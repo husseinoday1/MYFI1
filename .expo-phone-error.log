@@ -1,0 +1,7 @@
+The following packages should be updated for best compatibility with the installed expo version:
+  expo@54.0.35 - expected version: ~54.0.36
+Your project may not work correctly until you install the expected versions of the packages.
+CommandError: Input is required, but 'npx expo' is in non-interactive mode.
+Use the EXPO_TOKEN environment variable to authenticate in CI (Learn more: https://docs.expo.dev/accounts/programmatic-access/)
+CommandError: Input is required, but 'npx expo' is in non-interactive mode.
+Use the EXPO_TOKEN environment variable to authenticate in CI (Learn more: https://docs.expo.dev/accounts/programmatic-access/)

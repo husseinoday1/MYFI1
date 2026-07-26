@@ -1,0 +1,185 @@
+{
+  "v": 4,
+  "exportedAt": "2026-07-24T12:00:00.000Z",
+  "cfg": {
+    "name": "بيانات تجريبية",
+    "lang": "ar",
+    "langMode": "manual",
+    "theme": "dark",
+    "themeMode": "manual",
+    "country": "IQ",
+    "currency": "IQD",
+    "profileType": "personal",
+    "defaultWalletId": "cash",
+    "categoryBudgets": {
+      "food": 350000,
+      "transport": 180000,
+      "rent": 500000,
+      "entertain": 120000
+    },
+    "enabledModules": {
+      "wallets": true,
+      "debtsOwed": true,
+      "debtsReceivable": true,
+      "goals": true,
+      "commitments": true,
+      "reportsAdvanced": true,
+      "budgets": true
+    }
+  },
+  "wallets": [
+    {
+      "id": "cash",
+      "name": "نقدي",
+      "nameEn": "Cash",
+      "openingBalance": 1750000,
+      "currency": "IQD"
+    },
+    {
+      "id": "bank",
+      "name": "المصرف",
+      "nameEn": "Bank",
+      "openingBalance": 1250000,
+      "currency": "IQD"
+    }
+  ],
+  "trans": [
+    { "id": "m03-salary", "title": "راتب آذار", "amt": 2100000, "cat": "salary", "walletId": "bank", "dateISO": "2026-03-01", "ts": 2026030101 },
+    { "id": "m03-rent", "title": "إيجار المنزل", "amt": -450000, "cat": "rent", "walletId": "bank", "dateISO": "2026-03-03", "recurring": true, "isCommitmentPayment": true, "commitmentId": "commit-rent", "commitmentMonth": "2026-03", "ts": 2026030301 },
+    { "id": "m03-food", "title": "تسوق المنزل", "amt": -285000, "cat": "food", "walletId": "cash", "dateISO": "2026-03-08", "ts": 2026030801 },
+    { "id": "m03-fuel", "title": "وقود", "amt": -95000, "cat": "transport", "walletId": "cash", "dateISO": "2026-03-14", "ts": 2026031401 },
+    { "id": "m03-health", "title": "صيدلية", "amt": -72000, "cat": "health", "walletId": "cash", "dateISO": "2026-03-19", "ts": 2026031901 },
+    { "id": "m03-transfer", "kind": "transfer", "transferAmount": 300000, "fromWalletId": "bank", "toWalletId": "cash", "dateISO": "2026-03-05", "note": "مصروف الشهر", "ts": 2026030501 },
+
+    { "id": "m04-salary", "title": "راتب نيسان", "amt": 2100000, "cat": "salary", "walletId": "bank", "dateISO": "2026-04-01", "ts": 2026040101 },
+    { "id": "m04-bonus", "title": "مكافأة", "amt": 250000, "cat": "salary", "walletId": "bank", "dateISO": "2026-04-10", "ts": 2026041001 },
+    { "id": "m04-rent", "title": "إيجار المنزل", "amt": -450000, "cat": "rent", "walletId": "bank", "dateISO": "2026-04-03", "recurring": true, "isCommitmentPayment": true, "commitmentId": "commit-rent", "commitmentMonth": "2026-04", "ts": 2026040301 },
+    { "id": "m04-food", "title": "طعام وتسوق", "amt": -310000, "cat": "food", "walletId": "cash", "dateISO": "2026-04-09", "ts": 2026040901 },
+    { "id": "m04-transport", "title": "مواصلات", "amt": -125000, "cat": "transport", "walletId": "cash", "dateISO": "2026-04-16", "ts": 2026041601 },
+    { "id": "m04-entertain", "title": "ترفيه عائلي", "amt": -90000, "cat": "entertain", "walletId": "cash", "dateISO": "2026-04-22", "ts": 2026042201 },
+    { "id": "m04-debt", "title": "دفعة قرض", "amt": -150000, "cat": "other", "walletId": "bank", "dateISO": "2026-04-25", "isDebtPayment": true, "debtId": "debt-car", "paymentId": "pay-apr", "ts": 2026042501 },
+
+    { "id": "m05-salary", "title": "راتب أيار", "amt": 2150000, "cat": "salary", "walletId": "bank", "dateISO": "2026-05-01", "ts": 2026050101 },
+    { "id": "m05-rent", "title": "إيجار المنزل", "amt": -450000, "cat": "rent", "walletId": "bank", "dateISO": "2026-05-03", "recurring": true, "isCommitmentPayment": true, "commitmentId": "commit-rent", "commitmentMonth": "2026-05", "ts": 2026050301 },
+    { "id": "m05-food", "title": "تسوق المنزل", "amt": -340000, "cat": "food", "walletId": "cash", "dateISO": "2026-05-11", "ts": 2026051101 },
+    { "id": "m05-clothes", "title": "ملابس", "amt": -185000, "cat": "clothes", "walletId": "cash", "dateISO": "2026-05-17", "ts": 2026051701 },
+    { "id": "m05-fuel", "title": "وقود وصيانة", "amt": -165000, "cat": "transport", "walletId": "cash", "dateISO": "2026-05-20", "ts": 2026052001 },
+    { "id": "m05-goal", "title": "توفير للطوارئ", "amt": -200000, "cat": "other", "walletId": "bank", "dateISO": "2026-05-27", "isGoalSaving": true, "goalId": "goal-emergency", "savingId": "save-may", "ts": 2026052701 },
+
+    { "id": "m06-salary", "title": "راتب حزيران", "amt": 2150000, "cat": "salary", "walletId": "bank", "dateISO": "2026-06-01", "ts": 2026060101 },
+    { "id": "m06-side", "title": "عمل إضافي", "amt": 375000, "cat": "salary", "walletId": "cash", "dateISO": "2026-06-12", "ts": 2026061201 },
+    { "id": "m06-rent", "title": "إيجار المنزل", "amt": -450000, "cat": "rent", "walletId": "bank", "dateISO": "2026-06-03", "recurring": true, "isCommitmentPayment": true, "commitmentId": "commit-rent", "commitmentMonth": "2026-06", "ts": 2026060301 },
+    { "id": "m06-food", "title": "طعام", "amt": -295000, "cat": "food", "walletId": "cash", "dateISO": "2026-06-08", "ts": 2026060801 },
+    { "id": "m06-health", "title": "فحوصات", "amt": -210000, "cat": "health", "walletId": "cash", "dateISO": "2026-06-18", "ts": 2026061801 },
+    { "id": "m06-entertain", "title": "اشتراكات", "amt": -78000, "cat": "entertain", "walletId": "bank", "dateISO": "2026-06-21", "recurring": true, "ts": 2026062101 },
+    { "id": "m06-debt", "title": "دفعة قرض", "amt": -150000, "cat": "other", "walletId": "bank", "dateISO": "2026-06-25", "isDebtPayment": true, "debtId": "debt-car", "paymentId": "pay-jun", "ts": 2026062501 },
+
+    { "id": "m07-salary", "title": "راتب تموز", "amt": 2200000, "cat": "salary", "walletId": "bank", "dateISO": "2026-07-01", "ts": 2026070101 },
+    { "id": "m07-rent", "title": "إيجار المنزل", "amt": -450000, "cat": "rent", "walletId": "bank", "dateISO": "2026-07-03", "recurring": true, "isCommitmentPayment": true, "commitmentId": "commit-rent", "commitmentMonth": "2026-07", "ts": 2026070301 },
+    { "id": "m07-food", "title": "تسوق المنزل", "amt": -365000, "cat": "food", "walletId": "cash", "dateISO": "2026-07-07", "ts": 2026070701 },
+    { "id": "m07-transport", "title": "وقود", "amt": -135000, "cat": "transport", "walletId": "cash", "dateISO": "2026-07-12", "ts": 2026071201 },
+    { "id": "m07-other", "title": "صيانة منزل", "amt": -240000, "cat": "other", "walletId": "cash", "dateISO": "2026-07-16", "ts": 2026071601 },
+    { "id": "m07-goal", "title": "توفير للطوارئ", "amt": -250000, "cat": "other", "walletId": "bank", "dateISO": "2026-07-20", "isGoalSaving": true, "goalId": "goal-emergency", "savingId": "save-jul", "ts": 2026072001 },
+    { "id": "m07-internet", "title": "اشتراك الإنترنت", "amt": -65000, "cat": "entertain", "walletId": "cash", "dateISO": "2026-07-10", "isCommitmentPayment": true, "commitmentId": "commit-internet", "ts": 2026071001 },
+
+    { "id": "m03-coffee", "title": "قهوة", "amt": -18000, "cat": "food", "walletId": "cash", "dateISO": "2026-03-06", "ts": 2026030602 },
+    { "id": "m03-mobile", "title": "تعبئة هاتف", "amt": -25000, "cat": "other", "walletId": "cash", "dateISO": "2026-03-10", "ts": 2026031002 },
+    { "id": "m03-taxi", "title": "سيارة أجرة", "amt": -22000, "cat": "transport", "walletId": "cash", "dateISO": "2026-03-12", "ts": 2026031202 },
+    { "id": "m03-lunch", "title": "غداء", "amt": -35000, "cat": "food", "walletId": "cash", "dateISO": "2026-03-17", "ts": 2026031702 },
+    { "id": "m03-gift", "title": "هدية", "amt": -60000, "cat": "other", "walletId": "cash", "dateISO": "2026-03-23", "ts": 2026032302 },
+    { "id": "m03-sale", "title": "بيع جهاز قديم", "amt": 140000, "cat": "other", "walletId": "cash", "dateISO": "2026-03-27", "ts": 2026032702 },
+
+    { "id": "m04-coffee", "title": "قهوة", "amt": -21000, "cat": "food", "walletId": "cash", "dateISO": "2026-04-05", "ts": 2026040502 },
+    { "id": "m04-mobile", "title": "تعبئة هاتف", "amt": -25000, "cat": "other", "walletId": "cash", "dateISO": "2026-04-07", "ts": 2026040702 },
+    { "id": "m04-pharmacy", "title": "أدوية", "amt": -48000, "cat": "health", "walletId": "cash", "dateISO": "2026-04-14", "ts": 2026041402 },
+    { "id": "m04-dinner", "title": "عشاء", "amt": -52000, "cat": "food", "walletId": "cash", "dateISO": "2026-04-19", "ts": 2026041902 },
+    { "id": "m04-transfer", "kind": "transfer", "transferAmount": 350000, "fromWalletId": "bank", "toWalletId": "cash", "dateISO": "2026-04-04", "note": "مصروف الشهر", "ts": 2026040402 },
+
+    { "id": "m05-coffee", "title": "قهوة", "amt": -19000, "cat": "food", "walletId": "cash", "dateISO": "2026-05-04", "ts": 2026050402 },
+    { "id": "m05-mobile", "title": "إقراض — سلفة لصديق", "amt": -500000, "cat": "other", "walletId": "cash", "dateISO": "2026-05-05", "flowType": "receivable_created", "isDebtOrigin": true, "debtId": "debt-friend", "ts": 2026050502 },
+    { "id": "m05-taxi", "title": "سيارة أجرة", "amt": -28000, "cat": "transport", "walletId": "cash", "dateISO": "2026-05-09", "ts": 2026050902 },
+    { "id": "m05-dinner", "title": "مطعم", "amt": -68000, "cat": "food", "walletId": "cash", "dateISO": "2026-05-14", "ts": 2026051402 },
+    { "id": "m05-repair", "title": "تصليح هاتف", "amt": -85000, "cat": "other", "walletId": "cash", "dateISO": "2026-05-23", "ts": 2026052302 },
+    { "id": "m05-transfer", "kind": "transfer", "transferAmount": 400000, "fromWalletId": "bank", "toWalletId": "cash", "dateISO": "2026-05-02", "note": "مصروف الشهر", "ts": 2026050202 },
+
+    { "id": "m06-coffee", "title": "قهوة", "amt": -22000, "cat": "food", "walletId": "cash", "dateISO": "2026-06-05", "ts": 2026060502 },
+    { "id": "m06-mobile", "title": "تحصيل دين — سلفة لصديق", "amt": 100000, "cat": "other", "walletId": "cash", "dateISO": "2026-06-15", "flowType": "receivable_collection", "isDebtPayment": true, "debtId": "debt-friend", "paymentId": "collect-jun", "ts": 2026061502 },
+    { "id": "m06-taxi", "title": "سيارة أجرة", "amt": -26000, "cat": "transport", "walletId": "cash", "dateISO": "2026-06-14", "ts": 2026061402 },
+    { "id": "m06-gift", "title": "هدية", "amt": -75000, "cat": "other", "walletId": "cash", "dateISO": "2026-06-24", "ts": 2026062402 },
+    { "id": "m06-transfer", "kind": "transfer", "transferAmount": 450000, "fromWalletId": "bank", "toWalletId": "cash", "dateISO": "2026-06-04", "note": "مصروف الشهر", "ts": 2026060402 },
+
+    { "id": "m07-coffee", "title": "قهوة", "amt": -24000, "cat": "food", "walletId": "cash", "dateISO": "2026-07-05", "ts": 2026070502 },
+    { "id": "m07-mobile", "title": "تعبئة هاتف", "amt": -30000, "cat": "other", "walletId": "cash", "dateISO": "2026-07-08", "ts": 2026070802 },
+    { "id": "m07-pharmacy", "title": "صيدلية", "amt": -55000, "cat": "health", "walletId": "cash", "dateISO": "2026-07-14", "ts": 2026071402 },
+    { "id": "m07-dinner", "title": "مطعم", "amt": -72000, "cat": "food", "walletId": "cash", "dateISO": "2026-07-18", "ts": 2026071802 },
+    { "id": "m07-transfer", "kind": "transfer", "transferAmount": 500000, "fromWalletId": "bank", "toWalletId": "cash", "dateISO": "2026-07-04", "note": "مصروف الشهر", "ts": 2026070402 }
+  ],
+  "debts": [
+    {
+      "id": "debt-car",
+      "name": "قرض السيارة",
+      "total": 1800000,
+      "paid": 300000,
+      "direction": "owed",
+      "createdAt": "2026-03-01",
+      "payments": [
+        { "id": "pay-apr", "amt": 150000, "date": "2026-04-25", "walletId": "bank" },
+        { "id": "pay-jun", "amt": 150000, "date": "2026-06-25", "walletId": "bank" }
+      ]
+    },
+    {
+      "id": "debt-friend",
+      "name": "سلفة لصديق",
+      "total": 500000,
+      "paid": 100000,
+      "direction": "receivable",
+      "createdAt": "2026-05-05",
+      "originMode": "lent",
+      "originTransactionId": "m05-mobile",
+      "payments": [
+        { "id": "collect-jun", "amt": 100000, "date": "2026-06-15", "walletId": "cash" }
+      ]
+    }
+  ],
+  "goals": [
+    {
+      "id": "goal-emergency",
+      "name": "صندوق الطوارئ",
+      "target": 2000000,
+      "cur": 450000,
+      "createdAt": "2026-05-01",
+      "savings": [
+        { "id": "save-may", "amt": 200000, "date": "2026-05-27", "walletId": "bank" },
+        { "id": "save-jul", "amt": 250000, "date": "2026-07-20", "walletId": "bank" }
+      ]
+    }
+  ],
+  "commitments": [
+    {
+      "id": "commit-internet",
+      "name": "اشتراك الإنترنت",
+      "amt": 65000,
+      "day": 10,
+      "firstDueISO": "2026-03-10",
+      "repeatMonthly": true,
+      "active": true,
+      "walletId": "cash",
+      "linkedType": "none",
+      "linkedId": null,
+      "lastPaidMonth": "2026-07"
+    },
+    {
+      "id": "commit-rent",
+      "name": "إيجار المنزل",
+      "amt": 450000,
+      "day": 3,
+      "firstDueISO": "2026-03-03",
+      "repeatMonthly": true,
+      "active": true,
+      "walletId": "bank",
+      "linkedType": "none",
+      "linkedId": null,
+      "lastPaidMonth": "2026-07"
+    }
+  ]
+}

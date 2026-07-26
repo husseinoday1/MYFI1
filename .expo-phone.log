@@ -1,0 +1,23 @@
+env: load .env
+env: export EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_KEY
+Starting project at C:\Users\Administrator\Documents\MYFI
+Starting Metro Bundler
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Web .\index.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web .\index.js ░░░░░░░░░░░░░░░░  1.0% (1/1)
+Web .\index.js ▓▓▓▓▓▓▓░░░░░░░░░ 44.4% (18/35)
+Web .\index.js ▓▓▓▓▓▓▓▓░░░░░░░░ 55.3% (37/99)
+Web .\index.js ▓▓▓▓▓▓▓▓░░░░░░░░ 55.3% ( 73/157)
+Web .\index.js ▓▓▓▓▓▓▓▓░░░░░░░░ 55.3% ( 91/189)
+Web .\index.js ▓▓▓▓▓▓▓▓░░░░░░░░ 55.3% (136/241)
+Web .\index.js ▓▓▓▓▓▓▓▓░░░░░░░░ 55.3% (175/334)
+Web .\index.js ▓▓▓▓▓▓▓▓░░░░░░░░ 55.3% (234/391)
+Web .\index.js ▓▓▓▓▓▓▓▓▓░░░░░░░ 61.4% (340/434)
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 65.4% (393/486)
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓░░░░░ 73.0% (459/539)
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ 84.1% (533/584)
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 93.7% (610/631)
+Web .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 96.0% (644/686)
+Web Bundled 67969ms index.js (700 modules)
+ LOG  [web] Logs will appear in the browser console

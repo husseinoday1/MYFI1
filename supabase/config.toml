@@ -1,0 +1,5 @@
+[functions.smart-ocr]
+verify_jwt = false
+
+[functions.smart-transcribe]
+verify_jwt = false

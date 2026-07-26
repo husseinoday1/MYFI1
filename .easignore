@@ -1,0 +1,9 @@
+node_modules/
+.expo/
+.pnpm-store/
+dist-*/
+tmp/
+AppData/
+.env
+tools/supabase-cli/
+tools/*.tar.gz

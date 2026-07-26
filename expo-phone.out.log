@@ -1,0 +1,14 @@
+env: load .env
+env: export EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_KEY
+Starting project at C:\Users\nitro v15\Documents\MYFI
+Starting Metro Bundler
+warning: Bundler cache is empty, rebuilding (this may take a minute)
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Android .\index.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Android .\index.js ▓░░░░░░░░░░░░░░░  9.0% ( 6/22)
+Android .\index.js ▓░░░░░░░░░░░░░░░ 10.1% ( 70/222)
+Android .\index.js ▓▓▓▓▓▓▓▓▓░░░░░░░ 59.9% (432/581)
+Android .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 89.1% (877/929)
+Android .\index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.8% (1112/1113)
+Android Bundled 19431ms index.js (1123 modules)
