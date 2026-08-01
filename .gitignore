@@ -1,8 +1,11 @@
 node_modules/
+.env
+.env.*
+!.env.example
 /.expo/
 .expo/
 .expo
-dist-web/
-dist-check/
+/dist-*/
+supabase/.temp/
 npm-debug.log*
 expo-web*.log
