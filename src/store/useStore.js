@@ -723,6 +723,8 @@ export const useStore = create((set, get) => ({
     const current = get().trans.find(t => t.id === id);
     if (!current) return;
     const safePatch = { ...patch };
+    const stopRecurringSeries = current.recurring && safePatch.recurring === false;
+    const recurringGroupId = current.recurringGroupId || current.id;
     if (safePatch.recurring && !safePatch.recurringGroupId) {
       safePatch.recurringGroupId = current.recurringGroupId || current.id;
     }
@@ -748,6 +750,9 @@ export const useStore = create((set, get) => ({
 
     set(s => {
       const trans = s.trans.map(t => {
+        if (stopRecurringSeries && (t.recurringGroupId || t.id) === recurringGroupId) {
+          return t.id === id ? { ...t, ...safePatch, recurring: false } : { ...t, recurring: false };
+        }
         if (t.id !== id) return t;
         if (t.isDebtPayment || t.isGoalSaving) {
           return {

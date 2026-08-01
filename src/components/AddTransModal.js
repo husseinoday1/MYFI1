@@ -1130,13 +1130,27 @@ export default function AddTransModal({
                   placeholder={L.note} placeholderTextColor={th.sub}
                   style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]} />
 
-                {modules.recurring ? <View style={[s.rowBetween, { marginBottom: 16 }]}>
-                  <TouchableOpacity onPress={() => setRecurring(r => !r)}
-                    style={[s.toggleBtn, { backgroundColor: recurring ? th.primSoft : th.cardHigh, borderColor: recurring ? th.primary : 'transparent' }]}>
-                    <Ionicons name="repeat" size={13} color={recurring ? th.primary : th.sub} />
-                    <Text style={{ color: recurring ? th.primary : th.sub, fontSize: 12, ...weight('600') }}> {L.recurring}</Text>
-                  </TouchableOpacity>
-                </View> : null}
+                {modules.recurring ? (
+                  <View style={{ marginBottom: 16 }}>
+                    <View style={s.rowBetween}>
+                      <TouchableOpacity onPress={() => setRecurring(r => !r)}
+                        style={[s.toggleBtn, { backgroundColor: recurring ? th.primSoft : th.cardHigh, borderColor: recurring ? th.primary : 'transparent' }]}>
+                        <Ionicons name="repeat" size={13} color={recurring ? th.primary : th.sub} />
+                        <Text style={{ color: recurring ? th.primary : th.sub, fontSize: 12, ...weight('700') }}> {L.recurring}</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {recurring ? (
+                      <View style={[s.recurringNote, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}>
+                        <Ionicons name="shield-checkmark-outline" size={15} color={th.primary} />
+                        <Text style={{ color: th.sub, fontSize: 11, lineHeight: 17, ...weight('700'), flex: 1, textAlign: align }}>
+                          {cfg.lang === 'ar'
+                            ? 'تذكير شهري فقط: لن تُسجّل الحركة أو تُخصم إلا بعد مراجعتك وتأكيدك.'
+                            : 'Monthly reminder only: nothing is recorded or deducted until you review and confirm it.'}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
               </>
             )}
 
@@ -1199,6 +1213,7 @@ const s = StyleSheet.create({
   primaryMini:{ flex: 1, minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   toggleBtn:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, borderWidth: 1 },
+  recurringNote: { minHeight: 44, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', gap: 8, paddingHorizontal: 11, paddingVertical: 8, marginTop: 8 },
   saveBtn:    { minHeight: 52, borderRadius: 15, padding: 15, alignItems: 'center', justifyContent: 'center' },
   halfBtn:    { flex: 1, minHeight: 50, borderRadius: 15, padding: 14, alignItems: 'center', justifyContent: 'center' },
 });

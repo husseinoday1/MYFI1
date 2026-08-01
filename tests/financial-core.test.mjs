@@ -4,7 +4,7 @@ import { buildFinancialCoach, getBudgetRows, getBudgetSummary, normalizeBudgets,
 import { getWalletBalances, getWalletMonthlyMovement, normalizeWallets } from '../src/lib/wallets.js';
 import { analyzeSmartEntry } from '../src/lib/smartEntry.js';
 import { normalizeCfg, normalizeHomeCards } from '../src/lib/constants.js';
-import { buildChartData, buildFinancialSnapshot, byMonth, calcCashFlow, calcStats, catSpend, pct } from '../src/utils/calc.js';
+import { buildChartData, buildFinancialSnapshot, byMonth, calcCashFlow, calcStats, catSpend, getUpcomingRecurring, pct } from '../src/utils/calc.js';
 import { auditFinancialData } from '../src/lib/financialIntegrity.js';
 import { useStore } from '../src/store/useStore.js';
 import { formatNumberInput, normalizeNumberInput, parseNumberInput } from '../src/lib/numberInput.js';
@@ -31,6 +31,29 @@ assert.equal(profileModuleDefaults('personal').wallets, false);
 assert.equal(profileModuleDefaults('business').goals, false);
 assert.equal(profileModuleDefaults('business').debtsReceivable, true);
 assert.equal(profileModuleDefaults('personal_business').wallets, true);
+
+const recurringTemplate = {
+  id: 'monthly-rent-july', recurringGroupId: 'monthly-rent', recurring: true,
+  title: 'Rent', amt: -500, cat: 'rent', dateISO: '2026-07-31',
+};
+assert.equal(
+  getUpcomingRecurring([recurringTemplate], new Date('2026-08-15T12:00:00'))[0]?.dueISO,
+  '2026-08-31',
+  'monthly entries must be suggested for confirmation without creating a transaction automatically',
+);
+assert.equal(
+  getUpcomingRecurring([recurringTemplate], new Date('2027-02-15T12:00:00'))[0]?.dueISO,
+  '2027-02-28',
+  'monthly due dates must clamp safely to shorter months',
+);
+assert.equal(
+  getUpcomingRecurring([
+    recurringTemplate,
+    { ...recurringTemplate, id: 'monthly-rent-august', dateISO: '2026-08-31' },
+  ], new Date('2026-08-15T12:00:00')).length,
+  0,
+  'a confirmed occurrence must prevent a duplicate suggestion in the same month',
+);
 
 assert.equal(parseNumberInput('٣٬٥٠٠'), 3500, 'Arabic-Indic amounts must be accepted in transaction forms');
 assert.equal(parseNumberInput('١٢٫٥٠'), 12.5, 'Arabic decimal separators must be accepted');
