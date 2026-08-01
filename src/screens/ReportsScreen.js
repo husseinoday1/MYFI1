@@ -8,7 +8,8 @@ import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import ChoiceSheet from '../components/ChoiceSheet';
 import { getSymbol } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
-import { calcStats, catSpend, debtSummary } from '../utils/calc';
+import { buildFinancialSnapshot, calcStats, catSpend, debtSummary } from '../utils/calc';
+import { buildLeakInsights } from '../lib/localIntelligence';
 import { generateFinancialReportPDF } from '../lib/pdf';
 import { RADIUS, SHADOW, weight } from '../lib/tokens';
 import { isRTL, rowDirFor, textAlignFor, writingDirectionFor } from '../lib/layout';
@@ -77,12 +78,19 @@ const copy = (lang) => {
     budgetOnTrack: ar ? 'الصرف ضمن الحد المحدد' : 'Spending is within the set limit',
     budgetOver: ar ? 'تم تجاوز الحد المحدد' : 'The set limit has been exceeded',
     noData: ar ? 'لا توجد بيانات ضمن هذه الفترة' : 'No data in this period',
+    smartTitle: ar ? 'استنتاجات حسب استخدامك' : 'Insights from your activity',
+    smartHint: ar ? 'توقعات وقواعد محلية؛ لا تُرسل بياناتك إلى نموذج خارجي' : 'Local forecasts and rules; your data is not sent to an external model',
+    confidence: ar ? 'ثقة التحليل' : 'Analysis confidence',
+    confidenceHigh: ar ? 'عالية' : 'High',
+    confidenceMedium: ar ? 'متوسطة' : 'Medium',
+    confidenceLow: ar ? 'منخفضة' : 'Low',
+    needData: ar ? 'أضف 7 حركات على 4 أيام على الأقل للحصول على استنتاجات أدق.' : 'Add at least 7 entries across 4 days for more reliable insights.',
     exportFailed: ar ? 'تعذر إنشاء الملف أو فتح المشاركة. حاول مرة أخرى.' : 'Could not create the file or open sharing. Try again.',
   };
 };
 
 export default function ReportsScreen() {
-  const { trans, debts, cats, cfg } = useStore();
+  const { trans, debts, goals, cats, cfg } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const C = copy(cfg.lang);
   const ar = isRTL(cfg.lang);
@@ -93,8 +101,9 @@ export default function ReportsScreen() {
   const modules = getModules(cfg);
   const allScopedTrans = filterByActiveScope(trans, cfg);
   const viewTrans = allScopedTrans.filter(item => transactionFeatureEnabled(item, cfg));
-  const featureData = filterFeatureEntities({ debts, cfg });
+  const featureData = filterFeatureEntities({ debts, goals, cfg });
   const viewDebts = featureData.debts;
+  const viewGoals = featureData.goals;
   const archiveSummaries = Array.isArray(cfg.archiveSummaries) ? cfg.archiveSummaries : [];
   const activeDataScope = getActiveScope(cfg);
   const scopedArchiveSummaries = archiveSummaries.filter(item => (
@@ -176,6 +185,64 @@ export default function ReportsScreen() {
       bal: total.bal + Number(item.net || 0),
     }), active);
   }, [periodTrans, scopedArchiveSummaries, scope, selectedMonth]);
+  const activeDays = useMemo(
+    () => new Set(periodTrans.map(item => item.dateISO).filter(Boolean)).size,
+    [periodTrans],
+  );
+  const confidence = periodTrans.length >= 20 && activeDays >= 10
+    ? 'high'
+    : periodTrans.length >= 7 && activeDays >= 4 ? 'medium' : 'low';
+  const intelligence = useMemo(
+    () => buildLeakInsights(viewTrans, cats, selectedMonth),
+    [viewTrans, cats, selectedMonth],
+  );
+  const snapshot = useMemo(() => buildFinancialSnapshot({
+    trans: viewTrans,
+    debts: viewDebts,
+    goals: viewGoals,
+    cats,
+  }, selectedMonthKey === currentMonthKey ? now : selectedMonth), [viewTrans, viewDebts, viewGoals, cats, selectedMonth, selectedMonthKey, currentMonthKey]);
+  const insightItems = useMemo(() => {
+    const rows = [];
+    if (scope === 'month' && selectedMonthKey === currentMonthKey && periodTrans.length >= 3) {
+      const forecast = snapshot.forecast;
+      rows.push({
+        icon: forecast.projectedNet < 0 ? 'trending-down-outline' : 'analytics-outline',
+        tone: forecast.projectedNet < 0 ? 'danger' : 'primary',
+        text: cfg.lang === 'ar'
+          ? `إذا استمر نفس النمط، صافي نهاية الشهر المتوقع ${forecast.projectedNet < 0 ? '-' : '+'}${money(forecast.projectedNet, cfg.lang, cfg.currency)} ${sym}.`
+          : `At the current pace, projected month-end net is ${forecast.projectedNet < 0 ? '-' : '+'}${money(forecast.projectedNet, cfg.lang, cfg.currency)} ${sym}.`,
+      });
+    }
+    if (scope === 'month' && intelligence.topLeak?.previousSpent > 0) {
+      const cat = cfg.lang === 'ar' ? intelligence.topLeak.label : intelligence.topLeak.labelEn;
+      rows.push({
+        icon: 'trending-up-outline', tone: 'danger',
+        text: cfg.lang === 'ar'
+          ? `أكبر ارتفاع عن الشهر السابق في ${cat || 'تصنيف'}: ${money(intelligence.topLeak.delta, cfg.lang, cfg.currency)} ${sym}.`
+          : `Largest increase from last month is ${cat || 'a category'}: ${money(intelligence.topLeak.delta, cfg.lang, cfg.currency)} ${sym}.`,
+      });
+    }
+    if (scope === 'month' && intelligence.topSpend?.spent > 0) {
+      const cat = cfg.lang === 'ar' ? intelligence.topSpend.label : intelligence.topSpend.labelEn;
+      rows.push({
+        icon: 'pie-chart-outline', tone: 'warning',
+        text: cfg.lang === 'ar'
+          ? `${cat || 'أكبر تصنيف'} يمثل ${intelligence.topSpend.share}% من صرف هذا الشهر.`
+          : `${cat || 'The top category'} represents ${intelligence.topSpend.share}% of this month's spending.`,
+      });
+    }
+    if (stats.inc > 0) {
+      const rate = Math.round(((stats.inc - stats.exp) / stats.inc) * 100);
+      rows.push({
+        icon: rate >= 0 ? 'shield-checkmark-outline' : 'alert-circle-outline',
+        tone: rate >= 0 ? 'success' : 'danger',
+        text: cfg.lang === 'ar' ? `نسبة الادخار/الفائض لهذه الفترة ${rate}%.` : `Savings/surplus rate for this period is ${rate}%.`,
+      });
+    }
+    if (confidence === 'low') rows.push({ icon: 'information-circle-outline', tone: 'muted', text: C.needData });
+    return rows.slice(0, 4);
+  }, [scope, selectedMonthKey, currentMonthKey, periodTrans, snapshot, intelligence, stats, confidence, cfg.lang, cfg.currency, sym]);
   const debtInfo = useMemo(() => debtSummary(viewDebts), [debts, cfg.activeScope, cfg.profileType, modules.debtsOwed, modules.debtsReceivable]);
   const receivableInfo = useMemo(() => debtSummary(viewDebts, 'receivable'), [debts, cfg.activeScope, cfg.profileType, modules.debtsOwed, modules.debtsReceivable]);
   const categories = useMemo(() => {
@@ -317,6 +384,32 @@ export default function ReportsScreen() {
             <Text style={[s.shareCenterLabel, { color: th.onPrimary }]}>{C.export}</Text>
           </TouchableOpacity>
         </View>
+
+        <View style={[s.summaryGrid, { flexDirection: rowDir }]}>
+          <SummaryMetric label={C.income} value={stats.inc} color={th.inc} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+          <SummaryMetric label={C.expense} value={stats.exp} color={th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+          <SummaryMetric label={C.net} value={stats.bal} color={stats.bal >= 0 ? th.inc : th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+        </View>
+
+        <SectionCard th={th} title={C.smartTitle} subtitle={C.smartHint} icon="sparkles-outline" lang={cfg.lang}>
+          <View style={s.insightList}>
+            <View style={[s.confidenceRow, { flexDirection: rowDir, backgroundColor: th.cardHigh }]}>
+              <Text style={[s.confidenceLabel, { color: th.sub, textAlign: align }]}>{C.confidence}</Text>
+              <Text style={[s.confidenceValue, { color: confidence === 'high' ? th.inc : confidence === 'medium' ? th.warn : th.faint }]}>
+                {confidence === 'high' ? C.confidenceHigh : confidence === 'medium' ? C.confidenceMedium : C.confidenceLow} · {periodTrans.length}/{activeDays}
+              </Text>
+            </View>
+            {insightItems.map((item, index) => {
+              const color = item.tone === 'danger' ? th.exp : item.tone === 'success' ? th.inc : item.tone === 'warning' ? th.warn : item.tone === 'muted' ? th.faint : th.primary;
+              return (
+                <View key={`${item.icon}-${index}`} style={[s.insightRow, { flexDirection: rowDir, borderColor: th.border }]}>
+                  <View style={[s.insightIcon, { backgroundColor: `${color}1F` }]}><Ionicons name={item.icon} size={18} color={color} /></View>
+                  <Text style={[s.insightText, { color: th.text, textAlign: align, writingDirection: writingDirectionFor(cfg.lang) }]}>{item.text}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </SectionCard>
 
         {scope === 'month' && modules.budgets && budgetSummary.limit > 0 ? (
           <View style={[s.budgetCard, { backgroundColor: th.card, borderColor: th.border }]}>
@@ -746,6 +839,17 @@ function SectionCard({ th, title, subtitle, icon, lang, children }) {
   );
 }
 
+function SummaryMetric({ label, value, color, th, lang, currency, sym }) {
+  return (
+    <View style={[s.summaryMetric, { backgroundColor: th.card, borderColor: th.border }]}>
+      <Text style={[s.summaryMetricLabel, { color: th.sub }]} numberOfLines={1}>{label}</Text>
+      <Text style={[s.summaryMetricValue, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+        {money(value, lang, currency)} {sym}
+      </Text>
+    </View>
+  );
+}
+
 function ComparisonMetric({ label, value, color, lang, sym }) {
   return (
     <View style={s.comparisonMetric}>
@@ -836,6 +940,17 @@ const s = StyleSheet.create({
   periodValue: { fontSize: 18, lineHeight: 25, ...weight('900'), marginTop: 1 },
   periodHint: { fontSize: 11, lineHeight: 16, ...weight('700'), marginTop: 1 },
   periodAction: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  summaryGrid: { gap: 8, marginBottom: 12 },
+  summaryMetric: { flex: 1, minWidth: 0, minHeight: 76, borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 11, justifyContent: 'center', ...SHADOW.card },
+  summaryMetricLabel: { fontSize: 11, lineHeight: 16, ...weight('800'), textAlign: 'center' },
+  summaryMetricValue: { fontSize: 14, lineHeight: 21, ...weight('900'), textAlign: 'center', marginTop: 4 },
+  insightList: { gap: 8 },
+  confidenceRow: { minHeight: 38, borderRadius: RADIUS.md, paddingHorizontal: 11, alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  confidenceLabel: { flex: 1, fontSize: 11, lineHeight: 16, ...weight('800') },
+  confidenceValue: { fontSize: 11, lineHeight: 16, ...weight('900') },
+  insightRow: { minHeight: 54, borderRadius: RADIUS.md, borderWidth: 1, padding: 10, alignItems: 'center', gap: 10 },
+  insightIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  insightText: { flex: 1, fontSize: 12, lineHeight: 19, ...weight('700') },
   periodOverlay: { flex: 1, justifyContent: 'flex-end' },
   periodSheet: { maxHeight: '86%', borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, padding: 18, paddingBottom: 28, ...SHADOW.card },
   periodSheetHead: { alignItems: 'center', gap: 10, marginBottom: 14 },
