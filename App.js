@@ -222,6 +222,14 @@ function AppRoot() {
   }, [ready, user, workspaceReady, loadCloud]);
 
   useEffect(() => {
+    if (!ready || !user || !workspaceReady) return undefined;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') loadCloud();
+    });
+    return () => subscription.remove();
+  }, [ready, user, workspaceReady, loadCloud]);
+
+  useEffect(() => {
     if (!ready || !user || !workspaceReady || !pendingGuestTransfer || guestPromptOpen.current) return;
     guestPromptOpen.current = true;
     const ar = cfg.lang === 'ar';
