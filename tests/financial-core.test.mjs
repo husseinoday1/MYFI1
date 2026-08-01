@@ -15,6 +15,7 @@ import {
   getTransactionDisplayAmount,
   getModules,
   normalizeLedgerTransaction,
+  profileModuleDefaults,
 } from '../src/lib/modules.js';
 import { buildMyfiPackage, inspectMyfiPackage } from '../src/lib/myfiFiles.js';
 import { secureAuthStorage } from '../src/lib/secureVault.js';
@@ -25,6 +26,11 @@ assert.equal(
   'goal saving must show its real amount in History and exports',
 );
 assert.equal(getTransactionDisplayAmount({ kind: 'transfer', transferAmount: 80 }), 80);
+assert.equal(profileModuleDefaults('personal').goals, true);
+assert.equal(profileModuleDefaults('personal').wallets, false);
+assert.equal(profileModuleDefaults('business').goals, false);
+assert.equal(profileModuleDefaults('business').debtsReceivable, true);
+assert.equal(profileModuleDefaults('personal_business').wallets, true);
 
 assert.equal(parseNumberInput('٣٬٥٠٠'), 3500, 'Arabic-Indic amounts must be accepted in transaction forms');
 assert.equal(parseNumberInput('١٢٫٥٠'), 12.5, 'Arabic decimal separators must be accepted');

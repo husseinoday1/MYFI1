@@ -10,7 +10,7 @@ import { checkSupabaseHealth, supabase } from '../lib/supabase';
 import { getAuthRedirectUrl } from '../lib/authCallback';
 import { isBiometricSupported, authenticate } from '../lib/biometric';
 import { setupDailyNotif, cancelNotifs } from '../lib/notifications';
-import { defaultScopeForProfile, getFeatureDataCount, getModules } from '../lib/modules';
+import { defaultScopeForProfile, getFeatureDataCount, getModules, profileModuleDefaults } from '../lib/modules';
 import { getDefaultWalletId, getWalletBalances, getWalletLabel } from '../lib/wallets';
 import { RADIUS, SHADOW, TYPE, weight } from '../lib/tokens';
 import ActionMenu from '../components/ActionMenu';
@@ -26,6 +26,7 @@ const UI = {
     statusLocal: 'محلي',
     general: 'عام',
     usage: 'نوع الاستخدام',
+    profileEffect: 'اختيار نوع الاستخدام يفعّل الميزات المناسبة تلقائياً. يمكنك تعديلها من القائمة أدناه، ولا تُحذف البيانات المخفية.',
     money: 'التصنيفات',
     security: 'الأمان',
     alerts: 'التنبيهات',
@@ -145,6 +146,7 @@ const UI = {
     statusLocal: 'Local',
     general: 'General',
     usage: 'Use type',
+    profileEffect: 'Your usage type automatically enables the relevant features. You can adjust them below; hidden data is not deleted.',
     money: 'Categories',
     security: 'Security',
     alerts: 'Notifications',
@@ -501,6 +503,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
     setCfg({
       profileType,
       activeScope: profileType === 'personal_business' ? 'all' : defaultScopeForProfile(profileType),
+      enabledModules: profileModuleDefaults(profileType),
     });
   };
 
@@ -1173,6 +1176,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
               );
             })}
           </View>
+          <Text style={[s.profileEffect, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.profileEffect}</Text>
         </View>
         <Row
           label={T.enabledFeatures}
@@ -2101,6 +2105,7 @@ const s = StyleSheet.create({
   profileChoiceList: { gap: 8 },
   profileChoice: { minHeight: 52, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, paddingHorizontal: 11, paddingVertical: 9 },
   profileChoiceLabel: { flex: 1, minWidth: 0, fontSize: 13, lineHeight: 19, ...weight('800') },
+  profileEffect: { fontSize: 11, lineHeight: 18, ...weight('700') },
   radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   radioInner: { width: 10, height: 10, borderRadius: 5 },
   header: { alignItems: 'center', marginBottom: 18, gap: 12 },
