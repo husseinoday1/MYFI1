@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Touchable as TouchableOpacity } from './AppPrimitives';
-import { RADIUS, weight } from '../lib/tokens';
+import { RADIUS, SHADOW, weight } from '../lib/tokens';
 
 export function useMultiSelect(availableIds = []) {
   const idKey = JSON.stringify([...new Set((availableIds || []).filter(Boolean))]);
@@ -73,16 +73,16 @@ export function SelectionCheckbox({ th, selected, onPress, disabled = false }) {
       style={[
         s.checkbox,
         {
-          backgroundColor: selected ? th.primary : th.cardHigh,
+          backgroundColor: selected ? th.primSoft : th.cardHigh,
           borderColor: selected ? th.primary : th.border,
         },
       ]}
       scale={0.92}
     >
       <Ionicons
-        name={selected ? 'checkmark' : 'ellipse-outline'}
-        size={selected ? 17 : 15}
-        color={selected ? th.onPrimary : th.faint}
+        name={selected ? 'checkmark' : 'square-outline'}
+        size={selected ? 18 : 16}
+        color={selected ? th.primary : th.faint}
       />
     </TouchableOpacity>
   );
@@ -120,20 +120,21 @@ export function MultiSelectBar({
       style={[
         s.bar,
         {
-          backgroundColor: th.card,
-          borderColor: th.primary,
+          backgroundColor: th.nav || th.card,
+          borderColor: th.border,
           flexDirection: rowDir,
         },
         style,
       ]}
     >
-      <View style={[s.countBox, { backgroundColor: th.primSoft }]}>
+      <View style={[s.countBox, { backgroundColor: th.primSoft, flexDirection: rowDir }]}>
+        <Ionicons name="checkmark-done" size={15} color={th.primary} />
         <Text style={[s.countText, { color: th.primary }]}>{count}</Text>
       </View>
       <Text style={[s.selectedText, { color: th.text }]}>
         {text.selected}
       </Text>
-      <TouchableOpacity onPress={onToggleAll} style={[s.actionButton, { backgroundColor: th.cardHigh }]}>
+      <TouchableOpacity onPress={onToggleAll} style={[s.actionButton, { backgroundColor: th.primSoft, borderColor: `${th.primary}45` }]}>
         <Ionicons name={allSelected ? 'remove-circle-outline' : 'checkmark-done-outline'} size={16} color={th.primary} />
         <Text style={[s.actionText, { color: th.primary }]}>
           {allSelected ? text.clearAll : text.selectAll}
@@ -142,14 +143,14 @@ export function MultiSelectBar({
       <TouchableOpacity
         onPress={onDelete}
         disabled={!count}
-        style={[s.iconButton, { backgroundColor: count ? th.expBg : th.cardHigh }]}
+        style={[s.iconButton, { backgroundColor: count ? th.expBg : th.cardHigh, borderColor: count ? `${th.exp}35` : th.border }]}
         accessibilityLabel={text.delete}
       >
         <Ionicons name="trash-outline" size={18} color={count ? th.exp : th.faint} />
       </TouchableOpacity>
       <TouchableOpacity
         onPress={onCancel}
-        style={[s.iconButton, { backgroundColor: th.cardHigh }]}
+        style={[s.iconButton, { backgroundColor: th.cardHigh, borderColor: th.border }]}
         accessibilityLabel={text.cancel}
       >
         <Ionicons name="close" size={19} color={th.sub} />
@@ -168,13 +169,16 @@ const s = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 7,
     marginBottom: 10,
+    ...SHADOW.float,
   },
   countBox: {
     minWidth: 30,
     height: 30,
-    borderRadius: 15,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 4,
     paddingHorizontal: 7,
   },
   countText: { fontSize: 12, lineHeight: 17, ...weight('900') },
@@ -187,20 +191,22 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     gap: 5,
     paddingHorizontal: 9,
+    borderWidth: 1,
   },
   actionText: { fontSize: 12, lineHeight: 18, ...weight('900') },
   iconButton: {
     width: 34,
     height: 34,
     borderRadius: RADIUS.md,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkbox: {
     width: 32,
     height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 11,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
