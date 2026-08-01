@@ -2,6 +2,7 @@
   "expo": {
     "name": "MYFI",
     "slug": "terra-finance",
+    "scheme": "myfi",
     "version": "1.0.0",
     "platforms": [
       "android",

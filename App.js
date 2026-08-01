@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, Appearance, I18nManager, Image, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, Appearance, I18nManager, Image, Linking, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,7 +29,9 @@ import DraggableFab from './src/components/DraggableFab';
 import NotificationCenterModal from './src/components/NotificationCenterModal';
 import PressableScale from './src/components/PressableScale';
 import AppAlertHost from './src/components/AppAlertHost';
+import PasswordRecoveryModal from './src/components/PasswordRecoveryModal';
 import { getModules, shouldShowTrackersTab } from './src/lib/modules';
+import { handleAuthCallback } from './src/lib/authCallback';
 
 const BASE_TABS = [
   { key: 'home', icon: 'home-outline', labelKey: 'home' },
@@ -114,10 +116,12 @@ function AppRoot() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [locked, setLocked] = useState(false);
   const [showNotif, setShowNotif] = useState(false);
+  const [passwordRecoveryOpen, setPasswordRecoveryOpen] = useState(false);
   const [trackerFocus, setTrackerFocus] = useState(null);
   const [readNotifKeys, setReadNotifKeys] = useState([]);
   const guestPromptOpen = useRef(false);
   const conflictPromptOpen = useRef(false);
+  const handledAuthUrls = useRef(new Set());
   const [fontsLoaded, fontError] = useFonts(fontAssets);
   const fontReady = fontsLoaded || !!fontError;
 
@@ -174,6 +178,43 @@ function AppRoot() {
 
     return () => listener.subscription.unsubscribe();
   }, [loadLocal, setUser]);
+
+  useEffect(() => {
+    let active = true;
+    const processUrl = async (url) => {
+      if (!url || handledAuthUrls.current.has(url)) return;
+      handledAuthUrls.current.add(url);
+      try {
+        const result = await handleAuthCallback(url);
+        if (!active || !result.handled) return;
+        if (result.kind === 'recovery') {
+          setPasswordRecoveryOpen(true);
+        } else {
+          Alert.alert(
+            '',
+            cfg.lang === 'ar'
+              ? 'تم تفعيل الحساب وتسجيل الدخول بنجاح.'
+              : 'Your account is confirmed and signed in.',
+          );
+        }
+      } catch (error) {
+        if (!active) return;
+        Alert.alert(
+          cfg.lang === 'ar' ? 'تعذر فتح الرابط' : 'Could not open link',
+          cfg.lang === 'ar'
+            ? 'قد يكون رابط الحساب منتهياً أو مستخدماً. اطلب رسالة جديدة من إعدادات الحساب.'
+            : 'The account link may be expired or already used. Request a new email from account settings.',
+        );
+      }
+    };
+
+    Linking.getInitialURL().then(processUrl).catch(() => {});
+    const subscription = Linking.addEventListener('url', ({ url }) => processUrl(url));
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, [cfg.lang]);
 
   useEffect(() => {
     if (!ready || !user || !workspaceReady) return;
@@ -582,6 +623,12 @@ function AppRoot() {
         onClose={() => setShowNotif(false)}
         onItemPress={handleNotificationPress}
         items={notifItems}
+        th={th}
+        lang={cfg.lang}
+      />
+      <PasswordRecoveryModal
+        visible={passwordRecoveryOpen}
+        onClose={() => setPasswordRecoveryOpen(false)}
         th={th}
         lang={cfg.lang}
       />

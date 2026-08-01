@@ -4,6 +4,7 @@ import {
   StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Alert,
 } from 'react-native';
 import { checkSupabaseHealth, supabase } from '../lib/supabase';
+import { getAuthRedirectUrl } from '../lib/authCallback';
 import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
@@ -38,6 +39,14 @@ export default function AuthScreen({ onSkip }) {
       Alert.alert('', ar ? 'أدخل البريد وكلمة المرور' : 'Enter email and password');
       return;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email.trim())) {
+      Alert.alert('', ar ? 'اكتب بريداً إلكترونياً صحيحاً.' : 'Enter a valid email address.');
+      return;
+    }
+    if (pass.length < 8) {
+      Alert.alert('', ar ? 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.' : 'Password must be at least 8 characters.');
+      return;
+    }
     setLoading(true);
     try {
       const health = await checkSupabaseHealth();
@@ -50,7 +59,11 @@ export default function AuthScreen({ onSkip }) {
         if (error) throw error;
         await setUser(data.user);
       } else {
-        const { data, error } = await supabase.auth.signUp({ email: email.trim(), password: pass });
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim().toLowerCase(),
+          password: pass,
+          options: { emailRedirectTo: getAuthRedirectUrl('confirm') },
+        });
         if (error) throw error;
         if (data.user && !data.session) {
           Alert.alert('', S.emailChk);
@@ -74,7 +87,9 @@ export default function AuthScreen({ onSkip }) {
     try {
       const health = await checkSupabaseHealth();
       if (!health.ok) throw new Error(ar ? 'خدمة الحساب غير متاحة حالياً.' : 'Account service is currently unavailable.');
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: getAuthRedirectUrl('recovery'),
+      });
       if (error) throw error;
       Alert.alert('', ar ? 'أُرسلت رسالة الاستعادة إلى بريدك.' : 'A recovery email was sent.');
     } catch (error) {

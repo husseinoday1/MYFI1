@@ -7,6 +7,7 @@ import { STR } from '../lib/strings';
 import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { COUNTRIES, CURRENCIES, ICON_OPTIONS, CAT_COLORS } from '../lib/constants';
 import { checkSupabaseHealth, supabase } from '../lib/supabase';
+import { getAuthRedirectUrl } from '../lib/authCallback';
 import { isBiometricSupported, authenticate } from '../lib/biometric';
 import { setupDailyNotif, cancelNotifs } from '../lib/notifications';
 import { defaultScopeForProfile, getFeatureDataCount, getModules } from '../lib/modules';
@@ -123,9 +124,9 @@ const UI = {
     password: 'كلمة المرور',
     requiredFields: 'اكتب البريد الإلكتروني وكلمة المرور.',
     invalidEmail: 'اكتب بريداً إلكترونياً صحيحاً.',
-    passwordLength: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل.',
+    passwordLength: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.',
     verificationTitle: 'الحساب غير مفعّل بعد',
-    verificationPending: 'تم إرسال طلب تحقق فقط، ولم يصبح الحساب فعالاً بعد. افتح رابط التحقق في بريدك ثم سجّل الدخول.',
+    verificationPending: 'أرسلنا رابط التفعيل إلى بريدك. افتحه على هذا الهاتف لإكمال التسجيل والعودة إلى MYFI.',
     verificationUnconfirmed: 'لم يتم إنشاء حساب جديد. قد يكون البريد مستخدماً أو غير صالح؛ تحقق من البريد وحاول تسجيل الدخول أو الاستعادة.',
     close: 'إغلاق',
     loginSuccess: 'تم تسجيل الدخول بنجاح.',
@@ -242,9 +243,9 @@ const UI = {
     password: 'Password',
     requiredFields: 'Enter your email and password.',
     invalidEmail: 'Enter a valid email address.',
-    passwordLength: 'Password must be at least 6 characters.',
+    passwordLength: 'Password must be at least 8 characters.',
     verificationTitle: 'Account not active yet',
-    verificationPending: 'Only a verification request was sent; the account is not active yet. Open the email link, then sign in.',
+    verificationPending: 'We sent an activation link. Open it on this phone to finish registration and return to MYFI.',
     verificationUnconfirmed: 'No new account was created. The email may already be used or invalid; check the address, then try sign-in or recovery.',
     close: 'Close',
     loginSuccess: 'Signed in successfully.',
@@ -555,7 +556,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
       Alert.alert('', T.invalidEmail);
       return;
     }
-    if (passValue.length < 6) {
+    if (passValue.length < 8) {
       Alert.alert('', T.passwordLength);
       return;
     }
@@ -571,7 +572,10 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
       const credentials = { email: emailValue, password: passValue };
       const result = authMode === 'signin'
         ? await supabase.auth.signInWithPassword(credentials)
-        : await supabase.auth.signUp(credentials);
+        : await supabase.auth.signUp({
+            ...credentials,
+            options: { emailRedirectTo: getAuthRedirectUrl('confirm') },
+          });
       if (result.error) throw result.error;
       if (result.data?.session?.user) {
         await setUser(result.data.session.user);
@@ -611,7 +615,9 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
     try {
       const health = await checkSupabaseHealth();
       if (!health.ok) throw new Error(isAr ? 'خدمة الحساب غير متاحة حالياً.' : 'Account service is currently unavailable.');
-      const { error } = await supabase.auth.resetPasswordForEmail(emailValue);
+      const { error } = await supabase.auth.resetPasswordForEmail(emailValue, {
+        redirectTo: getAuthRedirectUrl('recovery'),
+      });
       if (error) throw error;
       Alert.alert(
         '',
@@ -1705,7 +1711,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
               </TouchableOpacity>
             ) : (
               <>
-                <View style={[s.statusNote, { backgroundColor: authServiceStatus === 'ready' ? th.incBg : authServiceStatus === 'down' ? th.expBg : th.cardHigh, flexDirection: isAr ? 'row-reverse' : 'row' }]}> 
+                <View style={[s.statusNote, { backgroundColor: authServiceStatus === 'ready' ? th.incBg : authServiceStatus === 'down' ? th.expBg : th.cardHigh, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
                   <Ionicons
                     name={authServiceStatus === 'ready' ? 'cloud-done-outline' : authServiceStatus === 'down' ? 'cloud-offline-outline' : 'sync-outline'}
                     size={16}
@@ -2155,4 +2161,3 @@ const s = StyleSheet.create({
   optionCard: { minHeight: 52, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10 },
   systemChoice: { minHeight: 62, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10 },
 });
-
