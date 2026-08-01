@@ -141,6 +141,17 @@ export const normalizeLedgerTransaction = (tx = {}, fallbackScope = SCOPES.PERSO
   };
 };
 
+// Goal allocations are excluded from income/expense statistics, so their
+// ledger value lives in allocationAmount while amt remains zero. Screens and
+// exports still need the real signed amount.
+export const getTransactionDisplayAmount = (tx = {}) => {
+  if (tx.kind === 'transfer') return Math.abs(Number(tx.transferAmount || 0));
+  if (tx.isGoalSaving || inferFlowType(tx) === FLOW_TYPES.GOAL_ALLOCATION) {
+    return -Math.abs(Number(tx.allocationAmount ?? tx.amt ?? 0));
+  }
+  return Number(tx.amt || 0);
+};
+
 export const isIncomeFlow = (tx = {}) => inferFlowType(tx) === FLOW_TYPES.INCOME;
 
 export const isExpenseFlow = (tx = {}) => (

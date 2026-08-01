@@ -116,10 +116,9 @@ export const monthlyForecast = (trans = [], date = new Date()) => {
   };
 };
 
-export const buildChartData = (trans, openingBalance = 0) => {
-  const now = new Date();
-  const mo  = now.getMonth();
-  const yr  = now.getFullYear();
+export const buildChartData = (trans, openingBalance = 0, date = new Date()) => {
+  const mo  = date.getMonth();
+  const yr  = date.getFullYear();
   const dim = daysInMonth(mo, yr);
   const mt  = byMonth(trans, mo, yr);
   let running = toNumber(openingBalance);

@@ -12,11 +12,19 @@ import {
   FLOW_TYPES,
   filterByActiveScope,
   filterFeatureEntities,
+  getTransactionDisplayAmount,
   getModules,
   normalizeLedgerTransaction,
 } from '../src/lib/modules.js';
 import { buildMyfiPackage, inspectMyfiPackage } from '../src/lib/myfiFiles.js';
 import { secureAuthStorage } from '../src/lib/secureVault.js';
+
+assert.equal(
+  getTransactionDisplayAmount({ isGoalSaving: true, allocationAmount: 125, amt: 0 }),
+  -125,
+  'goal saving must show its real amount in History and exports',
+);
+assert.equal(getTransactionDisplayAmount({ kind: 'transfer', transferAmount: 80 }), 80);
 
 assert.equal(parseNumberInput('٣٬٥٠٠'), 3500, 'Arabic-Indic amounts must be accepted in transaction forms');
 assert.equal(parseNumberInput('١٢٫٥٠'), 12.5, 'Arabic decimal separators must be accepted');
@@ -94,7 +102,11 @@ assert.deepEqual(
 assert.deepEqual(calcCashFlow(linkedFlows), { inflow: 1150, outflow: 625, net: 525 }, 'cash flow must include linked wallet movements');
 assert.equal(pct(120, 100), 120, 'progress must expose values over 100%');
 assert.equal(pct(120, 100, { cap: true }), 100, 'capped progress remains available for visual bars');
-assert.equal(buildChartData([{ amt: 50, dateISO: '2026-07-01' }], 100)[0].bal, 150, 'balance chart must start at the supplied opening balance');
+assert.equal(
+  buildChartData([{ amt: 50, dateISO: '2026-07-01' }], 100, new Date('2026-07-15T12:00:00'))[0].bal,
+  150,
+  'balance chart must start at the supplied opening balance',
+);
 assert.equal(catSpend(linkedFlows, [{ id: 'food' }, { id: 'other' }]).length, 1);
 assert.equal(normalizeLedgerTransaction({ amt: -20, isGoalSaving: true }).flowType, FLOW_TYPES.GOAL_ALLOCATION);
 

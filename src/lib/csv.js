@@ -1,5 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import { getTransactionDisplayAmount } from './modules';
 
 const csvCell = (value) => {
   const text = String(value ?? '');
@@ -34,8 +35,8 @@ export const transactionsToCsv = (trans = [], cats = [], wallets = [], cfg = {})
     .map(tx => [
       tx.dateISO || '',
       tx.kind === 'transfer' ? 'Wallet transfer' : tx.title || '',
-      tx.kind === 'transfer' ? Math.abs(Number(tx.transferAmount || 0)) : Number(tx.amt || 0),
-      tx.kind === 'transfer' ? 'transfer' : Number(tx.amt || 0) >= 0 ? 'income' : 'expense',
+      getTransactionDisplayAmount(tx),
+      tx.kind === 'transfer' ? 'transfer' : tx.flowType || (Number(tx.amt || 0) >= 0 ? 'income' : 'expense'),
       catMap.get(tx.cat) || tx.cat || '',
       walletMap.get(tx.walletId) || tx.walletId || '',
       tx.note || '',

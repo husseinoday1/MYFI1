@@ -15,7 +15,7 @@ import ActionMenu from '../components/ActionMenu';
 import DateField from '../components/DateField';
 import { rowDirFor, textAlignFor, writingDirectionFor } from '../lib/layout';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
-import { filterByActiveScope, isExpenseFlow, isIncomeFlow, transactionFeatureEnabled } from '../lib/modules';
+import { filterByActiveScope, getTransactionDisplayAmount, isExpenseFlow, isIncomeFlow, transactionFeatureEnabled } from '../lib/modules';
 
 const copy = (lang) => {
   const ar = lang === 'ar';
@@ -37,6 +37,7 @@ const copy = (lang) => {
     duplicate: ar ? 'تكرار الحركة' : 'Duplicate transaction',
     fromDate: ar ? 'من تاريخ' : 'From date',
     toDate: ar ? 'إلى تاريخ' : 'To date',
+    saving: ar ? 'توفير للهدف' : 'Goal saving',
   };
 };
 
@@ -146,17 +147,18 @@ export default function HistoryScreen() {
 
   const renderRow = (item) => {
     const cat = findCat(item.cat);
-    const amount = Number(item.amt || 0);
+    const amount = getTransactionDisplayAmount(item);
     const isTransfer = item.kind === 'transfer';
+    const isGoalSaving = !!item.isGoalSaving;
     const fromWallet = findWallet(item.fromWalletId);
     const toWallet = findWallet(item.toWalletId);
-    const color = isTransfer ? th.primary : amount > 0 ? th.inc : th.exp;
+    const color = isTransfer || isGoalSaving ? th.primary : amount > 0 ? th.inc : th.exp;
     const linked = item.isDebtPayment || item.isGoalSaving || item.isCommitmentPayment;
     const title = isTransfer ? T.walletTransfer : item.title;
     const metaLabel = isTransfer
       ? `${getWalletLabel(fromWallet, cfg.lang)} -> ${getWalletLabel(toWallet, cfg.lang)}`
       : (cfg.lang === 'ar' ? cat.label : cat.labelEn);
-    const amountLabel = isTransfer ? T.transfer : amount > 0 ? T.income : T.expense;
+    const amountLabel = isTransfer ? T.transfer : isGoalSaving ? T.saving : amount > 0 ? T.income : T.expense;
 
     return (
       <Pressable
