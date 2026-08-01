@@ -18,6 +18,7 @@ import ActionMenu from '../components/ActionMenu';
 import { describeSmartSource } from '../lib/smartEntry';
 import NotificationCenterModal from '../components/NotificationCenterModal';
 import HomeCenterModal from '../components/HomeCenterModal';
+import HelpGuideModal from '../components/HelpGuideModal';
 import { buildNotificationItems, notificationReadKey, sanitizeNotificationReadKeys } from '../lib/notificationCenter';
 import { isRTL, rowDirFor, textAlignFor } from '../lib/layout';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
@@ -129,6 +130,7 @@ export default function HomeScreen({
   const [recurringDraft, setRecurringDraft] = useState(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [centerMode, setCenterMode] = useState(null);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [readNotificationKeys, setReadNotificationKeys] = useState([]);
 
   const snapshot = useMemo(
@@ -500,6 +502,13 @@ export default function HomeScreen({
             <Text style={[s.brandTitle, { color: th.primary }]}>MYFI</Text>
           </View>
           <View style={[s.headerActions, { flexDirection: rowDir }]}>
+            <TouchableOpacity
+              onPress={() => setGuideOpen(true)}
+              accessibilityLabel={isAr ? 'دليل الاستخدام' : 'User guide'}
+              style={[s.headerIconBtn, { backgroundColor: th.card, borderColor: th.border }]}
+            >
+              <Ionicons name="help-circle-outline" size={19} color={th.sub} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => setCenterMode('profile')} style={[s.profileBtn, { backgroundColor: th.primSoft }]}>
               <Ionicons name="person-outline" size={19} color={th.primary} />
             </TouchableOpacity>
@@ -713,6 +722,7 @@ export default function HomeScreen({
         onOpenTab={onOpenTab}
         onEditTransaction={setEditing}
       />
+      <HelpGuideModal visible={guideOpen} onClose={() => setGuideOpen(false)} th={th} lang={cfg.lang} />
     </View>
   );
 }
@@ -724,6 +734,7 @@ const s = StyleSheet.create({
   notifyBadge:  { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, position: 'absolute', top: -4, right: -4 },
   brandLockup:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerActions: { alignItems: 'center', gap: 5 },
+  headerIconBtn: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   profileBtn:   { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   brandTitle:   { fontSize: 23, lineHeight: 28, ...weight('900'), letterSpacing: 2.2 },
   hero:         { borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 9, ...SHADOW.card },

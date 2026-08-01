@@ -87,8 +87,10 @@ export const DEF_MODULES = {
 export const DEF_HOME_CARDS = [
   { key: 'income', visible: true },
   { key: 'expense', visible: true },
-  { key: 'net', visible: true },
-  { key: 'dueSoon', visible: true },
+  // Net status already lives in the main balance card, while upcoming items
+  // have their own actionable sections. Keep the first dashboard focused.
+  { key: 'net', visible: false },
+  { key: 'dueSoon', visible: false },
 ];
 export const DEF_HOME_SECTIONS = [
   { key: 'hero', visible: true },
