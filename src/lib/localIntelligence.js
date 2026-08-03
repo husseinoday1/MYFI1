@@ -196,17 +196,26 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date()) => {
     list.push(tx);
     monthly.set(key, list);
   });
+  const catById = new Map(cats.map(c => [c.id, c]));
+  const currentSpend = catSpend(current, cats);
+  const currentById = new Map(currentSpend.map(row => [row.id, row.spent]));
+
+  const baselineMonths = [...monthly.entries()]
+    .filter(([key]) => key !== currentKey)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(-3);
+  const baselineMonthCount = baselineMonths.length;
+
   const decay = 0.7; // كل شهر أقدم وزنه 70% من اللي بعده — نمط EWMA قياسي
   const baselineById = new Map();
   const weightTotalById = new Map();
-    baselineMonths.forEach(([, rows], index) => {
+  baselineMonths.forEach(([, rows], index) => {
     const weight = Math.pow(decay, baselineMonthCount - 1 - index);
-  catSpend(rows, cats).forEach(row => {
-    baselineById.set(row.id, (baselineById.get(row.id) || 0) + Number(row.spent || 0) * weight);
-    weightTotalById.set(row.id, (weightTotalById.get(row.id) || 0) + weight);
+    catSpend(rows, cats).forEach(row => {
+      baselineById.set(row.id, (baselineById.get(row.id) || 0) + Number(row.spent || 0) * weight);
+      weightTotalById.set(row.id, (weightTotalById.get(row.id) || 0) + weight);
+    });
   });
-});
-
 
   const daysElapsed = Math.max(1, Math.min(
     analysisDate.getDate(),
