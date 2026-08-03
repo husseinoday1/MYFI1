@@ -14,7 +14,7 @@ const toLatinDigits = (value = '') =>
     .replace(/[\u0660-\u0669]/g, digit => String(digit.charCodeAt(0) - 0x0660))
     .replace(/[\u06F0-\u06F9]/g, digit => String(digit.charCodeAt(0) - 0x06F0));
 
-const moneyPattern = /(?:^|\s)([+-]?\d[\d,. \t\u066C\u060C]*)(?:\s*(?:د\.ع|دينار|ريال|ر\.س|درهم|دولار|\$|iqd|sar|aed|usd))?(?=\s|$)/gi;
+const moneyPattern = /(?:^|\s)([+-]?\s*\d[\d,. \t\u066C\u060C]*)(?:\s*(?:د\.ع|دينار|ريال|ر\.س|درهم|دولار|\$|iqd|sar|aed|usd))?(?=\s|$)/gi;
 
 const keywordMap = {
   food: ['اكل', 'أكل', 'طعام', 'مطعم', 'قهوة', 'كافي', 'غداء', 'عشاء', 'فطور', 'food', 'coffee', 'cafe', 'restaurant'],
