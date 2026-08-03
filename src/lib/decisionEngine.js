@@ -74,7 +74,7 @@ export const buildDecisionItems = ({
       channel: item.channel || 'quiet',
       notify: !!item.notify,
       throttleHours: item.throttleHours || 12,
-      fingerprint: item.fingerprint || `${item.id}:${body}`,
+      fingerprint: item.fingerprint || item.id,
       action: item.action || null,
     });
   };

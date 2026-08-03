@@ -100,6 +100,38 @@ export const suggestCategoryFromHistory = (query = '', history = [], { flow = 'e
   return [...scores.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 };
 
+export const suggestBudgetsFromHistory = (trans = [], cats = [], now = new Date()) => {
+  const current = monthId(now);
+  const eligibleMonths = [...new Set(trans
+    .map(tx => String(tx?.dateISO || '').slice(0, 7))
+    .filter(key => /^\d{4}-\d{2}$/.test(key) && key < current))]
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, 6);
+  const perCategoryMonthly = new Map();
+  trans.forEach((tx) => {
+    const key = String(tx?.dateISO || '').slice(0, 7);
+    const amount = expenseAmount(tx);
+    if (!amount || !eligibleMonths.includes(key)) return;
+    const cat = tx.cat || 'other';
+    const monthly = perCategoryMonthly.get(cat) || new Map();
+    monthly.set(key, (monthly.get(key) || 0) + amount);
+    perCategoryMonthly.set(cat, monthly);
+  });
+  const validCats = new Set(cats.map(cat => cat.id));
+  const median = (values) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  };
+  return Object.fromEntries([...perCategoryMonthly.entries()]
+    .filter(([cat]) => validCats.has(cat))
+    .map(([cat, monthly]) => {
+      const values = eligibleMonths.map(month => monthly.get(month) || 0).filter(v => v > 0);
+      return values.length ? [cat, Math.round(median(values) / 1000) * 1000] : [cat, 0];
+    })
+    .filter(([, value]) => value > 0));
+};
+
 export const detectRecurringCandidates = (trans = []) => {
   const groups = new Map();
   trans
@@ -164,19 +196,18 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date()) => {
     list.push(tx);
     monthly.set(key, list);
   });
-  const baselineMonths = [...monthly.entries()]
-    .filter(([key]) => key !== currentKey)
-    .sort(([a], [b]) => a.localeCompare(b));
-  const baselineMonthCount = baselineMonths.length;
-  const currentSpend = catSpend(current, cats);
-  const catById = new Map(cats.map(cat => [cat.id, cat]));
-  const currentById = new Map(currentSpend.map(cat => [cat.id, Number(cat.spent || 0)]));
+  const decay = 0.7; // كل شهر أقدم وزنه 70% من اللي بعده — نمط EWMA قياسي
   const baselineById = new Map();
-  baselineMonths.forEach(([, rows]) => {
-    catSpend(rows, cats).forEach(row => {
-      baselineById.set(row.id, (baselineById.get(row.id) || 0) + Number(row.spent || 0));
-    });
+  const weightTotalById = new Map();
+    baselineMonths.forEach(([, rows], index) => {
+    const weight = Math.pow(decay, baselineMonthCount - 1 - index);
+  catSpend(rows, cats).forEach(row => {
+    baselineById.set(row.id, (baselineById.get(row.id) || 0) + Number(row.spent || 0) * weight);
+    weightTotalById.set(row.id, (weightTotalById.get(row.id) || 0) + weight);
   });
+});
+
+
   const daysElapsed = Math.max(1, Math.min(
     analysisDate.getDate(),
     new Date(analysisDate.getFullYear(), analysisDate.getMonth() + 1, 0).getDate(),
@@ -187,7 +218,7 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date()) => {
     const source = catById.get(id) || { id, label: id, labelEn: id, color: '#8E8E93', icon: 'ellipse-outline' };
     const spent = currentById.get(id) || 0;
     const projectedSpent = spent * (daysInMonth / daysElapsed);
-    const previousSpent = baselineMonthCount ? (baselineById.get(id) || 0) / baselineMonthCount : 0;
+    const previousSpent = weightTotalById.get(id) ? (baselineById.get(id) || 0) / weightTotalById.get(id) : 0;
     return {
       ...source,
       spent,
@@ -218,11 +249,13 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date()) => {
   const activeDailyAverage = historicalDays.length
     ? historicalDays.reduce((sum, day) => sum + day.spent, 0) / historicalDays.length
     : 0;
+  const dailyVariance = historicalDays.length > 1
+    ? historicalDays.reduce((sum, day) => sum + (day.spent - activeDailyAverage) ** 2, 0) / (historicalDays.length - 1)
+    : 0;
+  const dailyStdDev = Math.sqrt(dailyVariance);
+  const unusualThreshold = activeDailyAverage + (dailyStdDev > 0 ? 2 * dailyStdDev : activeDailyAverage * 0.8);
   const unusualDays = historicalDays.length >= 4
-    ? currentDays
-      .filter(day => day.spent > activeDailyAverage * 1.8)
-      .sort((a, b) => b.spent - a.spent)
-      .slice(0, 3)
+    ? currentDays.filter(day => day.spent > unusualThreshold).sort((a, b) => b.spent - a.spent).slice(0, 3)
       .map(day => ({ ...day, average: activeDailyAverage }))
     : [];
   return {

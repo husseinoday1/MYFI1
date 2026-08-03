@@ -50,9 +50,9 @@ export const createTransactionSlice = (set, get) => ({
         note: current.note || '',
       });
     }
-    const { id: _id, ts: _ts, dateISO: _dateISO, ...draft } = current;
-    await get().addTrans({ ...draft, recurring: false, recurringGroupId: null, dateISO: today() });
-    return true;
+    const nextAmt = hasAmt
+     ? (current.isDebtPayment ? debtSign * linkedAbsAmt : current.isGoalSaving ? 0 : -linkedAbsAmt)
+      : current.amt;
   },
 
   addTransfer: async ({ fromWalletId, toWalletId, amount, dateISO = today(), note = '' }) => {
