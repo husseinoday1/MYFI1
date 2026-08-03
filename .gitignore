@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Expo / React Native
+.expo/
+.expo-shared/
+dist/
+dist-*/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Logs
+*.log
+.expo-phone*.log
+expo-phone.*.log
+
+# OS
+.DS_Store
+Thumbs.db
+AppData/
+
+# Temporary / Build artifacts
+.tmp-*/
+.tmp-*
+*.tmp
+
+# Tools / Binaries
+tools/supabase-cli/supabase.exe
+tools/*.tar.gz
+*.exe
+
+# Reports
+*.html
+.tmp-backfill-demo-report.json
+
+# Android build (keep source, ignore build output)
+android/app/build/
+android/.gradle/
+android/build/
+*.apk
+*.aab
+
+# Misc
+coverage/
+.idea/
+.vscode/
+supabase/.temp/

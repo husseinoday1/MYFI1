@@ -1,0 +1,332 @@
+import { today, normalizeDate } from '../../utils/calc';
+import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
+import { deferredCommitmentDueISO, monthKey, normalizeCommitments } from '../../lib/commitments';
+import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
+import { syncCommitmentPaidMonth, uid } from '../domain';
+
+export const createManagementSlice = (set, get) => ({
+  setCats: async (cats) => {
+    set({ cats });
+    await get().saveLocal();
+    await get().syncCloud();
+  },
+
+  addCommitment: async (item) => {
+    const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
+    const next = normalizeCommitments([{
+      id: uid(),
+      name: item.name,
+      amt: item.amt,
+      day: item.day,
+      firstDueISO: item.firstDueISO,
+      cat: item.cat || 'other',
+      walletId: item.walletId || defaultWalletId,
+      linkedType: item.linkedType || 'none',
+      linkedId: item.linkedId || null,
+      scope: normalizeScope(item.scope, getEntryScope(get().cfg)),
+      repeatMonthly: item.repeatMonthly !== false,
+      active: item.active !== false,
+      createdAt: today(),
+    }], defaultWalletId)[0];
+    if (!next || !next.amt) return false;
+    set(s => ({ commitments: [next, ...normalizeCommitments(s.commitments, defaultWalletId)] }));
+    await get().saveLocal();
+    await get().syncCloud();
+    return true;
+  },
+
+  editCommitment: async (id, patch) => {
+    const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
+    set(s => ({
+      commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
+        item.id === id
+          ? normalizeCommitments([{ ...item, ...patch }], defaultWalletId)[0]
+          : item
+      )),
+    }));
+    await get().saveLocal();
+    await get().syncCloud();
+  },
+
+  deferCommitment: async (id, option = 'day') => {
+    const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
+    const commitment = normalizeCommitments(get().commitments, defaultWalletId).find(item => item.id === id);
+    if (!commitment || commitment.active === false) return false;
+    const deferredUntilISO = deferredCommitmentDueISO(commitment, option);
+    set(s => ({
+      commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
+        item.id === id
+          ? normalizeCommitments([{ ...item, deferredUntilISO }], defaultWalletId)[0]
+          : item
+      )),
+    }));
+    await get().saveLocal();
+    await get().syncCloud();
+    return true;
+  },
+
+  clearCommitmentDeferral: async (id) => {
+    const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
+    set(s => ({
+      commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
+        item.id === id
+          ? normalizeCommitments([{ ...item, deferredUntilISO: null }], defaultWalletId)[0]
+          : item
+      )),
+    }));
+    await get().saveLocal();
+    await get().syncCloud();
+    return true;
+  },
+
+  deleteCommitment: async (id) => {
+    set(s => ({
+      commitments: s.commitments.filter(item => item.id !== id),
+      trans: s.trans
+        .map(t => {
+          if (!(t.isCommitmentPayment && t.commitmentId === id)) return t;
+          if (t.isDebtPayment || t.isGoalSaving) {
+            const {
+              isCommitmentPayment,
+              commitmentId,
+              commitmentMonth,
+              commitmentLinkedType,
+              commitmentLinkedId,
+              ...rest
+            } = t;
+            return rest;
+          }
+          return null;
+        })
+        .filter(Boolean),
+    }));
+    await get().saveLocal({ force: true });
+    await get().syncCloud();
+  },
+
+  deleteTrackersMany: async (items = []) => {
+    const rows = (Array.isArray(items) ? items : []).filter(item => item?.sourceId && item?.kind);
+    if (!rows.length) return false;
+    const debtIds = new Set(rows.filter(item => item.kind === 'owed' || item.kind === 'receivable').map(item => item.sourceId));
+    const goalIds = new Set(rows.filter(item => item.kind === 'saving').map(item => item.sourceId));
+    const commitmentIds = new Set(rows.filter(item => item.kind === 'monthly').map(item => item.sourceId));
+    set(s => {
+      let trans = s.trans.filter(item => (
+        !(item.isDebtPayment && debtIds.has(item.debtId))
+        && !(item.isGoalSaving && goalIds.has(item.goalId))
+      ));
+      trans = trans
+        .map(item => {
+          if (!(item.isCommitmentPayment && commitmentIds.has(item.commitmentId))) return item;
+          if (item.isDebtPayment || item.isGoalSaving) {
+            const {
+              isCommitmentPayment,
+              commitmentId,
+              commitmentMonth,
+              commitmentLinkedType,
+              commitmentLinkedId,
+              ...rest
+            } = item;
+            return rest;
+          }
+          return null;
+        })
+        .filter(Boolean);
+      const commitments = s.commitments.filter(item => {
+        if (commitmentIds.has(item.id)) return false;
+        const debtLinked = (item.linkedType === 'debt' || item.linkedType === 'receivable') && debtIds.has(item.linkedId);
+        const goalLinked = item.linkedType === 'goal' && goalIds.has(item.linkedId);
+        return !debtLinked && !goalLinked;
+      });
+      return {
+        trans,
+        commitments,
+        debts: s.debts.filter(item => !debtIds.has(item.id)),
+        goals: s.goals.filter(item => !goalIds.has(item.id)),
+      };
+    });
+    await get().saveLocal({ force: true });
+    await get().syncCloud();
+    return true;
+  },
+
+  payCommitment: async (id, dateISO = today(), walletId = null) => {
+    const entryDate = normalizeDate(dateISO);
+    const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
+    const commitment = normalizeCommitments(get().commitments, defaultWalletId).find(item => item.id === id);
+    if (!commitment || !commitment.active || !commitment.amt) return false;
+    const paymentWalletId = walletId || commitment.walletId || defaultWalletId;
+    const paidMonth = monthKey(entryDate);
+    if (commitment.lastPaidMonth === paidMonth) return false;
+    const linkedType = commitment.linkedType || 'none';
+    const linkedId = commitment.linkedId || null;
+    const linkedMeta = {
+      title: commitment.name,
+      cat: commitment.cat || 'other',
+      scope: normalizeScope(commitment.scope, getEntryScope(get().cfg)),
+      isCommitmentPayment: true,
+      commitmentId: id,
+      commitmentMonth: paidMonth,
+      commitmentLinkedType: linkedType,
+      commitmentLinkedId: linkedId,
+      transactionTag: 'commitment',
+    };
+    if ((linkedType === 'debt' || linkedType === 'receivable') && linkedId) {
+      const ok = await get().payDebt(linkedId, commitment.amt, entryDate, paymentWalletId, linkedMeta);
+      if (!ok) return false;
+      set(s => ({
+        commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
+          item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, active: item.repeatMonthly === false ? false : item.active } : item
+        )),
+      }));
+      await get().saveLocal();
+      await get().syncCloud();
+      return true;
+    }
+    if (linkedType === 'goal' && linkedId) {
+      const ok = await get().saveGoal(linkedId, commitment.amt, entryDate, paymentWalletId, linkedMeta);
+      if (!ok) return false;
+      set(s => ({
+        commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
+          item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, active: item.repeatMonthly === false ? false : item.active } : item
+        )),
+      }));
+      await get().saveLocal();
+      await get().syncCloud();
+      return true;
+    }
+    set(s => ({
+      commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
+        item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, active: item.repeatMonthly === false ? false : item.active } : item
+      )),
+      trans: [
+        {
+          id: uid(),
+          title: commitment.name,
+          amt: -Math.abs(Number(commitment.amt) || 0),
+          cat: commitment.cat || 'other',
+          walletId: paymentWalletId,
+          dateISO: entryDate,
+          ts: Date.now(),
+          scope: normalizeScope(commitment.scope, getEntryScope(get().cfg)),
+          flowType: FLOW_TYPES.COMMITMENT_PAYMENT,
+          transactionTag: 'commitment',
+          isCommitmentPayment: true,
+          commitmentId: id,
+          commitmentMonth: paidMonth,
+        },
+        ...s.trans,
+      ],
+    }));
+    await get().saveLocal();
+    await get().syncCloud();
+    return true;
+  },
+
+  addWallet: async (wallet) => {
+    const cfg = get().cfg;
+    const next = {
+      id: uid(),
+      name: wallet.name?.trim() || 'محفظة',
+      nameEn: wallet.nameEn?.trim() || wallet.name?.trim() || 'Wallet',
+      type: wallet.type || 'cash',
+      currency: cfg.currency,
+      scope: normalizeScope(wallet.scope, getEntryScope(cfg)),
+      openingBalance: Number(wallet.openingBalance || 0),
+    };
+    set(s => ({ wallets: [...normalizeWallets(s.wallets, cfg.currency), next] }));
+    await get().saveLocal();
+    await get().syncCloud();
+  },
+
+  editWallet: async (id, patch) => {
+    const { currency: _ignoredCurrency, ...safePatch } = patch || {};
+    set(s => ({
+      wallets: normalizeWallets(s.wallets, s.cfg.currency).map(wallet => (
+        wallet.id === id
+          ? { ...wallet, ...safePatch, currency: s.cfg.currency, openingBalance: Number(safePatch.openingBalance ?? wallet.openingBalance ?? 0) }
+          : wallet
+      )),
+    }));
+    await get().saveLocal();
+    await get().syncCloud();
+  },
+
+  deleteWallet: async (id) => {
+    const normalized = normalizeWallets(get().wallets, get().cfg.currency);
+    if (normalized.length <= 1 || !normalized.some(wallet => wallet.id === id)) return false;
+    const fallback = normalized.find(wallet => wallet.id !== id && wallet.id === get().cfg.defaultWalletId)
+      || normalized.find(wallet => wallet.id !== id)
+      || normalized[0];
+    set(s => ({
+      wallets: normalized.filter(wallet => wallet.id !== id),
+      cfg: {
+        ...s.cfg,
+        defaultWalletId: s.cfg.defaultWalletId === id ? fallback.id : getDefaultWalletId(normalized.filter(wallet => wallet.id !== id), s.cfg.currency, s.cfg.defaultWalletId),
+      },
+      trans: s.trans.map(tx => ({
+        ...tx,
+        walletId: tx.walletId === id ? fallback.id : tx.walletId,
+        fromWalletId: tx.fromWalletId === id ? fallback.id : tx.fromWalletId,
+        toWalletId: tx.toWalletId === id ? fallback.id : tx.toWalletId,
+      })).filter(tx => tx.kind !== 'transfer' || tx.fromWalletId !== tx.toWalletId),
+      commitments: s.commitments.map(item => item.walletId === id ? { ...item, walletId: fallback.id } : item),
+    }));
+    await get().saveLocal();
+    await get().syncCloud();
+    return true;
+  },
+
+  deleteWalletsMany: async (ids = []) => {
+    const normalized = normalizeWallets(get().wallets, get().cfg.currency);
+    const selected = new Set((Array.isArray(ids) ? ids : []).filter(id => normalized.some(wallet => wallet.id === id)));
+    if (!selected.size || selected.size >= normalized.length) return false;
+    const remaining = normalized.filter(wallet => !selected.has(wallet.id));
+    const fallback = remaining.find(wallet => wallet.id === get().cfg.defaultWalletId) || remaining[0];
+    set(s => ({
+      wallets: remaining,
+      cfg: {
+        ...s.cfg,
+        defaultWalletId: fallback.id,
+      },
+      trans: s.trans
+        .map(tx => ({
+          ...tx,
+          walletId: selected.has(tx.walletId) ? fallback.id : tx.walletId,
+          fromWalletId: selected.has(tx.fromWalletId) ? fallback.id : tx.fromWalletId,
+          toWalletId: selected.has(tx.toWalletId) ? fallback.id : tx.toWalletId,
+        }))
+        .filter(tx => tx.kind !== 'transfer' || tx.fromWalletId !== tx.toWalletId),
+      commitments: s.commitments.map(item => (
+        selected.has(item.walletId) ? { ...item, walletId: fallback.id } : item
+      )),
+    }));
+    await get().saveLocal();
+    await get().syncCloud();
+    return true;
+  },
+
+  setTransCatToOther: async (catId) => {
+    set(s => ({ trans: s.trans.map(t => t.cat === catId ? { ...t, cat: 'other' } : t) }));
+    await get().saveLocal();
+    await get().syncCloud();
+  },
+
+  deleteCategoriesMany: async (ids = []) => {
+    const selected = new Set((Array.isArray(ids) ? ids : []).filter(id => id && id !== 'other'));
+    if (!selected.size) return false;
+    set(s => {
+      const categoryBudgets = { ...(s.cfg.categoryBudgets || {}) };
+      selected.forEach(id => delete categoryBudgets[id]);
+      return {
+        cats: s.cats.filter(cat => !selected.has(cat.id)),
+        trans: s.trans.map(item => selected.has(item.cat) ? { ...item, cat: 'other' } : item),
+        commitments: s.commitments.map(item => selected.has(item.cat) ? { ...item, cat: 'other' } : item),
+        cfg: { ...s.cfg, categoryBudgets },
+      };
+    });
+    await get().saveLocal();
+    await get().syncCloud();
+    return true;
+  },
+});

@@ -1,0 +1,13 @@
+node_modules/
+.expo/
+.pnpm-store/
+dist-*/
+.tmp-*/
+*.log
+finance-onboarding-report.html
+MYFI_PRODUCT_BLUEPRINT.md
+tmp/
+AppData/
+.env
+tools/supabase-cli/
+tools/*.tar.gz
