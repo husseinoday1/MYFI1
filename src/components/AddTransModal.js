@@ -707,7 +707,7 @@ export default function AddTransModal({
     return cfg.lang === 'ar' ? `مصروف - ${catLabel || 'عام'}` : `Expense - ${catLabel || 'General'}`;
   })();
   const isMoneyEntry = type === 'exp' || type === 'inc';
-  const isSmartLaunch = !isEdit && isMoneyEntry && !!draftData?.smartMode;
+  const isSmartLaunch = !isEdit && (isMoneyEntry || type === 'transfer');
   useEffect(() => {
     if (!visible || categoryTouched || !isMoneyEntry || title.trim().length < 3) return;
     const suggested = suggestCategoryFromHistory(title, trans, {
