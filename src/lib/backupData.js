@@ -22,10 +22,10 @@ export const summarizeBackupData = (data = {}) => {
   const wallets = Array.isArray(data.wallets) ? data.wallets : [];
   const commitments = Array.isArray(data.commitments) ? data.commitments : [];
   const months = [...new Set(
-    trans
-      .map(item => String(item?.dateISO || '').slice(0, 7))
+    trans.map(item => String(item?.dateISO || '').slice(0, 7))
       .filter(value => /^\d{4}-\d{2}$/.test(value)),
   )].sort();
+
   return {
     months,
     entries: trans.length,
@@ -42,6 +42,7 @@ export const summarizeBackupData = (data = {}) => {
 export const inspectBackupData = (data, { requireConfig = true } = {}) => {
   const errors = [];
   const warnings = [];
+
   if (!isObject(data)) {
     return { valid: false, errors: ['backup_not_object'], warnings, ...summarizeBackupData({}) };
   }
@@ -91,8 +92,7 @@ export const inspectBackupData = (data, { requireConfig = true } = {}) => {
       return;
     }
 
-    // Ordinary transactions can be repaired safely by prepareWalletData:
-    // an absent/unknown wallet is attached to the imported default wallet.
+    // Ordinary entries can be repaired safely by prepareWalletData.
     if (tx.walletId && walletIds.size && !walletIds.has(tx.walletId)) {
       warnings.push(`backup_transaction_wallet_repaired:${index}`);
     }
@@ -132,5 +132,6 @@ export const sanitizeBackupCategories = (cats = [], fallback = []) => {
     const other = fallbackRows.find(item => item.id === 'other');
     if (other) cleaned.push({ ...other });
   }
+
   return cleaned;
 };

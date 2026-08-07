@@ -18,6 +18,7 @@ import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
 import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
 import { resolveSystemTheme } from '../lib/systemTheme';
+import { inspectBackupData } from '../lib/backupData';
 
 const UI = {
   ar: {
@@ -294,50 +295,43 @@ const formatHour12 = (hour, lang = 'ar') => {
 const previewBackupText = (text = '', lang = 'ar') => {
   const raw = String(text || '').trim();
   if (!raw) return { valid: false, empty: true, error: '' };
+
   try {
     const data = JSON.parse(raw);
-    if (!data || typeof data !== 'object' || Array.isArray(data)) {
-      return { valid: false, error: lang === 'ar' ? 'الملف ليس نسخة احتياطية صالحة.' : 'This is not a valid backup object.' };
-    }
-    const trans = Array.isArray(data.trans) ? data.trans : [];
-    const wallets = Array.isArray(data.wallets) ? data.wallets : [];
-    const debts = Array.isArray(data.debts) ? data.debts : [];
-    const goals = Array.isArray(data.goals) ? data.goals : [];
-    const commitments = Array.isArray(data.commitments) ? data.commitments : [];
-    const months = [...new Set(trans.map(t => String(t?.dateISO || '').slice(0, 7)).filter(v => /^\d{4}-\d{2}$/.test(v)))].sort();
-    const issues = [];
-    if (!data.cfg) issues.push(lang === 'ar' ? 'لا توجد إعدادات داخل النسخة.' : 'Backup has no settings.');
-    if (!trans.length && !debts.length && !goals.length && !commitments.length) {
-      issues.push(lang === 'ar' ? 'لا توجد بيانات مالية واضحة داخل النسخة.' : 'Backup has no clear financial data.');
-    }
-    if (wallets.length) {
-      const walletIds = new Set(wallets.map(wallet => wallet?.id).filter(Boolean));
-      const badWalletRefs = trans.filter(t => (
-        t?.kind === 'transfer'
-          ? (t.fromWalletId && !walletIds.has(t.fromWalletId)) || (t.toWalletId && !walletIds.has(t.toWalletId))
-          : t?.walletId && !walletIds.has(t.walletId)
-      )).length;
-      if (badWalletRefs) {
-        issues.push(lang === 'ar'
-          ? `${badWalletRefs} معاملة تشير إلى محفظة غير موجودة.`
-          : `${badWalletRefs} entries reference missing wallets.`);
+    const result = inspectBackupData(data);
+
+    const messageFor = code => {
+      if (code === 'backup_version_newer') {
+        return lang === 'ar'
+          ? 'هذه النسخة أُنشئت بإصدار أحدث من MYFI.'
+          : 'This backup was created by a newer MYFI version.';
       }
-    }
-    return {
-      valid: issues.length === 0,
-      error: issues[0] || '',
-      issues,
-      name: data.cfg?.name || 'MYFI',
-      currency: data.cfg?.currency || '',
-      months,
-      entries: trans.length,
-      wallets: wallets.length,
-      trackers: debts.length + goals.length,
-      debts: debts.length,
-      goals: goals.length,
-      commitments: commitments.length,
+      if (code === 'backup_config_missing') {
+        return lang === 'ar'
+          ? 'لا توجد إعدادات داخل النسخة.'
+          : 'Backup has no settings.';
+      }
+      if (String(code).startsWith('backup_transfer_')) {
+        return lang === 'ar'
+          ? 'توجد حركة تحويل تشير إلى محفظة مفقودة أو غير صالحة.'
+          : 'A transfer references a missing or invalid wallet.';
+      }
+      if (String(code).includes('duplicate_ids')) {
+        return lang === 'ar'
+          ? 'توجد معرّفات مكررة داخل النسخة.'
+          : 'The backup contains duplicate IDs.';
+      }
+      return lang === 'ar'
+        ? 'النسخة غير صالحة أو بنيتها غير مكتملة.'
+        : 'The backup is invalid or incomplete.';
     };
-  } catch (error) {
+
+    return {
+      ...result,
+      error: result.valid ? '' : messageFor(result.errors[0]),
+      issues: [...result.errors, ...result.warnings],
+    };
+  } catch {
     return {
       valid: false,
       error: lang === 'ar' ? 'النص ليس JSON صالح.' : 'Text is not valid JSON.',

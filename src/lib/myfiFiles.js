@@ -4,6 +4,8 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { decryptStringWithPassword, encryptStringWithPassword } from './cryptoBox';
+import { getTransactionDisplayAmount } from './modules';
+import { inspectBackupData, MYFI_BACKUP_DATA_VERSION } from './backupData';
 
 export const MYFI_SCHEMA_VERSION = 1;
 export const MYFI_FORMAT = 'MYFI';
@@ -47,7 +49,7 @@ export const transactionsToCsv = (trans = [], currency = '') => {
     item.dateISO,
     item.flowType || item.kind || '',
     item.title,
-    item.amt,
+    getTransactionDisplayAmount(item),
     currency,
     item.transactionTag,
     item.cat,
@@ -225,6 +227,17 @@ export const inspectMyfiPackage = async (base64, { password = '' } = {}) => {
   if (payload?.format !== MYFI_FORMAT) throw new Error('This is not a MYFI package');
   if (Number(payload.schemaVersion || 0) > MYFI_SCHEMA_VERSION) {
     throw new Error('This backup was created by a newer MYFI version');
+  }
+  if (!payload?.data || typeof payload.data !== 'object' || Array.isArray(payload.data)) {
+    throw new Error('MYFI package has no valid backup data');
+  }
+  const dataVersion = Number(payload.data.v || 0);
+  if (dataVersion > MYFI_BACKUP_DATA_VERSION) {
+    throw new Error('This backup data was created by a newer MYFI version');
+  }
+  const validation = inspectBackupData(payload.data);
+  if (!validation.valid) {
+    throw new Error('Invalid backup data: ' + (validation.errors[0] || 'unknown'));
   }
   return {
     payload,

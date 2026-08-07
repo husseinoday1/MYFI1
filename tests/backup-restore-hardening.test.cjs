@@ -12,6 +12,7 @@ const transformed = source
 
 const moduleObj = { exports: {} };
 new Function('module', 'exports', transformed)(moduleObj, moduleObj.exports);
+
 const {
   MYFI_BACKUP_DATA_VERSION,
   inspectBackupData,
@@ -32,24 +33,42 @@ const base = {
   goals: [],
   commitments: [],
 };
+
 assert.equal(inspectBackupData(base).valid, true);
 
-// Empty backup is legitimate and must be restorable.
-assert.equal(inspectBackupData({ ...base, trans: [], wallets: [] }).valid, true);
+// A valid empty workspace backup is restorable.
+assert.equal(inspectBackupData({
+  ...base,
+  trans: [],
+  debts: [],
+  goals: [],
+  commitments: [],
+  wallets: [],
+}).valid, true);
 
-// Newer data is rejected.
+// Newer inner data is rejected.
 assert.equal(inspectBackupData({ ...base, v: 999 }).valid, false);
 
 // Duplicate IDs are rejected.
-assert.equal(inspectBackupData({ ...base, trans: [base.trans[0], { ...base.trans[0] }] }).valid, false);
-
-// Broken transfer references are not silently repaired.
 assert.equal(inspectBackupData({
   ...base,
-  trans: [{ id: 'x', kind: 'transfer', fromWalletId: 'w1', toWalletId: 'missing', transferAmount: 50 }],
+  trans: [base.trans[0], { ...base.trans[0] }],
 }).valid, false);
 
-// Ordinary missing wallet can be safely repaired by prepareWalletData.
+// A broken transfer cannot be silently repaired because that changes money flow.
+assert.equal(inspectBackupData({
+  ...base,
+  trans: [{
+    id: 'x',
+    kind: 'transfer',
+    fromWalletId: 'w1',
+    toWalletId: 'missing',
+    transferAmount: 50,
+  }],
+}).valid, false);
+
+// An ordinary entry with a stale wallet reference can be repaired to the
+// imported default wallet by prepareWalletData.
 const repairable = inspectBackupData({
   ...base,
   trans: [{ id: 'x', walletId: 'missing', amt: -50 }],
@@ -57,14 +76,20 @@ const repairable = inspectBackupData({
 assert.equal(repairable.valid, true);
 assert(repairable.warnings.length > 0);
 
-// Notification defaults are merged one level deeper.
-const defaults = { daily: { on: false, value: 21 }, debt: { on: true, value: 3 } };
+// Nested notification defaults survive old/partial backups.
+const defaults = {
+  daily: { on: false, value: 21 },
+  debt: { on: true, value: 3 },
+};
 const notif = normalizeBackupNotifications({ daily: { on: true } }, defaults);
 assert.deepEqual(notif.daily, { on: true, value: 21 });
 assert.deepEqual(notif.debt, { on: true, value: 3 });
 
-// "other" category is preserved.
-const cats = sanitizeBackupCategories([{ id: 'food', label: 'Food' }], [{ id: 'other', label: 'Other' }]);
+// Core "other" category remains available after a partial category backup.
+const cats = sanitizeBackupCategories(
+  [{ id: 'food', label: 'Food' }],
+  [{ id: 'other', label: 'Other' }],
+);
 assert(cats.some(item => item.id === 'other'));
 
-console.log('backup restore validation tests passed');
+console.log('MYFI backup/restore validation tests passed.');

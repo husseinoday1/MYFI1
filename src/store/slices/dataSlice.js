@@ -4,6 +4,7 @@ import { calcStats, catSpend } from '../../utils/calc';
 import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
 import { defaultScopeForProfile, getActiveScope, normalizeScope } from '../../lib/modules';
 import { clearVaultSnapshot, GUEST_NAMESPACE, readVaultSnapshot } from '../../lib/secureVault';
+import { inspectBackupData, MYFI_BACKUP_DATA_VERSION, normalizeBackupNotifications, sanitizeBackupCategories } from '../../lib/backupData';
 import {
   archivedWalletMovement,
   financialDataCount,
@@ -133,7 +134,7 @@ export const createDataSlice = (set, get) => ({
     return JSON.stringify({
       trans, debts, goals, wallets, commitments, cats, cfg, notif,
       exportedAt: new Date().toISOString(),
-      v: 6,
+      v: MYFI_BACKUP_DATA_VERSION,
     });
   },
 
@@ -241,6 +242,9 @@ export const createDataSlice = (set, get) => ({
     let rollback = null;
     try {
       const data = JSON.parse(jsonStr);
+      const validation = inspectBackupData(data);
+      if (!validation.valid) throw new Error(validation.errors[0] || 'invalid_backup');
+
       const current = get();
       rollback = {
         trans: current.trans,
@@ -252,32 +256,56 @@ export const createDataSlice = (set, get) => ({
         cfg: current.cfg,
         notif: current.notif,
       };
-      const importedCfg = data.cfg ? normalizeCfg(data.cfg) : get().cfg;
+
+      const importedCfg = data.cfg ? normalizeCfg(data.cfg) : current.cfg;
       const prepared = prepareWalletData({
         wallets: data.wallets,
         trans: data.trans || [],
         commitments: data.commitments,
         cfg: importedCfg,
       });
+
       set({
         trans: prepared.trans,
         debts: normalizeDebtItems(data.debts, defaultScopeForProfile(prepared.cfg.profileType)),
         goals: normalizeGoalItems(data.goals, defaultScopeForProfile(prepared.cfg.profileType)),
         wallets: prepared.wallets,
         commitments: prepared.commitments,
-        cats:  data.cats  || DEF_CATS,
-        cfg:   prepared.cfg,
-        notif: { ...DEF_NOTIF, ...(data.notif || {}) },
+        cats: sanitizeBackupCategories(data.cats, DEF_CATS),
+        cfg: prepared.cfg,
+        notif: normalizeBackupNotifications(data.notif, DEF_NOTIF),
       });
-      await get().saveLocal();
-      await get().syncCloud();
+
+      await get().saveLocal({ force: true, dirty: true });
+
+      if (current.user) {
+        let synced = await get().syncCloud();
+
+        if (!synced && get().syncConflict?.cloud) {
+          const conflict = get().syncConflict;
+          set({
+            cloudRevision: Number(conflict.cloudRevision || 0),
+            syncConflict: null,
+            dirty: true,
+            lastSyncError: null,
+          });
+          await get().saveLocal({ force: true, dirty: true });
+          synced = await get().syncCloud();
+        }
+
+        if (!synced) {
+          set({ dirty: true, lastSyncError: 'backup_restore_sync_pending' });
+          await get().saveLocal({ force: true, dirty: true });
+        }
+      }
+
       return true;
     } catch (e) {
       console.error('[STORE] importBackup', e);
       if (rollback) {
         set(rollback);
         try {
-          await get().saveLocal();
+          await get().saveLocal({ force: true });
         } catch {}
       }
       return false;

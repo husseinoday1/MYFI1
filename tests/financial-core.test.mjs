@@ -372,7 +372,6 @@ const runLinkedStoreAssertions = async () => {
     'addDebt',
     'payDebt',
     'saveGoal',
-    'settleGoalDebt',
     'releaseGoalSavings',
     'payCommitment',
     'addWallet',
@@ -433,7 +432,7 @@ const runLinkedStoreAssertions = async () => {
     user: null,
   });
 
-  assert.equal(await useStore.getState().payDebt('debt-1', 200, '2026-07-05', 'cash'), true);
+  assert.equal(await useStore.getState().payDebt('debt-1', 200, '2026-07-05', 'cash'), 200);
   state = useStore.getState();
   let linkedTx = state.trans.find(item => item.isDebtPayment);
   assert.equal(state.debts[0].paid, 200);
@@ -447,7 +446,7 @@ const runLinkedStoreAssertions = async () => {
   state = useStore.getState();
   assert.equal(state.debts[0].paid, 0, 'deleting a linked transaction must reverse the debt payment');
 
-  assert.equal(await state.saveGoal('goal-1', 125, '2026-07-07', 'bank'), true);
+  assert.equal(await state.saveGoal('goal-1', 125, '2026-07-07', 'bank'), 125);
   state = useStore.getState();
   const goalTx = state.trans.find(item => item.isGoalSaving);
   assert.equal(state.goals[0].cur, 125);
@@ -455,7 +454,9 @@ const runLinkedStoreAssertions = async () => {
   assert.equal(goalTx.allocationAmount, 125);
   assert.equal(goalTx.walletId, 'bank');
 
-  assert.equal(await state.payCommitment('commit-1', '2026-07-10', 'cash'), true);
+  const commitmentResult = await state.payCommitment('commit-1', '2026-07-10', 'cash');
+  assert.equal(commitmentResult.ok, true);
+  assert.equal(commitmentResult.appliedAmount, 100);
   state = useStore.getState();
   const commitmentTx = state.trans.find(item => item.isCommitmentPayment);
   assert.equal(state.commitments[0].lastPaidMonth, '2026-07');
@@ -594,38 +595,67 @@ const runLinkedStoreAssertions = async () => {
   useStore.setState({
     wallets,
     trans: [{
-      id: 'debt-goal-allocation',
+      id: 'reserve-goal-allocation',
       amt: 0,
       allocationAmount: 100,
       walletId: 'cash',
       isGoalSaving: true,
-      goalId: 'debt-goal',
-      savingId: 'debt-goal-saving',
+      goalId: 'reserve-goal',
+      savingId: 'reserve-goal-saving',
       dateISO: '2026-07-12',
     }],
-    debts: [{ id: 'debt-goal-debt', total: 100, paid: 0, payments: [], direction: 'owed', scope: 'personal' }],
+    debts: [],
     goals: [{
-      id: 'debt-goal',
-      name: 'Debt reserve',
+      id: 'reserve-goal',
+      name: 'Reserved savings',
       target: 100,
       cur: 100,
-      purpose: 'debt_payoff',
-      linkedDebtId: 'debt-goal-debt',
+      purpose: 'reserve',
       status: 'active',
-      savings: [{ id: 'debt-goal-saving', amt: 100, date: '2026-07-12' }],
+      savings: [{
+        id: 'reserve-goal-saving',
+        amt: 100,
+        date: '2026-07-12',
+      }],
       scope: 'personal',
     }],
-    commitments: [{ id: 'debt-goal-plan', linkedType: 'goal', linkedId: 'debt-goal', active: true }],
-    cfg: { ...initialCfg, currency: 'IQD', defaultWalletId: 'cash' },
+    commitments: [{
+      id: 'reserve-goal-plan',
+      linkedType: 'goal',
+      linkedId: 'reserve-goal',
+      active: true,
+    }],
+    cfg: {
+      ...initialCfg,
+      currency: 'IQD',
+      defaultWalletId: 'cash',
+    },
     user: null,
   });
-  assert.equal(await useStore.getState().settleGoalDebt('debt-goal', '2026-07-13'), true);
+
+  assert.equal(
+    await useStore.getState().releaseGoalSavings('reserve-goal', '2026-07-13'),
+    true,
+  );
+
   state = useStore.getState();
-  assert.equal(state.debts[0].paid, 100, 'a completed debt-payoff saving must pay its linked debt');
-  assert.equal(state.goals[0].status, 'settled');
-  assert.equal(state.trans.some(item => item.isGoalSaving), false, 'settling must release the old allocation');
-  assert.equal(state.trans.some(item => item.isDebtPayment && item.settledGoalId === 'debt-goal'), true);
-  assert.equal(state.commitments[0].active, false, 'a plan linked to a settled saving must stop');
+
+  assert.equal(state.goals[0].status, 'released');
+  assert.equal(state.goals[0].settledAmount, 100);
+  assert.equal(
+    state.trans.some(item =>
+      item.isGoalSaving &&
+      item.goalId === 'reserve-goal' &&
+      item.allocationReleased === true
+    ),
+    true,
+    'releasing savings must preserve financial history and stop reserving the amount',
+  );
+  assert.equal(
+    state.commitments[0].active,
+    false,
+    'a plan linked to a released saving goal must stop',
+  );
 
   const threeWallets = normalizeWallets([
     { id: 'cash', name: 'Cash', openingBalance: 0, currency: 'IQD' },
