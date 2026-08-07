@@ -1,12 +1,32 @@
 import { byMonth, calcStats, catSpend } from '../utils/calc';
 import { isExpenseFlow, isIncomeFlow } from './modules';
+import {
+  adaptiveVariableProjection,
+  isFixedExpenseTransaction,
+  monthKeyForDate,
+  outstandingExpenseCommitments,
+} from './financialForecast';
 
 const normalize = (value = '') =>
   String(value)
     .trim()
     .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u064B-\u065F\u0670]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ');
+
+const monthId = (date = new Date()) => {
+  const d = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const expenseAmount = (tx = {}) => (
+  isExpenseFlow(tx) ? Math.abs(Number(tx?.amt || 0)) : 0
+);
 
 const toLatinDigits = (value = '') =>
   String(value)
@@ -49,6 +69,26 @@ const keywordMap = {
   entertain: ['ترفيه', 'سينما', 'لعبة', 'اشتراك', 'netflix', 'game', 'cinema'],
 };
 
+export const suggestCategoryForText = (value = '', cats = []) => {
+  const source = normalize(value);
+  const list = Array.isArray(cats) ? cats : [];
+  if (!source) return list.find(cat => cat.id === 'other')?.id || list[0]?.id || 'other';
+
+  const labelMatch = list.find(cat => {
+    const ar = normalize(cat.label || '');
+    const en = normalize(cat.labelEn || '');
+    return (ar && source.includes(ar)) || (en && source.includes(en));
+  });
+  if (labelMatch?.id) return labelMatch.id;
+
+  const keyword = Object.entries(keywordMap).find(([, words]) => (
+    words.some(word => source.includes(normalize(word)))
+  ));
+  if (keyword?.[0] && list.some(cat => cat.id === keyword[0])) return keyword[0];
+
+  return list.find(cat => cat.id === 'other')?.id || list[0]?.id || 'other';
+};
+
 export const parseQuickEntry = (input = '', cats = [], history = []) => {
   const raw = String(input || '').trim();
   if (!raw) return null;
@@ -60,7 +100,7 @@ export const parseQuickEntry = (input = '', cats = [], history = []) => {
     .trim();
   const source = normalize(title || raw);
   const learned = suggestCategoryFromHistory(source, history);
-  const keyword = Object.entries(keywordMap).find(([, words]) => words.some(word => source.includes(word)));
+  const keyword = Object.entries(keywordMap).find(([, words]) => words.some(word => source.includes(normalize(word))));
   const labelMatch = cats.find(cat => {
     const ar = normalize(cat.label || '');
     const en = normalize(cat.labelEn || '');
@@ -70,9 +110,9 @@ export const parseQuickEntry = (input = '', cats = [], history = []) => {
   const incomeWords = ['راتب', 'دخل', 'استلام', 'تحصيل', 'salary', 'income', 'received'];
   const expenseWords = ['صرف', 'دفع', 'شراء', 'قهوة', 'اكل', 'paid', 'buy'];
   const type = amountInfo.signed ||
-    (incomeWords.some(word => source.includes(word))
+    (incomeWords.some(word => source.includes(normalize(word)))
     ? 'inc'
-    : expenseWords.some(word => source.includes(word))
+    : expenseWords.some(word => source.includes(normalize(word)))
       ? 'exp'
       : keyword?.[0] === 'salary' ? 'inc' : 'exp');
 
@@ -160,10 +200,11 @@ export const detectRecurringCandidates = (trans = []) => {
     .slice(0, 3);
 };
 
-const spendByDay = (items = []) => {
+const spendByDay = (items = [], commitments = [], { variableOnly = false } = {}) => {
   const days = new Map();
   items.forEach(tx => {
     if (!tx?.dateISO || !isExpenseFlow(tx)) return;
+    if (variableOnly && isFixedExpenseTransaction(tx, commitments)) return;
     const d = new Date(`${tx.dateISO}T12:00:00`);
     if (Number.isNaN(d.getTime())) return;
     const key = tx.dateISO;
@@ -178,9 +219,9 @@ const spendByDay = (items = []) => {
 const savingRate = (stats) =>
   stats.inc > 0 ? Math.round(((Number(stats.inc || 0) - Number(stats.exp || 0)) / Number(stats.inc || 1)) * 100) : 0;
 
-export const buildLeakInsights = (trans = [], cats = [], date = new Date()) => {
+export const buildLeakInsights = (trans = [], cats = [], date = new Date(), commitments = []) => {
   const analysisDate = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
-  const currentKey = `${analysisDate.getFullYear()}-${String(analysisDate.getMonth() + 1).padStart(2, '0')}`;
+  const currentKey = monthKeyForDate(analysisDate);
   const periodEnd = new Date(analysisDate.getFullYear(), analysisDate.getMonth() + 1, 0, 23, 59, 59, 999);
   const relevant = trans.filter(tx => {
     if (tx?.kind === 'transfer' || !tx?.dateISO) return false;
@@ -201,24 +242,45 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date()) => {
   const currentById = new Map(currentSpend.map(row => [row.id, row.spent]));
 
   const currentFixedById = new Map();
-  current.filter(tx => isExpenseFlow(tx) && (tx?.isCommitmentPayment || tx?.isDebtPayment)).forEach(tx => {
-    currentFixedById.set(tx.cat, (currentFixedById.get(tx.cat) || 0) + Math.abs(Number(tx.amt || 0)));
+  current.filter(tx => isExpenseFlow(tx) && isFixedExpenseTransaction(tx, commitments)).forEach(tx => {
+    const id = tx.cat || 'other';
+    currentFixedById.set(id, (currentFixedById.get(id) || 0) + Math.abs(Number(tx.amt || 0)));
+  });
+
+  const remainingFixedById = new Map();
+  outstandingExpenseCommitments(commitments, current, currentKey).forEach(commitment => {
+    const id = commitment.cat || 'other';
+    remainingFixedById.set(id, (remainingFixedById.get(id) || 0) + Math.abs(Number(commitment.amt || 0)));
   });
 
   const baselineMonths = [...monthly.entries()]
     .filter(([key]) => key !== currentKey)
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .slice(-3);
+    .slice(-6);
   const baselineMonthCount = baselineMonths.length;
 
-  const decay = 0.7; // كل شهر أقدم وزنه 70% من اللي بعده — نمط EWMA قياسي
+  const decay = 0.7;
   const baselineById = new Map();
+  const baselineVariableById = new Map();
   const weightTotalById = new Map();
   baselineMonths.forEach(([, rows], index) => {
     const weight = Math.pow(decay, baselineMonthCount - 1 - index);
-    catSpend(rows, cats).forEach(row => {
-      baselineById.set(row.id, (baselineById.get(row.id) || 0) + Number(row.spent || 0) * weight);
-      weightTotalById.set(row.id, (weightTotalById.get(row.id) || 0) + weight);
+    const totalByCat = new Map();
+    const variableByCat = new Map();
+
+    rows.filter(isExpenseFlow).forEach(tx => {
+      const id = tx.cat || 'other';
+      const amount = Math.abs(Number(tx.amt || 0));
+      totalByCat.set(id, (totalByCat.get(id) || 0) + amount);
+      if (!isFixedExpenseTransaction(tx, commitments)) {
+        variableByCat.set(id, (variableByCat.get(id) || 0) + amount);
+      }
+    });
+
+    new Set([...totalByCat.keys(), ...variableByCat.keys()]).forEach(id => {
+      baselineById.set(id, (baselineById.get(id) || 0) + (totalByCat.get(id) || 0) * weight);
+      baselineVariableById.set(id, (baselineVariableById.get(id) || 0) + (variableByCat.get(id) || 0) * weight);
+      weightTotalById.set(id, (weightTotalById.get(id) || 0) + weight);
     });
   });
 
@@ -227,17 +289,39 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date()) => {
     new Date(analysisDate.getFullYear(), analysisDate.getMonth() + 1, 0).getDate(),
   ));
   const daysInMonth = new Date(analysisDate.getFullYear(), analysisDate.getMonth() + 1, 0).getDate();
-  const categoryIds = new Set([...currentById.keys(), ...baselineById.keys()]);
+  const categoryIds = new Set([
+    ...currentById.keys(),
+    ...baselineById.keys(),
+    ...remainingFixedById.keys(),
+  ]);
   const categoryMovement = [...categoryIds].map(id => {
     const source = catById.get(id) || { id, label: id, labelEn: id, color: '#8E8E93', icon: 'ellipse-outline' };
     const spent = currentById.get(id) || 0;
     const fixedSpent = Math.min(spent, currentFixedById.get(id) || 0);
+    const remainingFixed = remainingFixedById.get(id) || 0;
     const variableSpent = Math.max(0, spent - fixedSpent);
-    const projectedSpent = fixedSpent + variableSpent * (daysInMonth / daysElapsed);
     const previousSpent = weightTotalById.get(id) ? (baselineById.get(id) || 0) / weightTotalById.get(id) : 0;
+    const historicalVariable = weightTotalById.get(id)
+      ? (baselineVariableById.get(id) || 0) / weightTotalById.get(id)
+      : 0;
+    const variableForecast = adaptiveVariableProjection({
+      currentSpent: variableSpent,
+      historicalSpent: historicalVariable,
+      daysElapsed,
+      daysInMonth,
+      baselineMonthCount,
+      fallbackScaleCap: 2,
+    });
+    const projectedSpent = fixedSpent + remainingFixed + variableForecast.projected;
     return {
       ...source,
       spent,
+      fixedSpent,
+      remainingFixed,
+      variableSpent,
+      historicalVariable,
+      projectedVariable: variableForecast.projected,
+      forecastBasis: variableForecast.basis,
       projectedSpent,
       previousSpent,
       baselineSpent: previousSpent,
@@ -260,8 +344,12 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date()) => {
     ? categoryMovement.filter(cat => cat.delta < 0 && cat.previousSpent > 0).sort((a, b) => a.delta - b.delta)
     : [];
   const topSpend = categoryMovement.filter(cat => cat.spent > 0).sort((a, b) => b.spent - a.spent)[0] || null;
-  const currentDays = spendByDay(current).filter(day => day.spent > 0);
-  const historicalDays = spendByDay(relevant.filter(tx => String(tx.dateISO).slice(0, 7) !== currentKey));
+  const currentDays = spendByDay(current, commitments, { variableOnly: true }).filter(day => day.spent > 0);
+  const historicalDays = spendByDay(
+    relevant.filter(tx => String(tx.dateISO).slice(0, 7) !== currentKey),
+    commitments,
+    { variableOnly: true },
+  );
   const activeDailyAverage = historicalDays.length
     ? historicalDays.reduce((sum, day) => sum + day.spent, 0) / historicalDays.length
     : 0;

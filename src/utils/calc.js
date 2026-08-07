@@ -1,5 +1,12 @@
 import { getTransactionDisplayAmount, isExpenseFlow, isIncomeFlow } from '../lib/modules';
 import { getWalletAvailableBalances } from '../lib/wallets';
+import {
+  adaptiveVariableProjection,
+  fixedExpenseSpent,
+  monthKeyForDate,
+  outstandingExpenseCommitments,
+  weightedHistoricalVariableSpend,
+} from '../lib/financialForecast';
 
 const toNumber = (value) => {
   const n = Number(value);
@@ -83,31 +90,39 @@ export const prevMonth = () => {
   };
 };
 
-const isFixedExpenseTx = (t) => Boolean(t?.isCommitmentPayment || t?.isDebtPayment);
-
 export const monthlyForecast = (trans = [], date = new Date(), commitments = []) => {
   const mo  = date.getMonth();
   const yr  = date.getFullYear();
   const day = Math.max(1, date.getDate());
   const dim = daysInMonth(mo, yr);
-  const currentMonthKey = `${yr}-${String(mo + 1).padStart(2, '0')}`;
+  const currentMonthKey = monthKeyForDate(date);
   const mt  = byMonth(trans, mo, yr);
   const { inc: income, exp: spent } = calcStats(mt);
 
-  const fixedSpentSoFar = sum(mt.filter(t => isExpenseFlow(t) && isFixedExpenseTx(t)), t => Math.abs(toNumber(t.amt)));
+  const fixedSpentSoFar = fixedExpenseSpent(mt, commitments);
   const variableSpentSoFar = Math.max(0, spent - fixedSpentSoFar);
-  const remainingCommitments = sum(
-    (commitments || []).filter(c => c && c.active !== false && c.lastPaidMonth !== currentMonthKey),
-    c => Math.abs(toNumber(c.amt)),
-  );
-  const fixedExpected = fixedSpentSoFar + remainingCommitments;
+  const remainingCommitments = outstandingExpenseCommitments(commitments, mt, currentMonthKey);
+  const remainingCommitmentAmount = sum(remainingCommitments, c => Math.abs(toNumber(c.amt)));
+  const fixedExpected = fixedSpentSoFar + remainingCommitmentAmount;
+
+  const historicalVariable = weightedHistoricalVariableSpend(trans, date, commitments, { limit: 6, decay: 0.7 });
+  const variableForecast = adaptiveVariableProjection({
+    currentSpent: variableSpentSoFar,
+    historicalSpent: historicalVariable.value,
+    daysElapsed: day,
+    daysInMonth: dim,
+    baselineMonthCount: historicalVariable.monthCount,
+    fallbackScaleCap: 2,
+  });
 
   const daysLeft = Math.max(0, dim - day);
   const dailyAvg = day > 0 ? variableSpentSoFar / day : 0;
-  const projectedVariable = dailyAvg * dim;
+  const projectedVariable = variableForecast.projected;
   const projectedExpense = fixedExpected + projectedVariable;
   const projectedNet = income - projectedExpense;
-  const availableToday = daysLeft > 0 ? Math.max(0, (income - spent) / (daysLeft + 1)) : Math.max(0, income - spent);
+  const availableToday = daysLeft > 0
+    ? Math.max(0, projectedNet / (daysLeft + 1))
+    : Math.max(0, projectedNet);
 
   let status = 'safe';
   if (income > 0) {
@@ -122,7 +137,15 @@ export const monthlyForecast = (trans = [], date = new Date(), commitments = [])
     income: money(income),
     dailyAvg: money(dailyAvg),
     fixedExpected: money(fixedExpected),
+    fixedSpent: money(fixedSpentSoFar),
+    remainingCommitments: money(remainingCommitmentAmount),
     variableSpent: money(variableSpentSoFar),
+    historicalVariable: money(historicalVariable.value),
+    baselineMonthCount: historicalVariable.monthCount,
+    projectedVariable: money(projectedVariable),
+    forecastBasis: variableForecast.basis,
+    currentWeight: variableForecast.currentWeight,
+    historicalWeight: variableForecast.historicalWeight,
     projected: money(projectedExpense),
     projectedNet: money(projectedNet),
     availableToday: money(availableToday),

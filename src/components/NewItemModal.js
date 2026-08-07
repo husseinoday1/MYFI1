@@ -13,6 +13,7 @@ import { weight } from '../lib/tokens';
 import DateField from './DateField';
 import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
 import { filterByActiveScope, getModules, getTrackerKinds } from '../lib/modules';
+import { suggestCategoryForText } from '../lib/localIntelligence';
 
 const cleanNumber = parseNumberInput;
 
@@ -38,6 +39,8 @@ const modalCopy = (lang = 'ar') => {
     planAmount: ar ? 'قيمة الدفعة الشهرية' : 'Monthly payment amount',
     planDate: ar ? 'أول موعد دفع' : 'First payment date',
     wallet: ar ? 'محفظة الدفع' : 'Payment wallet',
+    category: ar ? 'فئة الالتزام' : 'Commitment category',
+    categoryHint: ar ? 'نقترح الفئة من اسم الالتزام ويمكنك تغييرها يدوياً.' : 'We suggest a category from the name; you can override it.',
     debtOrigin: ar ? 'هل تغيّر رصيدك الآن؟' : 'Did your balance change now?',
     previousDebt: ar ? 'لا، دين قديم' : 'No, an old debt',
     receivedDebt: ar ? 'نعم، استلمت المبلغ' : 'Yes, I received it',
@@ -60,7 +63,7 @@ const modalCopy = (lang = 'ar') => {
 };
 
 export default function NewItemModal({ visible, kind, onClose, preset = null }) {
-  const { addDebt, addGoal, addCommitment, setCfg, cfg, wallets } = useStore();
+  const { addDebt, addGoal, addCommitment, setCfg, cfg, wallets, cats } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
   const T = modalCopy(cfg.lang);
@@ -91,11 +94,14 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const [planDate, setPlanDate] = useState(today());
   const [planWalletId, setPlanWalletId] = useState(defaultWalletId);
   const [originMode, setOriginMode] = useState('previous');
+  const [commitmentCat, setCommitmentCat] = useState('other');
+  const [commitmentCatTouched, setCommitmentCatTouched] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
+    const presetName = linkedPlanMode ? String(preset?.linkedName || '').trim() : '';
     setTrackerType(linkedPlanMode ? presetKind : (enabledKinds[0] || 'owed'));
-    setName(linkedPlanMode ? String(preset?.linkedName || '').trim() : '');
+    setName(presetName);
     setAmt('');
     setStartDate(today());
     setWithPlan(false);
@@ -103,6 +109,8 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setPlanDate(today());
     setPlanWalletId(defaultWalletId);
     setOriginMode('previous');
+    setCommitmentCat(suggestCategoryForText(presetName, cats));
+    setCommitmentCatTouched(false);
   }, [visible, linkedPlanMode, presetKind, preset?.linkedName, defaultWalletId]);
 
   const currentKind = linkedPlanMode
@@ -131,6 +139,10 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const selectTrackerType = async (value) => {
     setTrackerType(value);
     setOriginMode('previous');
+    if (value === 'commitment') {
+      setCommitmentCat(suggestCategoryForText(name, cats));
+      setCommitmentCatTouched(false);
+    }
     if (value === 'receivable' && !modules.debtsReceivable) {
       await setCfg({ enabledModules: { debtsReceivable: true } });
     }
@@ -165,6 +177,8 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setPlanDate(today());
     setPlanWalletId(defaultWalletId);
     setOriginMode('previous');
+    setCommitmentCat('other');
+    setCommitmentCatTouched(false);
   };
 
   const handleClose = () => {
@@ -179,17 +193,31 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     }
   };
 
+  const handleNameChange = (value) => {
+    setName(value);
+    if (isCommitment && !commitmentCatTouched) {
+      setCommitmentCat(suggestCategoryForText(value, cats));
+    }
+  };
+
+  const selectCommitmentCategory = (catId) => {
+    setCommitmentCat(catId);
+    setCommitmentCatTouched(true);
+  };
+
   const handleSave = async () => {
     const totalValue = Math.abs(cleanNumber(amt));
     const linkedValue = Math.abs(cleanNumber(planAmount));
 
     if (linkedPlanMode) {
       if (!(linkedValue > 0) || !isISODate(planDate)) return;
+      const linkedName = String(preset?.linkedName || '').trim() || T.planTitle;
       await addCommitment({
-        name: String(preset?.linkedName || '').trim() || T.planTitle,
+        name: linkedName,
         amt: linkedValue,
         firstDueISO: planDate,
         walletId: planWalletId,
+        cat: preset?.cat || suggestCategoryForText(linkedName, cats),
         linkedType: preset?.linkedType || 'debt',
         linkedId: preset?.linkedId || null,
       });
@@ -212,6 +240,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         amt: totalValue,
         firstDueISO: startDate,
         walletId: planWalletId,
+        cat: commitmentCat || suggestCategoryForText(name, cats),
         linkedType: 'none',
       });
       handleClose();
@@ -244,6 +273,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         amt: linkedValue,
         firstDueISO: planDate,
         walletId: planWalletId,
+        cat: suggestCategoryForText(name, cats),
         linkedType: isGoal ? 'goal' : isReceivable ? 'receivable' : 'debt',
         linkedId: created.id,
       });
@@ -312,7 +342,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
               <Text style={[s.label, { color: th.sub, textAlign: align }]}>{nameLabel}</Text>
               <TextInput
                 value={name}
-                onChangeText={setName}
+                onChangeText={handleNameChange}
                 placeholder={placeholder}
                 placeholderTextColor={th.sub}
                 style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]}
@@ -327,6 +357,31 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                 placeholderTextColor={th.sub}
                 style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]}
               />
+
+              {isCommitment ? (
+                <View style={s.categoryBlock}>
+                  <Text style={[s.label, { color: th.sub, textAlign: align }]}>{T.category}</Text>
+                  <Text style={[s.categoryHint, { color: th.faint, textAlign: align }]}>{T.categoryHint}</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.walletRail}>
+                    {cats.map(cat => {
+                      const active = commitmentCat === cat.id;
+                      const label = (isAr ? cat.label : cat.labelEn) || cat.label || cat.labelEn || cat.id;
+                      return (
+                        <TouchableOpacity
+                          key={cat.id}
+                          onPress={() => selectCommitmentCategory(cat.id)}
+                          style={[s.walletChip, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent' }]}
+                        >
+                          <Ionicons name={cat.icon || 'pricetag-outline'} size={14} color={active ? th.primary : th.sub} />
+                          <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('900') }}>
+                            {label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              ) : null}
 
               {isGoal ? (
                 <Text style={{ color: th.faint, fontSize: 12, lineHeight: 18, ...weight('700'), textAlign: align, marginBottom: 14 }}>
@@ -491,6 +546,8 @@ const s = StyleSheet.create({
   input: { minHeight: 46, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 10, borderWidth: 0.5, marginBottom: 14, fontSize: 14, lineHeight: 19, ...weight('700') },
   dateRow: { justifyContent: 'space-between', alignItems: 'center', borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12, marginBottom: 16, gap: 12 },
   walletBlock: { marginBottom: 16 },
+  categoryBlock: { marginBottom: 16 },
+  categoryHint: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: -3, marginBottom: 9 },
   originBlock: { marginBottom: 14 },
   goalPurposeBlock: { marginBottom: 14 },
   originModes: { gap: 8, marginBottom: 7 },
