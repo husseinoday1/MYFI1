@@ -3,9 +3,10 @@ import { STORAGE, DEF_CATS, DEF_CFG, DEF_NOTIF, LEGACY_STORAGE_KEYS, normalizeCf
 import { calcStats, catSpend } from '../../utils/calc';
 import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
 import { defaultScopeForProfile, getActiveScope, normalizeScope } from '../../lib/modules';
-import { readVaultSnapshot } from '../../lib/secureVault';
+import { clearVaultSnapshot, GUEST_NAMESPACE, readVaultSnapshot } from '../../lib/secureVault';
 import {
   archivedWalletMovement,
+  financialDataCount,
   normalizeDebtItems,
   normalizeGoalItems,
   prepareWalletData,
@@ -43,32 +44,89 @@ export const createDataSlice = (set, get) => ({
   },
 
   resetAll: async () => {
-  const wallets = normalizeWallets([], get().cfg.currency);
-  set({
-    trans: [],
-    debts: [],
-    goals: [],
-    wallets,
-    commitments: [],
-    cats: DEF_CATS,
-    cfg: { ...get().cfg, defaultWalletId: getDefaultWalletId(wallets, get().cfg.currency, get().cfg.defaultWalletId) },
-  });
-  try {
-    const legacyKeys = Object.values(LEGACY_STORAGE_KEYS).flat();
-    await AsyncStorage.multiRemove([
-      STORAGE.DATA, STORAGE.CATS, STORAGE.ROLLBACK, STORAGE.DEMO_REAL, STORAGE.DEMO_DATA,
-      ...legacyKeys,
-    ]);
-    await get().saveLocal({ force: true });
-  } catch (e) {
-    console.error('[STORE] resetAll storage', e);
-  }
-  try {
-    await get().syncCloud();
-  } catch (e) {
-    console.error('[STORE] resetAll sync', e);
-  }
-},
+    const current = get();
+    const namespace = current.workspaceNamespace || 'guest';
+    const wallets = normalizeWallets([], current.cfg.currency);
+    const defaultWalletId = getDefaultWalletId(wallets, current.cfg.currency, null);
+    const resetCfg = {
+      ...current.cfg,
+      demoMode: false,
+      defaultWalletId,
+      archiveSummaries: [],
+      categoryBudgets: {},
+    };
+    set({
+      trans: [],
+      debts: [],
+      goals: [],
+      wallets,
+      commitments: [],
+      cats: DEF_CATS,
+      cfg: resetCfg,
+      syncConflict: null,
+      lastSyncError: null,
+      dirty: true,
+    });
+    try {
+      const legacyKeys = Object.values(LEGACY_STORAGE_KEYS).flat();
+      await AsyncStorage.multiRemove([
+        STORAGE.DATA, STORAGE.CATS, STORAGE.ROLLBACK, STORAGE.DEMO_REAL, STORAGE.DEMO_DATA,
+        ...legacyKeys,
+      ]);
+      const resetAt = new Date().toISOString();
+      const namespacesToClear = [...new Set([namespace, GUEST_NAMESPACE])];
+      for (const targetNamespace of namespacesToClear) {
+        await AsyncStorage.setItem(`MYFI_INTENTIONAL_RESET_V1:${targetNamespace}`, JSON.stringify({
+          legacyRecoveryDisabled: true,
+          pendingCloudSync: targetNamespace === namespace && !!current.user,
+          resetAt,
+        }));
+        await clearVaultSnapshot(targetNamespace);
+      }
+      await get().saveLocal({ force: true, dirty: true });
+    } catch (e) {
+      console.error('[STORE] resetAll storage', e);
+      return false;
+    }
+
+    if (current.user) {
+      try {
+        let synced = await get().syncCloud();
+        if (!synced && get().syncConflict?.cloud) {
+          const revision = Number(get().syncConflict.cloudRevision || 0);
+          set({ cloudRevision: revision, syncConflict: null, dirty: true });
+          await get().saveLocal({ force: true, dirty: true });
+          synced = await get().syncCloud();
+        }
+        if (synced) {
+          await AsyncStorage.setItem(`MYFI_INTENTIONAL_RESET_V1:${namespace}`, JSON.stringify({
+            legacyRecoveryDisabled: true,
+            pendingCloudSync: false,
+            resetAt: new Date().toISOString(),
+          }));
+        }
+      } catch (e) {
+        console.error('[STORE] resetAll sync', e);
+      }
+    }
+
+    const verify = get();
+    const empty = !verify.trans.length && !verify.debts.length && !verify.goals.length && !verify.commitments.length;
+    const namespacesToVerify = [...new Set([namespace, GUEST_NAMESPACE])];
+    let vaultEmpty = true;
+    for (const targetNamespace of namespacesToVerify) {
+      const { snapshot } = await readVaultSnapshot(targetNamespace);
+      if (financialDataCount(snapshot?.data || snapshot) > 0) {
+        vaultEmpty = false;
+        break;
+      }
+    }
+    if (!empty || !vaultEmpty) {
+      console.error('[STORE] resetAll verification failed');
+      return false;
+    }
+    return true;
+  },
 
   exportBackup: () => {
     const { trans, debts, goals, wallets, commitments, cats, cfg, notif } = get();

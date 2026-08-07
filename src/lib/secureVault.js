@@ -18,6 +18,7 @@ const VAULT_PREFIX = 'MYFI_ENCRYPTED_SNAPSHOT_V1';
 const AUTH_PREFIX = 'MYFI_ENCRYPTED_AUTH_V1';
 const PREVIOUS_SUFFIX = ':previous';
 const BACKUP_SUFFIXES = [':previous:1', ':previous:2', ':previous:3'];
+const LEGACY_PREVIOUS_SUFFIX = ':previous';
 
 export const GUEST_NAMESPACE = 'guest';
 export const namespaceForUser = (user) => user?.id ? `user:${user.id}` : GUEST_NAMESPACE;
@@ -99,6 +100,8 @@ export const readVaultSnapshot = async (namespace = GUEST_NAMESPACE) => {
     const result = await readBackup(`${key}${PREVIOUS_SUFFIX}:${index}`, index);
     if (result) return result;
   }
+  const legacyPrevious = await readBackup(`${key}${LEGACY_PREVIOUS_SUFFIX}`, 0);
+  if (legacyPrevious) return legacyPrevious;
 
   return { snapshot: null, recovered: false, hasRaw: false };
 };
@@ -107,7 +110,8 @@ export const writeVaultSnapshot = async (namespace = GUEST_NAMESPACE, snapshot =
   const key = vaultKey(namespace);
   const masterKey = await getOrCreateMasterKey();
   const current = await storage.getItem(key);
-  if (current && isSnapshotEmpty(snapshot)) {
+  const emptySnapshot = isSnapshotEmpty(snapshot);
+  if (current && emptySnapshot) {
     let currentHasData = true;
     try {
       const decodedCurrent = await decodeSnapshot(current, namespace);
@@ -120,7 +124,18 @@ export const writeVaultSnapshot = async (namespace = GUEST_NAMESPACE, snapshot =
     }
   }
   const envelope = JSON.stringify(encryptString(JSON.stringify(snapshot), masterKey, key));
-  if (current) await storage.setItem(`${key}${PREVIOUS_SUFFIX}`, current);
+  if (current && !(options.force && emptySnapshot)) {
+    for (let index = 3; index >= 2; index -= 1) {
+      const previous = await storage.getItem(`${key}${PREVIOUS_SUFFIX}:${index - 1}`);
+      if (previous) await storage.setItem(`${key}${PREVIOUS_SUFFIX}:${index}`, previous);
+      else await storage.removeItem(`${key}${PREVIOUS_SUFFIX}:${index}`);
+    }
+    await storage.setItem(`${key}${PREVIOUS_SUFFIX}:1`, current);
+  }
+  if (options.force && emptySnapshot) {
+    await Promise.all(BACKUP_SUFFIXES.map(suffix => storage.removeItem(`${key}${suffix}`)));
+  }
+  await storage.removeItem(`${key}${LEGACY_PREVIOUS_SUFFIX}`);
   await storage.setItem(key, envelope);
   return true;
 };
@@ -132,7 +147,7 @@ export const hasVaultSnapshot = async (namespace = GUEST_NAMESPACE) => {
 
 export const clearVaultSnapshot = async (namespace = GUEST_NAMESPACE) => {
   const key = vaultKey(namespace);
-  const backupKeys = BACKUP_SUFFIXES.map(suffix => `${key}${suffix}`);
+  const backupKeys = [...BACKUP_SUFFIXES.map(suffix => `${key}${suffix}`), `${key}${LEGACY_PREVIOUS_SUFFIX}`];
   if (typeof storage.multiRemove === 'function') {
     await storage.multiRemove([key, ...backupKeys]);
     return;

@@ -74,6 +74,57 @@ const previousMonthKey = () => {
 };
 const txTime = (item = {}) => item.ts || (item.dateISO ? new Date(`${item.dateISO}T12:00:00`).getTime() : 0);
 
+const HistoryListHeader = ({
+  th, rowDir, align, writingDirection, lang, L, T, search, setSearch,
+  selection, filteredCount, activeFilters, openFilters,
+}) => (
+  <>
+    <MultiSelectBar
+      th={th}
+      lang={lang}
+      active={selection.selecting}
+      count={selection.selectedCount}
+      total={filteredCount}
+      allSelected={selection.allSelected}
+      onStart={selection.start}
+      onToggleAll={selection.toggleAll}
+      onDelete={selection.onDelete}
+      onCancel={selection.cancel}
+    />
+    <View style={[s.searchBox, { backgroundColor: th.input, borderColor: search ? th.primary : th.border, flexDirection: rowDir }]}>
+      <Ionicons name="search" size={16} color={th.sub} />
+      <TextInput
+        value={search}
+        onChangeText={setSearch}
+        placeholder={L.searchPlaceholder}
+        placeholderTextColor={th.sub}
+        style={{ flex: 1, color: th.text, fontSize: 14, paddingVertical: 10, marginHorizontal: 8, textAlign: align, writingDirection }}
+      />
+      {!!search && (
+        <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+          <Ionicons name="backspace-outline" size={16} color={th.sub} />
+        </TouchableOpacity>
+      )}
+    </View>
+
+    <TouchableOpacity
+      onPress={openFilters}
+      style={[s.filterBtn, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}
+    >
+      <Ionicons name="options-outline" size={17} color={th.sub} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: th.text, ...weight('900'), fontSize: 13, textAlign: align, writingDirection }}>
+          {L.filterTitle}{activeFilters ? ` · ${activeFilters}` : ''}
+        </Text>
+        <Text style={{ color: th.sub, fontSize: 11, lineHeight: 17, textAlign: align, writingDirection }}>
+          {filteredCount} {T.entries}
+        </Text>
+      </View>
+      <Ionicons name={lang === 'ar' ? 'chevron-back' : 'chevron-forward'} size={16} color={th.faint} />
+    </TouchableOpacity>
+  </>
+);
+
 export default function HistoryScreen() {
   const { trans, wallets, cats, cfg, deleteTrans, deleteTransMany, duplicateTrans } = useStore();
   const th = TH[cfg.theme] || TH.dark;
@@ -344,53 +395,6 @@ export default function HistoryScreen() {
     );
   };
 
-  const renderHeader = () => (
-    <>
-      <MultiSelectBar
-        th={th}
-        lang={cfg.lang}
-        active={selection.selecting}
-        count={selection.selectedCount}
-        total={filtered.length}
-        allSelected={selection.allSelected}
-        onStart={selection.start}
-        onToggleAll={selection.toggleAll}
-        onDelete={confirmDeleteSelected}
-        onCancel={selection.cancel}
-      />
-      <View style={[s.searchBox, { backgroundColor: th.input, borderColor: search ? th.primary : th.border, flexDirection: rowDir }]}>
-        <Ionicons name="search" size={16} color={th.sub} />
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder={L.searchPlaceholder}
-          placeholderTextColor={th.sub}
-          style={{ flex: 1, color: th.text, fontSize: 14, paddingVertical: 10, marginHorizontal: 8, textAlign: align, writingDirection }}
-        />
-        {!!search && (
-          <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-            <Ionicons name="backspace-outline" size={16} color={th.sub} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <TouchableOpacity
-        onPress={openFilters}
-        style={[s.filterBtn, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}
-      >
-        <Ionicons name="options-outline" size={17} color={th.sub} />
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: th.text, ...weight('900'), fontSize: 13, textAlign: align, writingDirection }}>
-            {L.filterTitle}{activeFilters ? ` · ${activeFilters}` : ''}
-          </Text>
-          <Text style={{ color: th.sub, fontSize: 11, lineHeight: 17, textAlign: align, writingDirection }}>
-            {filtered.length} {T.entries}
-          </Text>
-        </View>
-        <Ionicons name={cfg.lang === 'ar' ? 'chevron-back' : 'chevron-forward'} size={16} color={th.faint} />
-      </TouchableOpacity>
-    </>
-  );
 
   const typeOptions = [
     { value: 'all', label: L.filterAll, icon: 'albums-outline' },
@@ -474,7 +478,23 @@ export default function HistoryScreen() {
             {dayLabel(section.title, cfg.lang)}
           </Text>
         )}
-        ListHeaderComponent={renderHeader}
+        ListHeaderComponent={(
+          <HistoryListHeader
+            th={th}
+            rowDir={rowDir}
+            align={align}
+            writingDirection={writingDirection}
+            lang={cfg.lang}
+            L={L}
+            T={T}
+            search={search}
+            setSearch={setSearch}
+            selection={{ ...selection, onDelete: confirmDeleteSelected }}
+            filteredCount={filtered.length}
+            activeFilters={activeFilters}
+            openFilters={openFilters}
+          />
+        )}
         ListEmptyComponent={(
           <View style={[s.empty, { borderColor: th.border }]}>
             <Ionicons name="receipt-outline" size={34} color={th.faint} />

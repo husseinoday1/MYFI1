@@ -21,6 +21,22 @@ import {
 
 let syncQueue = Promise.resolve();
 
+const RESET_MARKER_PREFIX = 'MYFI_INTENTIONAL_RESET_V1';
+const resetMarkerKey = namespace => `${RESET_MARKER_PREFIX}:${String(namespace || GUEST_NAMESPACE)}`;
+const readResetMarker = async namespace => parseJson(await AsyncStorage.getItem(resetMarkerKey(namespace)), null);
+const writeResetMarker = async (namespace, patch = {}) => {
+  const current = await readResetMarker(namespace);
+  const next = {
+    legacyRecoveryDisabled: true,
+    pendingCloudSync: false,
+    resetAt: current?.resetAt || new Date().toISOString(),
+    ...(current || {}),
+    ...patch,
+  };
+  await AsyncStorage.setItem(resetMarkerKey(namespace), JSON.stringify(next));
+  return next;
+};
+
 
 const parseJson = (raw, fallback = null) => {
   try { return raw ? JSON.parse(raw) : fallback; } catch { return fallback; }
@@ -142,8 +158,10 @@ export const createSyncSlice = (set, get) => ({
   loadLocal: async (namespace = GUEST_NAMESPACE, { allowLegacy = namespace === GUEST_NAMESPACE } = {}) => {
     try {
       let { snapshot, recovered } = await readVaultSnapshot(namespace);
+      const resetMarker = await readResetMarker(namespace);
+      const allowLegacyRecovery = allowLegacy && !resetMarker?.legacyRecoveryDisabled;
 
-      if (allowLegacy && (!snapshot || financialDataCount(snapshot.data || snapshot) === 0)) {
+      if (allowLegacyRecovery && (!snapshot || financialDataCount(snapshot.data || snapshot) === 0)) {
         const legacySnapshot = await findLegacySnapshot();
         if (legacySnapshot && financialDataCount(legacySnapshot.data || legacySnapshot) > 0) {
           snapshot = legacySnapshot;
@@ -217,59 +235,89 @@ export const createSyncSlice = (set, get) => ({
     }
     const next = { ...current, localUpdatedAt: updatedAt, dirty: nextDirty };
     await writeVaultSnapshot(current.workspaceNamespace, snapshotFromState(next), { force });
+    if (force && financialDataCount(current) === 0) {
+      await writeResetMarker(current.workspaceNamespace, { pendingCloudSync: !!current.user });
+    }
     set({ localUpdatedAt: updatedAt, dirty: nextDirty });
   },
 
   syncCloud: async () => {
     const queued = syncQueue.then(async () => {
-      const current = get();
-      if (!current.user || current.cfg.demoMode || !current.workspaceReady) return false;
-      if (!current.dirty) return true;
+      const initial = get();
+      if (!initial.user || initial.cfg.demoMode || !initial.workspaceReady) return false;
+      if (!initial.dirty) return true;
       set({ syncing: true, lastSyncError: null });
       try {
         const deviceId = await getOrCreateDeviceId();
-        const { data, error } = await supabase.rpc('sync_user_data_v2', {
-          p_expected_revision: Number(current.cloudRevision || 0),
-          p_trans: current.trans,
-          p_debts: current.debts,
-          p_goals: current.goals,
-          p_wallets: current.wallets,
-          p_commitments: current.commitments,
-          p_cats: current.cats,
-          p_cfg: current.cfg,
-          p_device_id: deviceId,
-        });
-        if (error) throw error;
-        const result = Array.isArray(data) ? data[0] : data;
-        if (!result?.accepted) {
+        let expectedRevision = Number(initial.cloudRevision || 0);
+
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const current = get();
+          const { data, error } = await supabase.rpc('sync_user_data_v2', {
+            p_expected_revision: expectedRevision,
+            p_trans: current.trans,
+            p_debts: current.debts,
+            p_goals: current.goals,
+            p_wallets: current.wallets,
+            p_commitments: current.commitments,
+            p_cats: current.cats,
+            p_cfg: current.cfg,
+            p_device_id: deviceId,
+          });
+          if (error) throw error;
+          const result = Array.isArray(data) ? data[0] : data;
+
+          if (result?.accepted) {
+            const syncedAt = result.updated_at || new Date().toISOString();
+            const cloudRevision = Number(result.revision || expectedRevision + 1);
+            set({
+              online: true,
+              dirty: false,
+              cloudRevision,
+              lastSyncedAt: syncedAt,
+              lastSyncError: null,
+              syncConflict: null,
+            });
+            await writeVaultSnapshot(
+              current.workspaceNamespace,
+              snapshotFromState(get(), { dirty: false, cloudRevision, lastSyncedAt: syncedAt }),
+            );
+            if (financialDataCount(get()) === 0) {
+              await writeResetMarker(current.workspaceNamespace, { pendingCloudSync: false });
+            }
+            return true;
+          }
+
           const { data: cloud, error: fetchError } = await supabase
             .from('user_data')
             .select('*')
             .eq('user_id', current.user.id)
             .maybeSingle();
           if (fetchError) throw fetchError;
+          const cloudRevision = Number(cloud?.revision || result?.revision || 0);
+          const resetMarker = await readResetMarker(current.workspaceNamespace);
+
+          if (attempt === 0 && cloud && resetMarker?.pendingCloudSync && financialDataCount(current) === 0) {
+            expectedRevision = cloudRevision;
+            set({
+              online: true,
+              cloudRevision: expectedRevision,
+              dirty: true,
+              syncConflict: null,
+              lastSyncError: null,
+            });
+            await get().saveLocal({ dirty: true, force: true });
+            continue;
+          }
+
           set({
             online: true,
-            syncConflict: cloud ? { cloud, cloudRevision: Number(cloud.revision || result?.revision || 0) } : null,
+            syncConflict: cloud ? { cloud, cloudRevision } : null,
             lastSyncError: 'sync_conflict',
           });
           return false;
         }
-        const syncedAt = result.updated_at || new Date().toISOString();
-        const cloudRevision = Number(result.revision || current.cloudRevision + 1);
-        set({
-          online: true,
-          dirty: false,
-          cloudRevision,
-          lastSyncedAt: syncedAt,
-          lastSyncError: null,
-          syncConflict: null,
-        });
-        await writeVaultSnapshot(
-          current.workspaceNamespace,
-          snapshotFromState(get(), { dirty: false, cloudRevision, lastSyncedAt: syncedAt }),
-        );
-        return true;
+        return false;
       } catch (e) {
         console.error('[STORE] syncCloud', e);
         set({ online: false, lastSyncError: String(e?.message || 'sync_failed') });
@@ -298,6 +346,14 @@ export const createSyncSlice = (set, get) => ({
         return await get().syncCloud();
       }
       const cloudRevision = Number(data.revision || 0);
+      const resetMarker = await readResetMarker(get().workspaceNamespace);
+      if (resetMarker?.pendingCloudSync && financialDataCount(get()) === 0) {
+        set({ cloudRevision, dirty: true, syncConflict: null, lastSyncError: null });
+        await get().saveLocal({ dirty: true, force: true });
+        const pushed = await get().syncCloud();
+        if (pushed) await writeResetMarker(get().workspaceNamespace, { pendingCloudSync: false });
+        return pushed;
+      }
       if (get().dirty && cloudRevision !== Number(get().cloudRevision || 0)) {
         set({
           online: true,

@@ -104,6 +104,57 @@ export const createManagementSlice = (set, get) => ({
     await get().syncCloud();
   },
 
+  archiveTracker: async (kind, sourceId) => {
+    if (!sourceId) return false;
+    const archivedAt = today();
+    set(s => {
+      const debtKinds = kind === 'owed' || kind === 'receivable';
+      return {
+        debts: debtKinds
+          ? s.debts.map(item => item.id === sourceId ? { ...item, archivedAt } : item)
+          : s.debts,
+        goals: kind === 'saving'
+          ? s.goals.map(item => item.id === sourceId ? { ...item, archivedAt, active: false } : item)
+          : s.goals,
+        commitments: s.commitments.map(item => {
+          if (kind === 'monthly' && item.id === sourceId) return { ...item, archivedAt, active: false };
+          if (debtKinds && (item.linkedType === 'debt' || item.linkedType === 'receivable') && item.linkedId === sourceId) {
+            return { ...item, archivedAt, active: false };
+          }
+          if (kind === 'saving' && item.linkedType === 'goal' && item.linkedId === sourceId) {
+            return { ...item, archivedAt, active: false };
+          }
+          return item;
+        }),
+      };
+    });
+    await get().saveLocal();
+    await get().syncCloud();
+    return true;
+  },
+
+  archiveTrackersMany: async (items = []) => {
+    const rows = (Array.isArray(items) ? items : []).filter(item => item?.sourceId && item?.kind);
+    if (!rows.length) return false;
+    const debtIds = new Set(rows.filter(item => item.kind === 'owed' || item.kind === 'receivable').map(item => item.sourceId));
+    const goalIds = new Set(rows.filter(item => item.kind === 'saving').map(item => item.sourceId));
+    const commitmentIds = new Set(rows.filter(item => item.kind === 'monthly').map(item => item.sourceId));
+    const archivedAt = today();
+    set(s => ({
+      debts: s.debts.map(item => debtIds.has(item.id) ? { ...item, archivedAt } : item),
+      goals: s.goals.map(item => goalIds.has(item.id) ? { ...item, archivedAt, active: false } : item),
+      commitments: s.commitments.map(item => {
+        const selected = commitmentIds.has(item.id);
+        const debtLinked = (item.linkedType === 'debt' || item.linkedType === 'receivable') && debtIds.has(item.linkedId);
+        const goalLinked = item.linkedType === 'goal' && goalIds.has(item.linkedId);
+        return selected || debtLinked || goalLinked ? { ...item, archivedAt, active: false } : item;
+      }),
+    }));
+    await get().saveLocal();
+    await get().syncCloud();
+    return true;
+  },
+
   deleteTrackersMany: async (items = []) => {
     const rows = (Array.isArray(items) ? items : []).filter(item => item?.sourceId && item?.kind);
     if (!rows.length) return false;

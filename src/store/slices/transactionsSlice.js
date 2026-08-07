@@ -6,6 +6,7 @@ import { inferTransactionTag } from '../../lib/transactionTags';
 import {
   capLinkedAmount,
   debtPaidTotal,
+  financialDataCount,
   goalSavedTotal,
   syncCommitmentPaidMonth,
   uid,
@@ -256,7 +257,7 @@ export const createTransactionSlice = (set, get) => ({
         : s.commitments,
       };
     });
-    await get().saveLocal();
+    await get().saveLocal({ force: financialDataCount(get()) === 0 });
     await get().syncCloud();
   },
 
@@ -295,7 +296,7 @@ export const createTransactionSlice = (set, get) => ({
         commitments: syncCommitmentPaidMonth(s.commitments, trans),
       };
     });
-    await get().saveLocal();
+    await get().saveLocal({ force: financialDataCount(get()) === 0 });
     await get().syncCloud();
     return true;
   },

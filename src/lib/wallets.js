@@ -88,7 +88,7 @@ export const getWalletAvailableBalances = (wallets = [], trans = [], currency = 
   const reserved = new Map(balances.map(wallet => [wallet.id, 0]));
 
   (Array.isArray(trans) ? trans : []).forEach(tx => {
-    if (!tx?.isGoalSaving && tx?.flowType !== 'goal_allocation') return;
+    if ((!tx?.isGoalSaving && tx?.flowType !== 'goal_allocation') || tx?.allocationReleased) return;
     const walletId = tx.walletId || safeDefault;
     if (!reserved.has(walletId)) return;
     reserved.set(

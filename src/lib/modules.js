@@ -187,12 +187,12 @@ export const filterFeatureEntities = ({
 } = {}) => {
   const modules = getModules(cfg);
   return {
-    debts: filterByActiveScope(debts, cfg).filter(item => (
+    debts: filterByActiveScope(debts, cfg).filter(item => !item.archivedAt).filter(item => (
       item.direction === 'receivable' ? modules.debtsReceivable : modules.debtsOwed
     )),
-    goals: modules.goals ? filterByActiveScope(goals, cfg) : [],
+    goals: modules.goals ? filterByActiveScope(goals, cfg).filter(item => !item.archivedAt && !['released', 'settled'].includes(item.status)) : [],
     commitments: modules.commitments
-      ? filterByActiveScope(commitments, cfg).filter(item => {
+      ? filterByActiveScope(commitments, cfg).filter(item => !item.archivedAt).filter(item => {
           if (item.linkedType === 'debt') return modules.debtsOwed;
           if (item.linkedType === 'receivable') return modules.debtsReceivable;
           if (item.linkedType === 'goal') return modules.goals;

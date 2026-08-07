@@ -14,6 +14,7 @@ import { isRTL, rowDirFor, textAlignFor } from '../lib/layout';
 import { filterByActiveScope, getModules } from '../lib/modules';
 import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
+import { isSafelyArchivableTracker, isTrackerPastGracePeriod, latestMovementDate } from '../lib/trackerLifecycle';
 
 const money = (value) => Math.round(Math.abs(Number(value) || 0)).toLocaleString();
 const cleanNumber = parseNumberInput;
@@ -31,6 +32,9 @@ const copy = (lang) => {
     receivable: ar ? 'دين لي' : 'Debt owed to me',
     saving: ar ? 'توفير' : 'Saving',
     monthly: ar ? 'التزامات' : 'Commitments',
+    ended: ar ? 'المنتهية' : 'Ended',
+    archiveTracker: ar ? 'إزالة من المتابعات' : 'Remove from trackers',
+    archiveTrackerBody: ar ? 'ستختفي المتابعة مع بقاء الحركات المالية في السجل والتقارير.' : 'The tracker will be hidden while its financial history stays in reports and history.',
     owedTotal: ar ? 'إجمالي دين عليّ' : 'Total debt I owe',
     receivableTotal: ar ? 'إجمالي دين لي' : 'Total debt owed to me',
     savingLeft: ar ? 'المتبقي لتحقيق الأهداف' : 'Remaining to save',
@@ -105,11 +109,11 @@ const copy = (lang) => {
 
 export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSave, onQuickCommitment, onAddLinkedPlan, onNewTracker, quickEntry = false }) {
   const {
-    debts, goals, commitments, cfg,
+    trans, debts, goals, commitments, cfg,
     editDebt, deleteDebt, editDebtPayment, deleteDebtPayment,
     editGoal, deleteGoal, editGoalSaving, deleteGoalSaving, releaseGoalSavings,
     deferCommitment, clearCommitmentDeferral, editCommitment, deleteCommitment,
-    deleteTrackersMany, deleteTrackerPaymentsMany,
+    archiveTracker, archiveTrackersMany, deleteTrackersMany, deleteTrackerPaymentsMany,
   } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const T = copy(cfg.lang);
@@ -127,9 +131,9 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
     }
     return { history: T.repaymentHistory, empty: T.noRepayments, edit: T.editRepayment, delete: T.deleteRepayment };
   };
-  const scopedDebts = filterByActiveScope(debts, cfg);
-  const scopedGoals = filterByActiveScope(goals, cfg);
-  const scopedCommitments = filterByActiveScope(commitments, cfg).filter(item => {
+  const scopedDebts = filterByActiveScope(debts, cfg).filter(item => !item.archivedAt);
+  const scopedGoals = filterByActiveScope(goals, cfg).filter(item => !item.archivedAt);
+  const scopedCommitments = filterByActiveScope(commitments, cfg).filter(item => !item.archivedAt).filter(item => {
     if (item.linkedType === 'debt') return modules.debtsOwed;
     if (item.linkedType === 'receivable') return modules.debtsReceivable;
     if (item.linkedType === 'goal') return modules.goals;
@@ -150,6 +154,9 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
       const doneValue = Number(item.paid || 0);
       const remaining = Math.max(0, total - doneValue);
       const plan = planFor(receivable ? 'receivable' : 'debt', item.id);
+      const status = remaining <= 0 ? 'done' : 'active';
+      const completedAt = status === 'done' ? latestMovementDate(item.payments, item.createdAt) : null;
+      const ended = status === 'done' && isTrackerPastGracePeriod(completedAt);
       return {
         id: `amount:${item.id}`,
         sourceId: item.id,
@@ -162,7 +169,9 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
         doneValue,
         remaining,
         progress: pct(doneValue, total),
-        status: remaining <= 0 ? 'done' : 'active',
+        status,
+        completedAt,
+        ended,
         date: item.createdAt,
         plan,
         source: item,
@@ -172,9 +181,14 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
 
     const savingRows = modules.goals ? scopedGoals.map(item => {
       const total = Number(item.target || 0);
-      const doneValue = Number(item.cur || 0);
-      const remaining = Math.max(0, total - doneValue);
+      const terminal = ['settled', 'released'].includes(item.status);
+      const rawDoneValue = terminal ? Number(item.settledAmount || item.cur || 0) : Number(item.cur || 0);
+      const doneValue = Math.min(total, rawDoneValue);
+      const remaining = terminal ? 0 : Math.max(0, total - doneValue);
       const plan = planFor('goal', item.id);
+      const status = terminal || remaining <= 0 ? 'done' : 'active';
+      const completedAt = terminal ? (item.settledAt || latestMovementDate(item.savings, item.createdAt)) : null;
+      const ended = terminal && isTrackerPastGracePeriod(completedAt);
       return {
         id: `saving:${item.id}`,
         sourceId: item.id,
@@ -201,6 +215,11 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
         const dueISO = commitmentDueISO(item);
         const paidThisCycle = item.lastPaidMonth === monthKey(dueISO);
         const amount = Number(item.amt || 0);
+        const oneTimeDone = item.repeatMonthly === false && !!item.lastPaidMonth;
+        const paymentRows = trans.filter(tx => tx.isCommitmentPayment && tx.commitmentId === item.id);
+        const completedAt = oneTimeDone ? latestMovementDate(paymentRows, item.firstDueISO || null) : null;
+        const ended = oneTimeDone && isTrackerPastGracePeriod(completedAt);
+        const status = oneTimeDone ? 'done' : item.active === false ? 'paused' : paidThisCycle ? 'paidMonth' : 'active';
         return {
           id: `monthly:${item.id}`,
           sourceId: item.id,
@@ -210,10 +229,12 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
           color: th.warn,
           bg: th.warnBg,
           total: amount,
-          doneValue: paidThisCycle ? amount : 0,
-          remaining: amount,
-          progress: paidThisCycle ? 100 : 0,
-          status: item.active === false ? 'paused' : paidThisCycle ? 'paidMonth' : 'active',
+          doneValue: oneTimeDone || paidThisCycle ? amount : 0,
+          remaining: oneTimeDone ? 0 : amount,
+          progress: oneTimeDone || paidThisCycle ? 100 : 0,
+          status,
+          completedAt,
+          ended,
           date: dueISO,
           deferredUntilISO: item.deferredUntilISO || null,
           commitment: item,
@@ -231,7 +252,7 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
       if (b.kind === 'monthly' && a.kind !== 'monthly') return 1;
       return Math.abs(b.remaining || 0) - Math.abs(a.remaining || 0);
     });
-  }, [debts, goals, commitments, cfg.activeScope, cfg.profileType, th, modules.debtsReceivable, modules.debtsOwed, modules.goals, modules.commitments]);
+  }, [trans, debts, goals, commitments, cfg.activeScope, cfg.profileType, th, modules.debtsReceivable, modules.debtsOwed, modules.goals, modules.commitments]);
 
   const totals = useMemo(() => ({
     owed: trackers.filter(item => item.kind === 'owed').reduce((sum, item) => sum + item.remaining, 0),
@@ -242,16 +263,19 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
       .reduce((sum, item) => sum + Number(item.amt || 0), 0),
   }), [trackers, commitments, cfg.activeScope, cfg.profileType]);
 
+  const currentTrackers = trackers.filter(item => !item.ended);
+  const endedTrackers = trackers.filter(item => item.ended);
   const filters = [
-    { key: 'all', label: T.all, count: trackers.length },
-    modules.debtsOwed ? { key: 'owed', label: T.owed, count: trackers.filter(item => item.kind === 'owed').length } : null,
-    modules.debtsReceivable ? { key: 'receivable', label: T.receivable, count: trackers.filter(item => item.kind === 'receivable').length } : null,
-    modules.goals ? { key: 'saving', label: T.saving, count: trackers.filter(item => item.kind === 'saving').length } : null,
-    modules.commitments ? { key: 'monthly', label: T.monthly, count: trackers.filter(item => item.kind === 'monthly').length } : null,
+    { key: 'all', label: T.all, count: currentTrackers.length },
+    modules.debtsOwed ? { key: 'owed', label: T.owed, count: currentTrackers.filter(item => item.kind === 'owed').length } : null,
+    modules.debtsReceivable ? { key: 'receivable', label: T.receivable, count: currentTrackers.filter(item => item.kind === 'receivable').length } : null,
+    modules.goals ? { key: 'saving', label: T.saving, count: currentTrackers.filter(item => item.kind === 'saving').length } : null,
+    modules.commitments ? { key: 'monthly', label: T.monthly, count: currentTrackers.filter(item => item.kind === 'monthly').length } : null,
+    endedTrackers.length ? { key: 'ended', label: T.ended, count: endedTrackers.length } : null,
   ].filter(Boolean);
   useEffect(() => {
     if (!filters.some(item => item.key === filter)) setFilter('all');
-  }, [filter, modules.debtsOwed, modules.debtsReceivable, modules.goals, modules.commitments]);
+  }, [filter, endedTrackers.length, modules.debtsOwed, modules.debtsReceivable, modules.goals, modules.commitments]);
   useEffect(() => {
     if (!focusRequest?.nonce) return;
     const nextKind = focusRequest.kind === 'goal'
@@ -266,7 +290,11 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
       ? `${nextKind === 'saving' ? 'saving' : nextKind === 'monthly' ? 'monthly' : 'amount'}:${focusRequest.id}`
       : null);
   }, [focusRequest?.nonce]);
-  const visibleBase = filter === 'all' ? trackers : trackers.filter(item => item.kind === filter);
+  const visibleBase = filter === 'ended'
+    ? endedTrackers
+    : filter === 'all'
+      ? currentTrackers
+      : currentTrackers.filter(item => item.kind === filter);
   const visible = openId
     ? [...visibleBase].sort((a, b) => (a.id === openId ? -1 : b.id === openId ? 1 : 0))
     : visibleBase;
@@ -305,7 +333,11 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
     const daysUntil = Math.ceil((dueDate - todayDate) / 86400000);
     const paidThisCycle = commitment.lastPaidMonth === monthKey(dueISO);
     const amount = Number(commitment.amt || 0);
+    const oneTimeDone = commitment.repeatMonthly === false && !!commitment.lastPaidMonth;
 
+    if (oneTimeDone) {
+      return { id: commitment.id, amount, dueISO, paidThisCycle: true, active: false, label: T.done, color: th.inc, bg: th.incBg };
+    }
     if (commitment.active === false) {
       return { id: commitment.id, amount, dueISO, paidThisCycle, active: false, label: T.paused, color: th.sub, bg: th.cardHigh };
     }
@@ -371,14 +403,25 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
   };
 
   const confirmDeleteTracker = (item) => {
-    const body = item.plan ? `${T.confirmDeleteTracker} ${T.linkedPlanDelete}` : T.confirmDeleteTracker;
+    const reservedGoalNeedsRelease = item.kind === 'saving'
+      && item.source?.status === 'active'
+      && item.remaining <= 0;
+    if (reservedGoalNeedsRelease) {
+      confirmReleaseGoal(item);
+      return;
+    }
+    const archivable = isSafelyArchivableTracker(item);
+    const body = archivable
+      ? T.archiveTrackerBody
+      : (item.plan ? `${T.confirmDeleteTracker} ${T.linkedPlanDelete}` : T.confirmDeleteTracker);
     Alert.alert(T.confirmDelete, body, [
       { text: T.cancel, style: 'cancel' },
       {
-        text: T.deleteTracker,
-        style: 'destructive',
+        text: archivable ? T.archiveTracker : T.deleteTracker,
+        style: archivable ? 'default' : 'destructive',
         onPress: async () => {
-          if (item.kind === 'saving') await deleteGoal?.(item.sourceId);
+          if (archivable) await archiveTracker?.(item.kind, item.sourceId);
+          else if (item.kind === 'saving') await deleteGoal?.(item.sourceId);
           else if (item.kind === 'monthly') await deleteCommitment?.(item.sourceId);
           else await deleteDebt?.(item.sourceId);
           if (openId === item.id) setOpenId(null);
@@ -442,17 +485,47 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
   const confirmDeleteSelectedTrackers = () => {
     if (!selection.selectedCount) return;
     const chosen = trackers.filter(item => selection.selected.has(item.id));
-    const hasLinkedPlan = chosen.some(item => item.plan);
-    const body = isAr
-      ? `سيتم حذف ${chosen.length} عناصر وكل الدفعات والحركات المرتبطة بها.`
-      : `Delete ${chosen.length} items and all linked payments and transactions?`;
+    const reservedGoals = chosen.filter(item => (
+      item.kind === 'saving'
+      && item.source?.status === 'active'
+      && item.remaining <= 0
+    ));
+    if (reservedGoals.length) {
+      Alert.alert(
+        T.releaseGoal,
+        isAr
+          ? 'يوجد هدف توفير مكتمل ما زال مبلغه محجوزاً. أتح المبلغ أولاً ثم أعد محاولة إزالة المتابعة.'
+          : 'A completed saving goal still has reserved funds. Make the funds available first, then remove the tracker.',
+      );
+      return;
+    }
+    const archivable = chosen.filter(isSafelyArchivableTracker);
+    const destructive = chosen.filter(item => !isSafelyArchivableTracker(item));
+    const hasLinkedPlan = destructive.some(item => item.plan);
+    const archivePart = archivable.length
+      ? (isAr
+          ? ` وإزالة ${archivable.length} متابعة منتهية مع إبقاء تاريخها المالي`
+          : ` and hide ${archivable.length} finished tracker(s) while keeping financial history`)
+      : '';
+    const body = destructive.length
+      ? (isAr
+          ? `سيتم حذف ${destructive.length} متابعة نشطة وحركاتها${archivePart}.`
+          : `Delete ${destructive.length} active tracker(s) with linked movements${archivePart}.`)
+      : (isAr
+          ? `ستتم إزالة ${archivable.length} متابعة منتهية مع إبقاء جميع الحركات المالية في السجل والتقارير.`
+          : `Hide ${archivable.length} finished tracker(s) while keeping all financial history.`);
     Alert.alert(T.confirmDelete, hasLinkedPlan ? `${body} ${T.linkedPlanDelete}` : body, [
       { text: T.cancel, style: 'cancel' },
       {
-        text: T.deleteTracker,
-        style: 'destructive',
+        text: destructive.length ? T.deleteTracker : T.archiveTracker,
+        style: destructive.length ? 'destructive' : 'default',
         onPress: async () => {
-          await deleteTrackersMany(chosen.map(item => ({ kind: item.kind, sourceId: item.sourceId })));
+          if (archivable.length) {
+            await archiveTrackersMany?.(archivable.map(item => ({ kind: item.kind, sourceId: item.sourceId })));
+          }
+          if (destructive.length) {
+            await deleteTrackersMany(destructive.map(item => ({ kind: item.kind, sourceId: item.sourceId })));
+          }
           setOpenId(null);
           selection.cancel();
         },

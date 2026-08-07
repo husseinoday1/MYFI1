@@ -277,14 +277,15 @@ export default function AddTransModal({
       const initialCommitment = initialCommitmentId
         ? availableCommitments.find(item => item.id === initialCommitmentId)
         : null;
-      const defaultCommitment = initialCommitment || availableCommitments[0] || null;
+      const launchingCommitment = cleanInitialMode === 'commitment' || !!initialCommitmentId;
+      const defaultCommitment = initialCommitment || (launchingCommitment ? availableCommitments[0] : null);
       setType(cleanInitialMode);
       setSelDebt(initialDebtId || availableDebts[0]?.id || null);
       setSelGoal(initialGoalId || availableGoals[0]?.id || null);
       setSelCommitment(defaultCommitment?.id || null);
       setAmt(''); setTitle(''); setCat('other'); setNote(''); setRecurring(false); setDateISO(today());
       setCategoryTouched(false);
-      setWalletId(defaultCommitment?.walletId || defaultWalletId);
+      setWalletId(launchingCommitment ? (defaultCommitment?.walletId || defaultWalletId) : defaultWalletId);
       setFromWalletId(firstTransferWallet?.id || defaultWalletId);
       setToWalletId(secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
       setSmartSource(null);

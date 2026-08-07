@@ -313,13 +313,17 @@ export const createTrackersSlice = (set, get) => ({
     set(s => ({
       goals: s.goals.map(item => (
         item.id === goalId
-          ? { ...item, savings: [], cur: 0, status: 'released', settledAt: entryDate, settledAmount: releasedAmount }
+          ? { ...item, savings: [], cur: 0, active: false, status: 'released', settledAt: entryDate, settledAmount: releasedAmount }
           : item
       )),
       commitments: s.commitments.map(item => (
         item.linkedType === 'goal' && item.linkedId === goalId ? { ...item, active: false } : item
       )),
-      trans: s.trans.filter(item => !(item.isGoalSaving && item.goalId === goalId)),
+      trans: s.trans.map(item => (
+        item.isGoalSaving && item.goalId === goalId
+          ? { ...item, allocationReleased: true, allocationReleasedAt: entryDate }
+          : item
+      )),
     }));
     await get().saveLocal();
     await get().syncCloud();

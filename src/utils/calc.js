@@ -213,7 +213,7 @@ export const getUpcomingRecurring = (trans = [], date = new Date()) => {
 };
 
 export const debtSummary = (debts = [], direction = 'owed') => {
-  const filtered = debts.filter(d => (
+  const filtered = debts.filter(d => !d.archivedAt && (
     direction === 'receivable'
       ? d.direction === 'receivable'
       : d.direction !== 'receivable'
@@ -231,14 +231,15 @@ export const debtSummary = (debts = [], direction = 'owed') => {
 };
 
 export const goalSummary = (goals = []) => {
-  const target = sum(goals, g => g.target);
-  const saved = sum(goals, g => g.cur);
-  const remaining = sum(goals, g => Math.max(0, toNumber(g.target) - toNumber(g.cur)));
+  const activeGoals = goals.filter(g => !g.archivedAt && !['released', 'settled'].includes(g.status));
+  const target = sum(activeGoals, g => g.target);
+  const saved = sum(activeGoals, g => g.cur);
+  const remaining = sum(activeGoals, g => Math.max(0, toNumber(g.target) - toNumber(g.cur)));
   return {
     target: money(target),
     saved: money(saved),
     remaining: money(remaining),
-    count: goals.filter(g => Math.max(0, toNumber(g.target) - toNumber(g.cur)) > 0).length,
+    count: activeGoals.filter(g => Math.max(0, toNumber(g.target) - toNumber(g.cur)) > 0).length,
     progress: pct(saved, target),
   };
 };
