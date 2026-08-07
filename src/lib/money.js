@@ -24,9 +24,15 @@ export const formatMoneyNumber = (
   const amount = Number(value);
   const safe = Number.isFinite(amount) ? amount : 0;
   const normalized = absolute ? Math.abs(safe) : safe;
-  return new Intl.NumberFormat(lang === 'ar' ? 'ar-IQ' : 'en-US', {
-    useGrouping: true,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: currencyFractionDigits(currency),
-  }).format(normalized);
+  const fractionDigits = currencyFractionDigits(currency);
+  const rounded = roundCurrency(normalized, currency);
+  const isNegative = rounded < 0;
+
+  const fixed = Math.abs(rounded).toFixed(fractionDigits);
+  const [intPart, fracPartRaw = ''] = fixed.split('.');
+  const fracPart = fracPartRaw.replace(/0+$/, '');
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const result = fracPart ? `${grouped}.${fracPart}` : grouped;
+
+  return isNegative ? `-${result}` : result;
 };

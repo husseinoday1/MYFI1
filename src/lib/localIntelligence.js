@@ -200,6 +200,11 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date()) => {
   const currentSpend = catSpend(current, cats);
   const currentById = new Map(currentSpend.map(row => [row.id, row.spent]));
 
+  const currentFixedById = new Map();
+  current.filter(tx => isExpenseFlow(tx) && (tx?.isCommitmentPayment || tx?.isDebtPayment)).forEach(tx => {
+    currentFixedById.set(tx.cat, (currentFixedById.get(tx.cat) || 0) + Math.abs(Number(tx.amt || 0)));
+  });
+
   const baselineMonths = [...monthly.entries()]
     .filter(([key]) => key !== currentKey)
     .sort((a, b) => a[0].localeCompare(b[0]))
@@ -226,7 +231,9 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date()) => {
   const categoryMovement = [...categoryIds].map(id => {
     const source = catById.get(id) || { id, label: id, labelEn: id, color: '#8E8E93', icon: 'ellipse-outline' };
     const spent = currentById.get(id) || 0;
-    const projectedSpent = spent * (daysInMonth / daysElapsed);
+    const fixedSpent = Math.min(spent, currentFixedById.get(id) || 0);
+    const variableSpent = Math.max(0, spent - fixedSpent);
+    const projectedSpent = fixedSpent + variableSpent * (daysInMonth / daysElapsed);
     const previousSpent = weightTotalById.get(id) ? (baselineById.get(id) || 0) / weightTotalById.get(id) : 0;
     return {
       ...source,

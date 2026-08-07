@@ -103,8 +103,6 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setPlanDate(today());
     setPlanWalletId(defaultWalletId);
     setOriginMode('previous');
-    setGoalPurpose('reserve');
-    setLinkedDebtId(null);
   }, [visible, linkedPlanMode, presetKind, preset?.linkedName, defaultWalletId]);
 
   const currentKind = linkedPlanMode
@@ -167,8 +165,6 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setPlanDate(today());
     setPlanWalletId(defaultWalletId);
     setOriginMode('previous');
-    setGoalPurpose('reserve');
-    setLinkedDebtId(null);
   };
 
   const handleClose = () => {
