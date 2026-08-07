@@ -156,7 +156,7 @@ export const createTransactionSlice = (set, get) => ({
         : requestedAmt;
     if (hasAmt && (current.isDebtPayment || current.isGoalSaving) && linkedAbsAmt <= 0) return false;
     const nextAmt = hasAmt
-      ? (current.isDebtPayment ? debtSign * linkedAbsAmt : current.isGoalSaving ? 0 : -linkedAbsAmt)
+      ? (current.isDebtPayment ? debtSign * linkedAbsAmt : current.isGoalSaving ? 0 : (Number(safePatch.amt) < 0 ? -linkedAbsAmt : linkedAbsAmt))
       : current.amt;
     const nextCommitmentMonth = current.isCommitmentPayment && safePatch.dateISO
       ? monthKey(safePatch.dateISO)

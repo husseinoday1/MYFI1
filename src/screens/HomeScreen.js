@@ -155,10 +155,11 @@ export default function HomeScreen({
       goals: scopedGoals,
       cats,
       wallets: scopedWallets,
+      commitments: scopedCommitments,
       currency: cfg.currency,
       defaultWalletId: cfg.defaultWalletId,
     }),
-    [trans, debts, goals, wallets, cats, cfg.activeScope, cfg.profileType, cfg.enabledModules, cfg.currency, cfg.defaultWalletId],
+    [trans, debts, goals, wallets, commitments, cats, cfg.activeScope, cfg.profileType, cfg.enabledModules, cfg.currency, cfg.defaultWalletId],
   );
   const upcoming = useMemo(() => modules.recurring ? getUpcomingRecurring(scopedTrans) : [], [trans, cfg.activeScope, cfg.profileType, modules.recurring]);
   const upcomingCommitments = useMemo(
@@ -506,7 +507,22 @@ export default function HomeScreen({
           <Text style={{ color: th.exp, ...weight('900'), fontSize: 14 }} numberOfLines={1}>
             -{fmt(item.amt)} {sym}
           </Text>
-          <TouchableOpacity onPress={() => payCommitment(item.id, item.dueISO)} style={[s.miniAction, { backgroundColor: th.primSoft }]}>
+          <TouchableOpacity onPress={async () => {
+            const result = await payCommitment(item.id, item.dueISO);
+            if (!result?.ok) {
+              if (result?.reason === 'linked_unavailable') {
+                Alert.alert('', cfg.lang === 'ar'
+                  ? 'الدين أو الهدف المرتبط بهذا الالتزام مكتمل بالفعل أو رصيد المحفظة غير كافٍ.'
+                  : 'The linked debt or goal is already complete, or the wallet balance is insufficient.');
+              }
+              return;
+            }
+            if (result.partial) {
+              Alert.alert('', cfg.lang === 'ar'
+                ? `تم سداد ${Math.round(result.appliedAmount).toLocaleString()} فقط من ${Math.round(result.requestedAmount).toLocaleString()}.`
+                : `Only ${Math.round(result.appliedAmount).toLocaleString()} of ${Math.round(result.requestedAmount).toLocaleString()} was applied.`);
+            }
+          }} style={[s.miniAction, { backgroundColor: th.primSoft }]}>
             <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.markPaid}</Text>
           </TouchableOpacity>
         </View>
@@ -593,7 +609,22 @@ export default function HomeScreen({
             {moneyText(`${displayAmount >= 0 ? '+' : '-'}${fmt(Math.abs(displayAmount))} ${sym}`)}
           </Text>
           {isCommitment ? (
-            <TouchableOpacity onPress={() => payCommitment(item.id, item.dueISO)} style={[s.miniAction, { backgroundColor: th.primSoft }]}>
+            <TouchableOpacity onPress={async () => {
+              const result = await payCommitment(item.id, item.dueISO);
+              if (!result?.ok) {
+                if (result?.reason === 'linked_unavailable') {
+                  Alert.alert('', cfg.lang === 'ar'
+                    ? 'الدين أو الهدف المرتبط بهذا الالتزام مكتمل بالفعل أو رصيد المحفظة غير كافٍ.'
+                    : 'The linked debt or goal is already complete, or the wallet balance is insufficient.');
+                }
+                return;
+              }
+              if (result.partial) {
+                Alert.alert('', cfg.lang === 'ar'
+                  ? `تم سداد ${Math.round(result.appliedAmount).toLocaleString()} فقط من ${Math.round(result.requestedAmount).toLocaleString()}.`
+                  : `Only ${Math.round(result.appliedAmount).toLocaleString()} of ${Math.round(result.requestedAmount).toLocaleString()} was applied.`);
+              }
+            }} style={[s.miniAction, { backgroundColor: th.primSoft }]}>
               <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.markPaid}</Text>
             </TouchableOpacity>
           ) : null}
@@ -692,8 +723,11 @@ export default function HomeScreen({
           const reserved = Number(wallet.reservedBalance || 0);
           const isDefault = wallet.id === defaultWalletId;
           return (
-            <View
+            <TouchableOpacity
               key={wallet.id}
+              activeOpacity={0.7}
+              disabled={isDefault}
+              onPress={() => setCfg({ defaultWalletId: wallet.id })}
               style={[
                 s.walletRow,
                 {
@@ -729,7 +763,7 @@ export default function HomeScreen({
                     : (wallet.currency || sym)}
                 </Text>
               </View>
-            </View>
+            </TouchableOpacity>
           );
         })}
       </View>

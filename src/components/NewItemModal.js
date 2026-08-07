@@ -38,13 +38,16 @@ const modalCopy = (lang = 'ar') => {
     planAmount: ar ? 'قيمة الدفعة الشهرية' : 'Monthly payment amount',
     planDate: ar ? 'أول موعد دفع' : 'First payment date',
     wallet: ar ? 'محفظة الدفع' : 'Payment wallet',
-    debtOrigin: ar ? 'متى حدثت العملية؟' : 'When did this happen?',
-    previousDebt: ar ? 'موجود قبل استخدام MYFI' : 'Existed before MYFI',
-    receivedDebt: ar ? 'استلمت المبلغ الآن' : 'I received it now',
-    lentDebt: ar ? 'أقرضت المبلغ الآن' : 'I lent it now',
-    previousHint: ar ? 'لن تُنشأ حركة مالية لأن المبلغ كان موجوداً مسبقاً.' : 'No transaction is created because it already existed.',
-    receivedHint: ar ? 'ستُنشأ حركة دخل مرتبطة بالدين وتزداد المحفظة.' : 'Creates linked income and increases the wallet.',
-    lentHint: ar ? 'ستُنشأ حركة مصروف مرتبطة بالمبلغ المستحق لك وتنخفض المحفظة.' : 'Creates a linked expense and reduces the wallet.',
+    debtOrigin: ar ? 'هل تغيّر رصيدك الآن؟' : 'Did your balance change now?',
+    previousDebt: ar ? 'لا، دين قديم' : 'No, an old debt',
+    receivedDebt: ar ? 'نعم، استلمت المبلغ' : 'Yes, I received it',
+    lentDebt: ar ? 'نعم، أعطيت المبلغ' : 'Yes, I gave it',
+    previousHint: ar ? 'اخترها إذا هذا دين من قبل ما تستخدم MYFI — رصيدك الحالي ما يتغيّر.' : 'Pick this if the debt existed before you used MYFI — your current balance stays the same.',
+    receivedHint: ar ? 'اخترها إذا الفلوس دخلت حسابك الحين — رصيدك يرتفع بقيمة الدين.' : 'Pick this if the money entered your account now — your balance goes up by the debt amount.',
+    lentHint: ar ? 'اخترها إذا الفلوس خرجت من حسابك الحين — رصيدك ينزل بقيمة الدين.' : 'Pick this if the money left your account now — your balance goes down by the debt amount.',
+    savingReservedHint: ar
+      ? 'هذا المبلغ يبقى بمحفظتك، بس نطرحه من رصيدك القابل للصرف لحد ما توصل الهدف أو تسحب التوفير.'
+      : 'This amount stays in your wallet, but we subtract it from your spendable balance until you reach the goal or withdraw the saving.',
     linkedTo: ar ? 'مرتبطة بـ' : 'Linked to',
     saveTracker: ar ? 'حفظ المتابعة' : 'Save tracker',
     saveCommitment: ar ? 'حفظ الالتزام' : 'Save commitment',
@@ -57,7 +60,7 @@ const modalCopy = (lang = 'ar') => {
 };
 
 export default function NewItemModal({ visible, kind, onClose, preset = null }) {
-  const { addDebt, addGoal, addCommitment, setCfg, cfg, wallets, debts } = useStore();
+  const { addDebt, addGoal, addCommitment, setCfg, cfg, wallets } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
   const T = modalCopy(cfg.lang);
@@ -65,9 +68,6 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const modules = getModules(cfg);
   const enabledKinds = getTrackerKinds(cfg);
   const scopedWallets = filterByActiveScope(wallets, cfg);
-  const payableDebts = filterByActiveScope(debts, cfg).filter(item => (
-    item.direction !== 'receivable' && Number(item.total || 0) > Number(item.paid || 0)
-  ));
   const walletList = sortWalletsByDefault(scopedWallets.length ? scopedWallets : wallets, cfg.currency, cfg.defaultWalletId);
   const defaultWalletId = getDefaultWalletId(walletList, cfg.currency, cfg.defaultWalletId);
   const insets = useSafeAreaInsets();
@@ -91,8 +91,6 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const [planDate, setPlanDate] = useState(today());
   const [planWalletId, setPlanWalletId] = useState(defaultWalletId);
   const [originMode, setOriginMode] = useState('previous');
-  const [goalPurpose, setGoalPurpose] = useState('reserve');
-  const [linkedDebtId, setLinkedDebtId] = useState(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -185,23 +183,6 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     }
   };
 
-  const selectGoalPurpose = (purpose) => {
-    setGoalPurpose(purpose);
-    if (purpose !== 'debt_payoff') {
-      setLinkedDebtId(null);
-      return;
-    }
-    const debt = payableDebts[0];
-    if (!debt) return;
-    setLinkedDebtId(debt.id);
-    setAmt(formatNumberInput(String(Math.max(0, Number(debt.total || 0) - Number(debt.paid || 0)))));
-  };
-
-  const selectLinkedDebt = (debt) => {
-    setLinkedDebtId(debt.id);
-    setAmt(formatNumberInput(String(Math.max(0, Number(debt.total || 0) - Number(debt.paid || 0)))));
-  };
-
   const handleSave = async () => {
     const totalValue = Math.abs(cleanNumber(amt));
     const linkedValue = Math.abs(cleanNumber(planAmount));
@@ -254,22 +235,10 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         walletId: planWalletId,
       });
     } else {
-      if (goalPurpose === 'debt_payoff' && !linkedDebtId) {
-        Alert.alert('', isAr ? '\u0627\u062e\u062a\u0631 \u062f\u064a\u0646\u0627\u064b \u0644\u0625\u0631\u0628\u0627\u0637 \u0627\u0644\u062a\u0648\u0641\u064a\u0631 \u0628\u0647.' : 'Choose a debt to link to this saving.');
-        return;
-      }
-      const linkedDebt = payableDebts.find(item => item.id === linkedDebtId);
-      const linkedDebtRemaining = Math.max(0, Number(linkedDebt?.total || 0) - Number(linkedDebt?.paid || 0));
-      if (goalPurpose === 'debt_payoff' && totalValue !== linkedDebtRemaining) {
-        Alert.alert('', isAr ? '\u0645\u0628\u0644\u063a \u062a\u0648\u0641\u064a\u0631 \u0633\u062f\u0627\u062f \u0627\u0644\u062f\u064a\u0646 \u064a\u0633\u0627\u0648\u064a \u0627\u0644\u0645\u062a\u0628\u0642\u064a \u0645\u0646 \u0627\u0644\u062f\u064a\u0646.' : 'A debt-payoff saving must equal the remaining debt.');
-        return;
-      }
       created = await addGoal({
         name: name.trim(),
         target: totalValue,
         createdAt: startDate,
-        purpose: goalPurpose,
-        linkedDebtId: goalPurpose === 'debt_payoff' ? linkedDebtId : null,
       });
     }
 
@@ -364,48 +333,9 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
               />
 
               {isGoal ? (
-                <View style={s.goalPurposeBlock}>
-                  <Text style={[s.label, { color: th.sub, textAlign: align }]}>
-                    {isAr ? '\u0646\u0648\u0639 \u0627\u0644\u062a\u0648\u0641\u064a\u0631' : 'Saving type'}
-                  </Text>
-                  <View style={[s.typeGrid, { flexDirection: rowDir }]}>
-                    {[
-                      { value: 'reserve', label: isAr ? '\u0627\u062f\u062e\u0627\u0631 \u0645\u062d\u062c\u0648\u0632' : 'Reserved saving', icon: 'lock-closed-outline' },
-                      { value: 'debt_payoff', label: isAr ? '\u0633\u062f\u0627\u062f \u062f\u064a\u0646' : 'Debt payoff', icon: 'card-outline' },
-                    ].map(option => {
-                      const active = goalPurpose === option.value;
-                      const disabled = option.value === 'debt_payoff' && payableDebts.length === 0;
-                      return (
-                        <TouchableOpacity
-                          key={option.value}
-                          disabled={disabled}
-                          onPress={() => selectGoalPurpose(option.value)}
-                          style={[s.typeBtn, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent', opacity: disabled ? 0.45 : 1 }]}
-                        >
-                          <Ionicons name={option.icon} size={16} color={active ? th.primary : th.sub} />
-                          <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('900'), textAlign: 'center' }}>{option.label}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                  {goalPurpose === 'debt_payoff' ? (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.walletRail}>
-                      {payableDebts.map(debt => {
-                        const active = linkedDebtId === debt.id;
-                        return (
-                          <TouchableOpacity
-                            key={debt.id}
-                            onPress={() => selectLinkedDebt(debt)}
-                            style={[s.walletChip, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent' }]}
-                          >
-                            <Ionicons name="card-outline" size={14} color={active ? th.primary : th.sub} />
-                            <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('900') }}>{debt.name}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </ScrollView>
-                  ) : null}
-                </View>
+                <Text style={{ color: th.faint, fontSize: 12, lineHeight: 18, ...weight('700'), textAlign: align, marginBottom: 14 }}>
+                  {T.savingReservedHint}
+                </Text>
               ) : null}
 
               <DateField

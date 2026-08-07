@@ -80,8 +80,8 @@ export const normalizeGoalItems = (items = [], fallbackScope = 'personal') =>
       return {
         ...item,
         scope: normalizeScope(item.scope, fallbackScope),
-        purpose: item.purpose === 'debt_payoff' && item.linkedDebtId ? 'debt_payoff' : 'reserve',
-        linkedDebtId: item.purpose === 'debt_payoff' && item.linkedDebtId ? item.linkedDebtId : null,
+        purpose: 'reserve',
+        linkedDebtId: null,
         status: ['settled', 'released'].includes(item.status) ? item.status : 'active',
         settledAt: ['settled', 'released'].includes(item.status) && item.settledAt ? normalizeDate(item.settledAt) : null,
         settledAmount: ['settled', 'released'].includes(item.status) ? Math.abs(Number(item.settledAmount || 0)) : 0,

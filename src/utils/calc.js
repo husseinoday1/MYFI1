@@ -83,16 +83,29 @@ export const prevMonth = () => {
   };
 };
 
-export const monthlyForecast = (trans = [], date = new Date()) => {
+const isFixedExpenseTx = (t) => Boolean(t?.isCommitmentPayment || t?.isDebtPayment);
+
+export const monthlyForecast = (trans = [], date = new Date(), commitments = []) => {
   const mo  = date.getMonth();
   const yr  = date.getFullYear();
   const day = Math.max(1, date.getDate());
   const dim = daysInMonth(mo, yr);
+  const currentMonthKey = `${yr}-${String(mo + 1).padStart(2, '0')}`;
   const mt  = byMonth(trans, mo, yr);
   const { inc: income, exp: spent } = calcStats(mt);
+
+  const fixedSpentSoFar = sum(mt.filter(t => isExpenseFlow(t) && isFixedExpenseTx(t)), t => Math.abs(toNumber(t.amt)));
+  const variableSpentSoFar = Math.max(0, spent - fixedSpentSoFar);
+  const remainingCommitments = sum(
+    (commitments || []).filter(c => c && c.active !== false && c.lastPaidMonth !== currentMonthKey),
+    c => Math.abs(toNumber(c.amt)),
+  );
+  const fixedExpected = fixedSpentSoFar + remainingCommitments;
+
   const daysLeft = Math.max(0, dim - day);
-  const dailyAvg = day > 0 ? spent / day : 0;
-  const projectedExpense = dailyAvg * dim;
+  const dailyAvg = day > 0 ? variableSpentSoFar / day : 0;
+  const projectedVariable = dailyAvg * dim;
+  const projectedExpense = fixedExpected + projectedVariable;
   const projectedNet = income - projectedExpense;
   const availableToday = daysLeft > 0 ? Math.max(0, (income - spent) / (daysLeft + 1)) : Math.max(0, income - spent);
 
@@ -108,6 +121,8 @@ export const monthlyForecast = (trans = [], date = new Date()) => {
     spent: money(spent),
     income: money(income),
     dailyAvg: money(dailyAvg),
+    fixedExpected: money(fixedExpected),
+    variableSpent: money(variableSpentSoFar),
     projected: money(projectedExpense),
     projectedNet: money(projectedNet),
     availableToday: money(availableToday),
@@ -211,6 +226,7 @@ export const buildFinancialSnapshot = ({
   goals = [],
   cats = [],
   wallets = [],
+  commitments = [],
   currency = 'IQD',
   defaultWalletId = null,
 } = {}, date = new Date()) => {
@@ -218,7 +234,7 @@ export const buildFinancialSnapshot = ({
   const all = calcStats(trans);
   const month = calcStats(monthTrans);
   const cashFlow = calcCashFlow(monthTrans);
-  const forecast = monthlyForecast(trans, date);
+  const forecast = monthlyForecast(trans, date, commitments);
   const debtsInfo = debtSummary(debts);
   const receivablesInfo = debtSummary(debts, 'receivable');
   const goalsInfo = goalSummary(goals);

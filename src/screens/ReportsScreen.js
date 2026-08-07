@@ -98,7 +98,7 @@ const copy = (lang) => {
 };
 
 export default function ReportsScreen() {
-  const { trans, debts, goals, cats, cfg } = useStore();
+  const { trans, debts, goals, commitments, cats, cfg } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const C = copy(cfg.lang);
   const ar = isRTL(cfg.lang);
@@ -109,9 +109,10 @@ export default function ReportsScreen() {
   const modules = getModules(cfg);
   const allScopedTrans = filterByActiveScope(trans, cfg);
   const viewTrans = allScopedTrans.filter(item => transactionFeatureEnabled(item, cfg));
-  const featureData = filterFeatureEntities({ debts, goals, cfg });
+  const featureData = filterFeatureEntities({ debts, goals, commitments, cfg });
   const viewDebts = featureData.debts;
   const viewGoals = featureData.goals;
+  const viewCommitments = featureData.commitments;
   const archiveSummaries = Array.isArray(cfg.archiveSummaries) ? cfg.archiveSummaries : [];
   const activeDataScope = getActiveScope(cfg);
   const scopedArchiveSummaries = archiveSummaries.filter(item => (
@@ -209,8 +210,9 @@ export default function ReportsScreen() {
     trans: viewTrans,
     debts: viewDebts,
     goals: viewGoals,
+    commitments: viewCommitments,
     cats,
-  }, selectedMonthKey === currentMonthKey ? now : selectedMonth), [viewTrans, viewDebts, viewGoals, cats, selectedMonth, selectedMonthKey, currentMonthKey]);
+  }, selectedMonthKey === currentMonthKey ? now : selectedMonth), [viewTrans, viewDebts, viewGoals, viewCommitments, cats, selectedMonth, selectedMonthKey, currentMonthKey]);
   const insightItems = useMemo(() => {
     const rows = [];
     if (scope === 'month' && selectedMonthKey === currentMonthKey && periodTrans.length >= 3) {

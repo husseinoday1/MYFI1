@@ -154,12 +154,13 @@ export const createManagementSlice = (set, get) => ({
     const entryDate = normalizeDate(dateISO);
     const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
     const commitment = normalizeCommitments(get().commitments, defaultWalletId).find(item => item.id === id);
-    if (!commitment || !commitment.active || !commitment.amt) return false;
+    if (!commitment || !commitment.active || !commitment.amt) return { ok: false, reason: 'not_found' };
     const paymentWalletId = walletId || commitment.walletId || defaultWalletId;
     const paidMonth = monthKey(entryDate);
-    if (commitment.lastPaidMonth === paidMonth) return false;
+    if (commitment.lastPaidMonth === paidMonth) return { ok: false, reason: 'already_paid' };
     const linkedType = commitment.linkedType || 'none';
     const linkedId = commitment.linkedId || null;
+    const requestedAmount = Math.abs(Number(commitment.amt) || 0);
     const linkedMeta = {
       title: commitment.name,
       cat: commitment.cat || 'other',
@@ -172,8 +173,8 @@ export const createManagementSlice = (set, get) => ({
       transactionTag: 'commitment',
     };
     if ((linkedType === 'debt' || linkedType === 'receivable') && linkedId) {
-      const ok = await get().payDebt(linkedId, commitment.amt, entryDate, paymentWalletId, linkedMeta);
-      if (!ok) return false;
+      const applied = await get().payDebt(linkedId, commitment.amt, entryDate, paymentWalletId, linkedMeta);
+      if (!applied) return { ok: false, reason: 'linked_unavailable' };
       set(s => ({
         commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
           item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, active: item.repeatMonthly === false ? false : item.active } : item
@@ -181,11 +182,11 @@ export const createManagementSlice = (set, get) => ({
       }));
       await get().saveLocal();
       await get().syncCloud();
-      return true;
+      return { ok: true, partial: applied < requestedAmount - 0.0001, appliedAmount: applied, requestedAmount };
     }
     if (linkedType === 'goal' && linkedId) {
-      const ok = await get().saveGoal(linkedId, commitment.amt, entryDate, paymentWalletId, linkedMeta);
-      if (!ok) return false;
+      const applied = await get().saveGoal(linkedId, commitment.amt, entryDate, paymentWalletId, linkedMeta);
+      if (!applied) return { ok: false, reason: 'linked_unavailable' };
       set(s => ({
         commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
           item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, active: item.repeatMonthly === false ? false : item.active } : item
@@ -193,7 +194,7 @@ export const createManagementSlice = (set, get) => ({
       }));
       await get().saveLocal();
       await get().syncCloud();
-      return true;
+      return { ok: true, partial: applied < requestedAmount - 0.0001, appliedAmount: applied, requestedAmount };
     }
     set(s => ({
       commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
@@ -220,7 +221,7 @@ export const createManagementSlice = (set, get) => ({
     }));
     await get().saveLocal();
     await get().syncCloud();
-    return true;
+    return { ok: true, partial: false, appliedAmount: requestedAmount, requestedAmount };
   },
 
   addWallet: async (wallet) => {

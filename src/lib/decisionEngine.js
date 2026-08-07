@@ -51,7 +51,7 @@ export const buildDecisionItems = ({
   const lang = cfg.lang || 'ar';
   const ar = lang === 'ar';
   const snapshot = buildFinancialSnapshot({
-    trans, debts, goals, cats, wallets,
+    trans, debts, goals, cats, wallets, commitments,
     currency: cfg.currency,
     defaultWalletId: cfg.defaultWalletId,
   }, date);
@@ -265,8 +265,6 @@ export const buildDecisionItems = ({
   if (intelligence.topLeak && shouldNotifyLeak(intelligence)) {
     push({
       id: `spend-jump-${intelligence.topLeak.id}`,
-      title: ar ? 'صرف غير طبيعي مقارنة بالشهر السابق' : 'Unusual spending jump',
-      body: `${categoryLabel(intelligence.topLeak, ar)}: +${money(intelligence.topLeak.delta)} ${symbol}.`,
       title: ar ? '\u0635\u0631\u0641 \u0623\u0639\u0644\u0649 \u0645\u0646 \u0627\u0644\u0645\u0639\u062a\u0627\u062f' : 'Spending above your usual pattern',
       body: ar
         ? `${categoryLabel(intelligence.topLeak, ar)}: \u0623\u0639\u0644\u0649 \u0645\u0646 \u0645\u062a\u0648\u0633\u0637 \u0633\u062c\u0644\u0643 \u0628\u0640 ${money(intelligence.topLeak.delta)} ${symbol}.`

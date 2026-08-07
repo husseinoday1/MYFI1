@@ -51,27 +51,36 @@ export const getBudgetSummary = (rows = []) => {
   };
 };
 
+const median = (values = []) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
 export const suggestBudgetsFromHistory = (trans = [], cats = [], now = new Date()) => {
   const current = monthId(now);
   const eligibleMonths = [...new Set(trans
     .map(tx => String(tx?.dateISO || '').slice(0, 7))
     .filter(key => /^\d{4}-\d{2}$/.test(key) && key < current))]
     .sort((a, b) => b.localeCompare(a))
-    .slice(0, 3);
-  const included = new Set(eligibleMonths);
-  const totals = new Map();
+    .slice(0, 6);
+  const perCategoryMonthly = new Map();
   trans.forEach((tx) => {
     const key = String(tx?.dateISO || '').slice(0, 7);
     const amount = expenseAmount(tx);
-    if (!amount || !included.has(key)) return;
+    if (!amount || !eligibleMonths.includes(key)) return;
     const cat = tx.cat || 'other';
-    totals.set(cat, (totals.get(cat) || 0) + amount);
+    const monthly = perCategoryMonthly.get(cat) || new Map();
+    monthly.set(key, (monthly.get(key) || 0) + amount);
+    perCategoryMonthly.set(cat, monthly);
   });
-  const divisor = Math.max(1, eligibleMonths.length);
   const validCats = new Set(cats.map(cat => cat.id));
-  return Object.fromEntries([...totals.entries()]
+  return Object.fromEntries([...perCategoryMonthly.entries()]
     .filter(([cat]) => validCats.has(cat))
-    .map(([cat, total]) => [cat, Math.ceil((total / divisor) / 1000) * 1000])
+    .map(([cat, monthly]) => {
+      const values = eligibleMonths.map(m => monthly.get(m) || 0).filter(v => v > 0);
+      return values.length ? [cat, Math.round(median(values) / 1000) * 1000] : [cat, 0];
+    })
     .filter(([, value]) => value > 0));
 };
 

@@ -598,19 +598,44 @@ export default function AddTransModal({
 
     if (type === 'debt') {
       if (!selDebt) return;
-      await payDebt(selDebt, n, dateISO, walletId);
+      const applied = await payDebt(selDebt, n, dateISO, walletId);
+      if (!applied) {
+        Alert.alert('', cfg.lang === 'ar'
+          ? 'تعذّر تسجيل الدفعة — تأكد أن رصيد المحفظة المتاح كافٍ وأن الدين لم يُسدد بالكامل.'
+          : 'Could not record the payment — check the wallet\u2019s available balance and that the debt is not already fully paid.');
+        return;
+      }
       handleClose();
       return;
     }
     if (type === 'goal') {
       if (!selGoal) return;
-      await saveGoal(selGoal, n, dateISO, walletId);
+      const applied = await saveGoal(selGoal, n, dateISO, walletId);
+      if (!applied) {
+        Alert.alert('', cfg.lang === 'ar'
+          ? 'تعذّر تسجيل التوفير — تأكد أن رصيد المحفظة المتاح كافٍ وأن الهدف لم يكتمل بالفعل.'
+          : 'Could not record the saving — check the wallet\u2019s available balance and that the goal is not already complete.');
+        return;
+      }
       handleClose();
       return;
     }
     if (type === 'commitment') {
       if (!selCommitment) return;
-      await payCommitment(selCommitment, dateISO, walletId);
+      const result = await payCommitment(selCommitment, dateISO, walletId);
+      if (!result?.ok) {
+        if (result?.reason === 'linked_unavailable') {
+          Alert.alert('', cfg.lang === 'ar'
+            ? 'الدين أو الهدف المرتبط بهذا الالتزام مكتمل بالفعل أو رصيد المحفظة غير كافٍ. الغِ الربط أو أوقف الالتزام من شاشة تعديله.'
+            : 'The linked debt or goal is already complete, or the wallet balance is insufficient. Unlink it or pause this commitment.');
+        }
+        return;
+      }
+      if (result.partial) {
+        Alert.alert('', cfg.lang === 'ar'
+          ? `تم سداد ${Math.round(result.appliedAmount).toLocaleString()} فقط من ${Math.round(result.requestedAmount).toLocaleString()} لأن الدين أو الهدف المرتبط قارب الاكتمال.`
+          : `Only ${Math.round(result.appliedAmount).toLocaleString()} of ${Math.round(result.requestedAmount).toLocaleString()} was applied \u2014 the linked debt or goal is almost complete.`);
+      }
       handleClose();
       return;
     }

@@ -20,15 +20,9 @@ const cleanNumber = parseNumberInput;
 
 const copy = (lang) => {
   const ar = lang === 'ar';
-  const settleDebt = ar ? '\u0633\u062f\u0627\u062f \u0627\u0644\u062f\u064a\u0646' : 'Pay linked debt';
-  const settleDebtConfirm = ar ? '\u0633\u064a\u062a\u0645 \u062a\u062d\u0648\u064a\u0644 \u0645\u0628\u0644\u063a \u0627\u0644\u062a\u0648\u0641\u064a\u0631 \u0627\u0644\u0645\u062d\u062c\u0648\u0632 \u0625\u0644\u0649 \u0633\u062f\u0627\u062f \u0627\u0644\u062f\u064a\u0646 \u0627\u0644\u0645\u0631\u062a\u0628\u0637.' : 'Use the reserved savings to pay the linked debt?';
-  const settleDebtFailed = ar ? '\u0644\u0627 \u064a\u0645\u0643\u0646 \u0633\u062f\u0627\u062f \u0627\u0644\u062f\u064a\u0646 \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u062a\u0648\u0641\u064a\u0631 \u062d\u0627\u0644\u064a\u0627\u064b.' : 'This saving cannot settle the linked debt right now.';
   const releaseGoal = ar ? '\u0625\u062a\u0627\u062d\u0629 \u0627\u0644\u0645\u0628\u0644\u063a' : 'Make funds available';
   const releaseGoalConfirm = ar ? '\u0633\u064a\u0639\u0648\u062f \u0645\u0628\u0644\u063a \u0627\u0644\u062a\u0648\u0641\u064a\u0631 \u0645\u062a\u0627\u062d\u0627\u064b \u0641\u064a \u0646\u0641\u0633 \u0627\u0644\u0645\u062d\u0627\u0641\u0638 \u0644\u064a\u064f\u0633\u062c\u0644 \u0627\u0644\u0635\u0631\u0641 \u0627\u0644\u0641\u0639\u0644\u064a \u0628\u0639\u062f\u0647.' : 'The reserved money will become available in its original wallets, ready for the actual expense.';
   return {
-    settleDebt,
-    settleDebtConfirm,
-    settleDebtFailed,
     releaseGoal,
     releaseGoalConfirm,
     title: ar ? 'المتابعات' : 'Trackers',
@@ -113,7 +107,7 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
   const {
     debts, goals, commitments, cfg,
     editDebt, deleteDebt, editDebtPayment, deleteDebtPayment,
-    editGoal, deleteGoal, editGoalSaving, deleteGoalSaving, settleGoalDebt, releaseGoalSavings,
+    editGoal, deleteGoal, editGoalSaving, deleteGoalSaving, releaseGoalSavings,
     deferCommitment, clearCommitmentDeferral, editCommitment, deleteCommitment,
     deleteTrackersMany, deleteTrackerPaymentsMany,
   } = useStore();
@@ -285,19 +279,6 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
     return T.active;
   };
 
-  const confirmSettleGoalDebt = (item) => {
-    Alert.alert(T.settleDebt, T.settleDebtConfirm, [
-      { text: T.cancel, style: 'cancel' },
-      {
-        text: T.settleDebt,
-        onPress: async () => {
-          const ok = await settleGoalDebt?.(item.sourceId);
-          if (!ok) Alert.alert('', T.settleDebtFailed);
-        },
-      },
-    ]);
-  };
-
   const confirmReleaseGoal = (item) => {
     Alert.alert(T.releaseGoal, T.releaseGoalConfirm, [
       { text: T.cancel, style: 'cancel' },
@@ -306,9 +287,6 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
   };
 
   const actionFor = (item) => {
-    if (item.kind === 'saving' && item.source?.purpose === 'debt_payoff' && item.source?.status !== 'settled' && item.remaining <= 0) {
-      return { label: T.settleDebt, icon: 'card-outline', onPress: () => confirmSettleGoalDebt(item), color: th.exp };
-    }
     if (item.kind === 'saving' && item.source?.purpose === 'reserve' && item.source?.status === 'active' && item.remaining <= 0) {
       return { label: T.releaseGoal, icon: 'lock-open-outline', onPress: () => confirmReleaseGoal(item), color: th.primary };
     }
@@ -625,7 +603,7 @@ export default function TrackersLabScreen({ focusRequest, onQuickPay, onQuickSav
           : item.kind === 'receivable'
             ? T.receivable
             : item.kind === 'saving'
-              ? (item.source?.purpose === 'debt_payoff' ? T.settleDebt : T.saving)
+              ? T.saving
               : T.monthly;
         const amountLabel = item.kind === 'monthly' ? T.planAmount : T.remaining;
         const progressValue = Math.min(100, Math.max(0, Number(item.progress || 0)));
