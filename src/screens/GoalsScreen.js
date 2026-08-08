@@ -22,6 +22,7 @@ const copy = (lang) => {
     remaining: ar ? 'إجمالي المتبقي' : 'Total remaining',
     active: ar ? 'النشطة' : 'Active',
     completed: ar ? 'المكتملة' : 'Completed',
+    ended: ar ? 'اكتمل الهدف' : 'Goal completed',
     lastSave: ar ? 'آخر توفير' : 'Last saving',
     target: ar ? 'الهدف' : 'Target',
     progress: ar ? 'التقدم' : 'Progress',
@@ -254,7 +255,7 @@ export default function GoalsScreen({ onQuickSave }) {
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: th.text, ...weight('900'), fontSize: 15, textAlign: align }} numberOfLines={1}>{goal.name}</Text>
                       <Text style={{ color: done ? th.inc : th.sub, fontSize: 12, lineHeight: 18, marginTop: 3, textAlign: align }}>
-                        {done ? L.completed : `${T.remaining}: ${fmt(remaining)} ${sym}`}
+                        {done ? T.ended : `${T.remaining}: ${fmt(remaining)} ${sym}`}
                       </Text>
                     </View>
                   </View>

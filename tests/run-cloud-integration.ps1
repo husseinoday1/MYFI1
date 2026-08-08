@@ -1,6 +1,7 @@
 param(
   [string]$ProjectRef = 'qihahfufuupgivnjzmfe',
-  [string]$NodePath = 'node'
+  [string]$NodePath = 'node',
+  [string]$SupabasePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -8,12 +9,26 @@ $workspace = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $imagePath = Join-Path $workspace '.tmp-myfi-cloud-receipt.png'
 $audioPath = Join-Path $workspace '.tmp-myfi-cloud-voice.wav'
 $cliPath = Join-Path $workspace 'tools\supabase-cli\supabase.exe'
+$cliCommand = $null
 $baseUrl = "https://$ProjectRef.supabase.co"
 $userId = $null
 $serviceKey = $null
 $testExitCode = 1
 
 try {
+  if ($SupabasePath) {
+    if (-not (Test-Path -LiteralPath $SupabasePath)) { throw "Supabase CLI was not found at $SupabasePath." }
+    $cliCommand = (Resolve-Path -LiteralPath $SupabasePath).Path
+  } elseif (Test-Path -LiteralPath $cliPath) {
+    $cliCommand = $cliPath
+  } else {
+    $pathCommand = Get-Command supabase -ErrorAction SilentlyContinue
+    if ($pathCommand) { $cliCommand = $pathCommand.Source }
+  }
+  if (-not $cliCommand) {
+    throw 'Supabase CLI was not found. Install it with `npm install --save-dev supabase`, `scoop install supabase`, or pass -SupabasePath.'
+  }
+
   Add-Type -AssemblyName System.Drawing
   $image = New-Object System.Drawing.Bitmap 900,420
   $graphics = [System.Drawing.Graphics]::FromImage($image)
@@ -36,8 +51,10 @@ try {
   $speech.Speak('Paid coffee twelve thousand five hundred Iraqi dinars')
   $speech.Dispose()
 
-  if (-not (Test-Path -LiteralPath $cliPath)) { throw 'Supabase CLI was not found.' }
-  $rawKeys = & $cliPath projects api-keys --project-ref $ProjectRef -o json
+  $rawKeys = & $cliCommand projects api-keys --project-ref $ProjectRef -o json
+  if ($LASTEXITCODE -ne 0) {
+    throw 'Could not read Supabase project API keys. Run `supabase login`, set SUPABASE_ACCESS_TOKEN, or pass existing test credentials to tests/run-cloud-integration.cjs.'
+  }
   $keys = $rawKeys | ConvertFrom-Json
   $serviceKey = ($keys | Where-Object { $_.name -eq 'service_role' }).api_key
   if (-not $serviceKey) { throw 'Supabase service role key was unavailable.' }

@@ -114,6 +114,8 @@ export const normalizedRowsToSnapshot = (rows = {}, fallbackCfg = {}, notif = {}
       archivedPaid,
       payments,
       paid: archivedPaid + sum(payments, payment => payment.amt),
+      status: debt.status === 'settled' ? 'settled' : 'active',
+      archivedAt: debt.archived_at || null,
       scope: debt.scope || 'personal',
       createdAt: debt.created_on || debt.created_at,
     };
@@ -133,6 +135,9 @@ export const normalizedRowsToSnapshot = (rows = {}, fallbackCfg = {}, notif = {}
       archivedSaved,
       savings,
       cur: archivedSaved + sum(savings, saving => saving.amt),
+      status: goal.status === 'completed' ? 'settled' : 'active',
+      archivedAt: goal.archived_at || null,
+      archivedFromActive: goal.archived_from_active == null ? undefined : goal.archived_from_active,
       scope: goal.scope || 'personal',
       createdAt: goal.created_on || goal.created_at,
     };
@@ -154,6 +159,10 @@ export const normalizedRowsToSnapshot = (rows = {}, fallbackCfg = {}, notif = {}
       linkedType: item.linked_type || 'none',
       linkedId: linkedMap.get(item.linked_id) || null,
       lastPaidMonth: item.last_paid_month || null,
+      deferredUntilISO: item.deferred_until_on || null,
+      deferredCycleMonth: item.deferred_cycle_month || null,
+      archivedAt: item.archived_at || null,
+      archivedFromActive: item.archived_from_active == null ? undefined : item.archived_from_active,
     };
   });
 
@@ -309,9 +318,9 @@ export const loadNormalizedSnapshot = async ({ client, userId, workspaceId, fall
   const [categories, wallets, debts, goals, commitments, transactions, tags] = await Promise.all([
     fetchWorkspaceRows(client, 'categories', workspace.id, 'archived_at'),
     fetchWorkspaceRows(client, 'wallets', workspace.id, 'archived_at'),
-    fetchWorkspaceRows(client, 'debts', workspace.id, 'archived_at'),
-    fetchWorkspaceRows(client, 'goals', workspace.id, 'archived_at'),
-    fetchWorkspaceRows(client, 'commitments', workspace.id, 'archived_at'),
+    fetchWorkspaceRows(client, 'debts', workspace.id),
+    fetchWorkspaceRows(client, 'goals', workspace.id),
+    fetchWorkspaceRows(client, 'commitments', workspace.id),
     fetchWorkspaceRows(client, 'transactions', workspace.id, 'deleted_at'),
     fetchWorkspaceRows(client, 'tags', workspace.id, 'archived_at'),
   ]);

@@ -1,9 +1,10 @@
 import { buildFinancialSnapshot, getUpcomingRecurring, today } from '../utils/calc';
-import { getUpcomingCommitments } from './commitments';
+import { formatCommitmentDate, formatCommitmentMonth, getUpcomingCommitments } from './commitments';
 import { buildLeakInsights } from './localIntelligence';
 import { getDefaultWalletId, getWalletAvailableBalances } from './wallets';
 import { filterByActiveScope, filterFeatureEntities, getModules } from './modules';
 import { getBudgetRows } from './budgets';
+import { daysSinceISO } from './trackerLifecycle';
 
 const money = (value) => Math.abs(Math.round(Number(value) || 0)).toLocaleString();
 
@@ -42,6 +43,8 @@ export const buildDecisionItems = ({
   date = new Date(),
 } = {}) => {
   const modules = getModules(cfg);
+  const sourceDebts = debts;
+  const sourceGoals = goals;
   trans = filterByActiveScope(trans, cfg);
   wallets = filterByActiveScope(wallets, cfg);
   const featureData = filterFeatureEntities({ debts, goals, commitments, cfg });
@@ -57,9 +60,10 @@ export const buildDecisionItems = ({
   }, date);
   const intelligence = buildLeakInsights(trans, cats, date);
   const walletBalance = currentWalletBalance({ trans, wallets, cfg, snapshot });
-  const commitmentWindow = Number(notif.commitment?.value ?? 3);
   const commitmentOn = notif.commitment?.on !== false;
   const items = [];
+  const scopedDebts = filterByActiveScope(sourceDebts, cfg);
+  const scopedGoals = filterByActiveScope(sourceGoals, cfg);
 
   const push = (item) => {
     const body = String(item.body || '').trim();
@@ -94,23 +98,7 @@ export const buildDecisionItems = ({
       throttleHours: 12,
       action: { type: 'open_tab', tab: 'reports' },
     });
-  } else if (false && snapshot.forecast.status === 'warning') {
-    push({
-      id: 'forecast-warning',
-      title: ar ? 'الصرف قريب من الدخل' : 'Spending is close to income',
-      body: ar
-        ? `مصروف الشهر المتوقع ${money(snapshot.forecast.projected)} ${symbol}.`
-        : `Projected monthly spending is ${money(snapshot.forecast.projected)} ${symbol}.`,
-      icon: 'analytics-outline',
-      tone: 'warning',
-      priority: 18,
-      channel: 'important',
-      notify: false,
-      throttleHours: 24,
-      action: { type: 'open_tab', tab: 'reports' },
-    });
   }
-
   if (modules.budgets) {
     const budgetRows = getBudgetRows(trans, cats, cfg.categoryBudgets, date);
     const urgentBudget = budgetRows.find(row => row.status === 'over');
@@ -177,8 +165,8 @@ export const buildDecisionItems = ({
   }
 
   const upcomingCommitments = modules.commitments ? getUpcomingCommitments(commitments, date) : [];
-  const commitmentDue = upcomingCommitments.filter(item => item.daysUntil <= commitmentWindow);
-  const deferredCommitments = upcomingCommitments.filter(item => item.deferredUntilISO && item.daysUntil > commitmentWindow);
+  const commitmentDue = upcomingCommitments.filter(item => item.actionable);
+  const deferredCommitments = upcomingCommitments.filter(item => item.isDeferred && !item.actionable);
 
   if (commitmentOn && commitmentDue.length > 0) {
     const first = commitmentDue[0];
@@ -186,16 +174,18 @@ export const buildDecisionItems = ({
       id: `commitment-due-${first.id}-${first.dueISO}`,
       title: ar ? 'التزام يحتاج متابعة' : 'Commitment needs attention',
       body: commitmentDue.length === 1
-        ? `${first.name}: ${dueText(first.daysUntil, ar)}.`
+        ? `${first.name}: ${first.monthsUntil < 0
+          ? (ar ? `\u0645\u062a\u0623\u062e\u0631 \u0645\u0646 \u0634\u0647\u0631 ${formatCommitmentMonth(first.dueISO, lang)}` : `overdue from ${formatCommitmentMonth(first.dueISO, lang)}`)
+          : (ar ? '\u0645\u0633\u062a\u062d\u0642 \u0647\u0630\u0627 \u0627\u0644\u0634\u0647\u0631' : 'due this month')}.`
         : (ar
           ? `${commitmentDue.length} التزامات تحتاج مراجعة أو تسجيل دفع.`
           : `${commitmentDue.length} commitments need review or payment.`),
       icon: 'calendar-outline',
-      tone: first.daysUntil <= 0 ? 'warning' : 'info',
-      priority: first.daysUntil <= 0 ? 14 : 22,
-      channel: first.daysUntil <= 1 ? 'critical' : 'important',
+      tone: first.monthsUntil <= 0 ? 'warning' : 'info',
+      priority: first.monthsUntil <= 0 ? 14 : 22,
+      channel: first.monthsUntil <= 0 ? 'critical' : 'important',
       notify: true,
-      throttleHours: first.daysUntil <= 0 ? 8 : 18,
+      throttleHours: first.monthsUntil <= 0 ? 8 : 18,
       action: { type: 'open_tracker', trackerKind: 'commitment', trackerId: first.id },
     });
   }
@@ -206,14 +196,64 @@ export const buildDecisionItems = ({
       id: `commitment-deferred-${first.id}-${first.deferredUntilISO}`,
       title: ar ? 'التزام مؤجل' : 'Deferred commitment',
       body: ar
-        ? `${first.name}: مؤجل إلى ${first.deferredUntilISO}.`
-        : `${first.name}: deferred until ${first.deferredUntilISO}.`,
+        ? `${first.name}: \u0645\u0624\u062c\u0644 \u0625\u0644\u0649 ${formatCommitmentDate(first.dueISO, lang)}.`
+        : `${first.name}: deferred to ${formatCommitmentDate(first.dueISO, lang)}.`,
       icon: 'time-outline',
       tone: 'info',
       priority: 36,
       channel: 'quiet',
       notify: false,
       action: { type: 'open_tracker', trackerKind: 'commitment', trackerId: first.id },
+    });
+  }
+
+  const recentlyCompletedDebt = scopedDebts
+    .filter(item => item.status === 'settled' && item.completedAt)
+    .filter(item => {
+      const age = daysSinceISO(item.completedAt, date);
+      return age != null && age <= 7;
+    })
+    .sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)))[0];
+
+  if (recentlyCompletedDebt) {
+    push({
+      id: `debt-completed-${recentlyCompletedDebt.id}-${recentlyCompletedDebt.completedAt}`,
+      title: ar ? 'انتهى الدين' : 'Debt ended',
+      body: ar
+        ? `${recentlyCompletedDebt.name}: تم تسجيل آخر دفعة وبقي السجل محفوظاً.`
+        : `${recentlyCompletedDebt.name}: the final payment was recorded and its history is preserved.`,
+      icon: 'checkmark-circle-outline',
+      tone: 'success',
+      priority: 18,
+      channel: 'important',
+      notify: true,
+      throttleHours: 168,
+      action: { type: 'open_tracker', trackerKind: recentlyCompletedDebt.direction === 'receivable' ? 'receivable' : 'debt', trackerId: recentlyCompletedDebt.id },
+    });
+  }
+
+  const recentlyCompletedGoal = scopedGoals
+    .filter(item => item.status === 'settled' && item.completedAt)
+    .filter(item => {
+      const age = daysSinceISO(item.completedAt, date);
+      return age != null && age <= 7;
+    })
+    .sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)))[0];
+
+  if (recentlyCompletedGoal) {
+    push({
+      id: `goal-completed-${recentlyCompletedGoal.id}-${recentlyCompletedGoal.completedAt}`,
+      title: ar ? 'اكتمل الهدف' : 'Goal completed',
+      body: ar
+        ? `${recentlyCompletedGoal.name}: وصل إلى المبلغ المستهدف، وبقيت مساهماته محفوظة في السجل.`
+        : `${recentlyCompletedGoal.name}: reached its target and its contributions remain in history.`,
+      icon: 'flag-outline',
+      tone: 'success',
+      priority: 19,
+      channel: 'important',
+      notify: true,
+      throttleHours: 168,
+      action: { type: 'open_tracker', trackerKind: 'goal', trackerId: recentlyCompletedGoal.id },
     });
   }
 

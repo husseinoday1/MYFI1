@@ -1,4 +1,5 @@
 import { FLOW_TYPES, isExpenseFlow } from './modules';
+import { commitmentDueISO } from './commitments';
 
 const asAmount = (value) => {
   const n = Math.abs(Number(value || 0));
@@ -114,7 +115,11 @@ export const outstandingExpenseCommitments = (
     if (!commitment || commitment.active === false || !asAmount(commitment.amt)) return false;
     // Debt and goal linked commitments are tracker/allocation flows, not normal expenses.
     if ((commitment.linkedType || 'none') !== 'none') return false;
-    if (commitment.lastPaidMonth === currentMonthKey) return false;
+    const dueMonth = String(commitmentDueISO(
+      commitment,
+      new Date(`${currentMonthKey}-15T12:00:00`),
+    )).slice(0, 7);
+    if (dueMonth > currentMonthKey) return false;
     return !(Array.isArray(currentMonthTransactions) ? currentMonthTransactions : [])
       .some(tx => transactionMatchesCommitment(tx, commitment));
   })

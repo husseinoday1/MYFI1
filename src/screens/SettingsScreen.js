@@ -6,12 +6,13 @@ import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
 import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { COUNTRIES, CURRENCIES, ICON_OPTIONS, CAT_COLORS, DEF_HOME_CARDS, DEF_HOME_SECTIONS } from '../lib/constants';
+import { CATEGORY_FLOWS, categoryFlowLabel, getCategoriesForFlow, normalizeCategoryFlow } from '../lib/categories';
 import { checkSupabaseHealth, supabase } from '../lib/supabase';
 import { getAuthRedirectUrl } from '../lib/authCallback';
 import { isBiometricSupported, authenticate } from '../lib/biometric';
 import { setupDailyNotif, cancelNotifs } from '../lib/notifications';
 import { defaultScopeForProfile, getFeatureDataCount, getModules, profileModuleDefaults } from '../lib/modules';
-import { getDefaultWalletId, getWalletBalances, getWalletLabel } from '../lib/wallets';
+import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel } from '../lib/wallets';
 import { RADIUS, SHADOW, TYPE, weight } from '../lib/tokens';
 import ActionMenu from '../components/ActionMenu';
 import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
@@ -54,8 +55,8 @@ const UI = {
     commitmentsSection: 'التزامات',
     commitmentName: 'اسم الالتزام',
     commitmentAmount: 'مبلغ الالتزام',
-    commitmentDay: 'موعد الالتزام',
-    nextDeduction: 'الاستقطاع القادم',
+    commitmentDay: 'شهر الالتزام',
+    nextDeduction: 'الشهر القادم',
     commitmentReminderInline: 'تذكير الالتزامات',
     commitmentWallet: 'محفظة الدفع',
     commitmentCategory: 'تصنيف الالتزام',
@@ -64,8 +65,6 @@ const UI = {
     repeatMonthly: 'يتكرر شهرياً',
     commitmentDetails: 'تفاصيل الالتزام',
     postponeCommitment: 'تأجيل الدفع',
-    postponeDay: 'يوم',
-    postpone3Days: '3 أيام',
     postponeNextMonth: 'الشهر القادم',
     deferredUntil: 'مؤجل إلى',
     paidThisMonth: 'مدفوع هذا الشهر',
@@ -95,7 +94,7 @@ const UI = {
     fifteenMinutes: '15 دقيقة',
     debtAlert: 'تذكير دين عليّ',
     debtBefore: 'قبل الموعد',
-    commitmentBefore: 'قبل موعد الالتزام',
+    commitmentBefore: '\u062a\u0646\u0628\u064a\u0647 \u062e\u0644\u0627\u0644 \u0634\u0647\u0631 \u0627\u0644\u0627\u0644\u062a\u0632\u0627\u0645',
     dailyAlert: 'تذكير يومي',
     alertTime: 'وقت التذكير',
     testNotification: 'اختبار إشعار',
@@ -184,8 +183,8 @@ const UI = {
     commitmentsSection: 'Commitments',
     commitmentName: 'Commitment name',
     commitmentAmount: 'Commitment amount',
-    commitmentDay: 'Commitment due date',
-    nextDeduction: 'Next deduction',
+    commitmentDay: 'Commitment month',
+    nextDeduction: 'Next month',
     commitmentReminderInline: 'Commitment reminders',
     commitmentWallet: 'Payment wallet',
     commitmentCategory: 'Category',
@@ -194,8 +193,6 @@ const UI = {
     repeatMonthly: 'Repeat monthly',
     commitmentDetails: 'Commitment details',
     postponeCommitment: 'Postpone payment',
-    postponeDay: '1 day',
-    postpone3Days: '3 days',
     postponeNextMonth: 'Next month',
     deferredUntil: 'Deferred until',
     paidThisMonth: 'Paid this month',
@@ -225,7 +222,7 @@ const UI = {
     fifteenMinutes: '15 minutes',
     debtAlert: 'Amount reminder',
     debtBefore: 'Before due',
-    commitmentBefore: 'Before due',
+    commitmentBefore: 'Alert during the commitment month',
     dailyAlert: 'Daily reminder',
     alertTime: 'Reminder time',
     testNotification: 'Test notification',
@@ -382,7 +379,6 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
     { key: 'goals', label: T.goalsFeature, icon: 'flag-outline' },
     { key: 'commitments', label: isAr ? 'الالتزامات المتكررة' : 'Recurring commitments', icon: 'calendar-outline' },
     { key: 'budgets', label: isAr ? 'الميزانيات' : 'Budgets', icon: 'pie-chart-outline' },
-    { key: 'recurring', label: isAr ? 'الحركات المتكررة' : 'Recurring entries', icon: 'repeat-outline' },
   ];
   const homeContentTitle = cfg.lang === 'ar' ? 'محتوى الرئيسية' : 'Home content';
   const homeMetricsTitle = cfg.lang === 'ar' ? 'مؤشرات الشهر' : 'Month metrics';
@@ -496,6 +492,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
   const [loading, setLoading] = useState(false);
   const [authServiceStatus, setAuthServiceStatus] = useState('idle');
   const [newCatName, setNewCatName] = useState('');
+  const [newCatFlow, setNewCatFlow] = useState(CATEGORY_FLOWS.EXPENSE);
   const [newCatIcon, setNewCatIcon] = useState(ICON_OPTIONS[0]);
   const [newCatColor, setNewCatColor] = useState(CAT_COLORS[0]);
   const [newWalletName, setNewWalletName] = useState('');
@@ -528,7 +525,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
           : dirty
             ? { icon: 'cloud-upload-outline', color: th.warn, text: isAr ? 'بانتظار المزامنة' : 'Pending sync' }
             : { icon: 'cloud-done-outline', color: th.inc, text: isAr ? 'محفوظ ومتصل' : 'Saved and connected' };
-  const walletRows = getWalletBalances(wallets, trans, cfg.currency, defaultWalletId)
+  const walletRows = getWalletAvailableBalances(wallets, trans, cfg.currency, defaultWalletId)
     .sort((a, b) => (a.id === defaultWalletId ? -1 : b.id === defaultWalletId ? 1 : 0));
   const walletSelection = useMultiSelect(
     walletRows.filter(wallet => wallet.id !== defaultWalletId).map(wallet => wallet.id),
@@ -692,7 +689,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: 'local' });
     await setUser(null);
   };
 
@@ -792,9 +789,11 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
         emoji: '',
         icon: newCatIcon,
         color: newCatColor,
+        flow: newCatFlow,
       },
     ]);
     setNewCatName('');
+    setNewCatFlow(CATEGORY_FLOWS.EXPENSE);
     setNewCatIcon(ICON_OPTIONS[0]);
     setNewCatColor(CAT_COLORS[0]);
     setCategoryModalOpen(false);
@@ -1345,7 +1344,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
 
       {modules.wallets ? (
         <Section id="wallets" title={T.walletsSection}>
-          <MultiSelectBar
+<MultiSelectBar
             th={th}
             lang={cfg.lang}
             active={walletSelection.selecting}
@@ -1383,9 +1382,20 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                 <Text style={{ color: th.text, fontSize: 14, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>
                   {getWalletLabel(wallet, cfg.lang)}
                 </Text>
-                <Text style={{ color: th.sub, fontSize: 12, marginTop: 2, textAlign: isAr ? 'right' : 'left' }}>
-                  {wallet.id === defaultWalletId ? `${T.defaultWallet} · ` : ''}{T.currentBalance}: {Math.round(wallet.balance || 0).toLocaleString()} {wallet.currency}
-                </Text>
+                <View style={[s.walletBalanceLine, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+                  <View style={[s.walletBalanceMetric, { backgroundColor: th.cardHigh }]}>
+                    <Text style={[s.walletBalanceLabel, { color: th.sub }]}>{isAr ? 'الكلي' : 'Total'}</Text>
+                    <Text style={[s.walletBalanceValue, { color: th.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+                      {Math.round(wallet.balance || 0).toLocaleString()} {wallet.currency}
+                    </Text>
+                  </View>
+                  <View style={[s.walletBalanceMetric, { backgroundColor: th.primSoft }]}>
+                    <Text style={[s.walletBalanceLabel, { color: th.primary }]}>{isAr ? 'المتاح' : 'Available'}</Text>
+                    <Text style={[s.walletBalanceValue, { color: Number(wallet.availableBalance ?? wallet.balance) >= 0 ? th.primary : th.exp }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+                      {Math.round(wallet.availableBalance ?? wallet.balance ?? 0).toLocaleString()} {wallet.currency}
+                    </Text>
+                  </View>
+                </View>
               </View>
               {walletSelection.selecting ? (
                 wallet.id !== defaultWalletId ? (
@@ -1456,7 +1466,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
             <Text style={[s.miniLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
               {isAr ? 'حد شهري لكل تصنيف. اترك القيمة فارغة لتعطيله.' : 'Monthly limit per category. Leave blank to disable.'}
             </Text>
-            {cats.filter(cat => cat.id !== 'salary').map(cat => (
+            {getCategoriesForFlow(cats, CATEGORY_FLOWS.EXPENSE).map(cat => (
               <View key={cat.id} style={[s.categoryRow, { backgroundColor: th.cardHigh }]}>
                 <View style={[s.categoryInfo, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
                   <Ionicons name={cat.icon || 'cube-outline'} size={16} color={cat.color || th.primary} />
@@ -1530,6 +1540,11 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                     <Text style={{ color: th.text, fontSize: 13, ...weight('800') }}>
                       {isAr ? cat.label : cat.labelEn}
                     </Text>
+                    <View style={[s.categoryFlowBadge, { backgroundColor: normalizeCategoryFlow(cat) === CATEGORY_FLOWS.INCOME ? th.incBg : normalizeCategoryFlow(cat) === CATEGORY_FLOWS.EXPENSE ? th.expBg : th.primSoft }]}>
+                      <Text style={{ color: normalizeCategoryFlow(cat) === CATEGORY_FLOWS.INCOME ? th.inc : normalizeCategoryFlow(cat) === CATEGORY_FLOWS.EXPENSE ? th.exp : th.primary, fontSize: 10, ...weight('900') }}>
+                        {categoryFlowLabel(cat, cfg.lang)}
+                      </Text>
+                    </View>
                   </View>
                   {categorySelection.selecting ? (
                     cat.id !== 'other' ? (
@@ -1648,28 +1663,15 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
           <>
             <Row
               label={T.commitmentReminderInline}
-              value={notif.commitment?.on !== false ? `${notif.commitment?.value || 3} ${T.days}` : T.inactive}
-              last={false}
+              value={notif.commitment?.on !== false ? T.activeStatus : T.inactive}
+              last
             >
               <Switch
                 value={notif.commitment?.on !== false}
-                onValueChange={(on) => setNotif({ commitment: { ...(notif.commitment || { value: 3 }), on } })}
+                onValueChange={(on) => setNotif({ commitment: { ...(notif.commitment || {}), on } })}
                 trackColor={{ true: th.primary, false: th.cardHigh }}
               />
             </Row>
-            {notif.commitment?.on !== false ? (
-              <Expanded bottomBorder>
-                <View style={[s.detailLine, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                  <Text style={{ color: th.sub, fontSize: 12, ...weight('800') }}>{T.commitmentBefore}</Text>
-                  <Stepper
-                    value={notif.commitment?.value || 3}
-                    suffix={` ${T.days}`}
-                    onMinus={() => setNotif({ commitment: { ...(notif.commitment || {}), on: true, value: Math.max(0, Number(notif.commitment?.value || 3) - 1) } })}
-                    onPlus={() => setNotif({ commitment: { ...(notif.commitment || {}), on: true, value: Number(notif.commitment?.value || 3) + 1 } })}
-                  />
-                </View>
-              </Expanded>
-            ) : null}
           </>
         ) : null}
 
@@ -2228,6 +2230,24 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
             placeholderTextColor={th.sub}
             style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
           />
+          <View style={[s.categoryFlowPicker, { flexDirection: isAr ? 'row-reverse' : 'row', backgroundColor: th.cardHigh }]}>
+            {[
+              { key: CATEGORY_FLOWS.EXPENSE, label: isAr ? 'صرف' : 'Expense', icon: 'arrow-up-circle-outline', color: th.exp },
+              { key: CATEGORY_FLOWS.INCOME, label: isAr ? 'دخل' : 'Income', icon: 'arrow-down-circle-outline', color: th.inc },
+            ].map(item => {
+              const active = newCatFlow === item.key;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  onPress={() => setNewCatFlow(item.key)}
+                  style={[s.categoryFlowOption, { backgroundColor: active ? `${item.color}22` : 'transparent', borderColor: active ? item.color : 'transparent' }]}
+                >
+                  <Ionicons name={item.icon} size={16} color={active ? item.color : th.sub} />
+                  <Text style={{ color: active ? item.color : th.sub, fontSize: 12, ...weight('900') }}>{item.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           <Text style={[s.miniLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.icon}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.iconRail}>
             {ICON_OPTIONS.map(icon => (
@@ -2357,6 +2377,9 @@ const s = StyleSheet.create({
   categoryRow: { borderRadius: RADIUS.md, padding: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   categoryInfo: { alignItems: 'center', gap: 8, flex: 1 },
   categoryIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  categoryFlowBadge: { minHeight: 22, borderRadius: 11, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
+  categoryFlowPicker: { borderRadius: RADIUS.md, padding: 4, gap: 4, marginBottom: 10 },
+  categoryFlowOption: { flex: 1, minHeight: 42, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 },
   categoryTools: { alignItems: 'center', gap: 5 },
   reorderBtn: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   countryChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS.md, borderWidth: 1 },
@@ -2402,4 +2425,9 @@ const s = StyleSheet.create({
   pickerSearch: { minHeight: 46, alignItems: 'center', borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, marginBottom: 2 },
   optionCard: { minHeight: 52, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10 },
   systemChoice: { minHeight: 62, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10 },
+  walletBalanceLine: { gap: 6, marginTop: 6 },
+  walletBalanceMetric: { flex: 1, minWidth: 0, borderRadius: RADIUS.md, paddingHorizontal: 7, paddingVertical: 5 },
+  walletBalanceLabel: { fontSize: 9, lineHeight: 13, ...weight('800'), textAlign: 'center' },
+  walletBalanceValue: { fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: 'center', marginTop: 1 },
+
 });

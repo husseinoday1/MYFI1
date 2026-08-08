@@ -38,7 +38,7 @@ Module._load = function load(request, parent, isMain) {
     };
   }
   if (request === 'expo-document-picker') return { getDocumentAsync: async () => ({ canceled: true }) };
-  if (request === 'expo-file-system') {
+  if (request === 'expo-file-system' || request === 'expo-file-system/legacy') {
     return {
       documentDirectory: 'memory://',
       EncodingType: { UTF8: 'utf8', Base64: 'base64' },

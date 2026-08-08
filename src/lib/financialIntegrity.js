@@ -43,6 +43,10 @@ export const auditFinancialData = ({
     if (amount(debt.paid) !== paymentTotal) {
       issues.push({ code: 'debt_paid_mismatch', entityId: debt.id, expected: paymentTotal, actual: amount(debt.paid) });
     }
+    const debtRemaining = Math.max(0, amount(debt.total) - paymentTotal);
+    if (debtRemaining === 0 && amount(debt.total) > 0 && debt.status !== 'settled') {
+      issues.push({ code: 'debt_status_mismatch', entityId: debt.id, expected: 'settled', actual: debt.status || 'active' });
+    }
     (debt.payments || []).forEach(payment => {
       const linked = trans.find(tx => tx.isDebtPayment && tx.debtId === debt.id && tx.paymentId === payment.id);
       if (!linked) issues.push({ code: 'debt_payment_missing_transaction', entityId: debt.id, childId: payment.id });
@@ -53,9 +57,13 @@ export const auditFinancialData = ({
   });
 
   goals.forEach(goal => {
-    const savingTotal = (goal.savings || []).reduce((sum, saving) => sum + amount(saving.amt), 0);
+    const savingTotal = Number(goal.archivedSaved || 0)
+      + (goal.savings || []).reduce((sum, saving) => sum + amount(saving.amt), 0);
     if (amount(goal.cur) !== Math.min(savingTotal, amount(goal.target))) {
       issues.push({ code: 'goal_saved_mismatch', entityId: goal.id });
+    }
+    if (amount(goal.target) > 0 && amount(goal.cur) >= amount(goal.target) && !['settled', 'released'].includes(goal.status)) {
+      issues.push({ code: 'goal_status_mismatch', entityId: goal.id, expected: 'settled', actual: goal.status || 'active' });
     }
     (goal.savings || []).forEach(saving => {
       const linked = trans.find(tx => tx.isGoalSaving && tx.goalId === goal.id && tx.savingId === saving.id);

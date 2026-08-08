@@ -9,6 +9,7 @@ import {
   normalizeScope,
 } from '../lib/modules';
 import { normalizeTransactionTag } from '../lib/transactionTags';
+import { debtLifecycle, goalLifecycle } from '../lib/trackerLifecycle';
 
 export const uid = () => Crypto.randomUUID();
 
@@ -47,6 +48,7 @@ export const normalizeDebtItems = (items = [], fallbackScope = 'personal') =>
           : Math.max(0, Math.abs(Number(item.paid || 0)) - archivedPaid)
       );
       const total = Math.max(Math.abs(Number(item.total || 0)), paid);
+      const lifecycle = debtLifecycle({ ...item, total, paid, payments }, paid);
       return {
         ...item,
         scope: normalizeScope(item.scope, fallbackScope),
@@ -56,6 +58,7 @@ export const normalizeDebtItems = (items = [], fallbackScope = 'personal') =>
         payments,
         direction: item.direction === 'receivable' ? 'receivable' : 'owed',
         createdAt: normalizeDate(item.createdAt),
+        ...lifecycle,
       };
     });
 
@@ -77,14 +80,17 @@ export const normalizeGoalItems = (items = [], fallbackScope = 'personal') =>
           : Math.max(0, Math.abs(Number(item.cur || 0)) - archivedSaved)
       );
       const target = Math.max(Math.abs(Number(item.target || 0)), saved);
+      const lifecycle = goalLifecycle({ ...item, target, cur: saved, savings }, saved);
+      const completedAt = lifecycle.completedAt || item.completedAt || null;
       return {
         ...item,
         scope: normalizeScope(item.scope, fallbackScope),
         purpose: 'reserve',
         linkedDebtId: null,
-        status: ['settled', 'released'].includes(item.status) ? item.status : 'active',
-        settledAt: ['settled', 'released'].includes(item.status) && item.settledAt ? normalizeDate(item.settledAt) : null,
-        settledAmount: ['settled', 'released'].includes(item.status) ? Math.abs(Number(item.settledAmount || 0)) : 0,
+        ...lifecycle,
+        completedAt: completedAt ? normalizeDate(completedAt, null) : null,
+        settledAt: lifecycle.settledAt ? normalizeDate(lifecycle.settledAt, null) : null,
+        settledAmount: lifecycle.settledAmount || 0,
         target,
         cur: saved,
         archivedSaved,
@@ -170,6 +176,203 @@ export const prepareWalletData = ({ wallets, trans, commitments, cfg }) => {
   };
 };
 
+const cleanTextKey = value => String(value || '')
+  .trim()
+  .replace(/\s+/g, ' ')
+  .replace(/\s*\((Guest|ضيف)\)\s*$/i, '')
+  .toLowerCase();
+
+const amountKey = value => String(Math.round(Number(value || 0) * 1000) / 1000);
+
+const itemDateKey = item => String(
+  item?.dateISO
+  || item?.date
+  || item?.createdAt
+  || item?.startedAt
+  || ''
+).slice(0, 10);
+
+const keepLastUniqueBy = (items = [], keyOf) => {
+  const list = Array.isArray(items) ? items : [];
+  const seen = new Set();
+  const result = [];
+
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const item = list[index];
+    const key = keyOf(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+
+  return result.reverse();
+};
+
+const isGuestNamedWallet = wallet => (
+  /\((Guest|ضيف)\)\s*$/i.test(String(wallet?.name || ''))
+  || /\(Guest\)\s*$/i.test(String(wallet?.nameEn || ''))
+);
+
+const walletKey = wallet => [
+  cleanTextKey(wallet?.name || wallet?.nameEn),
+  cleanTextKey(wallet?.type),
+  cleanTextKey(wallet?.scope),
+  cleanTextKey(wallet?.currency),
+  amountKey(wallet?.openingBalance),
+].join('|');
+
+const dedupeWalletsWithAliases = (wallets = []) => {
+  const order = [];
+  const map = new Map();
+  const aliases = new Map();
+
+  (Array.isArray(wallets) ? wallets : []).forEach(wallet => {
+    if (!wallet) return;
+    const key = walletKey(wallet);
+    if (!key) return;
+
+    if (!map.has(key)) {
+      order.push(key);
+      map.set(key, wallet);
+      return;
+    }
+
+    const current = map.get(key);
+    if (isGuestNamedWallet(current) && !isGuestNamedWallet(wallet)) {
+      map.set(key, wallet);
+      if (current.id && wallet.id && current.id !== wallet.id) aliases.set(current.id, wallet.id);
+      return;
+    }
+
+    if (wallet.id && current.id && wallet.id !== current.id) aliases.set(wallet.id, current.id);
+  });
+
+  const deduped = order.map(key => map.get(key)).filter(Boolean);
+  const validIds = new Set(deduped.map(wallet => wallet.id).filter(Boolean));
+  aliases.forEach((targetId, sourceId) => {
+    if (!validIds.has(targetId)) aliases.delete(sourceId);
+  });
+  return { wallets: deduped, aliases };
+};
+
+const dedupeWallets = (wallets = []) => dedupeWalletsWithAliases(wallets).wallets;
+
+const transactionKey = item => {
+  if (!item) return '';
+  const transfer = item.kind === 'transfer';
+  return [
+    transfer ? 'transfer' : cleanTextKey(item.flowType || item.kind),
+    itemDateKey(item),
+    cleanTextKey(item.title),
+    cleanTextKey(item.note),
+    cleanTextKey(item.cat),
+    amountKey(transfer ? item.transferAmount : item.amt),
+    amountKey(item.allocationAmount),
+    cleanTextKey(item.walletId),
+    cleanTextKey(item.fromWalletId),
+    cleanTextKey(item.toWalletId),
+    cleanTextKey(item.commitmentMonth),
+    cleanTextKey(item.scope),
+    item.isGoalSaving ? 'goal' : '',
+    item.isDebtPayment ? 'debt_payment' : '',
+    item.isCommitmentPayment ? 'commitment_payment' : '',
+  ].join('|');
+};
+
+const paymentKey = item => [
+  itemDateKey(item),
+  amountKey(item?.amt),
+  cleanTextKey(item?.note),
+].join('|');
+
+const debtKey = item => [
+  cleanTextKey(item?.direction || 'owed'),
+  cleanTextKey(item?.title || item?.name),
+  amountKey(item?.total),
+  itemDateKey(item),
+  cleanTextKey(item?.scope),
+].join('|');
+
+const goalKey = item => [
+  cleanTextKey(item?.title || item?.name),
+  amountKey(item?.target),
+  itemDateKey(item),
+  cleanTextKey(item?.scope),
+].join('|');
+
+const commitmentKey = item => [
+  cleanTextKey(item?.title || item?.name),
+  amountKey(item?.amt),
+  cleanTextKey(item?.repeatMonthly),
+  cleanTextKey(item?.dueDay),
+  cleanTextKey(item?.linkedType),
+  cleanTextKey(item?.scope),
+].join('|');
+
+const categoryKey = item => item?.id || [
+  cleanTextKey(item?.name || item?.nameEn),
+  cleanTextKey(item?.type),
+].join('|');
+
+export const dedupeWorkspaceData = (state = {}) => {
+  const { wallets, aliases: walletAliases } = dedupeWalletsWithAliases(state.wallets || []);
+  const validWalletIds = new Set(wallets.map(wallet => wallet.id).filter(Boolean));
+  const defaultWalletId = state.cfg?.defaultWalletId && validWalletIds.has(state.cfg.defaultWalletId)
+    ? state.cfg.defaultWalletId
+    : wallets[0]?.id || state.cfg?.defaultWalletId || null;
+
+  const normalizeWalletRef = id => {
+    if (!id) return id;
+    const mappedId = walletAliases.get(id) || id;
+    return validWalletIds.has(mappedId) ? mappedId : defaultWalletId;
+  };
+
+  const normalizedTrans = (Array.isArray(state.trans) ? state.trans : []).map(item => {
+    if (!item) return item;
+    if (item.kind === 'transfer') {
+      return {
+        ...item,
+        fromWalletId: normalizeWalletRef(item.fromWalletId),
+        toWalletId: normalizeWalletRef(item.toWalletId),
+      };
+    }
+    return {
+      ...item,
+      walletId: normalizeWalletRef(item.walletId),
+    };
+  });
+  const trans = keepLastUniqueBy(normalizedTrans, transactionKey);
+
+  const debts = keepLastUniqueBy((state.debts || []).map(item => ({
+    ...item,
+    payments: keepLastUniqueBy(item?.payments || [], paymentKey),
+  })), debtKey);
+
+  const goals = keepLastUniqueBy((state.goals || []).map(item => ({
+    ...item,
+    savings: keepLastUniqueBy(item?.savings || [], paymentKey),
+  })), goalKey);
+
+  const commitments = keepLastUniqueBy((state.commitments || []).map(item => ({
+    ...item,
+    walletId: normalizeWalletRef(item?.walletId),
+  })), commitmentKey);
+
+  return {
+    ...state,
+    trans,
+    debts,
+    goals,
+    wallets,
+    commitments,
+    cats: keepLastUniqueBy(state.cats || [], categoryKey),
+    cfg: {
+      ...(state.cfg || DEF_CFG),
+      defaultWalletId,
+    },
+  };
+};
+
 export const financialDataCount = (snapshot = {}) => (
   (snapshot.trans || []).length
   + (snapshot.debts || []).length
@@ -177,23 +380,26 @@ export const financialDataCount = (snapshot = {}) => (
   + (snapshot.commitments || []).length
 );
 
-export const snapshotFromState = (state = {}, overrides = {}) => ({
-  v: 7,
-  data: {
-    trans: state.trans || [],
-    debts: state.debts || [],
-    goals: state.goals || [],
-    wallets: state.wallets || [],
-    commitments: state.commitments || [],
-  },
-  cats: state.cats || DEF_CATS,
-  cfg: state.cfg || DEF_CFG,
-  notif: state.notif || DEF_NOTIF,
-  updatedAt: overrides.updatedAt || state.localUpdatedAt || new Date().toISOString(),
-  lastSyncedAt: overrides.lastSyncedAt ?? state.lastSyncedAt ?? null,
-  cloudRevision: Number(overrides.cloudRevision ?? state.cloudRevision ?? 0),
-  dirty: overrides.dirty ?? state.dirty ?? false,
-});
+export const snapshotFromState = (state = {}, overrides = {}) => {
+  const clean = dedupeWorkspaceData(state);
+  return {
+    v: 7,
+    data: {
+      trans: clean.trans || [],
+      debts: clean.debts || [],
+      goals: clean.goals || [],
+      wallets: clean.wallets || [],
+      commitments: clean.commitments || [],
+    },
+    cats: clean.cats || DEF_CATS,
+    cfg: clean.cfg || DEF_CFG,
+    notif: clean.notif || DEF_NOTIF,
+    updatedAt: overrides.updatedAt || clean.localUpdatedAt || state.localUpdatedAt || new Date().toISOString(),
+    lastSyncedAt: overrides.lastSyncedAt ?? clean.lastSyncedAt ?? state.lastSyncedAt ?? null,
+    cloudRevision: Number(overrides.cloudRevision ?? clean.cloudRevision ?? state.cloudRevision ?? 0),
+    dirty: overrides.dirty ?? clean.dirty ?? state.dirty ?? false,
+  };
+};
 
 export const stateFromSnapshot = (snapshot = {}, fallbackCfg = DEF_CFG) => {
   const data = snapshot.data || snapshot;
@@ -204,7 +410,7 @@ export const stateFromSnapshot = (snapshot = {}, fallbackCfg = DEF_CFG) => {
     commitments: data.commitments,
     cfg,
   });
-  return {
+  return dedupeWorkspaceData({
     trans: prepared.trans,
     debts: normalizeDebtItems(data.debts, defaultScopeForProfile(prepared.cfg.profileType)),
     goals: normalizeGoalItems(data.goals, defaultScopeForProfile(prepared.cfg.profileType)),
@@ -217,7 +423,7 @@ export const stateFromSnapshot = (snapshot = {}, fallbackCfg = DEF_CFG) => {
     lastSyncedAt: snapshot.lastSyncedAt || null,
     cloudRevision: Number(snapshot.cloudRevision || 0),
     dirty: !!snapshot.dirty,
-  };
+  });
 };
 
 export const cloudSnapshot = (row = {}, notif = DEF_NOTIF) => ({

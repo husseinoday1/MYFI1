@@ -200,6 +200,16 @@ export default function OnboardingScreen({ cfg, onDone }) {
     setNeeds(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const skipAll = async () => {
+    await setCfg({
+      profileType: 'personal',
+      activeScope: defaultScopeForProfile('personal'),
+      enabledModules: profileModuleDefaults('personal'),
+      demoMode: false,
+    });
+    onDone();
+  };
+
   const finish = async () => {
     await setCfg({
       country: selectedCountry.code,
@@ -259,7 +269,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
     >
       <View style={[s.topBar, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
         {step === 0 ? (
-          <TouchableOpacity onPress={() => setStep(1)} style={s.skipBtn}>
+          <TouchableOpacity onPress={skipAll} style={s.skipBtn}>
             <Text style={{ color: th.faint, fontSize: 13 }}>{T.skip}</Text>
           </TouchableOpacity>
         ) : <View style={s.skipBtn} />}

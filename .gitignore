@@ -9,6 +9,9 @@ yarn-error.log*
 .env
 .env.*
 !.env.example
+.envrc
+.direnv/
+.npmrc
 
 # Expo / React Native
 .expo/
@@ -17,9 +20,16 @@ dist/
 dist-*/
 web-build/
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
+*.pem
+*.cer
+*.crt
+*.der
+*.secret
+*.token
 *.mobileprovision
 *.orig.*
 
@@ -34,9 +44,15 @@ Thumbs.db
 AppData/
 
 # Temporary / Build artifacts
+tmp/
 .tmp-*/
 .tmp-*
 *.tmp
+
+# Local data files
+*.db
+*.sqlite
+*.sqlite3
 
 # Tools / Binaries
 tools/supabase-cli/supabase.exe

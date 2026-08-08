@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, Modal, TextInput, ScrollView, Alert, Pressable, StyleSheet, Image, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import {
   AudioModule,
@@ -17,12 +16,13 @@ import { STR } from '../lib/strings';
 import { getSymbol } from '../lib/constants';
 import { today, isISODate } from '../utils/calc';
 import { filterByActiveScope, getEntryScope, getModules, normalizeScope } from '../lib/modules';
-import { getDefaultWalletId, getWalletLabel, sortWalletsByDefault } from '../lib/wallets';
+import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel, sortWalletsByDefault } from '../lib/wallets';
 import { Touchable as TouchableOpacity } from './AppPrimitives';
 import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 import DateField from './DateField';
 import { analyzeSmartEntry, buildSmartSourceMeta, describeSmartSource } from '../lib/smartEntry';
 import { suggestCategoryFromHistory } from '../lib/localIntelligence';
+import { CATEGORY_FLOWS, categorySupportsFlow, getCategoriesForFlow, getDefaultCategoryId } from '../lib/categories';
 import { rowDirFor, textAlignFor } from '../lib/layout';
 import { startLiveSpeechPreview } from '../lib/liveSpeechPreview';
 import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
@@ -52,6 +52,7 @@ const buildUploadHeaders = async (endpoint) => {
   } catch {
     // Authenticated edge functions require a user session JWT.
   }
+  if (!headers.Authorization) throw createUploadError(401, 'AUTH_REQUIRED', 'auth_required');
   return headers;
 };
 
@@ -59,11 +60,22 @@ const uploadMediaText = async (uri, endpoint, fallbackName, mimeType) => {
   if (!endpoint || !uri) return '';
   const form = new FormData();
   form.append('file', { uri, name: fallbackName, type: mimeType });
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: await buildUploadHeaders(endpoint),
-    body: form,
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: await buildUploadHeaders(endpoint),
+      body: form,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw createUploadError(408, 'TIMEOUT', 'timeout');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
     let message = '';
     let code = '';
@@ -92,6 +104,9 @@ const analysisErrorMessage = ({ lang, kind, endpoint, error }) => {
     return isArabic
       ? `سجّل الدخول أولاً لتحليل ${source}.`
       : `Sign in first to analyze ${source}.`;
+  }
+  if (error?.status === 408 || error?.code === 'timeout') {
+    return isArabic ? `انتهت مهلة تحليل ${source}. حاول مرة أخرى.` : `${source} analysis timed out. Try again.`;
   }
   if (error?.status === 413) {
     return isArabic ? `ملف ${source} أكبر من الحد المسموح.` : `The ${source} file is too large.`;
@@ -140,6 +155,13 @@ export default function AddTransModal({
   const walletList = sortWalletsByDefault(scopedWallets.length ? scopedWallets : wallets, cfg.currency, cfg.defaultWalletId);
   const transferWalletList = walletList;
   const defaultWalletId = getDefaultWalletId(walletList, cfg.currency, cfg.defaultWalletId);
+  const walletBalanceRows = getWalletAvailableBalances(
+    walletList,
+    trans,
+    cfg.currency,
+    defaultWalletId,
+  );
+  const walletBalanceById = (id) => walletBalanceRows.find(item => item.id === id) || walletList.find(item => item.id === id) || null;
   const align = textAlignFor(cfg.lang);
   const rowDir = rowDirFor(cfg.lang);
   const normalizeEntryMode = (mode) => (
@@ -184,17 +206,17 @@ export default function AddTransModal({
   const transferTargetWallets = eligibleTransferWallets.filter(wallet => wallet.id !== fromWalletId);
   const canTransfer = modules.wallets && eligibleTransferWallets.length > 1;
   const [smartOpen, setSmartOpen] = useState(false);
-  const [smartMode, setSmartMode] = useState('text');
-  const [smartText, setSmartText] = useState('');
+  const [smartMode, setSmartMode] = useState('image');
   const [receiptImageUri, setReceiptImageUri] = useState(null);
   const [voiceUri, setVoiceUri] = useState(null);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [smartSource, setSmartSource] = useState(null);
-  const [showMore, setShowMore] = useState(false);
   const [voicePreviewLive, setVoicePreviewLive] = useState(false);
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [voiceError, setVoiceError] = useState('');
+  const [imageError, setImageError] = useState('');
+  const [expandedPicker, setExpandedPicker] = useState(null);
   const liveSpeechRef = useRef(null);
   const recordingRef = useRef(false);
   const stoppingRef = useRef(false);
@@ -218,9 +240,7 @@ export default function AddTransModal({
     setFromWalletId(firstTransferWallet?.id || defaultWalletId);
     setToWalletId(secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
     setSmartOpen(false);
-    setShowMore(false);
-    setSmartMode('text');
-    setSmartText('');
+    setSmartMode('image');
     setReceiptImageUri(null);
     setVoiceUri(null);
     setMediaBusy(false);
@@ -232,6 +252,7 @@ export default function AddTransModal({
     stoppingRef.current = false;
     setVoiceRecording(false);
     setVoiceError('');
+    setExpandedPicker(null);
   };
 
   useEffect(() => {
@@ -250,17 +271,16 @@ export default function AddTransModal({
       setFromWalletId(editData.fromWalletId || defaultWalletId);
       setToWalletId(editData.toWalletId || secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
       setSmartSource(editData.smartSource || null);
-      setShowMore(!!(editData.note || editData.recurring || editData.smartSource));
+      setExpandedPicker(null);
     } else if (draftData?.smartMode) {
       setType(cleanInitialMode);
       setAmt(''); setTitle(''); setCat('other'); setNote(''); setRecurring(false); setDateISO(today());
       setCategoryTouched(false);
       setWalletId(defaultWalletId);
-      setSmartMode(draftData.smartMode);
+      setSmartMode(draftData.smartMode === 'voice' ? 'voice' : 'image');
       setSmartOpen(true);
-      setSmartText('');
       setSmartSource(null);
-      setShowMore(true);
+      setExpandedPicker(null);
     } else if (draftData) {
       setType(draftData.amt > 0 ? 'inc' : 'exp');
       setAmt(Math.abs(draftData.amt).toString());
@@ -272,7 +292,7 @@ export default function AddTransModal({
       setDateISO(draftData.dateISO || today());
       setWalletId(draftData.walletId || defaultWalletId);
       setSmartSource(draftData.smartSource || null);
-      setShowMore(!!(draftData.note || draftData.recurring || draftData.smartSource));
+      setExpandedPicker(null);
     } else {
       const initialCommitment = initialCommitmentId
         ? availableCommitments.find(item => item.id === initialCommitmentId)
@@ -289,9 +309,9 @@ export default function AddTransModal({
       setFromWalletId(firstTransferWallet?.id || defaultWalletId);
       setToWalletId(secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
       setSmartSource(null);
-      setShowMore(false);
+      setExpandedPicker(null);
     }
-  }, [visible, editData, draftData, cleanInitialMode, initialDebtId, initialGoalId, initialCommitmentId, wallets, commitments, defaultWalletId]);
+  }, [visible, editData, draftData, cleanInitialMode, initialDebtId, initialGoalId, initialCommitmentId, wallets, commitments, defaultWalletId, focusedEntry]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -337,9 +357,13 @@ export default function AddTransModal({
       lang: cfg.lang,
     });
     if (!draft || !draft.amount) return false;
+    const draftFlow = draft.type === 'inc' ? CATEGORY_FLOWS.INCOME : CATEGORY_FLOWS.EXPENSE;
+    const draftCat = cats.find(item => item.id === draft.catId);
     setType(draft.type);
     setAmt(String(draft.amount));
-    setCat(draft.catId);
+    setCat(draftCat && categorySupportsFlow(draftCat, draftFlow)
+      ? draft.catId
+      : getDefaultCategoryId(cats, draftFlow));
     setCategoryTouched(false);
     setTitle(draft.title);
     if (draft.walletId) setWalletId(draft.walletId);
@@ -349,33 +373,15 @@ export default function AddTransModal({
 
   const applyAnalyzedText = ({ value, mode, automated = true }) => {
     const text = String(value || '').trim();
-    setSmartText(text);
     if (!applySmartDraft(text)) return false;
     setSmartMode(mode);
     setSmartSource(buildSmartSourceMeta({ mode, text, automated }));
     setSmartOpen(false);
-    setSmartText('');
     return true;
   };
 
-  const openSmartPanel = (mode) => {
-    setSmartMode(mode);
-    setSmartOpen(true);
-  };
-
-  const useManualTextEntry = () => {
-    setSmartMode('text');
-    setSmartOpen(true);
-    setSmartText('');
-    setSmartSource(null);
-  };
-
-  const pasteSmartText = async () => {
-    const text = await Clipboard.getStringAsync();
-    if (text) setSmartText(text);
-  };
-
   const extractReceiptText = async (uri, mode, mimeType = 'image/jpeg') => {
+    setImageError('');
     setMediaBusy(true);
     try {
       const extension = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
@@ -383,13 +389,14 @@ export default function AddTransModal({
       if (!text) throw new Error('EMPTY_ANALYSIS');
       if (!applyAnalyzedText({ value: text, mode, automated: true })) {
         setSmartOpen(false);
-        setSmartText('');
         Alert.alert('', cfg.lang === 'ar'
           ? 'تمت قراءة الصورة، لكن لم يظهر مبلغ واضح. أدخل المبلغ يدوياً.'
           : 'The image was read, but no clear amount was found. Enter the amount manually.');
       }
     } catch (error) {
-      Alert.alert('', analysisErrorMessage({ lang: cfg.lang, kind: 'image', endpoint: OCR_ENDPOINT, error }));
+      const imageMessage = analysisErrorMessage({ lang: cfg.lang, kind: 'image', endpoint: OCR_ENDPOINT, error });
+      setImageError(imageMessage);
+      Alert.alert('', imageMessage);
     } finally {
       setMediaBusy(false);
       setVoicePreviewLive(false);
@@ -447,7 +454,6 @@ export default function AddTransModal({
       if (!applyAnalyzedText({ value: text, mode: 'voice', automated: true })) {
         setNote(current => current || text);
         setSmartOpen(false);
-        setSmartText('');
         Alert.alert('', cfg.lang === 'ar'
           ? 'تم فهم التسجيل، لكن لم يظهر مبلغ واضح. أدخل المبلغ يدوياً.'
           : 'The recording was understood, but no clear amount was found. Enter the amount manually.');
@@ -497,7 +503,6 @@ export default function AddTransModal({
           : 'Microphone permission is required. Enable it in device settings.');
         return;
       }
-      setSmartText('');
       setVoiceUri(null);
       setSmartMode('voice');
       setSmartOpen(true);
@@ -518,10 +523,7 @@ export default function AddTransModal({
 
       const livePreview = startLiveSpeechPreview({
         lang: cfg.lang,
-        onText: (text) => {
-          setSmartText(text);
-          setVoicePreviewLive(true);
-        },
+        onText: () => setVoicePreviewLive(true),
         onError: () => setVoicePreviewLive(false),
       });
       liveSpeechRef.current = livePreview;
@@ -538,14 +540,6 @@ export default function AddTransModal({
         : `Could not start or stop recording. ${String(error?.message || '')}`.trim();
       setVoiceError(message);
       Alert.alert('', message);
-    }
-  };
-
-  const applySmartPanel = () => {
-    const ok = applyAnalyzedText({ value: smartText, mode: smartMode, automated: smartMode !== 'text' });
-    if (!ok) {
-      Alert.alert('', cfg.lang === 'ar' ? 'لم يتم العثور على مبلغ واضح.' : 'No clear amount was found.');
-      return;
     }
   };
 
@@ -625,7 +619,7 @@ export default function AddTransModal({
       if (!selCommitment) return;
       const result = await payCommitment(selCommitment, dateISO, walletId);
       if (!result?.ok) {
-        if (result?.reason === 'linked_unavailable') {
+        if (result?.reason === 'linked_unavailable' || result?.reason === 'insufficient_balance') {
           Alert.alert('', cfg.lang === 'ar'
             ? 'الدين أو الهدف المرتبط بهذا الالتزام مكتمل بالفعل أو رصيد المحفظة غير كافٍ. الغِ الربط أو أوقف الالتزام من شاشة تعديله.'
             : 'The linked debt or goal is already complete, or the wallet balance is insufficient. Unlink it or pause this commitment.');
@@ -645,12 +639,18 @@ export default function AddTransModal({
     const payload = {
       title: finalTitle,
       amt:   type === 'exp' ? -Math.abs(n) : Math.abs(n),
-      cat, note, recurring, dateISO, walletId,
+      cat: categorySupportsFlow(cats.find(item => item.id === cat), entryFlow) ? cat : defaultEntryCat,
+      note, recurring, dateISO, walletId,
       recurringGroupId: draftData?.recurringGroupId,
       smartSource: smartSource || editData?.smartSource || null,
     };
-    if (editData) await editTrans(editData.id, payload);
-    else           await addTrans(payload);
+    const saved = editData ? await editTrans(editData.id, payload) : await addTrans(payload);
+    if (!saved) {
+      Alert.alert('', cfg.lang === 'ar'
+        ? 'الرصيد المتاح في هذه المحفظة غير كافٍ لتسجيل هذه الحركة.'
+        : 'This wallet does not have enough available balance for this entry.');
+      return;
+    }
     handleClose();
   };
 
@@ -668,19 +668,32 @@ export default function AddTransModal({
   const fmt = (n) => Math.abs(Math.round(n)).toLocaleString();
 
   const isPlanningAction = ['debt', 'goal', 'commitment'].includes(type);
+  const isAmountEntry = ['exp', 'inc', 'transfer'].includes(type);
   const isContextualPlanningLaunch = !!(initialDebtId || initialGoalId || initialCommitmentId);
+  const smartEntryAvailable = !isEdit && !isPlanningAction;
   const planningSeg = [
     (modules.debtsOwed || modules.debtsReceivable) ? { k: 'debt', l: cfg.lang === 'ar' ? 'دين' : 'Debt' } : null,
     modules.goals ? { k: 'goal', l: cfg.lang === 'ar' ? 'هدف' : 'Goal' } : null,
     modules.commitments ? { k: 'commitment', l: cfg.lang === 'ar' ? 'التزام' : 'Commitment' } : null,
   ].filter(Boolean);
   const seg = [
-    { k: 'exp',  l: L.expMode },
-    { k: 'inc',  l: L.incMode },
-    modules.wallets && canTransfer ? { k: 'transfer', l: transferLabel } : null,
+    { k: 'exp', l: cfg.lang === 'ar' ? 'صرف' : 'Expense', icon: 'arrow-down-outline', tone: th.exp },
+    { k: 'inc', l: cfg.lang === 'ar' ? 'دخل' : 'Income', icon: 'arrow-up-outline', tone: th.inc },
+    modules.wallets && canTransfer ? { k: 'transfer', l: transferLabel, icon: 'repeat-outline', tone: th.primary } : null,
+    smartEntryAvailable ? { k: 'smart', l: cfg.lang === 'ar' ? 'ذكي' : 'Smart', icon: 'sparkles-outline', tone: th.warn } : null,
     planningSeg.length > 0 ? { k: 'planning', l: cfg.lang === 'ar' ? 'المتابعات' : 'Tracking' } : null,
   ].filter(Boolean);
-  const saveLabel = type === 'debt' ? L.payDebtAction : type === 'goal' ? L.saveGoalAction : type === 'commitment' ? (cfg.lang === 'ar' ? 'تسجيل الدفع' : 'Mark paid') : type === 'transfer' ? transferLabel : L.save;
+  const saveLabel = type === 'debt'
+    ? L.payDebtAction
+    : type === 'goal'
+      ? L.saveGoalAction
+      : type === 'commitment'
+        ? (cfg.lang === 'ar' ? 'تسجيل الدفع' : 'Mark paid')
+        : type === 'transfer'
+          ? (cfg.lang === 'ar' ? 'متابعة التحويل' : 'Continue transfer')
+          : type === 'inc'
+            ? (cfg.lang === 'ar' ? 'حفظ الدخل' : 'Save income')
+            : (cfg.lang === 'ar' ? 'حفظ الصرف' : 'Save expense');
   const saveColor = type === 'debt' ? th.exp : type === 'goal' || type === 'commitment' || type === 'transfer' ? th.primary : (type === 'exp' ? th.exp : th.inc);
   const lockedDebt = type === 'debt' && !!initialDebtId && !isEdit;
   const lockedGoal = type === 'goal' && !!initialGoalId && !isEdit;
@@ -695,52 +708,56 @@ export default function AddTransModal({
   const debtColor = selectedDebtReceivable ? th.inc : th.exp;
   const finalSaveLabel = type === 'debt' ? debtActionLabel : saveLabel;
   const finalSaveColor = type === 'debt' ? debtColor : saveColor;
-  const focusedTitle = type === 'exp'
-    ? (cfg.lang === 'ar' ? 'إضافة مصروف' : 'Add expense')
-    : type === 'inc'
-      ? (cfg.lang === 'ar' ? 'إضافة دخل' : 'Add income')
-      : type === 'transfer'
-        ? transferLabel
-        : finalSaveLabel;
   const entryTitle = isEdit
     ? L.editTrans
     : focusedEntry
-      ? focusedTitle
-      : (cfg.lang === 'ar' ? '\u0625\u0636\u0627\u0641\u0629 \u062d\u0631\u0643\u0629' : 'Add entry');
-  const moreLabel = cfg.lang === 'ar' ? '\u0627\u0644\u0645\u0632\u064a\u062f' : 'More';
+      ? (cfg.lang === 'ar' ? 'إدخال سريع' : 'Quick entry')
+      : (cfg.lang === 'ar' ? 'إدخال كامل' : 'Full entry');
+  const categoryFlowHint = type === 'inc'
+    ? (cfg.lang === 'ar' ? 'تصنيف الدخل' : 'Income category')
+    : (cfg.lang === 'ar' ? 'تصنيف الصرف' : 'Expense category');
   const smartLabels = {
-    text: cfg.lang === 'ar' ? 'كتابة' : 'Text',
-    media: cfg.lang === 'ar' ? 'صورة' : 'Image',
-    voice: cfg.lang === 'ar' ? 'تسجيل' : 'Record',
-    pasteText: cfg.lang === 'ar' ? 'لصق نص' : 'Paste text',
-    recording: cfg.lang === 'ar' ? 'إيقاف التسجيل' : 'Stop',
-    listening: cfg.lang === 'ar' ? 'جاري التسجيل...' : 'Recording...',
-    processing: cfg.lang === 'ar' ? 'جاري التحليل...' : 'Analyzing...',
-    imageReady: cfg.lang === 'ar' ? 'تم اختيار الصورة' : 'Image selected',
-    voiceReady: cfg.lang === 'ar' ? 'تم تسجيل الصوت' : 'Voice recorded',
-    paste: cfg.lang === 'ar' ? 'لصق' : 'Paste',
-    apply: cfg.lang === 'ar' ? 'تحليل' : 'Analyze',
-    placeholder: smartMode === 'camera' || smartMode === 'image' || smartMode === 'receipt'
-      ? (cfg.lang === 'ar' ? 'الصق نص الفاتورة هنا' : 'Paste receipt text here')
-      : smartMode === 'voice'
-        ? (cfg.lang === 'ar' ? 'سيظهر نص الصوت هنا عند ربط التحويل، أو اكتبه يدوياً' : 'Voice text appears here when transcription is connected, or type it manually')
-      : (cfg.lang === 'ar' ? 'مثال: قهوة 3000 من الكاش' : 'Example: coffee 3000 from cash'),
+    camera: cfg.lang === 'ar' ? '\u0643\u0627\u0645\u064a\u0631\u0627' : 'Camera',
+    gallery: cfg.lang === 'ar' ? '\u0635\u0648\u0631\u0629' : 'Gallery',
+    voice: cfg.lang === 'ar' ? '\u0635\u0648\u062a' : 'Voice',
+    cameraHint: cfg.lang === 'ar' ? '\u0627\u0644\u062a\u0642\u0627\u0637 \u0648\u062a\u062d\u0644\u064a\u0644' : 'Take and scan',
+    galleryHint: cfg.lang === 'ar' ? '\u0627\u062e\u062a\u064a\u0627\u0631 \u0645\u0646 \u0627\u0644\u0635\u0648\u0631' : 'Pick from photos',
+    voiceHint: cfg.lang === 'ar' ? '\u062a\u0633\u062c\u064a\u0644 \u0645\u0644\u0627\u062d\u0638\u0629' : 'Record a note',
+    recording: cfg.lang === 'ar' ? '\u0625\u064a\u0642\u0627\u0641' : 'Stop',
+    listening: cfg.lang === 'ar' ? '\u062c\u0627\u0631\u064a \u0627\u0644\u062a\u0633\u062c\u064a\u0644...' : 'Recording...',
+    processing: cfg.lang === 'ar' ? '\u062c\u0627\u0631\u064a \u0627\u0644\u062a\u062d\u0644\u064a\u0644...' : 'Analyzing...',
+    imageReady: cfg.lang === 'ar' ? '\u062a\u0645 \u0627\u062e\u062a\u064a\u0627\u0631 \u0627\u0644\u0635\u0648\u0631\u0629' : 'Image selected',
+    voiceReady: cfg.lang === 'ar' ? '\u062a\u0645 \u062a\u0633\u062c\u064a\u0644 \u0627\u0644\u0635\u0648\u062a' : 'Voice recorded',
+    quota: cfg.lang === 'ar' ? '\u0625\u062f\u062e\u0627\u0644 \u0630\u0643\u064a \u00b7 \u0635\u0648\u0631\u0629 \u0623\u0648 \u0635\u0648\u062a' : 'Smart entry · image or voice',
   };
-  const selectedCat = cats.find(c => c.id === cat) || cats.find(c => c.id === 'other') || cats[0] || {};
+  const isMoneyEntry = type === 'exp' || type === 'inc';
+  const isTrackerPayment = ['debt', 'goal', 'commitment'].includes(type) && !isEdit;
+  const entryFlow = type === 'inc' ? CATEGORY_FLOWS.INCOME : CATEGORY_FLOWS.EXPENSE;
+  const entryCategories = isMoneyEntry ? getCategoriesForFlow(cats, entryFlow) : cats;
+  const defaultEntryCat = getDefaultCategoryId(cats, entryFlow);
+  const selectedCat = entryCategories.find(c => c.id === cat) || cats.find(c => c.id === cat) || cats.find(c => c.id === defaultEntryCat) || cats.find(c => c.id === 'other') || cats[0] || {};
   const defaultTitle = (() => {
     const catLabel = (cfg.lang === 'ar' ? selectedCat.label : selectedCat.labelEn) || selectedCat.label || selectedCat.labelEn || '';
     if (type === 'inc') return cfg.lang === 'ar' ? `دخل - ${catLabel || 'عام'}` : `Income - ${catLabel || 'General'}`;
     return cfg.lang === 'ar' ? `مصروف - ${catLabel || 'عام'}` : `Expense - ${catLabel || 'General'}`;
   })();
-  const isMoneyEntry = type === 'exp' || type === 'inc';
-  const isSmartLaunch = !isEdit && (isMoneyEntry || type === 'transfer');
+  useEffect(() => {
+    if (!visible || !isMoneyEntry) return;
+    const activeCat = cats.find(item => item.id === cat);
+    if (!activeCat || !categorySupportsFlow(activeCat, entryFlow)) {
+      setCat(defaultEntryCat);
+      setCategoryTouched(false);
+    }
+  }, [visible, isMoneyEntry, cat, cats, entryFlow, defaultEntryCat]);
   useEffect(() => {
     if (!visible || categoryTouched || !isMoneyEntry || title.trim().length < 3) return;
     const suggested = suggestCategoryFromHistory(title, trans, {
       flow: type === 'inc' ? 'income' : 'expense',
     });
-    if (suggested && cats.some(item => item.id === suggested)) setCat(suggested);
-  }, [visible, title, type, categoryTouched, isMoneyEntry, trans, cats]);
+    const suggestedCat = cats.find(item => item.id === suggested);
+    if (suggestedCat && categorySupportsFlow(suggestedCat, entryFlow)) setCat(suggested);
+  }, [visible, title, type, categoryTouched, isMoneyEntry, trans, cats, entryFlow]);
+  const hasImageError = !!imageError;
   const smartSourceInfo = describeSmartSource(smartSource, cfg.lang);
   const isImageSource = ['receipt', 'camera', 'image'].includes(smartSource?.mode);
   const smartSourceTone = smartSource?.mode === 'voice' ? th.warn : isImageSource ? th.primary : th.inc;
@@ -748,14 +765,67 @@ export default function AddTransModal({
     ? (cfg.lang === 'ar' ? 'تم تحليل الصورة وتعبئة البيانات' : 'Image analyzed and fields filled')
     : smartSource?.mode === 'voice'
       ? (cfg.lang === 'ar' ? 'تم تحليل التسجيل وتعبئة البيانات' : 'Recording analyzed and fields filled')
-      : smartSource?.mode === 'text'
-        ? (cfg.lang === 'ar' ? 'تم تحليل النص وتعبئة البيانات' : 'Text analyzed and fields filled')
-        : '';
+      : '';
   const smartModes = [
-    { key: 'text', label: smartLabels.text, icon: 'text-outline', onPress: useManualTextEntry },
-    { key: 'media', label: smartLabels.media, icon: 'camera-outline', onPress: chooseReceiptSource },
-    { key: 'voice', label: voiceRecording ? smartLabels.recording : smartLabels.voice, icon: voiceRecording ? 'stop-circle-outline' : 'mic-outline', onPress: toggleVoiceRecording },
+    { key: 'camera', label: smartLabels.camera, detail: smartLabels.cameraHint, icon: 'camera-outline', onPress: () => pickReceiptImage('camera') },
+    { key: 'image', label: smartLabels.gallery, detail: smartLabels.galleryHint, icon: 'images-outline', onPress: () => pickReceiptImage('library') },
+    { key: 'voice', label: voiceRecording ? smartLabels.recording : smartLabels.voice, detail: smartLabels.voiceHint, icon: voiceRecording ? 'stop' : 'mic-outline', onPress: toggleVoiceRecording },
   ];
+  const renderSelectField = ({ id, label, value, options, onChange, icon = 'chevron-down-outline', tone = th.sub }) => {
+    const selected = options.find(option => option.value === value) || options[0];
+    const expanded = expandedPicker?.id === id;
+    return (
+      <View style={s.selectFieldBlock}>
+        <TouchableOpacity
+          onPress={() => setExpandedPicker(expanded ? null : { id, label, value, options, onChange, icon, tone })}
+          style={[s.selectField, { backgroundColor: th.cardHigh, borderColor: expanded ? th.primary : th.border, flexDirection: rowDir }]}
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+        >
+          <Ionicons name={icon} size={18} color={tone} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[s.selectLabel, { color: th.sub, textAlign: align }]}>{label}</Text>
+            <Text numberOfLines={1} style={[s.selectValue, { color: th.text, textAlign: align }]}>
+              {selected?.label || (cfg.lang === 'ar' ? 'اختر' : 'Choose')}
+            </Text>
+            <Text numberOfLines={1} style={[s.selectDetail, { color: th.sub, textAlign: align }]}>
+              {selected?.detail || ' '}
+            </Text>
+          </View>
+          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={17} color={th.faint} />
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const transferFromOptions = eligibleTransferWallets.map(wallet => {
+    const row = walletBalanceById(wallet.id);
+    return {
+      value: wallet.id,
+      label: getWalletLabel(wallet, cfg.lang),
+      detail: row ? `${cfg.lang === 'ar' ? 'متاح' : 'Available'} ${Math.round(Number(row.availableBalance || 0)).toLocaleString()} ${sym}` : wallet.currency || cfg.currency,
+      icon: 'wallet-outline',
+    };
+  });
+  const transferToOptions = transferFromOptions.filter(option => option.value !== fromWalletId);
+  const walletOptions = walletList.map(wallet => {
+    const row = walletBalanceById(wallet.id);
+    return {
+      value: wallet.id,
+      label: getWalletLabel(wallet, cfg.lang),
+      detail: row ? `${cfg.lang === 'ar' ? 'متاح' : 'Available'} ${Math.round(Number(row.availableBalance || 0)).toLocaleString()} ${sym}` : wallet.currency || cfg.currency,
+      icon: 'wallet-outline',
+    };
+  });
+  const categoryOptions = entryCategories.map(category => ({
+    value: category.id,
+    label: cfg.lang === 'ar' ? category.label : category.labelEn,
+    detail: category.id === defaultEntryCat
+      ? `${categoryFlowHint} · ${cfg.lang === 'ar' ? 'افتراضي' : 'Default'}`
+      : categoryFlowHint,
+    icon: category.icon || 'cube-outline',
+    color: category.color,
+  }));
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
@@ -766,73 +836,58 @@ export default function AddTransModal({
       >
         <View style={s.dismissArea}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
-        <View style={[s.sheet, { backgroundColor: th.card, maxHeight: '88%', paddingBottom: 20 + Math.max(insets.bottom, 8) }]}>
+        <View style={[s.sheet, { backgroundColor: th.card, maxHeight: focusedEntry ? '76%' : '82%', paddingBottom: 0 }]}>
           <ScrollView
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             nestedScrollEnabled
-            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 12) + 96 }}
+            contentContainerStyle={{ paddingBottom: 14 }}
           >
 
             <View style={[s.handle, { backgroundColor: th.cardHigh }]} />
 
             <View style={[s.headRow, { flexDirection: rowDir }]}>
+              <TouchableOpacity onPress={handleClose} style={[s.headerIconBtn, { backgroundColor: th.cardHigh }]}>
+                <Ionicons name="chevron-down" size={18} color={th.sub} />
+              </TouchableOpacity>
               <Text style={[s.title, { color: th.text, textAlign: 'center' }]}>{entryTitle}</Text>
+              <View style={s.headerIconBtn} />
             </View>
-
-            {!isEdit && !isContextualPlanningLaunch && !focusedEntry && (
-              <View style={[s.typeRow, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
-                {seg.filter(sg => sg.k !== 'planning').map(sg => (
+            {!isEdit && !isContextualPlanningLaunch && (
+              <View style={[s.typeRow, { flexDirection: rowDir }]}>
+                {seg.filter(sg => sg.k !== 'planning').map(sg => {
+                  const active = sg.k === 'smart' ? smartOpen : (!smartOpen && type === sg.k);
+                  const color = active ? th.onPrimary : sg.tone || th.sub;
+                  return (
                   <TouchableOpacity
                     key={sg.k}
                     onPress={() => {
+                      if (sg.k === 'smart') {
+                        setSmartMode('image');
+                        setSmartOpen(true);
+                        if (type === 'transfer') setType('exp');
+                        return;
+                      }
                       setType(sg.k === 'planning' ? (planningSeg[0]?.k || 'debt') : sg.k);
                       setSmartOpen(false);
-                      setShowMore(false);
                     }}
-                    style={[s.typeBtn, s.typeBtnEntry, { backgroundColor: (sg.k === 'planning' ? isPlanningAction : type === sg.k) ? th.primary : 'transparent' }]}
+                    style={[
+                      s.typeBtn,
+                      {
+                        backgroundColor: active ? (sg.tone || th.primary) : th.cardHigh,
+                        borderColor: active ? 'transparent' : th.border,
+                      },
+                    ]}
                   >
-                    <Text style={{ color: (sg.k === 'planning' ? isPlanningAction : type === sg.k) ? th.onPrimary : th.sub, ...weight('900'), fontSize: 12, lineHeight: 16 }}>
+                    <Ionicons name={sg.icon || 'ellipse-outline'} size={18} color={color} />
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={{ color, ...weight('900'), fontSize: 13, lineHeight: 18 }}>
                       {sg.l}
                     </Text>
                   </TouchableOpacity>
-                ))}
+                );})}
               </View>
             )}
-
-            {false && isMoneyEntry ? (
-              <TouchableOpacity
-                onPress={() => {
-                  setShowMore(current => !current);
-                  if (showMore) setSmartOpen(false);
-                }}
-                style={[s.moreToggle, { backgroundColor: showMore ? th.primSoft : th.cardHigh, borderColor: showMore ? th.primary : th.border, flexDirection: rowDir }]}
-              >
-                <View style={[s.moreIcon, { backgroundColor: showMore ? th.card : th.primSoft }]}>
-                  <Ionicons name={showMore ? 'options-outline' : 'add-outline'} size={16} color={th.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: showMore ? th.primary : th.text, fontSize: 13, ...weight('900'), textAlign: align }}>{moreLabel}</Text>
-                </View>
-                <Ionicons name={showMore ? 'chevron-up-outline' : 'chevron-down-outline'} size={17} color={showMore ? th.primary : th.faint} />
-              </TouchableOpacity>
-            ) : null}
-
-            {false && !isEdit && isPlanningAction && !isContextualPlanningLaunch && !focusedEntry && (
-              <View style={[s.planTypeRow, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
-                {planningSeg.map(item => (
-                  <TouchableOpacity
-                    key={item.k}
-                    onPress={() => setType(item.k)}
-                    style={[s.planTypeBtn, { backgroundColor: type === item.k ? th.primSoft : 'transparent', borderColor: type === item.k ? th.primary : 'transparent' }]}
-                  >
-                    <Text style={{ color: type === item.k ? th.primary : th.sub, fontSize: 12, ...weight('900') }}>{item.l}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
             {isEdit && type !== 'transfer' && (
               <View style={[s.typeRow, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
                 {['exp', 'inc'].map(t => (
@@ -853,33 +908,37 @@ export default function AddTransModal({
               </View>
             )}
 
-            {isSmartLaunch ? (
+            {smartOpen ? (
               <View style={[s.smartBox, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
-                <View style={[s.smartToolbar, { flexDirection: rowDir }]}>
+                <View style={[s.smartActionGrid, { flexDirection: rowDir }]}>
                   {smartModes.map(item => {
-                    const active = item.key === 'media'
-                      ? ['receipt', 'camera', 'image'].includes(smartMode)
-                      : smartMode === item.key;
+                    const active = item.key === smartMode || (item.key === 'image' && ['receipt', 'image'].includes(smartMode));
                     const recording = item.key === 'voice' && voiceRecording;
                     return (
                       <TouchableOpacity
                         key={item.key}
                         onPress={item.onPress}
                         disabled={mediaBusy || (voiceRecording && item.key !== 'voice')}
-                        style={[s.smartModeBtn, { backgroundColor: recording ? th.expBg : active ? th.primary : th.card, borderColor: recording ? th.exp : active ? th.primary : 'transparent', opacity: mediaBusy ? 0.55 : 1 }]}
+                        accessibilityLabel={item.label}
+                        style={[s.smartModeBtn, { backgroundColor: recording ? th.expBg : active ? th.primary : th.card, borderColor: recording ? th.exp : active ? th.primary : th.border, opacity: mediaBusy ? 0.55 : 1 }]}
                       >
-                        <Ionicons name={item.icon} size={18} color={recording ? th.exp : active ? th.onPrimary : th.sub} />
-                        <Text numberOfLines={1} style={{ color: recording ? th.exp : active ? th.onPrimary : th.sub, fontSize: 12, ...weight('900') }}>{item.label}</Text>
+                        <Ionicons name={item.icon} size={20} color={recording ? th.exp : active ? th.onPrimary : th.sub} />
+                        <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: recording ? th.exp : active ? th.onPrimary : th.text, fontSize: 11, lineHeight: 15, ...weight('900'), textAlign: 'center' }}>
+                          {item.label}
+                        </Text>
+                        <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: active ? th.onPrimary : th.sub, fontSize: 9, lineHeight: 12, ...weight('700'), textAlign: 'center' }}>
+                          {item.detail}
+                        </Text>
                       </TouchableOpacity>
                     );
                   })}
                 </View>
                 {voiceRecording ? (
-                  <Text style={{ color: th.exp, fontSize: 12, ...weight('900'), textAlign: align, marginTop: 8 }}>
+                  <Text style={[s.smartStatusText, { color: th.exp, textAlign: align }]}>
                     {smartLabels.listening} {recordingSeconds}s
                   </Text>
                 ) : mediaBusy ? (
-                  <Text style={{ color: th.primary, fontSize: 12, ...weight('900'), textAlign: align, marginTop: 8 }}>{smartLabels.processing}</Text>
+                  <Text style={[s.smartStatusText, { color: th.primary, textAlign: align }]}>{smartLabels.processing}</Text>
                 ) : receiptImageUri && ['receipt', 'camera', 'image'].includes(smartMode) ? (
                   <View style={[s.mediaPreview, { backgroundColor: th.card, flexDirection: rowDir, marginTop: 8 }]}>
                     <Image source={{ uri: receiptImageUri }} style={s.receiptThumb} />
@@ -892,181 +951,10 @@ export default function AddTransModal({
                   </View>
                 ) : null}
                 {!!voiceError && smartMode === 'voice' ? (
-                  <Text style={{ color: th.exp, fontSize: 12, lineHeight: 18, ...weight('800'), textAlign: align, marginTop: 8 }}>{voiceError}</Text>
-                ) : null}
-                {smartOpen && smartMode === 'text' ? (
-                  <View style={{ marginTop: 10 }}>
-                    <TextInput
-                      value={smartText}
-                      onChangeText={setSmartText}
-                      placeholder={smartLabels.placeholder}
-                      placeholderTextColor={th.sub}
-                      multiline
-                      style={[s.smartInput, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]}
-                    />
-                    <View style={[s.smartFooter, { flexDirection: rowDir }]}>
-                      <TouchableOpacity onPress={pasteSmartText} style={[s.secondaryMini, { backgroundColor: th.card }]}>
-                        <Text style={{ color: th.sub, fontSize: 12, ...weight('900') }}>{smartLabels.paste}</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={applySmartPanel} style={[s.primaryMini, { backgroundColor: th.primary }]}>
-                        <Text style={{ color: th.onPrimary, fontSize: 12, ...weight('900') }}>{smartLabels.apply}</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
+                  <Text style={[s.smartErrorText, { color: th.exp, textAlign: align }]}>{voiceError}</Text>
                 ) : null}
               </View>
             ) : null}
-
-            {false && showMore && isMoneyEntry && (
-              <View style={[smartOpen ? s.smartBox : s.smartBoxCompact, { backgroundColor: smartOpen ? th.cardHigh : 'transparent', borderColor: smartOpen ? th.border : 'transparent' }]}>
-                <View style={[s.smartToolbar, { flexDirection: rowDir }]}>
-                  {smartModes.map(item => {
-                    const matchesMode = item.key === 'media'
-                      ? ['receipt', 'camera', 'image'].includes(smartMode)
-                      : smartMode === item.key;
-                    const matchesSource = item.key === 'media'
-                      ? ['receipt', 'camera', 'image'].includes(smartSource?.mode)
-                      : smartSource?.mode === item.key;
-                    const active = matchesMode && (item.key === 'text' || smartOpen || matchesSource);
-                    const recording = item.key === 'voice' && voiceRecording;
-                    return (
-                      <TouchableOpacity
-                        key={item.key}
-                        onPress={item.onPress}
-                        disabled={mediaBusy || (voiceRecording && item.key !== 'voice')}
-                        style={[
-                          s.smartModeBtn,
-                          {
-                            backgroundColor: recording ? th.expBg : active ? th.primary : th.cardHigh,
-                            borderColor: recording ? th.exp : active ? th.primary : 'transparent',
-                            opacity: mediaBusy ? 0.55 : 1,
-                          },
-                        ]}
-                      >
-                        <Ionicons name={item.icon} size={18} color={recording ? th.exp : active ? th.onPrimary : th.sub} />
-                        <Text numberOfLines={1} style={{ color: recording ? th.exp : active ? th.onPrimary : th.sub, fontSize: 12, ...weight('900') }}>
-                          {item.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-                {smartOpen ? (
-                  <View style={{ marginTop: 10 }}>
-                    {voiceRecording ? (
-                      <Text style={{ color: th.exp, fontSize: 12, ...weight('900'), textAlign: align, marginBottom: 6 }}>
-                        {smartLabels.listening} {recordingSeconds}s
-                        {!voicePreviewLive ? (cfg.lang === 'ar' ? ' — سيظهر النص بعد الإيقاف' : ' — text appears after stopping') : ''}
-                      </Text>
-                    ) : mediaBusy ? (
-                      <Text style={{ color: th.primary, fontSize: 12, ...weight('900'), textAlign: align, marginBottom: 8 }}>{smartLabels.processing}</Text>
-                    ) : receiptImageUri && ['receipt', 'camera', 'image'].includes(smartMode) ? (
-                      <View style={[s.mediaPreview, { backgroundColor: th.card, flexDirection: rowDir }]}>
-                        <Image source={{ uri: receiptImageUri }} style={s.receiptThumb} />
-                        <Text style={{ color: th.sub, fontSize: 12, ...weight('800'), flex: 1, textAlign: align }}>{smartLabels.imageReady}</Text>
-                      </View>
-                    ) : voiceUri && smartMode === 'voice' ? (
-                      <View style={[s.mediaPreview, { backgroundColor: th.card, flexDirection: rowDir }]}>
-                        <Ionicons name="mic-outline" size={18} color={th.primary} />
-                        <Text style={{ color: th.sub, fontSize: 12, ...weight('800'), flex: 1, textAlign: align }}>{smartLabels.voiceReady}</Text>
-                      </View>
-                    ) : null}
-                    {!!voiceError && smartMode === 'voice' ? (
-                      <Text style={{ color: th.exp, fontSize: 12, lineHeight: 18, ...weight('800'), textAlign: align, marginBottom: 6 }}>{voiceError}</Text>
-                    ) : null}
-                    {smartMode === 'text' ? (
-                      <>
-                        <TextInput
-                          value={smartText}
-                          onChangeText={setSmartText}
-                          placeholder={smartLabels.placeholder}
-                          placeholderTextColor={th.sub}
-                          multiline
-                          style={[s.smartInput, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]}
-                        />
-                        <View style={[s.smartFooter, { flexDirection: rowDir }]}>
-                          <TouchableOpacity onPress={pasteSmartText} style={[s.secondaryMini, { backgroundColor: th.card }]}>
-                            <Text style={{ color: th.sub, fontSize: 12, ...weight('900') }}>{smartLabels.paste}</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={applySmartPanel} style={[s.primaryMini, { backgroundColor: th.primary }]}>
-                            <Text style={{ color: th.onPrimary, fontSize: 12, ...weight('900') }}>{smartLabels.apply}</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </>
-                    ) : null}
-                  </View>
-                ) : null}
-              </View>
-            )}
-
-            {type === 'transfer' && (
-              <View style={{ marginBottom: 14 }}>
-                <Text style={[s.label, { color: th.sub }]}>{fromLabel}</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={{ marginBottom: 10 }}
-                  contentContainerStyle={{ flexDirection: rowDir }}
-                >
-                  {eligibleTransferWallets.map(wallet => {
-                    const active = fromWalletId === wallet.id;
-                    return (
-                      <TouchableOpacity
-                        key={wallet.id}
-                        onPress={() => {
-                          setFromWalletId(wallet.id);
-                          const nextTarget = eligibleTransferWallets.find(candidate => candidate.id !== wallet.id);
-                          setToWalletId(nextTarget?.id || wallet.id);
-                        }}
-                        style={[
-                          s.walletChip,
-                          {
-                            backgroundColor: active ? th.primSoft : th.cardHigh,
-                            borderColor: active ? th.primary : 'transparent',
-                            marginRight: cfg.lang === 'ar' ? 0 : 8,
-                            marginLeft: cfg.lang === 'ar' ? 8 : 0,
-                          },
-                        ]}
-                      >
-                        <Ionicons name="wallet-outline" size={14} color={active ? th.primary : th.sub} />
-                        <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('800'), textAlign: align }}>
-                          {getWalletLabel(wallet, cfg.lang)}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-
-                <Text style={[s.label, { color: th.sub }]}>{toLabel}</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: rowDir }}>
-                  {transferTargetWallets.map(wallet => {
-                    const active = toWalletId === wallet.id;
-                    return (
-                      <TouchableOpacity
-                        key={wallet.id}
-                        onPress={() => setToWalletId(wallet.id)}
-                        style={[
-                          s.walletChip,
-                          {
-                            backgroundColor: active ? th.primSoft : th.cardHigh,
-                            borderColor: active ? th.primary : 'transparent',
-                            opacity: fromWalletId === wallet.id ? 0.45 : 1,
-                            marginRight: cfg.lang === 'ar' ? 0 : 8,
-                            marginLeft: cfg.lang === 'ar' ? 8 : 0,
-                          },
-                        ]}
-                      >
-                        <Ionicons name="wallet-outline" size={14} color={active ? th.primary : th.sub} />
-                        <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('800'), textAlign: align }}>
-                          {getWalletLabel(wallet, cfg.lang)}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-            )}
 
             {lockedDebt && selectedDebt && (
               <View style={[s.lockedPick, { backgroundColor: selectedDebtReceivable ? th.incBg : th.expBg, borderColor: debtColor }]}>
@@ -1082,26 +970,21 @@ export default function AddTransModal({
             )}
 
             {type === 'debt' && !isEdit && !lockedDebt && (
-              <View style={{ marginBottom: 14 }}>
-                <Text style={[s.label, { color: th.sub }]}>{L.selectDebt}</Text>
-                {availableDebts.length === 0 ? (
-                  <Text style={{ color: th.faint, fontSize: 12 }}>{L.noDebtsHint}</Text>
-                ) : availableDebts.map(d => {
-                  const receivable = d.direction === 'receivable';
-                  const active = selDebt === d.id;
-                  const tone = receivable ? th.inc : th.exp;
-                  return (
-                    <TouchableOpacity key={d.id} onPress={() => setSelDebt(d.id)}
-                      style={[s.pickRow, { backgroundColor: active ? (receivable ? th.incBg : th.expBg) : th.cardHigh, borderColor: active ? tone : 'transparent' }]}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: tone, ...weight('900'), fontSize: 11, marginBottom: 2 }}>
-                          {cfg.lang === 'ar' ? (receivable ? 'دين لي' : 'دين عليّ') : (receivable ? 'Debt owed to me' : 'Debt I owe')}
-                        </Text>
-                        <Text style={{ color: active ? tone : th.text, ...weight('700'), fontSize: 13 }}>{d.name}</Text>
-                      </View>
-                      <Text style={{ color: th.sub, fontSize: 12 }}>{L.remainingOf} {fmt(d.total - d.paid)} {sym}</Text>
-                    </TouchableOpacity>
-                  );
+              <View style={s.sectionBlock}>
+                {renderSelectField({
+                  id: 'debt',
+                  label: L.selectDebt,
+                  value: selDebt,
+                  options: availableDebts.map(debt => ({
+                    value: debt.id,
+                    label: debt.name,
+                    detail: `${debt.direction === 'receivable' ? (cfg.lang === 'ar' ? 'دين لي' : 'Owed to me') : (cfg.lang === 'ar' ? 'دين عليّ' : 'I owe')} · ${L.remainingOf} ${fmt(debt.total - debt.paid)} ${sym}`,
+                    icon: debt.direction === 'receivable' ? 'arrow-down-circle-outline' : 'arrow-up-circle-outline',
+                    color: debt.direction === 'receivable' ? th.inc : th.exp,
+                  })),
+                  icon: 'card-outline',
+                  tone: selectedDebtReceivable ? th.inc : th.exp,
+                  onChange: setSelDebt,
                 })}
               </View>
             )}
@@ -1117,17 +1000,22 @@ export default function AddTransModal({
             )}
 
             {type === 'goal' && !isEdit && !lockedGoal && (
-              <View style={{ marginBottom: 14 }}>
-                <Text style={[s.label, { color: th.sub }]}>{L.selectGoal}</Text>
-                {availableGoals.length === 0 ? (
-                  <Text style={{ color: th.faint, fontSize: 12 }}>{L.noGoalsHint}</Text>
-                ) : availableGoals.map(g => (
-                  <TouchableOpacity key={g.id} onPress={() => setSelGoal(g.id)}
-                    style={[s.pickRow, { backgroundColor: selGoal === g.id ? th.primSoft : th.cardHigh, borderColor: selGoal === g.id ? th.primary : 'transparent' }]}>
-                    <Text style={{ color: selGoal === g.id ? th.primary : th.text, ...weight('700'), fontSize: 13 }}>{g.name}</Text>
-                    <Text style={{ color: th.sub, fontSize: 12 }}>{L.remainingOf} {fmt(g.target - g.cur)} {sym}</Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={s.sectionBlock}>
+                {renderSelectField({
+                  id: 'goal',
+                  label: L.selectGoal,
+                  value: selGoal,
+                  options: availableGoals.map(goal => ({
+                    value: goal.id,
+                    label: goal.name,
+                    detail: `${L.remainingOf} ${fmt(goal.target - goal.cur)} ${sym}`,
+                    icon: 'flag-outline',
+                    color: th.primary,
+                  })),
+                  icon: 'flag-outline',
+                  tone: th.primary,
+                  onChange: setSelGoal,
+                })}
               </View>
             )}
 
@@ -1142,74 +1030,143 @@ export default function AddTransModal({
             )}
 
             {type === 'commitment' && !isEdit && !lockedCommitment && (
-              <View style={{ marginBottom: 14 }}>
-                <Text style={[s.label, { color: th.sub }]}>{cfg.lang === 'ar' ? 'اختر الالتزام' : 'Select commitment'}</Text>
-                {availableCommitments.filter(item => item.active !== false).length === 0 ? (
-                  <Text style={{ color: th.faint, fontSize: 12 }}>{cfg.lang === 'ar' ? 'لا توجد التزامات مفعلة' : 'No active commitments'}</Text>
-                ) : availableCommitments.filter(item => item.active !== false).map(item => (
-                  <TouchableOpacity key={item.id} onPress={() => { setSelCommitment(item.id); setWalletId(item.walletId || defaultWalletId); }}
-                    style={[s.pickRow, { backgroundColor: selCommitment === item.id ? th.primSoft : th.cardHigh, borderColor: selCommitment === item.id ? th.primary : 'transparent' }]}>
-                    <Text style={{ color: selCommitment === item.id ? th.primary : th.text, ...weight('700'), fontSize: 13 }}>{item.name}</Text>
-                    <Text style={{ color: th.sub, fontSize: 12 }}>{Math.round(Number(item.amt || 0)).toLocaleString()} {sym}</Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={s.sectionBlock}>
+                {renderSelectField({
+                  id: 'commitment',
+                  label: cfg.lang === 'ar' ? 'اختر الالتزام' : 'Select commitment',
+                  value: selCommitment,
+                  options: availableCommitments.filter(item => item.active !== false).map(item => ({
+                    value: item.id,
+                    label: item.name,
+                    detail: `${Math.round(Number(item.amt || 0)).toLocaleString()} ${sym}`,
+                    icon: 'calendar-outline',
+                    color: th.primary,
+                  })),
+                  icon: 'calendar-outline',
+                  tone: th.primary,
+                  onChange: (value, option) => {
+                    setSelCommitment(value);
+                    const commitment = availableCommitments.find(item => item.id === option?.value);
+                    setWalletId(commitment?.walletId || defaultWalletId);
+                  },
+                })}
               </View>
             )}
 
-            {isMoneyEntry && (
-              <View style={[s.moneyFields, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
-                <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>{L.amount}</Text>
-                <TextInput value={amt} onChangeText={(value) => setAmt(formatNumberInput(value))} keyboardType="numeric"
-                  placeholder={`0 ${sym}`} placeholderTextColor={th.faint}
-                  style={[s.amountInput, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]} />
-                <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>{L.titleField}</Text>
-                <TextInput
-                  value={title}
-                  onChangeText={setTitle}
-                  placeholder={defaultTitle}
-                  placeholderTextColor={th.faint}
-                  style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]}
-                />
-                <DateField
-                  value={dateISO}
-                  onChange={setDateISO}
-                  th={th}
-                  lang={cfg.lang}
-                  label={cfg.lang === 'ar' ? 'التاريخ' : 'Date'}
-                />
-              </View>
+            {isAmountEntry && (
+              <>
+                <View style={[s.entryField, s.amountField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                  <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>{L.amount}</Text>
+                  <TextInput
+                    value={amt}
+                    onChangeText={(value) => setAmt(formatNumberInput(value))}
+                    keyboardType="numeric"
+                    placeholder={`0 ${sym}`}
+                    placeholderTextColor={th.faint}
+                    style={[s.amountInput, { color: type === 'inc' ? th.inc : type === 'exp' ? th.exp : th.text, textAlign: align }]}
+                  />
+                </View>
+                {isMoneyEntry ? (
+                  <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                    <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>{L.titleField}</Text>
+                    <TextInput
+                      value={title}
+                      onChangeText={setTitle}
+                      placeholder={defaultTitle}
+                      placeholderTextColor={th.faint}
+                      style={[s.inlineInput, { color: th.text, textAlign: align }]}
+                    />
+                  </View>
+                ) : null}
+              </>
             )}
 
-            {modules.wallets && walletList.length > 0 && type !== 'transfer' && (
-              <View style={{ marginBottom: 14 }}>
-                <Text style={[s.label, { color: th.sub, textAlign: align }]}>{walletLabel}</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: rowDir }}>
-                  {walletList.map(wallet => {
-                    const active = walletId === wallet.id;
-                    return (
+            {isMoneyEntry ? (
+              <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
+                {modules.wallets && walletList.length > 0 ? renderSelectField({
+                    id: 'wallet',
+                    label: walletLabel,
+                    value: walletId,
+                    options: walletOptions,
+                    icon: 'wallet-outline',
+                    tone: th.primary,
+                    onChange: setWalletId,
+                  }) : null}
+                {renderSelectField({
+                  id: 'category',
+                  label: categoryFlowHint,
+                  value: cat,
+                  options: categoryOptions,
+                  icon: selectedCat.icon || 'grid-outline',
+                  tone: type === 'inc' ? th.inc : th.exp,
+                  onChange: (value) => { setCat(value); setCategoryTouched(true); },
+                })}
+              </View>
+            ) : null}
+
+            {type === 'transfer' ? (
+              <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
+                {renderSelectField({
+                  id: 'transfer-from',
+                  label: fromLabel,
+                  value: fromWalletId,
+                  options: transferFromOptions,
+                  icon: 'arrow-up-outline',
+                  tone: th.exp,
+                  onChange: (value) => {
+                    setFromWalletId(value);
+                    const nextTarget = eligibleTransferWallets.find(candidate => candidate.id !== value);
+                    setToWalletId(nextTarget?.id || value);
+                  },
+                })}
+                {renderSelectField({
+                  id: 'transfer-to',
+                  label: toLabel,
+                  value: toWalletId,
+                  options: transferToOptions,
+                  icon: 'arrow-down-outline',
+                  tone: th.inc,
+                  onChange: setToWalletId,
+                })}
+              </View>
+            ) : null}
+
+            {isAmountEntry ? (
+              <View style={s.detailsBlock}>
+                <View style={[s.dateRepeatRow, { flexDirection: rowDir }]}>
+                  <DateField
+                    value={dateISO}
+                    onChange={setDateISO}
+                    th={th}
+                    lang={cfg.lang}
+                    label={cfg.lang === 'ar' ? 'التاريخ' : 'Date'}
+                    style={s.selectFieldBlock}
+                    buttonStyle={s.dateButton}
+                  />
+                  {modules.recurring && isMoneyEntry ? (
+                    <View style={s.selectFieldBlock}>
+                      <Text style={[s.selectLabel, { color: th.sub, textAlign: align }]}>
+                        {cfg.lang === 'ar' ? 'التكرار الشهري' : 'Monthly repeat'}
+                      </Text>
                       <TouchableOpacity
-                        key={wallet.id}
-                        onPress={() => setWalletId(wallet.id)}
-                        style={[
-                          s.walletChip,
-                          {
-                            backgroundColor: active ? th.primSoft : th.cardHigh,
-                            borderColor: active ? th.primary : 'transparent',
-                            marginRight: cfg.lang === 'ar' ? 0 : 8,
-                            marginLeft: cfg.lang === 'ar' ? 8 : 0,
-                          },
-                        ]}
+                        onPress={() => setRecurring(current => !current)}
+                        accessibilityRole="switch"
+                        accessibilityState={{ checked: recurring }}
+                        style={[s.repeatField, { backgroundColor: recurring ? th.primSoft : th.input, borderColor: recurring ? th.primary : th.border, flexDirection: rowDir }]}
                       >
-                        <Ionicons name="wallet-outline" size={14} color={active ? th.primary : th.sub} />
-                        <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('800'), textAlign: align }}>
-                          {getWalletLabel(wallet, cfg.lang)}
-                        </Text>
+                        <Ionicons name="repeat" size={17} color={recurring ? th.primary : th.sub} />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text numberOfLines={1} style={[s.repeatValue, { color: recurring ? th.primary : th.text, textAlign: align }]}>
+                            {recurring ? (cfg.lang === 'ar' ? 'مفعل شهرياً' : 'Monthly on') : (cfg.lang === 'ar' ? 'غير مكرر' : 'Off')}
+                          </Text>
+                        </View>
+                        <Ionicons name={recurring ? 'checkmark-circle' : 'ellipse-outline'} size={17} color={recurring ? th.primary : th.faint} />
                       </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+                    </View>
+                  ) : null}
+                </View>
               </View>
-            )}
+            ) : null}
 
             {smartSourceInfo && isMoneyEntry ? (
               <View style={[s.smartSourceNote, { backgroundColor: `${smartSourceTone}18`, borderColor: `${smartSourceTone}38`, flexDirection: rowDir }]}>
@@ -1233,166 +1190,161 @@ export default function AddTransModal({
                   </Text>
                 </View>
               </View>
-              <DateField
-                value={dateISO}
-                onChange={setDateISO}
-                th={th}
-                lang={cfg.lang}
-                label={cfg.lang === 'ar' ? 'تاريخ الدفع' : 'Payment date'}
-                style={{ marginBottom: 12 }}
-              />
-              </>
-            ) : !isMoneyEntry ? (
-              <View style={{ marginBottom: 12 }}>
-                <TextInput value={amt} onChangeText={(value) => setAmt(formatNumberInput(value))} keyboardType="numeric"
-                  placeholder={`${L.amount} (${sym})`} placeholderTextColor={th.sub}
-                  style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]} />
+              <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
+                {isTrackerPayment && modules.wallets && walletList.length > 0 ? renderSelectField({
+                  id: 'tracker-wallet',
+                  label: walletLabel,
+                  value: walletId,
+                  options: walletOptions,
+                  icon: 'wallet-outline',
+                  tone: th.primary,
+                  onChange: setWalletId,
+                }) : null}
                 <DateField
                   value={dateISO}
                   onChange={setDateISO}
                   th={th}
                   lang={cfg.lang}
-                  label={cfg.lang === 'ar' ? 'التاريخ' : 'Date'}
+                  label={cfg.lang === 'ar' ? 'تاريخ الدفع' : 'Payment date'}
+                  style={s.selectFieldBlock}
+                  buttonStyle={s.dateButton}
                 />
+              </View>
+              </>
+            ) : !isAmountEntry ? (
+              <View style={{ marginBottom: 12 }}>
+                <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                  <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>{L.amount}</Text>
+                  <TextInput
+                    value={amt}
+                    onChangeText={(value) => setAmt(formatNumberInput(value))}
+                    keyboardType="numeric"
+                    placeholder={`0 ${sym}`}
+                    placeholderTextColor={th.faint}
+                    style={[s.inlineInput, { color: th.text, textAlign: align }]}
+                  />
+                </View>
+                <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
+                  {isTrackerPayment && modules.wallets && walletList.length > 0 ? renderSelectField({
+                    id: 'tracker-wallet',
+                    label: walletLabel,
+                    value: walletId,
+                    options: walletOptions,
+                    icon: 'wallet-outline',
+                    tone: th.primary,
+                    onChange: setWalletId,
+                  }) : null}
+                  <DateField
+                    value={dateISO}
+                    onChange={setDateISO}
+                    th={th}
+                    lang={cfg.lang}
+                    label={cfg.lang === 'ar' ? 'التاريخ' : 'Date'}
+                    style={s.selectFieldBlock}
+                    buttonStyle={s.dateButton}
+                  />
+                </View>
               </View>
             ) : null}
 
-            {isMoneyEntry && (
-              <>
-                <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>{L.cat}</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={{ marginBottom: 12 }}
-                  contentContainerStyle={{ flexDirection: rowDir }}
-                >
-                  {cats.map(c => (
-                    <TouchableOpacity key={c.id} onPress={() => { setCat(c.id); setCategoryTouched(true); }}
-                      style={[
-                        s.catChip,
-                        {
-                          backgroundColor: cat === c.id ? c.color + '33' : th.cardHigh,
-                          borderColor: cat === c.id ? c.color : 'transparent',
-                          marginRight: cfg.lang === 'ar' ? 0 : 8,
-                          marginLeft: cfg.lang === 'ar' ? 8 : 0,
-                        },
-                      ]}>
-                      <Ionicons name={c.icon || 'cube-outline'} size={16} color={c.color} />
-                      <Text style={{ color: cat === c.id ? c.color : th.sub, fontSize: 12, ...weight('700'), textAlign: align }}>
-                        {cfg.lang === 'ar' ? c.label : c.labelEn}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+          </ScrollView>
 
-                {false && <TouchableOpacity
-                  onPress={() => {
-                    setShowMore(current => !current);
-                    if (showMore) setSmartOpen(false);
-                  }}
-                  style={[s.moreToggle, { backgroundColor: showMore ? th.primSoft : th.cardHigh, borderColor: showMore ? th.primary : th.border, flexDirection: rowDir }]}
-                >
-                  <View style={[s.moreIcon, { backgroundColor: showMore ? th.card : th.primSoft }]}>
-                    <Ionicons name={showMore ? 'options-outline' : 'add-outline'} size={16} color={th.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: showMore ? th.primary : th.text, fontSize: 13, ...weight('900'), textAlign: align }}>{moreLabel}</Text>
-                  </View>
-                  <Ionicons name={showMore ? 'chevron-up-outline' : 'chevron-down-outline'} size={17} color={showMore ? th.primary : th.faint} />
-                </TouchableOpacity>}
-
-                {false && showMore ? <>
-                <View style={[s.smartBoxCompact, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
-                  <View style={[s.smartToolbar, { flexDirection: rowDir }]}>
-                    {smartModes.map(item => {
-                      const active = item.key === 'media'
-                        ? ['receipt', 'camera', 'image'].includes(smartMode)
-                        : smartMode === item.key;
-                      const recording = item.key === 'voice' && voiceRecording;
-                      return (
-                        <TouchableOpacity
-                          key={item.key}
-                          onPress={item.onPress}
-                          disabled={mediaBusy || (voiceRecording && item.key !== 'voice')}
-                          style={[s.smartModeBtn, { backgroundColor: recording ? th.expBg : active ? th.primary : th.card, borderColor: recording ? th.exp : active ? th.primary : 'transparent', opacity: mediaBusy ? 0.55 : 1 }]}
-                        >
-                          <Ionicons name={item.icon} size={18} color={recording ? th.exp : active ? th.onPrimary : th.sub} />
-                          <Text numberOfLines={1} style={{ color: recording ? th.exp : active ? th.onPrimary : th.sub, fontSize: 12, ...weight('900') }}>{item.label}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                  {smartOpen && smartMode === 'text' ? (
-                    <View style={{ marginTop: 10 }}>
-                      <TextInput
-                        value={smartText}
-                        onChangeText={setSmartText}
-                        placeholder={smartLabels.placeholder}
-                        placeholderTextColor={th.sub}
-                        multiline
-                        style={[s.smartInput, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]}
-                      />
-                      <View style={[s.smartFooter, { flexDirection: rowDir }]}>
-                        <TouchableOpacity onPress={pasteSmartText} style={[s.secondaryMini, { backgroundColor: th.card }]}>
-                          <Text style={{ color: th.sub, fontSize: 12, ...weight('900') }}>{smartLabels.paste}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={applySmartPanel} style={[s.primaryMini, { backgroundColor: th.primary }]}>
-                          <Text style={{ color: th.onPrimary, fontSize: 12, ...weight('900') }}>{smartLabels.apply}</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ) : null}
-                </View>
-                <TextInput value={note} onChangeText={setNote}
-                  placeholder={L.note} placeholderTextColor={th.sub}
-                  style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]} />
-
-                {modules.recurring ? (
-                  <View style={{ marginBottom: 16 }}>
-                    <View style={s.rowBetween}>
-                      <TouchableOpacity onPress={() => setRecurring(r => !r)}
-                        style={[s.toggleBtn, { backgroundColor: recurring ? th.primSoft : th.cardHigh, borderColor: recurring ? th.primary : 'transparent' }]}>
-                        <Ionicons name="repeat" size={13} color={recurring ? th.primary : th.sub} />
-                        <Text style={{ color: recurring ? th.primary : th.sub, fontSize: 12, ...weight('700') }}> {L.recurring}</Text>
-                      </TouchableOpacity>
-                    </View>
-                    {recurring ? (
-                      <View style={[s.recurringNote, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}>
-                        <Ionicons name="shield-checkmark-outline" size={15} color={th.primary} />
-                        <Text style={{ color: th.sub, fontSize: 11, lineHeight: 17, ...weight('700'), flex: 1, textAlign: align }}>
-                          {cfg.lang === 'ar'
-                            ? 'تذكير شهري فقط: لن تُسجّل الحركة أو تُخصم إلا بعد مراجعتك وتأكيدك.'
-                            : 'Monthly reminder only: nothing is recorded or deducted until you review and confirm it.'}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                ) : null}
-                </> : null}
-              </>
-            )}
-
+          <View
+            style={[
+              s.stickyFooter,
+              {
+                backgroundColor: th.card,
+                borderTopColor: th.border,
+                paddingBottom: Math.max(insets.bottom, 8),
+              },
+            ]}
+          >
             {isEdit ? (
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <TouchableOpacity onPress={handleDelete}
-                  style={[s.halfBtn, { backgroundColor: th.expBg, borderColor: th.exp, borderWidth: 1 }]}>
-                  <Text style={{ color: th.exp, ...weight('700'), fontSize: 14 }}>{L.delete}</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity
+                  onPress={handleDelete}
+                  style={[s.footerDeleteBtn, { backgroundColor: th.expBg, borderColor: th.exp }]}
+                >
+                  <Ionicons name="trash-outline" size={17} color={th.exp} />
+                  <Text style={{ color: th.exp, ...weight('800'), fontSize: 12 }}>{L.delete}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleSave}
-                  style={[s.halfBtn, { backgroundColor: finalSaveColor, flex: 2 }]}>
-                  <Text style={{ color: '#fff', ...weight('800'), fontSize: 15 }}>{L.save}</Text>
+                <TouchableOpacity
+                  onPress={handleSave}
+                  style={[s.footerSaveBtn, { backgroundColor: finalSaveColor, flex: 2 }]}
+                >
+                  <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                  <Text style={{ color: '#fff', ...weight('900'), fontSize: 14 }}>{L.save}</Text>
                 </TouchableOpacity>
               </View>
             ) : (
-              <TouchableOpacity onPress={handleSave} style={[s.saveBtn, { backgroundColor: finalSaveColor }]}>
-                <Text style={{ color: '#fff', ...weight('800'), fontSize: 15 }}>{finalSaveLabel}</Text>
+              <TouchableOpacity
+                onPress={handleSave}
+                style={[s.footerSaveBtn, { backgroundColor: finalSaveColor }]}
+              >
+                <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                <Text style={{ color: '#fff', ...weight('900'), fontSize: 14 }}>{finalSaveLabel}</Text>
               </TouchableOpacity>
             )}
-
-          </ScrollView>
+          </View>
         </View>
         </View>
       </KeyboardAvoidingView>
+      <Modal
+        visible={!!expandedPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setExpandedPicker(null)}
+      >
+        <View style={[s.selectSheetOverlay, { backgroundColor: th.overlay }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setExpandedPicker(null)} />
+          <View style={[s.selectSheetPanel, { backgroundColor: th.card, borderColor: th.border, paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <View style={[s.selectSheetHead, { flexDirection: rowDir }]}>
+              <View style={[s.selectSheetIcon, { backgroundColor: th.primSoft }]}>
+                <Ionicons name={expandedPicker?.icon || 'chevron-down-outline'} size={18} color={expandedPicker?.tone || th.primary} />
+              </View>
+              <Text style={[s.selectSheetTitle, { color: th.text, textAlign: align }]} numberOfLines={1}>
+                {expandedPicker?.label || (cfg.lang === 'ar' ? 'اختر' : 'Choose')}
+              </Text>
+              <TouchableOpacity onPress={() => setExpandedPicker(null)} style={[s.selectSheetClose, { backgroundColor: th.cardHigh }]}>
+                <Ionicons name="chevron-down" size={18} color={th.sub} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={s.selectSheetList}>
+              {expandedPicker?.options?.length ? expandedPicker.options.map(option => {
+                const active = option.value === expandedPicker.value;
+                const optionColor = option.color || (active ? th.primary : th.sub);
+                return (
+                  <TouchableOpacity
+                    key={String(option.value)}
+                    onPress={() => {
+                      expandedPicker.onChange?.(option.value, option);
+                      setExpandedPicker(null);
+                    }}
+                    style={[s.selectSheetOption, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : th.border, flexDirection: rowDir }]}
+                  >
+                    <Ionicons name={option.icon || 'ellipse-outline'} size={18} color={optionColor} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text numberOfLines={1} style={{ color: active ? th.primary : th.text, fontSize: 13, ...weight(active ? '900' : '800'), textAlign: align }}>
+                        {option.label}
+                      </Text>
+                      {option.detail ? (
+                        <Text numberOfLines={1} style={{ color: th.sub, fontSize: 10, lineHeight: 15, ...weight('700'), textAlign: align, marginTop: 2 }}>
+                          {option.detail}
+                        </Text>
+                      ) : null}
+                    </View>
+                    {active ? <Ionicons name="checkmark-circle" size={18} color={th.primary} /> : null}
+                  </TouchableOpacity>
+                );
+              }) : (
+                <Text style={[s.emptySelect, { color: th.faint, textAlign: align }]}>
+                  {cfg.lang === 'ar' ? 'لا توجد خيارات متاحة' : 'No options available'}
+                </Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -1400,41 +1352,73 @@ export default function AddTransModal({
 const s = StyleSheet.create({
   overlay:    { flex: 1, justifyContent: 'flex-end' },
   dismissArea:{ flex: 1, justifyContent: 'flex-end' },
-  sheet:      { borderTopLeftRadius: RADIUS.sheet, borderTopRightRadius: RADIUS.sheet, paddingHorizontal: SPACE.lg, paddingTop: SPACE.md, paddingBottom: SPACE.huge, ...SHADOW.float },
-  handle:     { width: 38, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
-  headRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  title:      { flex: 1, fontSize: 18, lineHeight: 24, ...weight('900') },
-  typeRow:    { borderRadius: 8, padding: 4, marginBottom: 12, gap: 4 },
-  typeBtn:    { flex: 1, minHeight: 42, paddingHorizontal: 8, paddingVertical: 9, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  typeBtnEntry: { flex: 1, minWidth: 0 },
-  planTypeRow:{ borderRadius: 14, padding: 4, marginTop: -8, marginBottom: 16, gap: 4 },
-  planTypeBtn:{ flex: 1, minHeight: 44, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  sheet:      { borderTopLeftRadius: RADIUS.sheet, borderTopRightRadius: RADIUS.sheet, paddingHorizontal: 16, paddingTop: 10, paddingBottom: SPACE.huge, ...SHADOW.float },
+  handle:     { width: 38, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 10 },
+  headRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  title:      { flex: 1, fontSize: 17, lineHeight: 23, ...weight('900') },
+  headerIconBtn:{ width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  typeRow:    { marginBottom: 10, gap: 7 },
+  typeBtn:    { flex: 1, minHeight: 56, paddingHorizontal: 5, paddingVertical: 8, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 4 },
   label:      { fontSize: 12, lineHeight: 17, ...weight('900'), marginBottom: 8 },
-  fieldLabel: { fontSize: 12, lineHeight: 18, ...weight('900'), marginBottom: 6 },
-  moneyFields:{ borderRadius: 8, borderWidth: 1, padding: 12, marginBottom: 12 },
-  pickRow:    { borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 11, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  lockedPick: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  input:      { minHeight: 46, borderRadius: 8, paddingHorizontal: 13, paddingVertical: 10, borderWidth: 0.5, marginBottom: 10, fontSize: 14, lineHeight: 19, ...weight('700') },
-  amountInput:{ minHeight: 54, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 11, borderWidth: 0.5, marginBottom: 10, fontSize: 22, lineHeight: 28, ...weight('900') },
-  dateChip:   { minHeight: 46, borderRadius: 12, borderWidth: 0.5, paddingHorizontal: 12, justifyContent: 'center', flexDirection: 'row', alignItems: 'center', gap: 6 },
-  catChip:    { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 11, paddingVertical: 9, borderRadius: 12, marginRight: 8, borderWidth: 1, gap: 4, minWidth: 68 },
-  walletChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, marginRight: 8, borderWidth: 1 },
-  moreToggle: { minHeight: 54, borderRadius: 8, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 11, paddingVertical: 8, marginBottom: 12 },
-  moreIcon:   { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  smartBox:   { borderWidth: 0.5, borderRadius: 8, padding: 10, marginBottom: 10 },
-  smartBoxCompact:{ borderWidth: 0.5, borderRadius: 8, marginBottom: 10 },
-  smartToolbar:{ alignItems: 'stretch', gap: 7 },
-  smartModeBtn:{ flex: 1, minHeight: 52, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 4 },
-  smartInput: { minHeight: 88, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 0.5, fontSize: 13, lineHeight: 19, ...weight('700'), textAlignVertical: 'top' },
-  smartFooter:{ gap: 8, marginTop: 8 },
+  fieldLabel: { fontSize: 11, lineHeight: 16, ...weight('900'), marginBottom: 5 },
+  entryField: { borderRadius: 13, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8 },
+  amountField:{ paddingVertical: 9 },
+  sectionBlock:{ marginBottom: 8 },
+  twoColumnRow:{ alignItems: 'stretch', gap: 8, marginBottom: 1 },
+  selectFieldBlock:{ flex: 1, minWidth: 0, marginBottom: 7 },
+  selectField:{ minHeight: 64, alignItems: 'center', gap: 8, borderRadius: 13, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7 },
+  selectLabel:{ fontSize: 10, lineHeight: 14, ...weight('800') },
+  selectValue:{ fontSize: 12, lineHeight: 18, ...weight('900'), marginTop: 1 },
+  selectDetail:{ fontSize: 9, lineHeight: 13, ...weight('700'), marginTop: 1 },
+  emptySelect:{ padding: 10, fontSize: 12, ...weight('700') },
+  selectSheetOverlay:{ flex: 1, justifyContent: 'flex-end', paddingHorizontal: 12 },
+  selectSheetPanel:{ width: '100%', maxWidth: 520, alignSelf: 'center', maxHeight: '54%', borderTopLeftRadius: RADIUS.sheet, borderTopRightRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 12, paddingTop: 10, ...SHADOW.float },
+  selectSheetHead:{ minHeight: 42, alignItems: 'center', gap: 9, marginBottom: 8 },
+  selectSheetIcon:{ width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  selectSheetTitle:{ flex: 1, minWidth: 0, fontSize: 15, lineHeight: 21, ...weight('900') },
+  selectSheetClose:{ width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  selectSheetList:{ width: '100%' },
+  selectSheetOption:{ minHeight: 48, alignItems: 'center', gap: 9, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 7 },
+  detailsBlock:{ marginBottom: 3 },
+  lockedPick: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  input:      { minHeight: 42, borderRadius: 8, paddingHorizontal: 11, paddingVertical: 8, borderWidth: 0.5, marginBottom: 6, fontSize: 13, lineHeight: 18, ...weight('700') },
+  inlineInput:{ minHeight: 30, paddingVertical: 0, paddingHorizontal: 0, fontSize: 14, lineHeight: 19, ...weight('800') },
+  amountInput:{ minHeight: 44, paddingHorizontal: 0, paddingVertical: 0, fontSize: 30, lineHeight: 38, ...weight('900') },
+  dateRepeatRow:{ alignItems: 'stretch', gap: 8, marginBottom: 2 },
+  dateButton:{ minHeight: 64, paddingHorizontal: 10 },
+  repeatField:{ minHeight: 64, borderRadius: RADIUS.md, borderWidth: 0.5, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 8 },
+  repeatValue:{ fontSize: 12, lineHeight: 18, ...weight('900') },
+  smartBox:   { borderWidth: 1, borderStyle: 'dashed', borderRadius: 12, padding: 9, marginBottom: 8, gap: 9 },
+  smartActionGrid:{ alignItems: 'stretch', gap: 7 },
+  smartModeBtn:{ flex: 1, minHeight: 66, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 3, paddingHorizontal: 4 },
+  smartStatusText:{ width: '100%', fontSize: 12, lineHeight: 18, ...weight('900'), marginTop: 2 },
+  smartErrorText:{ width: '100%', fontSize: 12, lineHeight: 18, ...weight('800'), marginTop: 2 },
   smartSourceNote:{ minHeight: 40, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
-  mediaPreview:{ alignItems: 'center', gap: 8, borderRadius: 12, padding: 8, marginBottom: 8 },
+  mediaPreview:{ width: '100%', alignItems: 'center', gap: 8, borderRadius: 12, padding: 8, marginTop: 2 },
   receiptThumb:{ width: 44, height: 44, borderRadius: 10 },
-  secondaryMini:{ flex: 1, minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  primaryMini:{ flex: 1, minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  toggleBtn:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, borderWidth: 1 },
-  recurringNote: { minHeight: 44, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', gap: 8, paddingHorizontal: 11, paddingVertical: 8, marginTop: 8 },
-  saveBtn:    { minHeight: 52, borderRadius: 15, padding: 15, alignItems: 'center', justifyContent: 'center' },
-  halfBtn:    { flex: 1, minHeight: 50, borderRadius: 15, padding: 14, alignItems: 'center', justifyContent: 'center' },
+  stickyFooter: {
+    borderTopWidth: 1,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
+  footerSaveBtn: {
+    minHeight: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 7,
+    paddingHorizontal: 14,
+  },
+  footerDeleteBtn: {
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 12,
+  },
+
 });

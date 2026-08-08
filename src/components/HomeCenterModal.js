@@ -8,7 +8,7 @@ import { getSymbol } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
 import { filterByActiveScope, filterFeatureEntities, getTransactionDisplayAmount, transactionFeatureEnabled } from '../lib/modules';
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
-import { getUpcomingCommitments } from '../lib/commitments';
+import { formatCommitmentMonth, getUpcomingCommitments } from '../lib/commitments';
 import { getUpcomingRecurring } from '../utils/calc';
 
 const text = (lang) => {
@@ -57,7 +57,7 @@ const text = (lang) => {
 export default function HomeCenterModal({ visible, mode = 'profile', onClose, onMode, onOpenTab, onEditTransaction, onOpenTransactionDetails }) {
   const {
     trans, debts, goals, commitments, cats, cfg, user, syncing, online, dirty,
-    lastSyncedAt, lastSyncError, syncConflict, syncCloud, editTrans,
+    lastSyncedAt, lastSyncError, syncConflict, vaultRecovery, syncCloud, editTrans,
     retryLoadLocal, clearAndResetVault,
   } = useStore();
   const [query, setQuery] = useState('');
@@ -164,7 +164,9 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
           <Text numberOfLines={1} style={[s.rowTitle, { color: th.text, textAlign: align }]}>{title}</Text>
           <Text numberOfLines={1} style={[s.rowSub, { color: th.sub, textAlign: align }]}>
             {kind === 'review' ? (reviewed ? L.reviewed : L.needsReview) : kind === 'calendar'
-              ? `${labelFor(type)} · ${item.dueISO} · ${dueLabel(Number(item.daysUntil || 0))}`
+              ? (type === 'commitment'
+                ? `${labelFor(type)} · ${formatCommitmentMonth(item.dueISO, cfg.lang)}`
+                : `${labelFor(type)} · ${item.dueISO} · ${dueLabel(Number(item.daysUntil || 0))}`)
               : `${labelFor(type)}${item.resultSub ? ` · ${item.resultSub}` : ''}`}
           </Text>
         </View>
@@ -177,9 +179,13 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
   };
 
   const profileName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || L.guest;
+  const conflictCount = Number(syncConflict?.total || syncConflict?.items?.length || 0);
+  const conflictLabel = syncConflict?.type === 'merged_changes'
+    ? (ar ? 'تم دمج تغييرات جهازين' : 'Changes from two devices were merged')
+    : L.conflict;
   const syncText = lastSyncError === 'vault_unreadable'
     ? L.vaultUnreadable
-    : syncConflict ? L.conflict : !online ? L.offline : dirty ? L.pending : user ? L.synced : L.local;
+    : syncConflict ? `${conflictLabel}${conflictCount ? ` (${conflictCount})` : ''}` : !online ? L.offline : dirty ? L.pending : user ? L.synced : L.local;
   const modeTitle = L[mode] || L.profile;
 
   const handleRetryVault = async () => {
@@ -224,6 +230,11 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
                   <Text style={{ color: th.sub, fontSize: 12, marginTop: 3, textAlign: align }}>
                     {L.lastSync}: {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString(ar ? 'ar-IQ' : 'en') : L.never}
                   </Text>
+                  {vaultRecovery ? (
+                    <Text style={{ color: th.warn, fontSize: 11, marginTop: 4, textAlign: align }}>
+                      {ar ? `تم الاسترداد من النسخة المحلية الاحتياطية رقم ${vaultRecovery.backupIndex || 1}` : `Recovered from local backup #${vaultRecovery.backupIndex || 1}`}
+                    </Text>
+                  ) : null}
                 </View>
               </View>
               {lastSyncError === 'vault_unreadable' ? (

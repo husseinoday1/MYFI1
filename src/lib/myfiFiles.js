@@ -1,6 +1,6 @@
-import * as Crypto from 'expo-crypto';
+﻿import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { decryptStringWithPassword, encryptStringWithPassword } from './cryptoBox';
@@ -25,12 +25,62 @@ const bytesToBase64 = (bytes) => {
   }
   return globalThis.btoa(binary);
 };
+const cleanBase64 = (value) => String(value || '')
+  .replace(/^data:[^,]+,/, '')
+  .replace(/\s/g, '')
+  .trim();
 
 const base64ToBytes = (value) => {
-  const binary = globalThis.atob(String(value || ''));
+  const source = cleanBase64(value);
+  const binary = globalThis.atob(source);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return bytes;
+};
+
+const hasZipSignature = (base64) => {
+  try {
+    const bytes = base64ToBytes(base64);
+    return bytes[0] === 0x50 && bytes[1] === 0x4b;
+  } catch {
+    return false;
+  }
+};
+
+const readPickedPackageBase64 = async (asset) => {
+  const attempts = [];
+
+  const readBase64 = async (uri, label) => {
+    if (!uri) return null;
+    try {
+      const value = cleanBase64(await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      }));
+      attempts.push(`${label}:read`);
+      if (hasZipSignature(value)) return value;
+      attempts.push(`${label}:not_zip`);
+      return value;
+    } catch (error) {
+      attempts.push(`${label}:${String(error?.message || 'failed')}`);
+      return null;
+    }
+  };
+
+  const direct = await readBase64(asset?.uri, 'direct');
+  if (direct && hasZipSignature(direct)) return direct;
+
+  if (FileSystem.cacheDirectory && asset?.uri) {
+    const target = `${FileSystem.cacheDirectory}myfi-import-${Date.now()}.zip`;
+    try {
+      await FileSystem.copyAsync({ from: asset.uri, to: target });
+      const copied = await readBase64(target, 'cache_copy');
+      if (copied && hasZipSignature(copied)) return copied;
+    } catch (error) {
+      attempts.push(`cache_copy:${String(error?.message || 'failed')}`);
+    }
+  }
+
+  throw new Error(`Selected file is not a readable ZIP package (${attempts.join(' | ')})`);
 };
 
 const csvCell = (value) => {
@@ -166,8 +216,14 @@ const manifestEntries = (source = '') => new Map(
 );
 
 export const inspectMyfiPackage = async (base64, { password = '' } = {}) => {
-  if (String(base64 || '').length > 70_000_000) throw new Error('MYFI package is too large');
-  const files = unzipSync(base64ToBytes(base64));
+  const normalizedBase64 = cleanBase64(base64);
+  if (String(normalizedBase64 || '').length > 70_000_000) throw new Error('MYFI package is too large');
+  let files = null;
+  try {
+    files = unzipSync(base64ToBytes(normalizedBase64));
+  } catch (error) {
+    throw new Error(`Selected file is not a valid ZIP backup package: ${String(error?.message || 'zip_failed')}`);
+  }
   const uncompressedSize = Object.values(files).reduce((sum, file) => sum + Number(file?.length || 0), 0);
   if (uncompressedSize > 100_000_000) throw new Error('MYFI package expands beyond the safety limit');
   const encrypted = !!files['data/backup.enc'];
@@ -273,7 +329,7 @@ export const pickMyfiPackage = async ({ kind = null, password = '' } = {}) => {
   const asset = result.assets?.[0];
   if (!asset?.uri) return null;
   if (Number(asset.size || 0) > 50_000_000) throw new Error('MYFI package exceeds the 50 MB import limit');
-  const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+  const base64 = await readPickedPackageBase64(asset);
   const inspected = await inspectMyfiPackage(base64, { password });
   const receivedKind = inspected.payload?.kind || inspected.kind;
   if (kind && receivedKind !== kind) {

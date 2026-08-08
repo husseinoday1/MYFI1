@@ -7,15 +7,17 @@ import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
 import { getSymbol } from '../lib/constants';
 import { today, isISODate } from '../utils/calc';
-import { getDefaultWalletId, getWalletLabel, sortWalletsByDefault } from '../lib/wallets';
+import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel, sortWalletsByDefault } from '../lib/wallets';
 import { Touchable as TouchableOpacity } from './AppPrimitives';
 import { weight } from '../lib/tokens';
 import DateField from './DateField';
 import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
 import { filterByActiveScope, getModules, getTrackerKinds } from '../lib/modules';
 import { suggestCategoryForText } from '../lib/localIntelligence';
+import { CATEGORY_FLOWS, getCategoriesForFlow } from '../lib/categories';
 
 const cleanNumber = parseNumberInput;
+const monthStartISO = (value = today()) => `${String(value).slice(0, 7)}-01`;
 
 const modalCopy = (lang = 'ar') => {
   const ar = lang === 'ar';
@@ -37,7 +39,7 @@ const modalCopy = (lang = 'ar') => {
     linkPlan: ar ? 'إضافة التزام شهري مرتبط' : 'Add linked monthly commitment',
     linkPlanHint: ar ? 'سينشئ التزاماً بدفعة شهرية مرتبطة بالدين أو هدف التوفير.' : 'Creates a monthly payment commitment linked to this debt or saving goal.',
     planAmount: ar ? 'قيمة الدفعة الشهرية' : 'Monthly payment amount',
-    planDate: ar ? 'أول موعد دفع' : 'First payment date',
+    planDate: ar ? 'شهر بدء الالتزام' : 'First commitment month',
     wallet: ar ? 'محفظة الدفع' : 'Payment wallet',
     category: ar ? 'فئة الالتزام' : 'Commitment category',
     categoryHint: ar ? 'نقترح الفئة من اسم الالتزام ويمكنك تغييرها يدوياً.' : 'We suggest a category from the name; you can override it.',
@@ -63,22 +65,33 @@ const modalCopy = (lang = 'ar') => {
 };
 
 export default function NewItemModal({ visible, kind, onClose, preset = null }) {
-  const { addDebt, addGoal, addCommitment, setCfg, cfg, wallets, cats } = useStore();
+  const { addDebt, addGoal, addCommitment, setCfg, cfg, wallets, cats, trans } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
   const T = modalCopy(cfg.lang);
   const sym = getSymbol(cfg.currency);
   const modules = getModules(cfg);
+  const commitmentCategories = getCategoriesForFlow(cats, CATEGORY_FLOWS.EXPENSE);
   const enabledKinds = getTrackerKinds(cfg);
   const scopedWallets = filterByActiveScope(wallets, cfg);
   const walletList = sortWalletsByDefault(scopedWallets.length ? scopedWallets : wallets, cfg.currency, cfg.defaultWalletId);
   const defaultWalletId = getDefaultWalletId(walletList, cfg.currency, cfg.defaultWalletId);
+  const walletBalanceRows = getWalletAvailableBalances(
+    walletList,
+    trans,
+    cfg.currency,
+    defaultWalletId,
+  );
+  const walletBalanceById = (id) => walletBalanceRows.find(item => item.id === id) || walletList.find(item => item.id === id) || null;
   const insets = useSafeAreaInsets();
   const isAr = cfg.lang === 'ar';
   const align = isAr ? 'right' : 'left';
   const rowDir = isAr ? 'row-reverse' : 'row';
   const isTracker = kind === 'tracker';
   const linkedPlanMode = !!preset?.planOnly && !!preset?.linkedId;
+  const requestedTrackerType = ['owed', 'receivable', 'goal', 'commitment'].includes(preset?.trackerType)
+    ? preset.trackerType
+    : null;
   const presetKind = preset?.linkedType === 'goal'
     ? 'goal'
     : preset?.linkedType === 'receivable'
@@ -96,22 +109,28 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const [originMode, setOriginMode] = useState('previous');
   const [commitmentCat, setCommitmentCat] = useState('other');
   const [commitmentCatTouched, setCommitmentCatTouched] = useState(false);
+  const [expandedPicker, setExpandedPicker] = useState(null);
 
   useEffect(() => {
     if (!visible) return;
     const presetName = linkedPlanMode ? String(preset?.linkedName || '').trim() : '';
-    setTrackerType(linkedPlanMode ? presetKind : (enabledKinds[0] || 'owed'));
+    setTrackerType(linkedPlanMode
+      ? presetKind
+      : enabledKinds.includes(requestedTrackerType)
+        ? requestedTrackerType
+        : (enabledKinds[0] || 'owed'));
     setName(presetName);
     setAmt('');
     setStartDate(today());
     setWithPlan(false);
     setPlanAmount('');
-    setPlanDate(today());
+    setPlanDate(monthStartISO());
     setPlanWalletId(defaultWalletId);
     setOriginMode('previous');
-    setCommitmentCat(suggestCategoryForText(presetName, cats));
+    setCommitmentCat(suggestCategoryForText(presetName, commitmentCategories));
     setCommitmentCatTouched(false);
-  }, [visible, linkedPlanMode, presetKind, preset?.linkedName, defaultWalletId]);
+    setExpandedPicker(null);
+  }, [visible, linkedPlanMode, presetKind, preset?.linkedName, requestedTrackerType, defaultWalletId]);
 
   const currentKind = linkedPlanMode
     ? presetKind
@@ -140,7 +159,8 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setTrackerType(value);
     setOriginMode('previous');
     if (value === 'commitment') {
-      setCommitmentCat(suggestCategoryForText(name, cats));
+      setStartDate(monthStartISO());
+      setCommitmentCat(suggestCategoryForText(name, commitmentCategories));
       setCommitmentCatTouched(false);
     }
     if (value === 'receivable' && !modules.debtsReceivable) {
@@ -174,11 +194,12 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setStartDate(today());
     setWithPlan(false);
     setPlanAmount('');
-    setPlanDate(today());
+    setPlanDate(monthStartISO());
     setPlanWalletId(defaultWalletId);
     setOriginMode('previous');
     setCommitmentCat('other');
     setCommitmentCatTouched(false);
+    setExpandedPicker(null);
   };
 
   const handleClose = () => {
@@ -196,13 +217,60 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const handleNameChange = (value) => {
     setName(value);
     if (isCommitment && !commitmentCatTouched) {
-      setCommitmentCat(suggestCategoryForText(value, cats));
+      setCommitmentCat(suggestCategoryForText(value, commitmentCategories));
     }
   };
 
   const selectCommitmentCategory = (catId) => {
     setCommitmentCat(catId);
     setCommitmentCatTouched(true);
+  };
+
+  const walletOptions = walletList.map(wallet => {
+    const info = walletBalanceById(wallet.id) || wallet;
+    const total = Number(info?.balance || 0);
+    const available = Number(info?.availableBalance ?? total);
+    return {
+      value: wallet.id,
+      label: getWalletLabel(wallet, cfg.lang),
+      detail: `${isAr ? 'متاح' : 'Available'} ${Math.round(available).toLocaleString()} ${sym} · ${isAr ? 'كلي' : 'Total'} ${Math.round(total).toLocaleString()} ${sym}`,
+      icon: 'wallet-outline',
+      color: available >= 0 ? th.primary : th.exp,
+    };
+  });
+
+  const commitmentCategoryOptions = commitmentCategories.map(cat => ({
+    value: cat.id,
+    label: (isAr ? cat.label : cat.labelEn) || cat.label || cat.labelEn || cat.id,
+    icon: cat.icon || 'pricetag-outline',
+    color: cat.color || th.primary,
+  }));
+
+  const renderSelectField = ({ id, label, value, options, onChange, icon = 'chevron-down-outline', tone = th.sub }) => {
+    const selected = options.find(option => option.value === value) || options[0];
+    const expanded = expandedPicker?.id === id;
+    return (
+      <View style={s.selectFieldBlock}>
+        <TouchableOpacity
+          onPress={() => setExpandedPicker(expanded ? null : { id, label, value, options, onChange, icon, tone })}
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          style={[s.selectField, { backgroundColor: th.input, borderColor: expanded ? th.primary : th.border, flexDirection: rowDir }]}
+        >
+          <Ionicons name={icon} size={18} color={tone} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[s.selectLabel, { color: th.sub, textAlign: align }]}>{label}</Text>
+            <Text numberOfLines={1} style={[s.selectValue, { color: th.text, textAlign: align }]}>
+              {selected?.label || (isAr ? 'اختر' : 'Choose')}
+            </Text>
+            <Text numberOfLines={1} style={[s.selectDetail, { color: th.sub, textAlign: align }]}>
+              {selected?.detail || ' '}
+            </Text>
+          </View>
+          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={17} color={th.sub} />
+        </TouchableOpacity>
+      </View>
+    );
   };
 
   const handleSave = async () => {
@@ -215,7 +283,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
       await addCommitment({
         name: linkedName,
         amt: linkedValue,
-        firstDueISO: planDate,
+        firstDueISO: monthStartISO(planDate),
         walletId: planWalletId,
         cat: preset?.cat || suggestCategoryForText(linkedName, cats),
         linkedType: preset?.linkedType || 'debt',
@@ -238,9 +306,9 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
       await addCommitment({
         name: name.trim(),
         amt: totalValue,
-        firstDueISO: startDate,
+        firstDueISO: monthStartISO(startDate),
         walletId: planWalletId,
-        cat: commitmentCat || suggestCategoryForText(name, cats),
+        cat: commitmentCat || suggestCategoryForText(name, commitmentCategories),
         linkedType: 'none',
       });
       handleClose();
@@ -271,7 +339,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
       await addCommitment({
         name: name.trim(),
         amt: linkedValue,
-        firstDueISO: planDate,
+        firstDueISO: monthStartISO(planDate),
         walletId: planWalletId,
         cat: suggestCategoryForText(name, cats),
         linkedType: isGoal ? 'goal' : isReceivable ? 'receivable' : 'debt',
@@ -291,18 +359,22 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
       >
         <View style={s.dismissArea}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
-        <View style={[s.sheet, { backgroundColor: th.card, maxHeight: '90%', paddingBottom: 20 + Math.max(insets.bottom, 8) }]}>
+        <View style={[s.sheet, { backgroundColor: th.card, maxHeight: '88%', paddingBottom: 0 }]}>
           <ScrollView
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             nestedScrollEnabled
-            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 12) + 96 }}
+            contentContainerStyle={{ paddingBottom: 14 }}
           >
           <View style={[s.handle, { backgroundColor: th.cardHigh }]} />
 
           <View style={[s.headRow, { flexDirection: rowDir }]}>
+            <TouchableOpacity onPress={handleClose} style={[s.headerIconBtn, { backgroundColor: th.cardHigh }]}>
+              <Ionicons name="chevron-down" size={18} color={th.sub} />
+            </TouchableOpacity>
             <Text style={[s.title, { color: th.text, textAlign: 'center' }]}>{title}</Text>
+            <View style={s.headerIconBtn} />
           </View>
 
           {linkedPlanMode ? (
@@ -327,10 +399,10 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                       <TouchableOpacity
                         key={option.value}
                         onPress={() => selectTrackerType(option.value)}
-                        style={[s.typeBtn, { backgroundColor: active ? `${option.color}22` : th.cardHigh, borderColor: active ? option.color : 'transparent' }]}
+                        style={[s.typeBtn, { backgroundColor: active ? option.color : th.cardHigh, borderColor: active ? option.color : th.border }]}
                       >
-                        <Ionicons name={option.icon} size={16} color={active ? option.color : th.sub} />
-                        <Text style={{ color: active ? option.color : th.sub, fontSize: 12, ...weight('900'), textAlign: 'center' }}>
+                        <Ionicons name={option.icon} size={18} color={active ? '#fff' : option.color} />
+                        <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: active ? '#fff' : th.sub, fontSize: 11, ...weight('900'), textAlign: 'center' }}>
                           {option.label}
                         </Text>
                       </TouchableOpacity>
@@ -360,26 +432,16 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
 
               {isCommitment ? (
                 <View style={s.categoryBlock}>
-                  <Text style={[s.label, { color: th.sub, textAlign: align }]}>{T.category}</Text>
+                  {renderSelectField({
+                    id: 'commitment-category',
+                    label: T.category,
+                    value: commitmentCat,
+                    options: commitmentCategoryOptions,
+                    icon: 'pricetag-outline',
+                    tone: th.warn,
+                    onChange: selectCommitmentCategory,
+                  })}
                   <Text style={[s.categoryHint, { color: th.faint, textAlign: align }]}>{T.categoryHint}</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.walletRail}>
-                    {cats.map(cat => {
-                      const active = commitmentCat === cat.id;
-                      const label = (isAr ? cat.label : cat.labelEn) || cat.label || cat.labelEn || cat.id;
-                      return (
-                        <TouchableOpacity
-                          key={cat.id}
-                          onPress={() => selectCommitmentCategory(cat.id)}
-                          style={[s.walletChip, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent' }]}
-                        >
-                          <Ionicons name={cat.icon || 'pricetag-outline'} size={14} color={active ? th.primary : th.sub} />
-                          <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('900') }}>
-                            {label}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
                 </View>
               ) : null}
 
@@ -389,14 +451,39 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                 </Text>
               ) : null}
 
-              <DateField
-                value={startDate}
-                onChange={setStartDate}
-                th={th}
-                lang={cfg.lang}
-                label={isCommitment ? T.planDate : T.startDate}
-                style={{ marginBottom: 16 }}
-              />
+              {isCommitment ? (
+                <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
+                  <DateField
+                    value={startDate}
+                    onChange={setStartDate}
+                    th={th}
+                    lang={cfg.lang}
+                    label={T.planDate}
+                    monthOnly
+                    style={s.selectFieldBlock}
+                    buttonStyle={s.dateButton}
+                  />
+                  {walletList.length > 0 ? renderSelectField({
+                    id: 'commitment-wallet',
+                    label: T.wallet,
+                    value: planWalletId,
+                    options: walletOptions,
+                    icon: 'wallet-outline',
+                    tone: th.primary,
+                    onChange: setPlanWalletId,
+                  }) : null}
+                </View>
+              ) : (
+                <DateField
+                  value={startDate}
+                  onChange={setStartDate}
+                  th={th}
+                  lang={cfg.lang}
+                  label={T.startDate}
+                  style={{ marginBottom: 16 }}
+                  buttonStyle={s.dateButton}
+                />
+              )}
 
               {isDebt ? (
                 <View style={s.originBlock}>
@@ -426,26 +513,17 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                 </View>
               ) : null}
 
-              {(isCommitment || (isDebt && originMode !== 'previous')) && walletList.length > 0 ? (
+              {isDebt && originMode !== 'previous' && walletList.length > 0 ? (
                 <View style={s.walletBlock}>
-                  <Text style={[s.label, { color: th.sub, textAlign: align }]}>{T.wallet}</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.walletRail}>
-                    {walletList.map(wallet => {
-                      const active = planWalletId === wallet.id;
-                      return (
-                        <TouchableOpacity
-                          key={wallet.id}
-                          onPress={() => setPlanWalletId(wallet.id)}
-                          style={[s.walletChip, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent' }]}
-                        >
-                          <Ionicons name="wallet-outline" size={14} color={active ? th.primary : th.sub} />
-                          <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('900') }}>
-                            {getWalletLabel(wallet, cfg.lang)}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
+                  {renderSelectField({
+                    id: 'origin-wallet',
+                    label: T.wallet,
+                    value: planWalletId,
+                    options: walletOptions,
+                    icon: 'wallet-outline',
+                    tone: th.primary,
+                    onChange: setPlanWalletId,
+                  })}
                 </View>
               ) : null}
             </>
@@ -484,49 +562,110 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                     style={[s.input, s.planInput, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]}
                   />
 
-                  <DateField
-                    value={planDate}
-                    onChange={setPlanDate}
-                    th={th}
-                    lang={cfg.lang}
-                    label={T.planDate}
-                    style={{ marginBottom: 0 }}
-                  />
-
-                  {walletList.length > 0 ? (
-                    <View style={[s.walletBlock, { marginTop: 12 }]}>
-                      <Text style={[s.label, { color: th.sub, textAlign: align }]}>{T.wallet}</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.walletRail}>
-                        {walletList.map(wallet => {
-                          const active = planWalletId === wallet.id;
-                          return (
-                            <TouchableOpacity
-                              key={wallet.id}
-                              onPress={() => setPlanWalletId(wallet.id)}
-                              style={[s.walletChip, { backgroundColor: active ? th.primSoft : th.input, borderColor: active ? th.primary : 'transparent' }]}
-                            >
-                              <Ionicons name="wallet-outline" size={14} color={active ? th.primary : th.sub} />
-                              <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('900') }}>
-                                {getWalletLabel(wallet, cfg.lang)}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
-                    </View>
-                  ) : null}
+                  <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
+                    <DateField
+                      value={planDate}
+                      onChange={setPlanDate}
+                      th={th}
+                      lang={cfg.lang}
+                      label={T.planDate}
+                      monthOnly
+                      style={s.selectFieldBlock}
+                      buttonStyle={s.dateButton}
+                    />
+                    {walletList.length > 0 ? renderSelectField({
+                      id: 'plan-wallet',
+                      label: T.wallet,
+                      value: planWalletId,
+                      options: walletOptions,
+                      icon: 'wallet-outline',
+                      tone: th.primary,
+                      onChange: setPlanWalletId,
+                    }) : null}
+                  </View>
                 </View>
               ) : null}
             </>
           ) : null}
-
-          <TouchableOpacity onPress={handleSave} style={[s.saveBtn, { backgroundColor: linkedPlanMode ? th.warn : activeColor }]}>
-            <Text style={{ color: '#fff', ...weight('800'), fontSize: 15 }}>{saveLabel}</Text>
-          </TouchableOpacity>
           </ScrollView>
+
+          <View
+            style={[
+              s.stickyFooter,
+              {
+                backgroundColor: th.card,
+                borderTopColor: th.border,
+                paddingBottom: Math.max(insets.bottom, 8),
+              },
+            ]}
+          >
+            <TouchableOpacity
+              onPress={handleSave}
+              style={[s.footerSaveBtn, { backgroundColor: linkedPlanMode ? th.warn : activeColor }]}
+            >
+              <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+              <Text style={{ color: '#fff', ...weight('900'), fontSize: 14 }}>{saveLabel}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         </View>
       </KeyboardAvoidingView>
+      <Modal
+        visible={!!expandedPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setExpandedPicker(null)}
+      >
+        <View style={[s.selectSheetOverlay, { backgroundColor: th.overlay }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setExpandedPicker(null)} />
+          <View style={[s.selectSheetPanel, { backgroundColor: th.card, borderColor: th.border, paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <View style={[s.selectSheetHead, { flexDirection: rowDir }]}>
+              <View style={[s.selectSheetIcon, { backgroundColor: th.primSoft }]}>
+                <Ionicons name={expandedPicker?.icon || 'chevron-down-outline'} size={18} color={expandedPicker?.tone || th.primary} />
+              </View>
+              <Text style={[s.selectSheetTitle, { color: th.text, textAlign: align }]} numberOfLines={1}>
+                {expandedPicker?.label || (isAr ? 'اختر' : 'Choose')}
+              </Text>
+              <TouchableOpacity onPress={() => setExpandedPicker(null)} style={[s.selectSheetClose, { backgroundColor: th.cardHigh }]}>
+                <Ionicons name="chevron-down" size={18} color={th.sub} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={s.selectSheetList}>
+              {expandedPicker?.options?.length ? expandedPicker.options.map(option => {
+                const active = option.value === expandedPicker.value;
+                const optionColor = option.color || (active ? th.primary : th.sub);
+                return (
+                  <TouchableOpacity
+                    key={String(option.value)}
+                    onPress={() => {
+                      expandedPicker.onChange?.(option.value, option);
+                      setExpandedPicker(null);
+                    }}
+                    style={[s.selectSheetOption, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : th.border, flexDirection: rowDir }]}
+                  >
+                    <Ionicons name={option.icon || 'ellipse-outline'} size={18} color={optionColor} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text numberOfLines={1} style={{ color: active ? th.primary : th.text, fontSize: 13, ...weight(active ? '900' : '800'), textAlign: align }}>
+                        {option.label}
+                      </Text>
+                      {option.detail ? (
+                        <Text numberOfLines={1} style={{ color: th.sub, fontSize: 10, lineHeight: 15, ...weight('700'), textAlign: align, marginTop: 2 }}>
+                          {option.detail}
+                        </Text>
+                      ) : null}
+                    </View>
+                    {active ? <Ionicons name="checkmark-circle" size={18} color={th.primary} /> : null}
+                  </TouchableOpacity>
+                );
+              }) : (
+                <Text style={[s.emptySelect, { color: th.faint, textAlign: align }]}>
+                  {isAr ? 'لا توجد خيارات متاحة' : 'No options available'}
+                </Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -534,12 +673,13 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
 const s = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end' },
   dismissArea: { flex: 1, justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 18, paddingTop: 12, paddingBottom: 32 },
-  handle: { width: 38, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
-  headRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
+  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 32 },
+  handle: { width: 38, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 10 },
+  headRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  headerIconBtn: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   title: { flex: 1, fontSize: 18, lineHeight: 24, ...weight('900') },
-  typeGrid: { flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  typeBtn: { width: '48.5%', minHeight: 54, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 8 },
+  typeGrid: { gap: 8, marginBottom: 12, flexWrap: 'wrap' },
+  typeBtn: { width: '48.5%', minWidth: 0, minHeight: 70, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 8 },
   infoBox: { borderRadius: 14, borderWidth: 0.5, padding: 12, gap: 10, marginBottom: 16, alignItems: 'center' },
   infoIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   label: { fontSize: 12, lineHeight: 17, ...weight('900'), marginBottom: 8 },
@@ -552,11 +692,40 @@ const s = StyleSheet.create({
   goalPurposeBlock: { marginBottom: 14 },
   originModes: { gap: 8, marginBottom: 7 },
   originMode: { flex: 1, minHeight: 40, borderRadius: 11, borderWidth: 0.5, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-  walletRail: { gap: 8 },
-  walletChip: { minHeight: 36, borderRadius: 11, borderWidth: 0.5, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', gap: 6, flexDirection: 'row' },
+  twoColumnRow: { alignItems: 'stretch', gap: 8, marginBottom: 8 },
+  selectFieldBlock: { flex: 1, minWidth: 0, marginBottom: 7 },
+  selectField: { minHeight: 64, alignItems: 'center', gap: 8, borderRadius: 13, borderWidth: 0.5, paddingHorizontal: 10, paddingVertical: 7 },
+  selectLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
+  selectValue: { fontSize: 12, lineHeight: 18, ...weight('900'), marginTop: 1 },
+  selectDetail: { fontSize: 9, lineHeight: 13, ...weight('700'), marginTop: 1 },
+  dateButton: { minHeight: 64, paddingHorizontal: 10 },
+  emptySelect: { padding: 10, fontSize: 12, ...weight('700') },
+  selectSheetOverlay: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 12 },
+  selectSheetPanel: { width: '100%', maxWidth: 520, alignSelf: 'center', maxHeight: '54%', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, paddingHorizontal: 12, paddingTop: 10 },
+  selectSheetHead: { minHeight: 42, alignItems: 'center', gap: 9, marginBottom: 8 },
+  selectSheetIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  selectSheetTitle: { flex: 1, minWidth: 0, fontSize: 15, lineHeight: 21, ...weight('900') },
+  selectSheetClose: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  selectSheetList: { width: '100%' },
+  selectSheetOption: { minHeight: 48, alignItems: 'center', gap: 9, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 7 },
   planToggle: { borderRadius: 14, paddingHorizontal: 13, paddingVertical: 12, gap: 10, alignItems: 'center', marginBottom: 14 },
   planSection: { borderRadius: 14, borderWidth: 0.5, padding: 12, marginBottom: 16 },
   planHead: { alignItems: 'center', gap: 7, marginBottom: 10 },
   planInput: { marginBottom: 12 },
   saveBtn: { minHeight: 52, borderRadius: 15, padding: 15, alignItems: 'center', justifyContent: 'center' },
+  stickyFooter: {
+    borderTopWidth: 1,
+    paddingHorizontal: 12,
+    paddingTop: 9,
+  },
+  footerSaveBtn: {
+    minHeight: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 7,
+    paddingHorizontal: 14,
+  },
+
 });

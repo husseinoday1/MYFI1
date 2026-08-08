@@ -272,7 +272,9 @@ export const normalizeCfg = (cfg = {}) => {
     themeMode: cfg.themeMode === 'system' ? 'system' : 'manual',
     theme: cfg.theme === 'light' ? 'light' : 'dark',
     categoryBudgets: Object.fromEntries(Object.entries(cfg.categoryBudgets || {}).filter(([, value]) => Number(value) > 0)),
-    enabledModules: normalizeModules(cfg.enabledModules),
+    // Monthly recurrence is a core entry capability. Existing profiles that
+    // hid the old optional module are migrated back to the enabled state.
+    enabledModules: { ...normalizeModules(cfg.enabledModules), recurring: true },
     homeCards: normalizeHomeCards(resetHomeLayout ? DEF_HOME_CARDS : cfg.homeCards),
     homeSections: normalizeVisibilityList(DEF_HOME_SECTIONS, resetHomeLayout ? DEF_HOME_SECTIONS : cfg.homeSections),
     quickActions: normalizeVisibilityList(DEF_QUICK_ACTIONS, cfg.quickActions),
@@ -285,7 +287,7 @@ export const normalizeCfg = (cfg = {}) => {
 
 export const DEF_NOTIF = {
   debt:   { on: true, value: 3 },
-  commitment: { on: true, value: 3 },
+  commitment: { on: true },
   daily:  { on: false, value: 21 },
   low:    { on: false, value: 500000 },
   forecast: { on: false },

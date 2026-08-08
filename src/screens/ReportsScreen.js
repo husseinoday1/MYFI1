@@ -1,22 +1,25 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
 import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
+import WalletBalanceCard from '../components/WalletBalanceCard';
 import ChoiceSheet from '../components/ChoiceSheet';
 import { getSymbol } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
-import { buildFinancialSnapshot, calcStats, catSpend, debtSummary } from '../utils/calc';
+import { buildFinancialReport, calcStats, catSpend, debtSummary } from '../utils/calc';
 import { buildLeakInsights } from '../lib/localIntelligence';
 import { generateFinancialReportPDF } from '../lib/pdf';
 import { RADIUS, SHADOW, weight } from '../lib/tokens';
 import { isRTL, rowDirFor, textAlignFor, writingDirectionFor } from '../lib/layout';
 import { filterByActiveScope, filterFeatureEntities, getActiveScope, getModules, transactionFeatureEnabled } from '../lib/modules';
 import { getBudgetRows, getBudgetSummary } from '../lib/budgets';
+import { getWalletLabel } from '../lib/wallets';
 
-const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+const MONTHS_AR = ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'];
+const MONTHS_AR_SHORT = ['ك2', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'ت1', 'ت2', 'ك1'];
 const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MONTHS_EN_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const CHART_COLORS = ['#138A57', '#447FC1', '#C18428', '#C25761', '#6E68B5', '#4E8975'];
@@ -63,9 +66,11 @@ const copy = (lang) => {
     selectAtLeastOne: ar ? 'حدد معلومة واحدة على الأقل.' : 'Select at least one item.',
     income: ar ? 'الدخل' : 'Income',
     expense: ar ? 'المصروف' : 'Expense',
-    net: ar ? 'الصافي' : 'Net',
+    net: ar ? 'صافي الدخل' : 'Net income',
     compared: ar ? 'مقارنة الفترات' : 'Period comparison',
-    comparisonHint: ar ? 'اختر النوع والفترات التي تريد مراجعتها' : 'Choose the type and periods you want to review',
+    comparisonTitle: ar ? 'مقارنة الأداء' : 'Performance comparison',
+    comparisonSubtitle: ar ? 'قارن فترتين أو أكثر بنفس المؤشرات وبعرض موحّد.' : 'Compare two or more periods using the same metrics and layout.',
+    comparisonHint: ar ? 'قارن الفترات بنفس التعريف وبنفس أسلوب العرض.' : 'Compare periods using the same definition and presentation.',
     monthlyComparison: ar ? 'شهرية' : 'Monthly',
     annualComparison: ar ? 'سنوية' : 'Annual',
     chartView: ar ? 'الرسم' : 'Chart',
@@ -73,6 +78,9 @@ const copy = (lang) => {
     addComparison: ar ? 'إضافة مقارنة' : 'Add comparison',
     removeComparison: ar ? 'حذف المقارنة' : 'Remove comparison',
     choosePeriods: ar ? 'اختر الفترات' : 'Choose periods',
+    editPeriods: ar ? 'تعديل الفترات' : 'Edit periods',
+    selectedPeriodsLabel: ar ? 'الفترات المختارة' : 'Selected periods',
+    startComparisonHint: ar ? 'اختر شهري أو سنوي، ثم حدد الفترات التي تريد مقارنتها.' : 'Choose monthly or annual, then select the periods to compare.',
     selectedPeriods: ar ? 'فترات محددة' : 'periods selected',
     monthlyLimit: ar ? 'يمكنك مقارنة ما يصل إلى 12 شهراً' : 'Compare up to 12 months',
     annualLimit: ar ? 'يمكنك مقارنة ما يصل إلى 10 سنوات' : 'Compare up to 10 years',
@@ -80,25 +88,57 @@ const copy = (lang) => {
     noComparison: ar ? 'لا توجد بيانات كافية للمقارنة' : 'Not enough data to compare',
     topSpending: ar ? 'أين تذهب مصروفاتك؟' : 'Where your money goes',
     topSpendingHint: ar ? 'أكبر البنود مرتبة من الأعلى إلى الأقل' : 'Largest categories, ranked from highest to lowest',
-    monthlyBudget: ar ? 'الميزانية الشهرية' : 'Monthly budget',
+    monthlyBudget: ar ? 'حد الإنفاق الشهري' : 'Monthly spending limit',
     budgetRemaining: ar ? 'متبقي' : 'remaining',
     budgetOf: ar ? 'من أصل' : 'of',
     budgetOnTrack: ar ? 'الصرف ضمن الحد المحدد' : 'Spending is within the set limit',
     budgetOver: ar ? 'تم تجاوز الحد المحدد' : 'The set limit has been exceeded',
     noData: ar ? 'لا توجد بيانات ضمن هذه الفترة' : 'No data in this period',
-    smartTitle: ar ? 'استنتاجات حسب استخدامك' : 'Insights from your activity',
-    smartHint: ar ? 'توقعات وقواعد محلية؛ لا تُرسل بياناتك إلى نموذج خارجي' : 'Local forecasts and rules; your data is not sent to an external model',
+    smartTitle: ar ? 'التحليل والاتجاهات' : 'Insights from your activity',
+    smartHint: ar ? 'تحليل محلي للاتجاهات حتى نهاية الفترة المختارة، ولا يغيّر الأرقام الأساسية.' : 'Local forecasts and rules; your data is not sent to an external model',
     confidence: ar ? 'ثقة التحليل' : 'Analysis confidence',
     confidenceHigh: ar ? 'عالية' : 'High',
     confidenceMedium: ar ? 'متوسطة' : 'Medium',
     confidenceLow: ar ? 'منخفضة' : 'Low',
     needData: ar ? 'أضف 7 حركات على 4 أيام على الأقل للحصول على استنتاجات أدق.' : 'Add at least 7 entries across 4 days for more reliable insights.',
     exportFailed: ar ? 'تعذر إنشاء الملف أو فتح المشاركة. حاول مرة أخرى.' : 'Could not create the file or open sharing. Try again.',
+    walletScope: ar ? 'المحفظة' : 'Wallet',
+    allWallets: ar ? 'كل المحافظ' : 'All wallets',
+    liquidityTitle: ar ? 'الرصيد المرحّل بنهاية الفترة' : 'Carried balance at period end',
+    liquidityHint: ar ? 'الرصيد الفعلي يشمل التوفير المحجوز، والمتاح هو القابل للصرف الآن.' : 'Physical balance includes reserved savings; available is what can be spent now.',
+    physicalBalance: ar ? 'الرصيد الفعلي' : 'Physical balance',
+    reservedSavings: ar ? 'محجوز للتوفير' : 'Reserved savings',
+    availableBalance: ar ? 'المتاح للصرف' : 'Available to spend',
+    netPosition: ar ? 'صافي المركز المالي بنهاية الفترة' : 'Net position at period end',
+    cashFlowTitle: ar ? 'التدفق النقدي' : 'Cash flow',
+    cashIn: ar ? 'النقد الداخل' : 'Cash in',
+    cashOut: ar ? 'النقد الخارج' : 'Cash out',
+    cashNet: ar ? 'صافي حركة النقد' : 'Net cash movement',
+    cashFlowHint: ar ? 'حركة النقد الفعلية خلال الفترة؛ التوفير المحجوز لا يُعامل كمصروف.' : 'Physical cash movement in the period; reserved savings is not treated as spending.',
+    forecastTitle: ar ? 'توقع نهاية الشهر' : 'Month-end forecast',
+    forecastHint: ar ? 'تقدير محلي يجمع المصروف الحالي والالتزامات غير المسددة ونمط الأشهر السابقة.' : 'A local estimate combining current spending, unpaid commitments, and recent history.',
+    projectedExpense: ar ? 'المصروف المتوقع' : 'Projected expense',
+    forecastCommitments: ar ? 'التزامات متبقية' : 'Commitments left',
+    forecastAvailable: ar ? 'المتاح اليوم' : 'Available today',
+    inflow: ar ? 'داخل' : 'Inflow',
+    outflow: ar ? 'خارج' : 'Outflow',
+    debtsDueTitle: ar ? 'الديون والاستحقاقات' : 'Debts and dues',
+    debtsDueHint: ar ? 'المبالغ المتبقية حالياً والالتزامات النشطة.' : 'Current outstanding amounts and active commitments.',
+    owedRemaining: ar ? 'دين عليّ متبقٍ' : 'Debt I owe',
+    receivableRemaining: ar ? 'دين لي متبقٍ' : 'Owed to me',
+    activeCommitments: ar ? 'التزامات نشطة' : 'Active commitments',
+    goalsTitle: ar ? 'الأهداف والتوفير' : 'Goals and savings',
+    goalsHint: ar ? 'تقدم أهداف التوفير النشطة دون احتساب المبلغ المحجوز كأصل إضافي.' : 'Progress of active saving goals without counting reserved cash as an extra asset.',
+    savedAmount: ar ? 'مدخر' : 'Saved',
+    goalRemaining: ar ? 'متبقي للأهداف' : 'Goal remaining',
+    goalTarget: ar ? 'إجمالي الأهداف' : 'Goal target',
+    expandSection: ar ? 'إظهار التفاصيل' : 'Show details',
+    collapseSection: ar ? 'إخفاء التفاصيل' : 'Hide details',
   };
 };
 
 export default function ReportsScreen() {
-  const { trans, debts, goals, commitments, cats, cfg } = useStore();
+  const { trans, debts, goals, wallets, commitments, cats, cfg } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const C = copy(cfg.lang);
   const ar = isRTL(cfg.lang);
@@ -124,6 +164,7 @@ export default function ReportsScreen() {
   const previousNow = new Date(now.getFullYear(), now.getMonth() - 1, 15);
   const previousMonthKey = `${previousNow.getFullYear()}-${String(previousNow.getMonth() + 1).padStart(2, '0')}`;
   const [scope, setScope] = useState('month');
+  const [walletFilter, setWalletFilter] = useState('all');
   const [selectedMonthKey, setSelectedMonthKey] = useState(currentMonthKey);
   const [comparisonMode, setComparisonMode] = useState('none');
   const [comparisonView, setComparisonView] = useState('chart');
@@ -159,6 +200,31 @@ export default function ReportsScreen() {
       icon: 'calendar-number-outline',
     }));
   }, [trans, scopedArchiveSummaries, now.getFullYear()]);
+  const scopedWallets = filterByActiveScope(wallets, cfg);
+  const walletOptions = useMemo(() => ([
+    { value: 'all', label: C.allWallets, icon: 'wallet-outline' },
+    ...scopedWallets.map(wallet => ({
+      value: wallet.id,
+      label: getWalletLabel(wallet, cfg.lang),
+      detail: wallet.currency || cfg.currency,
+      icon: 'wallet-outline',
+    })),
+  ]), [wallets, cfg.activeScope, cfg.profileType, cfg.lang, cfg.currency]);
+
+  useEffect(() => {
+    if (walletFilter !== 'all' && !scopedWallets.some(wallet => wallet.id === walletFilter)) {
+      setWalletFilter('all');
+    }
+  }, [walletFilter, wallets, cfg.activeScope, cfg.profileType]);
+
+  const matchesWallet = (item) => {
+    if (walletFilter === 'all') return true;
+    if (item?.kind === 'transfer') {
+      return item.fromWalletId === walletFilter || item.toWalletId === walletFilter;
+    }
+    return (item?.walletId || cfg.defaultWalletId) === walletFilter;
+  };
+
   const selectedMonth = useMemo(() => {
     const [year, month] = selectedMonthKey.split('-').map(Number);
     return new Date(year, month - 1, 15);
@@ -169,50 +235,77 @@ export default function ReportsScreen() {
     : scope === 'year' ? String(selectedMonth.getFullYear()) : C.allTime;
 
   const periodTrans = useMemo(() => viewTrans.filter(item => {
+    if (!matchesWallet(item)) return false;
     const date = dateOf(item);
     if (!date) return false;
     if (scope === 'month') return date.getMonth() === selectedMonth.getMonth() && date.getFullYear() === selectedMonth.getFullYear();
     if (scope === 'year') return date.getFullYear() === selectedMonth.getFullYear();
     return true;
-  }), [trans, scope, selectedMonth]);
+  }), [viewTrans, scope, selectedMonth, walletFilter, cfg.defaultWalletId]);
 
   const comparisonTrans = (key, mode) => viewTrans.filter(item => {
+    if (!matchesWallet(item)) return false;
     const date = dateOf(item);
     if (!date || item.kind === 'transfer') return false;
     if (mode === 'year') return date.getFullYear() === Number(key);
     const [year, month] = String(key).split('-').map(Number);
     return date.getFullYear() === year && date.getMonth() === month - 1;
   });
-  const stats = useMemo(() => {
-    const active = calcStats(periodTrans);
-    const archived = scopedArchiveSummaries.filter(item => (
-      scope === 'all' || (scope === 'year' && Number(item.year) === selectedMonth.getFullYear())
-    ));
-    return archived.reduce((total, item) => ({
-      inc: total.inc + Number(item.income || 0),
-      exp: total.exp + Number(item.expense || 0),
-      bal: total.bal + Number(item.net || 0),
-    }), active);
-  }, [periodTrans, scopedArchiveSummaries, scope, selectedMonth]);
   const intelligenceDate = useMemo(() => (
     selectedMonthKey === currentMonthKey
       ? now
       : new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 0, 12)
   ), [selectedMonthKey, currentMonthKey, selectedMonth, now.getFullYear(), now.getMonth(), now.getDate()]);
+  const walletScopedTrans = useMemo(
+    () => viewTrans.filter(matchesWallet),
+    [viewTrans, walletFilter, cfg.defaultWalletId],
+  );
   const intelligence = useMemo(
-    () => buildLeakInsights(viewTrans, cats, intelligenceDate),
-    [viewTrans, cats, intelligenceDate],
+    () => buildLeakInsights(walletScopedTrans, cats, intelligenceDate),
+    [walletScopedTrans, cats, intelligenceDate],
   );
   const confidence = intelligence.history?.baselineMonthCount >= 6 && intelligence.history?.transactionCount >= 30
     ? 'high'
     : intelligence.history?.baselineMonthCount >= 2 && intelligence.history?.transactionCount >= 10 ? 'medium' : 'low';
-  const snapshot = useMemo(() => buildFinancialSnapshot({
-    trans: viewTrans,
+  const snapshotWallets = walletFilter === 'all'
+    ? scopedWallets
+    : scopedWallets.filter(wallet => wallet.id === walletFilter);
+  const reportDate = selectedMonthKey === currentMonthKey ? now : selectedMonth;
+  const financialReport = useMemo(() => buildFinancialReport({
+    trans: walletScopedTrans,
     debts: viewDebts,
     goals: viewGoals,
+    wallets: snapshotWallets,
     commitments: viewCommitments,
     cats,
-  }, selectedMonthKey === currentMonthKey ? now : selectedMonth), [viewTrans, viewDebts, viewGoals, viewCommitments, cats, selectedMonth, selectedMonthKey, currentMonthKey]);
+    currency: cfg.currency,
+    defaultWalletId: cfg.defaultWalletId,
+    scope,
+  }, reportDate), [
+    walletScopedTrans, viewDebts, viewGoals, snapshotWallets, viewCommitments, cats,
+    cfg.currency, cfg.defaultWalletId, scope, reportDate,
+  ]);
+  const snapshot = financialReport;
+  const periodCashFlow = financialReport.periodCashFlow;
+  const stats = useMemo(() => {
+    const active = financialReport.stats;
+    const archived = walletFilter === 'all'
+      ? scopedArchiveSummaries.filter(item => (
+          scope === 'all' || (scope === 'year' && Number(item.year) === selectedMonth.getFullYear())
+        ))
+      : [];
+    return archived.reduce((total, item) => ({
+      inc: total.inc + Number(item.income || 0),
+      exp: total.exp + Number(item.expense || 0),
+      bal: total.bal + Number(item.net || 0),
+    }), active);
+  }, [financialReport.stats, scopedArchiveSummaries, scope, selectedMonth, walletFilter]);
+  const activeCommitmentTotal = useMemo(
+    () => viewCommitments
+      .filter(item => item.active !== false)
+      .reduce((sum, item) => sum + Number(item.amt || 0), 0),
+    [viewCommitments],
+  );
   const insightItems = useMemo(() => {
     const rows = [];
     if (scope === 'month' && selectedMonthKey === currentMonthKey && periodTrans.length >= 3) {
@@ -269,8 +362,8 @@ export default function ReportsScreen() {
     }));
   }, [periodTrans, cats]);
   const budgetRows = useMemo(
-    () => getBudgetRows(viewTrans, cats, cfg.categoryBudgets, selectedMonth),
-    [viewTrans, cats, cfg.categoryBudgets, selectedMonth],
+    () => getBudgetRows(walletScopedTrans, cats, cfg.categoryBudgets, selectedMonth),
+    [walletScopedTrans, cats, cfg.categoryBudgets, selectedMonth],
   );
   const budgetSummary = useMemo(() => getBudgetSummary(budgetRows), [budgetRows]);
   const comparisonOptions = comparisonMode === 'month' ? monthOptions : yearOptions;
@@ -283,12 +376,15 @@ export default function ReportsScreen() {
         key,
         label: option?.label || key,
         shortLabel: comparisonMode === 'month'
-          ? `${String(option?.label || key).split(' ')[0].slice(0, 3)} ${String(key).slice(2, 4)}`
+          ? (() => {
+              const [, month] = String(key).split('-').map(Number);
+              return ar ? `${MONTHS_AR_SHORT[month - 1]} ${String(key).slice(2, 4)}` : `${String(option?.label || key).split(' ')[0].slice(0, 3)} ${String(key).slice(2, 4)}`;
+            })()
           : String(key),
         ...periodStats,
       };
     })
-    .sort((a, b) => a.key.localeCompare(b.key)), [trans, comparisonPeriods, comparisonMode, comparisonOptions]);
+    .sort((a, b) => a.key.localeCompare(b.key)), [viewTrans, comparisonPeriods, comparisonMode, comparisonOptions, walletFilter, cfg.defaultWalletId]);
 
   const changeComparisonMode = (mode) => {
     setComparisonMode(mode);
@@ -401,11 +497,123 @@ export default function ReportsScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={[s.summaryGrid, { flexDirection: rowDir }]}>
-          <SummaryMetric label={C.income} value={stats.inc} color={th.inc} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-          <SummaryMetric label={C.expense} value={stats.exp} color={th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-          <SummaryMetric label={C.net} value={stats.bal} color={stats.bal >= 0 ? th.inc : th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-        </View>
+        {modules.wallets && walletOptions.length > 1 ? (
+          <TouchableOpacity
+            onPress={() => setSheet('wallet')}
+            style={[s.walletFilterBar, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}
+          >
+            <View style={[s.walletFilterIcon, { backgroundColor: th.primSoft }]}>
+              <Ionicons name="wallet-outline" size={17} color={th.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.walletFilterLabel, { color: th.sub, textAlign: align }]}>{C.walletScope}</Text>
+              <Text style={[s.walletFilterValue, { color: th.text, textAlign: align }]} numberOfLines={1}>
+                {walletOptions.find(item => item.value === walletFilter)?.label || C.allWallets}
+              </Text>
+            </View>
+            <Ionicons name="chevron-down-outline" size={17} color={th.faint} />
+          </TouchableOpacity>
+        ) : null}
+
+        {modules.wallets ? (
+        <SectionCard
+            th={th}
+            title={C.liquidityTitle}
+            subtitle={`${C.availableBalance}: ${money(snapshot.availableCash, cfg.lang, cfg.currency)} ${sym} · ${C.reservedSavings}: ${money(snapshot.reservedSavings, cfg.lang, cfg.currency)} ${sym}`}
+            icon="wallet-outline"
+            lang={cfg.lang}
+          >
+          {/* MYFI_REPORT_WALLET_INLINE */}
+          <WalletBalanceCard
+            cfg={cfg}
+            compact
+            summary={{
+              physical: Number(snapshot?.cashBalance || 0),
+              available: Number(snapshot?.availableCash || 0),
+              reserved: Number(snapshot?.reservedSavings || 0),
+            }}
+            title={cfg.lang === 'ar' ? 'رصيد المحافظ بنهاية الفترة' : 'Wallet balance at period end'}
+          />
+            <View style={[s.summaryGrid, { flexDirection: rowDir, marginBottom: 0 }]}>
+              <SummaryMetric label={C.physicalBalance} value={snapshot.cashBalance} color={th.text} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <SummaryMetric label={C.reservedSavings} value={snapshot.reservedSavings} color={snapshot.reservedSavings > 0 ? th.warn : th.sub} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <SummaryMetric label={C.availableBalance} value={snapshot.availableCash} color={snapshot.availableCash >= 0 ? th.inc : th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+            </View>
+            {walletFilter === 'all' ? (
+              <View style={[s.netPositionRow, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
+                <Text style={[s.netPositionLabel, { color: th.sub, textAlign: align }]}>{C.netPosition}</Text>
+                <Text style={[s.netPositionValue, { color: snapshot.netWorth >= 0 ? th.inc : th.exp }]}>
+                  {money(snapshot.netWorth, cfg.lang, cfg.currency)} {sym}
+                </Text>
+              </View>
+            ) : null}
+          </SectionCard>
+        ) : null}
+
+        <SectionCard
+          th={th}
+          title={C.cashFlowTitle}
+          subtitle={`${C.cashNet}: ${money(periodCashFlow.net, cfg.lang, cfg.currency)} ${sym}`}
+          icon="swap-vertical-outline"
+          lang={cfg.lang}
+        >
+          <Text style={[s.reportExplanation, { color: th.sub, textAlign: align }]}>{C.cashFlowHint}</Text>
+          <View style={[s.summaryGrid, { flexDirection: rowDir, marginBottom: 0 }]}>
+            <SummaryMetric label={C.cashIn} value={periodCashFlow.inflow} color={th.inc} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+            <SummaryMetric label={C.cashOut} value={periodCashFlow.outflow} color={th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+            <SummaryMetric label={C.cashNet} value={periodCashFlow.net} color={periodCashFlow.net >= 0 ? th.inc : th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+          </View>
+        </SectionCard>
+
+        {scope === 'month' && selectedMonthKey === currentMonthKey ? (
+          <SectionCard
+            th={th}
+            title={C.forecastTitle}
+            subtitle={C.forecastHint}
+            icon="trending-up-outline"
+            lang={cfg.lang}
+          >
+            <View style={[s.summaryGrid, { flexDirection: rowDir, marginBottom: 0 }]}>
+              <SummaryMetric label={C.projectedExpense} value={snapshot.forecast.projected} color={snapshot.forecast.status === 'danger' ? th.exp : th.text} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <SummaryMetric label={C.forecastCommitments} value={snapshot.forecast.remainingCommitments} color={th.warn} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <SummaryMetric label={C.forecastAvailable} value={snapshot.forecast.availableToday} color={snapshot.forecast.availableToday >= 0 ? th.inc : th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+            </View>
+          </SectionCard>
+        ) : null}
+
+        {walletFilter === 'all' && (modules.debtsOwed || modules.debtsReceivable || modules.commitments) ? (
+          <SectionCard
+            th={th}
+            title={C.debtsDueTitle}
+            subtitle={`${C.owedRemaining}: ${money(snapshot.debts.remaining, cfg.lang, cfg.currency)} ${sym} · ${C.receivableRemaining}: ${money(snapshot.receivables.remaining, cfg.lang, cfg.currency)} ${sym}`}
+            icon="card-outline"
+            lang={cfg.lang}
+          >
+            <Text style={[s.reportExplanation, { color: th.sub, textAlign: align }]}>{C.debtsDueHint}</Text>
+            <View style={[s.summaryGrid, { flexDirection: rowDir, marginBottom: 0 }]}>
+              <SummaryMetric label={C.owedRemaining} value={snapshot.debts.remaining} color={th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <SummaryMetric label={C.receivableRemaining} value={snapshot.receivables.remaining} color={th.inc} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <SummaryMetric label={C.activeCommitments} value={activeCommitmentTotal} color={th.warn} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+            </View>
+          </SectionCard>
+        ) : null}
+
+        {walletFilter === 'all' && modules.goals ? (
+          <SectionCard
+            th={th}
+            title={C.goalsTitle}
+            subtitle={`${C.savedAmount}: ${money(snapshot.goals.saved, cfg.lang, cfg.currency)} ${sym} · ${C.goalRemaining}: ${money(snapshot.goals.remaining, cfg.lang, cfg.currency)} ${sym}`}
+            icon="flag-outline"
+            lang={cfg.lang}
+          >
+            <Text style={[s.reportExplanation, { color: th.sub, textAlign: align }]}>{C.goalsHint}</Text>
+            <View style={[s.summaryGrid, { flexDirection: rowDir, marginBottom: 0 }]}>
+              <SummaryMetric label={C.savedAmount} value={snapshot.goals.saved} color={th.primary} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <SummaryMetric label={C.goalRemaining} value={snapshot.goals.remaining} color={th.warn} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <SummaryMetric label={C.goalTarget} value={snapshot.goals.target} color={th.text} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+            </View>
+          </SectionCard>
+        ) : null}
 
         <SectionCard th={th} title={C.smartTitle} subtitle={C.smartHint} icon="sparkles-outline" lang={cfg.lang}>
           <View style={s.insightList}>
@@ -428,30 +636,39 @@ export default function ReportsScreen() {
         </SectionCard>
 
         {scope === 'month' && modules.budgets && budgetSummary.limit > 0 ? (
-          <View style={[s.budgetCard, { backgroundColor: th.card, borderColor: th.border }]}>
-            <View style={[s.budgetHead, { flexDirection: rowDir }]}>
-              <View style={[s.budgetIcon, { backgroundColor: budgetSummary.over ? th.expBg : th.primSoft }]}>
-                <Ionicons name="speedometer-outline" size={19} color={budgetSummary.over ? th.exp : th.primary} />
+          <SectionCard
+            th={th}
+            title={C.monthlyBudget}
+            subtitle={budgetSummary.over
+              ? C.budgetOver
+              : `${C.budgetRemaining}: ${money(budgetSummary.remaining, cfg.lang, cfg.currency)} ${sym}`}
+            icon="speedometer-outline"
+            lang={cfg.lang}
+          >
+            <View style={[s.spendingLimitRow, { flexDirection: rowDir }]}>
+              <View style={[s.spendingLimitMetric, { backgroundColor: th.cardHigh }]}>
+                <Text style={[s.spendingLimitLabel, { color: th.sub }]}>{ar ? 'المصروف' : 'Spent'}</Text>
+                <Text style={[s.spendingLimitValue, { color: budgetSummary.over ? th.exp : th.text }]}>
+                  {money(budgetSummary.spent, cfg.lang, cfg.currency)} {sym}
+                </Text>
               </View>
-              <Text style={[s.budgetTitle, { color: th.text, textAlign: align }]}>{C.monthlyBudget}</Text>
-              <View style={[s.budgetStatus, { backgroundColor: budgetSummary.over ? th.expBg : th.incBg }]}>
-                <Text style={[s.budgetStatusText, { color: budgetSummary.over ? th.exp : th.inc }]}>
-                  {Math.round(budgetSummary.percent || 0)}%
+              <View style={[s.spendingLimitMetric, { backgroundColor: th.cardHigh }]}>
+                <Text style={[s.spendingLimitLabel, { color: th.sub }]}>{ar ? 'الحد' : 'Limit'}</Text>
+                <Text style={[s.spendingLimitValue, { color: th.text }]}>
+                  {money(budgetSummary.limit, cfg.lang, cfg.currency)} {sym}
+                </Text>
+              </View>
+              <View style={[s.spendingLimitMetric, { backgroundColor: th.cardHigh }]}>
+                <Text style={[s.spendingLimitLabel, { color: th.sub }]}>{C.budgetRemaining}</Text>
+                <Text style={[s.spendingLimitValue, { color: budgetSummary.remaining >= 0 ? th.inc : th.exp }]}>
+                  {money(budgetSummary.remaining, cfg.lang, cfg.currency)} {sym}
                 </Text>
               </View>
             </View>
-            <View style={[s.budgetNumbers, { flexDirection: rowDir }]}>
-              <Text style={[s.budgetSpent, { color: budgetSummary.over ? th.exp : th.text }]}>
-                {money(budgetSummary.spent, cfg.lang, cfg.currency)} {sym}
-              </Text>
-              <Text style={[s.budgetLimit, { color: th.sub }]}>
-                {C.budgetOf} {money(budgetSummary.limit, cfg.lang, cfg.currency)} {sym}
-              </Text>
-            </View>
-            <View style={[s.budgetTrack, { backgroundColor: th.cardHigh }]}>
+            <View style={[s.spendingLimitTrack, { backgroundColor: th.cardHigh }]}>
               <View
                 style={[
-                  s.budgetFill,
+                  s.spendingLimitFill,
                   {
                     backgroundColor: budgetSummary.over ? th.exp : th.primary,
                     width: `${Math.min(100, budgetSummary.percent || 0)}%`,
@@ -460,12 +677,10 @@ export default function ReportsScreen() {
                 ]}
               />
             </View>
-            <Text style={[s.budgetFoot, { color: th.sub, textAlign: align }]}>
-              {budgetSummary.over
-                ? C.budgetOver
-                : `${C.budgetOnTrack} · ${C.budgetRemaining}: ${money(budgetSummary.remaining, cfg.lang, cfg.currency)} ${sym}`}
+            <Text style={[s.spendingLimitPercent, { color: budgetSummary.over ? th.exp : th.primary, textAlign: align }]}>
+              {Math.round(budgetSummary.percent || 0)}%
             </Text>
-          </View>
+          </SectionCard>
         ) : null}
 
         <SectionCard th={th} title={C.topSpending} subtitle={C.topSpendingHint} icon="pie-chart-outline" lang={cfg.lang}>
@@ -478,72 +693,109 @@ export default function ReportsScreen() {
           ) : <Empty th={th} text={C.noData} />}
         </SectionCard>
 
-        {comparisonMode === 'none' ? (
-          <TouchableOpacity
-            onPress={() => changeComparisonMode('month')}
-            style={[s.addComparisonCard, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}
-          >
-            <View style={[s.comparisonIcon, { backgroundColor: th.primSoft }]}>
-              <Ionicons name="git-compare-outline" size={19} color={th.primary} />
-            </View>
-            <Text style={[s.addComparisonLabel, { color: th.text, textAlign: align }]}>{C.addComparison}</Text>
-            <Ionicons name={ar ? 'chevron-back' : 'chevron-forward'} size={18} color={th.faint} />
-          </TouchableOpacity>
-        ) : (
-          <View style={[s.comparisonPanel, { backgroundColor: th.card, borderColor: th.border }]}>
-            <View style={[s.comparisonHead, { flexDirection: rowDir }]}>
-              <View style={[s.comparisonIcon, { backgroundColor: th.primSoft }]}>
-                <Ionicons name="git-compare-outline" size={18} color={th.primary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.sectionTitle, { color: th.text, textAlign: align }]}>{C.compared}</Text>
-                <Text style={[s.sectionSubtitle, { color: th.sub, textAlign: align }]}>{C.comparisonHint}</Text>
-              </View>
-              <TouchableOpacity
-                accessibilityLabel={C.removeComparison}
-                onPress={() => changeComparisonMode('none')}
-                style={[s.comparisonRemoveBtn, { backgroundColor: th.expBg }]}
-              >
-                <Ionicons name="trash-outline" size={18} color={th.exp} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={[s.comparisonModes, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
-              {[
-                { value: 'month', label: C.monthlyComparison },
-                { value: 'year', label: C.annualComparison },
-              ].map(option => {
+        {/* MYFI_COMPARISON_PRO_V3 */}
+        <SectionCard
+          th={th}
+          title={C.comparisonTitle}
+          subtitle={C.comparisonSubtitle}
+          icon="git-compare-outline"
+          lang={cfg.lang}
+        >
+          <View style={[s.proCompareModeBar, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
+            {[
+              { value: 'month', label: C.monthlyComparison, icon: 'calendar-outline' },
+              { value: 'year', label: C.annualComparison, icon: 'calendar-number-outline' },
+            ].map(option => {
               const active = comparisonMode === option.value;
               return (
                 <TouchableOpacity
                   key={option.value}
                   onPress={() => changeComparisonMode(option.value)}
-                  style={[s.comparisonModeBtn, { backgroundColor: active ? th.primary : 'transparent' }]}
+                  style={[
+                    s.proCompareModeBtn,
+                    {
+                      backgroundColor: active ? th.card : 'transparent',
+                      borderColor: active ? th.border : 'transparent',
+                      flexDirection: rowDir,
+                    },
+                  ]}
                 >
-                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.9} style={{ color: active ? th.onPrimary : th.sub, fontSize: 12, ...weight('900') }}>{option.label}</Text>
+                  <Ionicons name={option.icon} size={16} color={active ? th.primary : th.sub} />
+                  <Text style={[s.proCompareModeText, { color: active ? th.primary : th.sub }]}>
+                    {option.label}
+                  </Text>
                 </TouchableOpacity>
               );
-              })}
-            </View>
+            })}
+          </View>
 
+          {comparisonMode === 'none' ? (
+            <TouchableOpacity
+              onPress={() => changeComparisonMode('month')}
+              style={[s.proCompareEmpty, { backgroundColor: th.cardHigh, borderColor: th.border }]}
+            >
+              <View style={[s.proCompareHeroIcon, { backgroundColor: th.primSoft }]}>
+                <Ionicons name="git-compare-outline" size={23} color={th.primary} />
+              </View>
+              <Text style={[s.proCompareEmptyTitle, { color: th.text }]}>
+                {C.addComparison}
+              </Text>
+              <Text style={[s.proCompareEmptyHint, { color: th.sub }]}>
+                {C.startComparisonHint}
+              </Text>
+            </TouchableOpacity>
+          ) : (
             <>
               <TouchableOpacity
                 onPress={() => setSheet('comparisonPeriods')}
-                style={[s.periodPicker, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}
+                style={[
+                  s.proComparePicker,
+                  {
+                    backgroundColor: th.cardHigh,
+                    borderColor: th.border,
+                    flexDirection: rowDir,
+                  },
+                ]}
               >
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.compareFieldLabel, { color: th.sub, textAlign: align }]}>{C.choosePeriods}</Text>
-                  <Text style={[s.periodPickerValue, { color: th.text, textAlign: align }]}>
-                    {comparisonPeriods.length} {C.selectedPeriods}
+                <View style={[s.proComparePickerIcon, { backgroundColor: th.primSoft }]}>
+                  <Ionicons name="calendar-clear-outline" size={18} color={th.primary} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[s.proComparePickerLabel, { color: th.sub, textAlign: align }]}>
+                    {C.selectedPeriodsLabel}
                   </Text>
-                  <Text style={[s.periodPickerHint, { color: th.faint, textAlign: align }]}>
-                    {comparisonMode === 'month' ? C.monthlyLimit : C.annualLimit}
+                  <Text
+                    style={[s.proComparePickerValue, { color: th.text, textAlign: align }]}
+                    numberOfLines={2}
+                  >
+                    {comparisonPeriods
+                      .map(value => comparisonOptions.find(option => option.value === value)?.label || value)
+                      .join(' · ')}
                   </Text>
                 </View>
-                <Ionicons name="options-outline" size={19} color={th.primary} />
+                <View style={[s.proCompareEditPill, { backgroundColor: th.primSoft }]}>
+                  <Text style={[s.proCompareEditText, { color: th.primary }]}>{C.editPeriods}</Text>
+                  <Ionicons name="chevron-down" size={14} color={th.primary} />
+                </View>
               </TouchableOpacity>
 
-              <View style={[s.comparisonViewSwitch, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
+              <View style={s.proCompareChipRail}>
+                {comparisonPeriods.slice(0, 6).map(value => {
+                  const option = comparisonOptions.find(item => item.value === value);
+                  return (
+                    <View
+                      key={value}
+                      style={[s.proCompareChip, { backgroundColor: th.primSoft, borderColor: `${th.primary}30` }]}
+                    >
+                      <Text style={[s.proCompareChipText, { color: th.primary }]} numberOfLines={1}>
+                        {option?.label || value}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+
+              <View style={[s.proCompareViewBar, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
                 {[
                   { value: 'chart', label: C.chartView, icon: 'analytics-outline' },
                   { value: 'details', label: C.detailsView, icon: 'list-outline' },
@@ -553,10 +805,18 @@ export default function ReportsScreen() {
                     <TouchableOpacity
                       key={option.value}
                       onPress={() => setComparisonView(option.value)}
-                      style={[s.comparisonViewBtn, { backgroundColor: active ? th.card : 'transparent', flexDirection: rowDir }]}
+                      style={[
+                        s.proCompareViewBtn,
+                        {
+                          backgroundColor: active ? th.primary : 'transparent',
+                          flexDirection: rowDir,
+                        },
+                      ]}
                     >
-                      <Ionicons name={option.icon} size={16} color={active ? th.primary : th.sub} />
-                      <Text style={[s.comparisonViewText, { color: active ? th.primary : th.sub }]}>{option.label}</Text>
+                      <Ionicons name={option.icon} size={15} color={active ? th.onPrimary : th.sub} />
+                      <Text style={[s.proCompareViewText, { color: active ? th.onPrimary : th.sub }]}>
+                        {option.label}
+                      </Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -564,33 +824,89 @@ export default function ReportsScreen() {
 
               {comparisonSeries.length ? (
                 comparisonView === 'chart' ? (
-                  <>
-                  <TrendChart data={comparisonSeries} th={th} lang={cfg.lang} />
-                  <View style={[s.legend, { flexDirection: rowDir }]}>
-                    <Legend color={th.inc} label={C.income} th={th} />
-                    <Legend color={th.exp} label={C.expense} th={th} />
+                  <View style={[s.proCompareResultBox, { borderColor: th.border }]}>
+                    <TrendChart data={comparisonSeries} th={th} lang={cfg.lang} />
+                    <View style={[s.legend, { flexDirection: rowDir }]}>
+                      <Legend color={th.inc} label={C.income} th={th} />
+                      <Legend color={th.exp} label={C.expense} th={th} />
+                    </View>
                   </View>
-                  </>
                 ) : (
-                  <View style={s.comparisonDetails}>
-                    {comparisonSeries.map(item => (
-                        <View key={item.key} style={[s.comparisonDetailRow, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
-                          <View style={[s.comparisonDetailHead, { flexDirection: rowDir }]}>
-                            <Text style={[s.periodCardTitle, { color: th.primary, textAlign: align }]}>{item.label}</Text>
+                  <View style={s.proCompareDetails}>
+                    {comparisonSeries.map((item, index) => (
+                      <View
+                        key={item.key}
+                        style={[
+                          s.proComparePeriodCard,
+                          {
+                            backgroundColor: th.cardHigh,
+                            borderColor: index === comparisonSeries.length - 1 ? `${th.primary}55` : th.border,
+                          },
+                        ]}
+                      >
+                        <View style={[s.proComparePeriodHead, { flexDirection: rowDir }]}>
+                          <View style={[s.proComparePeriodMark, { backgroundColor: th.primSoft }]}>
+                            <Ionicons
+                              name={comparisonMode === 'month' ? 'calendar-outline' : 'calendar-number-outline'}
+                              size={16}
+                              color={th.primary}
+                            />
                           </View>
-                        <View style={[s.comparisonDetailMetrics, { flexDirection: rowDir }]}>
-                          <ComparisonMetric label={C.income} value={item.inc} color={th.inc} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-                          <ComparisonMetric label={C.expense} value={item.exp} color={th.exp} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-                          <ComparisonMetric label={C.net} value={item.bal} color={item.bal >= 0 ? th.inc : th.exp} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+                          <Text style={[s.proComparePeriodTitle, { color: th.text, textAlign: align }]}>
+                            {item.label}
+                          </Text>
+                          {index === comparisonSeries.length - 1 ? (
+                            <View style={[s.proCompareLatest, { backgroundColor: th.primSoft }]}>
+                              <Text style={[s.proCompareLatestText, { color: th.primary }]}>
+                                {ar ? 'الأحدث' : 'Latest'}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+
+                        <View style={[s.proCompareMetrics, { flexDirection: rowDir }]}>
+                          <View style={[s.proCompareMetric, { borderColor: th.border }]}>
+                            <Text style={[s.proCompareMetricLabel, { color: th.sub }]}>{C.income}</Text>
+                            <Text style={[s.proCompareMetricValue, { color: th.inc }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                              {money(item.inc, cfg.lang, cfg.currency)} {sym}
+                            </Text>
+                          </View>
+                          <View style={[s.proCompareMetric, { borderColor: th.border }]}>
+                            <Text style={[s.proCompareMetricLabel, { color: th.sub }]}>{C.expense}</Text>
+                            <Text style={[s.proCompareMetricValue, { color: th.exp }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                              {money(item.exp, cfg.lang, cfg.currency)} {sym}
+                            </Text>
+                          </View>
+                          <View style={[s.proCompareMetric, { borderColor: th.border }]}>
+                            <Text style={[s.proCompareMetricLabel, { color: th.sub }]}>
+                              {ar ? 'صافي الدخل' : 'Net income'}
+                            </Text>
+                            <Text
+                              style={[s.proCompareMetricValue, { color: item.bal >= 0 ? th.inc : th.exp }]}
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.7}
+                            >
+                              {money(item.bal, cfg.lang, cfg.currency)} {sym}
+                            </Text>
+                          </View>
                         </View>
                       </View>
                     ))}
                   </View>
                 )
               ) : <Empty th={th} text={C.noComparison} />}
+
+              <TouchableOpacity
+                onPress={() => changeComparisonMode('none')}
+                style={[s.proCompareRemove, { borderColor: th.border, flexDirection: rowDir }]}
+              >
+                <Ionicons name="close-circle-outline" size={16} color={th.sub} />
+                <Text style={[s.proCompareRemoveText, { color: th.sub }]}>{C.removeComparison}</Text>
+              </TouchableOpacity>
             </>
-          </View>
-        )}
+          )}
+        </SectionCard>
       </ScrollView>
 
       <ReportPeriodSheet
@@ -604,19 +920,28 @@ export default function ReportsScreen() {
         lang={cfg.lang}
       />
       <ChoiceSheet
-        visible={sheet === 'comparisonPeriods'}
-        title={`${C.choosePeriods} · ${comparisonPeriods.length}/${comparisonLimit}`}
-        options={comparisonOptions}
-        values={comparisonPeriods}
-        multiple
-        maxSelections={comparisonLimit}
-        doneLabel={`${C.done} (${comparisonPeriods.length})`}
-        onSelect={toggleComparisonPeriod}
+        visible={sheet === 'wallet'}
+        title={C.walletScope}
+        options={walletOptions}
+        value={walletFilter}
+        onSelect={value => setWalletFilter(value)}
         onClose={() => setSheet(null)}
         th={th}
         lang={cfg.lang}
       />
-      <ReportShareSheet
+
+      <ComparisonPeriodSheet
+        visible={sheet === 'comparisonPeriods'}
+        onClose={() => setSheet(null)}
+        options={comparisonOptions}
+        values={comparisonPeriods}
+        onToggle={toggleComparisonPeriod}
+        limit={comparisonLimit}
+        mode={comparisonMode}
+        th={th}
+        lang={cfg.lang}
+      />
+<ReportShareSheet
         visible={sheet === 'share'}
         onClose={() => setSheet(null)}
         onShare={exportReport}
@@ -629,6 +954,208 @@ export default function ReportsScreen() {
         lang={cfg.lang}
       />
     </>
+  );
+}
+
+function ComparisonPeriodSheet({ visible, onClose, options, values, onToggle, limit, mode, th, lang }) {
+  const ar = lang === 'ar';
+  const C = copy(lang);
+  const currentYear = new Date().getFullYear();
+  const selectedYears = values
+    .map(value => Number(String(value).slice(0, 4)))
+    .filter(Number.isFinite);
+  const [year, setYear] = useState(selectedYears[selectedYears.length - 1] || currentYear);
+
+  useEffect(() => {
+    if (!visible) return;
+    const nextYears = values
+      .map(value => Number(String(value).slice(0, 4)))
+      .filter(Number.isFinite);
+    setYear(nextYears[nextYears.length - 1] || currentYear);
+  }, [visible, mode]);
+
+  const years = useMemo(() => {
+    const set = new Set();
+    options.forEach(option => {
+      const y = Number(String(option.value).slice(0, 4));
+      if (Number.isFinite(y)) set.add(y);
+    });
+    if (!set.size) Array.from({ length: 10 }, (_, index) => set.add(currentYear - index));
+    return [...set].sort((a, b) => b - a);
+  }, [options, currentYear]);
+
+  const monthOptionsForYear = useMemo(() => {
+    if (mode !== 'month') return [];
+    return Array.from({ length: 12 }, (_, index) => {
+      const value = `${year}-${String(index + 1).padStart(2, '0')}`;
+      const option = options.find(item => item.value === value);
+      return {
+        value,
+        label: option?.label || `${ar ? MONTHS_AR[index] : MONTHS_EN_FULL[index]} ${year}`,
+        monthLabel: ar ? MONTHS_AR[index] : MONTHS_EN_FULL[index],
+      };
+    });
+  }, [mode, year, options, ar]);
+
+  const selectedCount = values.length;
+  const canSelectMore = selectedCount < limit;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
+      <View style={[s.periodOverlay, { backgroundColor: th.overlay }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[s.proCompareSheet, { backgroundColor: th.card, borderColor: th.border }]}>
+          <View style={[s.proCompareSheetHandle, { backgroundColor: th.cardHigh }]} />
+
+          <View style={[s.proCompareSheetHead, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
+            <View style={[s.proCompareSheetIcon, { backgroundColor: th.primSoft }]}>
+              <Ionicons name="git-compare-outline" size={20} color={th.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.proCompareSheetTitle, { color: th.text, textAlign: ar ? 'right' : 'left' }]}>
+                {C.choosePeriods}
+              </Text>
+              <Text style={[s.proCompareSheetHint, { color: th.sub, textAlign: ar ? 'right' : 'left' }]}>
+                {mode === 'month' ? C.monthlyLimit : C.annualLimit}
+              </Text>
+            </View>
+            <View style={[s.proCompareSheetCount, { backgroundColor: th.primSoft }]}>
+              <Text style={[s.proCompareSheetCountText, { color: th.primary }]}>
+                {selectedCount}/{limit}
+              </Text>
+            </View>
+          </View>
+
+          {mode === 'month' ? (
+            <>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ direction: ar ? 'rtl' : 'ltr' }}
+                contentContainerStyle={s.proCompareYearRail}
+              >
+                {years.map(item => {
+                  const active = year === item;
+                  return (
+                    <TouchableOpacity
+                      key={item}
+                      onPress={() => setYear(item)}
+                      style={[
+                        s.proCompareYearChip,
+                        {
+                          backgroundColor: active ? th.primary : th.cardHigh,
+                          borderColor: active ? th.primary : th.border,
+                        },
+                      ]}
+                    >
+                      <Text style={[s.proCompareYearText, { color: active ? th.onPrimary : th.text }]}>
+                        {item}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={s.proCompareMonthScroll}
+              >
+                <View style={s.proCompareMonthGrid}>
+                  {monthOptionsForYear.map(option => {
+                    const active = values.includes(option.value);
+                    const disabled = !active && !canSelectMore;
+                    return (
+                      <TouchableOpacity
+                        key={option.value}
+                        disabled={disabled}
+                        onPress={() => onToggle(option.value)}
+                        style={[
+                          s.proCompareMonthTile,
+                          {
+                            backgroundColor: active ? th.primSoft : th.cardHigh,
+                            borderColor: active ? th.primary : th.border,
+                            opacity: disabled ? 0.42 : 1,
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            s.proCompareMonthCheck,
+                            {
+                              backgroundColor: active ? th.primary : 'transparent',
+                              borderColor: active ? th.primary : th.border,
+                            },
+                          ]}
+                        >
+                          {active ? <Ionicons name="checkmark" size={12} color={th.onPrimary} /> : null}
+                        </View>
+                        <Text
+                          numberOfLines={2}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.78}
+                          style={[s.proCompareMonthText, { color: active ? th.primary : th.text }]}
+                        >
+                          {option.monthLabel}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            </>
+          ) : (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.proCompareMonthScroll}>
+              <View style={s.proCompareYearGrid}>
+                {years.map(item => {
+                  const value = String(item);
+                  const active = values.includes(value);
+                  const disabled = !active && !canSelectMore;
+                  return (
+                    <TouchableOpacity
+                      key={value}
+                      disabled={disabled}
+                      onPress={() => onToggle(value)}
+                      style={[
+                        s.proCompareYearTile,
+                        {
+                          backgroundColor: active ? th.primSoft : th.cardHigh,
+                          borderColor: active ? th.primary : th.border,
+                          opacity: disabled ? 0.42 : 1,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={active ? 'checkmark-circle' : 'calendar-number-outline'}
+                        size={18}
+                        color={active ? th.primary : th.sub}
+                      />
+                      <Text style={[s.proCompareYearTileText, { color: active ? th.primary : th.text }]}>
+                        {item}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          )}
+
+          <View style={[s.proCompareSheetFooter, { borderTopColor: th.border }]}>
+            <Text style={[s.proCompareSelectionSummary, { color: th.sub, textAlign: ar ? 'right' : 'left' }]}>
+              {C.selectedPeriodsLabel}: {selectedCount}
+            </Text>
+            <TouchableOpacity
+              onPress={onClose}
+              style={[s.proCompareDoneBtn, { backgroundColor: th.primary }]}
+            >
+              <Ionicons name="checkmark-circle-outline" size={18} color={th.onPrimary} />
+              <Text style={[s.proCompareDoneText, { color: th.onPrimary }]}>
+                {C.done}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -832,11 +1359,18 @@ function ReportPeriodSheet({ visible, onClose, onSelect, scope, selectedMonthKey
   );
 }
 
-function SectionCard({ th, title, subtitle, icon, lang, children }) {
+function SectionCard({ th, title, subtitle, icon, lang, children, defaultExpanded = false }) {
   const ar = lang === 'ar';
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const C = copy(lang);
   return (
     <View style={[s.card, { backgroundColor: th.card, borderColor: th.border }]}>
-      <View style={[s.sectionHead, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={expanded ? C.collapseSection : C.expandSection}
+        onPress={() => setExpanded(value => !value)}
+        style={[s.sectionHead, { flexDirection: ar ? 'row-reverse' : 'row', marginBottom: expanded ? 15 : 0 }]}
+      >
         <View style={[s.sectionIcon, { backgroundColor: th.primSoft }]}>
           <Ionicons name={icon} size={18} color={th.primary} />
         </View>
@@ -844,8 +1378,9 @@ function SectionCard({ th, title, subtitle, icon, lang, children }) {
           <Text style={[s.sectionTitle, { color: th.text, textAlign: ar ? 'right' : 'left' }]}>{title}</Text>
           {!!subtitle && <Text style={[s.sectionSubtitle, { color: th.sub, textAlign: ar ? 'right' : 'left' }]}>{subtitle}</Text>}
         </View>
-      </View>
-      {children}
+        <Ionicons name={expanded ? 'chevron-up-outline' : 'chevron-down-outline'} size={18} color={th.faint} />
+      </TouchableOpacity>
+      {expanded ? children : null}
     </View>
   );
 }
@@ -945,18 +1480,26 @@ function Empty({ th, text }) {
 }
 
 const s = StyleSheet.create({
-  screen: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 96 },
+  screen: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 92 },
   reportTopRow: { alignItems: 'stretch', gap: 8 },
-  shareCenterBtn: { width: 72, minHeight: 102, borderRadius: RADIUS.xl, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 7, marginBottom: 12, ...SHADOW.card },
+  shareCenterBtn: { width: 58, minHeight: 78, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 10, ...SHADOW.card },
   shareCenterLabel: { fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: 'center' },
-  periodCard: { minHeight: 102, borderRadius: RADIUS.xl, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 16, alignItems: 'center', gap: 13, marginBottom: 12, overflow: 'hidden', ...SHADOW.card },
-  periodIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  periodCard: { minHeight: 78, borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 11, alignItems: 'center', gap: 10, marginBottom: 10, overflow: 'hidden', ...SHADOW.card },
+  periodIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   periodLabel: { fontSize: 11, lineHeight: 16, ...weight('800') },
-  periodValue: { fontSize: 18, lineHeight: 25, ...weight('900'), marginTop: 1 },
-  periodHint: { fontSize: 11, lineHeight: 16, ...weight('700'), marginTop: 1 },
-  periodAction: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  summaryGrid: { gap: 8, marginBottom: 12 },
-  summaryMetric: { flex: 1, minWidth: 0, minHeight: 76, borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 11, justifyContent: 'center', ...SHADOW.card },
+  periodValue: { fontSize: 16, lineHeight: 22, ...weight('900'), marginTop: 0 },
+  periodHint: { fontSize: 10, lineHeight: 14, ...weight('700'), marginTop: 0 },
+  periodAction: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  summaryGrid: { gap: 7, marginBottom: 10 },
+  walletFilterBar: { minHeight: 50, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, alignItems: 'center', gap: 9, marginBottom: 10, ...SHADOW.card },
+  walletFilterIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  walletFilterLabel: { fontSize: 11, lineHeight: 16, ...weight('800') },
+  walletFilterValue: { fontSize: 13, lineHeight: 19, ...weight('900'), marginTop: 1 },
+  netPositionRow: { minHeight: 42, borderRadius: RADIUS.md, paddingHorizontal: 11, marginTop: 10, alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  netPositionLabel: { flex: 1, fontSize: 12, ...weight('800') },
+  netPositionValue: { fontSize: 13, ...weight('900') },
+  reportExplanation: { fontSize: 11, lineHeight: 18, ...weight('700'), marginBottom: 10 },
+  summaryMetric: { flex: 1, minWidth: 0, minHeight: 66, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 9, justifyContent: 'center', ...SHADOW.card },
   summaryMetricLabel: { fontSize: 11, lineHeight: 16, ...weight('800'), textAlign: 'center' },
   summaryMetricValue: { fontSize: 14, lineHeight: 21, ...weight('900'), textAlign: 'center', marginTop: 4 },
   insightList: { gap: 8 },
@@ -1023,9 +1566,9 @@ const s = StyleSheet.create({
   comparisonDetailRow: { borderRadius: RADIUS.md, borderWidth: 1, padding: 12 },
   comparisonDetailHead: { alignItems: 'center', marginBottom: 10 },
   comparisonDetailMetrics: { gap: 10 },
-  card: { borderRadius: RADIUS.xl, borderWidth: 1, padding: 15, marginBottom: 12, ...SHADOW.card },
-  sectionHead: { alignItems: 'center', gap: 10, marginBottom: 15 },
-  sectionIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  card: { borderRadius: RADIUS.lg, borderWidth: 1, padding: 12, marginBottom: 10, ...SHADOW.card },
+  sectionHead: { alignItems: 'center', gap: 9, marginBottom: 12 },
+  sectionIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   sectionTitle: { fontSize: 15, lineHeight: 21, ...weight('900') },
   sectionSubtitle: { fontSize: 12, lineHeight: 18, ...weight('700'), marginTop: 2 },
   chartScroll: { paddingVertical: 2 },
@@ -1060,4 +1603,100 @@ const s = StyleSheet.create({
   shareSubmit: { minHeight: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginTop: 8 },
   empty: { borderWidth: 1, borderStyle: 'dashed', borderRadius: RADIUS.lg, minHeight: 96, alignItems: 'center', justifyContent: 'center', padding: 16, gap: 8 },
   emptyText: { fontSize: 12, lineHeight: 18, textAlign: 'center', ...weight('700') },
+  spendingLimitRow: { gap: 8, marginBottom: 12 },
+  spendingLimitMetric: { flex: 1, minWidth: 0, borderRadius: RADIUS.md, paddingHorizontal: 9, paddingVertical: 10 },
+  spendingLimitLabel: { fontSize: 10, lineHeight: 14, ...weight('800'), textAlign: 'center' },
+  spendingLimitValue: { fontSize: 13, lineHeight: 19, ...weight('900'), marginTop: 3, textAlign: 'center' },
+  spendingLimitTrack: { height: 7, borderRadius: 7, overflow: 'hidden' },
+  spendingLimitFill: { height: 7, borderRadius: 7 },
+  spendingLimitPercent: { fontSize: 11, lineHeight: 16, ...weight('900'), marginTop: 7 },
+
+  comparisonActionRow: { alignItems: 'center', gap: 8, marginBottom: 10 },
+  compareStartBtn: { minHeight: 72, borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 11, alignItems: 'center', gap: 10 },
+  compareStartIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  compareStartTitle: { fontSize: 13, lineHeight: 19, ...weight('900') },
+  compareStartHint: { fontSize: 11, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  comparePickerIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginHorizontal: 2 },
+
+  compareSheetSubtitle: { fontSize: 11, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  compareCountPill: { minWidth: 48, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 9 },
+  compareCountText: { fontSize: 11, ...weight('900') },
+  comparePeriodsScroll: { paddingTop: 4, paddingBottom: 10, gap: 7 },
+  comparePeriodOption: { minHeight: 56, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center', gap: 10 },
+  comparePeriodOptionIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  comparePeriodText: { flex: 1, minWidth: 0, fontSize: 13, lineHeight: 18, ...weight('900') },
+  comparePeriodCheck: { width: 22, height: 22, borderRadius: 7, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  compareDone: { minHeight: 48, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, marginTop: 4 },
+  compareDoneText: { fontSize: 13, ...weight('900') },
+
+  /* MYFI_COMPARE_PRO_STYLES_V3_START */
+  proCompareModeBar: { minHeight: 46, borderRadius: RADIUS.md, padding: 4, gap: 4, marginBottom: 12 },
+  proCompareModeBtn: { flex: 1, minWidth: 0, minHeight: 38, borderRadius: RADIUS.sm, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 8 },
+  proCompareModeText: { fontSize: 12, lineHeight: 17, ...weight('900') },
+
+  proCompareEmpty: { borderWidth: 1, borderRadius: RADIUS.lg, paddingHorizontal: 18, paddingVertical: 22, alignItems: 'center' },
+  proCompareHeroIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  proCompareEmptyTitle: { fontSize: 14, lineHeight: 20, ...weight('900'), textAlign: 'center' },
+  proCompareEmptyHint: { fontSize: 12, lineHeight: 19, ...weight('700'), textAlign: 'center', marginTop: 5, maxWidth: 290 },
+
+  proComparePicker: { minHeight: 76, borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 10, alignItems: 'center', gap: 10 },
+  proComparePickerIcon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  proComparePickerLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
+  proComparePickerValue: { fontSize: 12, lineHeight: 18, ...weight('900'), marginTop: 2 },
+  proCompareEditPill: { minHeight: 32, borderRadius: 16, paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 4, flexShrink: 0 },
+  proCompareEditText: { fontSize: 10, lineHeight: 14, ...weight('900') },
+
+  proCompareChipRail: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, marginBottom: 12 },
+  proCompareChip: { maxWidth: '48%', minHeight: 28, borderRadius: 14, borderWidth: 1, paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center' },
+  proCompareChipText: { fontSize: 10, lineHeight: 14, ...weight('900') },
+
+  proCompareViewBar: { minHeight: 44, borderRadius: RADIUS.md, padding: 4, gap: 4, marginBottom: 12 },
+  proCompareViewBtn: { flex: 1, minHeight: 36, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  proCompareViewText: { fontSize: 11, lineHeight: 16, ...weight('900') },
+
+  proCompareResultBox: { borderWidth: 1, borderRadius: RADIUS.lg, paddingHorizontal: 8, paddingTop: 7, paddingBottom: 9 },
+  proCompareDetails: { gap: 9 },
+  proComparePeriodCard: { borderWidth: 1, borderRadius: RADIUS.lg, padding: 11 },
+  proComparePeriodHead: { alignItems: 'center', gap: 8, marginBottom: 10 },
+  proComparePeriodMark: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  proComparePeriodTitle: { flex: 1, minWidth: 0, fontSize: 13, lineHeight: 18, ...weight('900') },
+  proCompareLatest: { minHeight: 24, borderRadius: 12, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
+  proCompareLatestText: { fontSize: 9, lineHeight: 13, ...weight('900') },
+  proCompareMetrics: { gap: 6 },
+  proCompareMetric: { flex: 1, minWidth: 0, borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 7, paddingVertical: 8 },
+  proCompareMetricLabel: { fontSize: 9, lineHeight: 13, ...weight('800'), textAlign: 'center' },
+  proCompareMetricValue: { fontSize: 12, lineHeight: 17, ...weight('900'), textAlign: 'center', marginTop: 3 },
+
+  proCompareRemove: { alignSelf: 'center', minHeight: 34, borderWidth: 1, borderRadius: 17, paddingHorizontal: 11, alignItems: 'center', justifyContent: 'center', gap: 5, marginTop: 12 },
+  proCompareRemoveText: { fontSize: 10, lineHeight: 14, ...weight('800') },
+
+  proCompareSheet: { width: '100%', maxHeight: '86%', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, paddingHorizontal: 16, paddingTop: 9, paddingBottom: 16 },
+  proCompareSheetHandle: { width: 42, height: 4, borderRadius: 4, alignSelf: 'center', marginBottom: 13 },
+  proCompareSheetHead: { alignItems: 'center', gap: 10, marginBottom: 12 },
+  proCompareSheetIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  proCompareSheetTitle: { fontSize: 16, lineHeight: 22, ...weight('900') },
+  proCompareSheetHint: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 2 },
+  proCompareSheetCount: { minWidth: 46, height: 30, borderRadius: 15, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
+  proCompareSheetCountText: { fontSize: 10, ...weight('900') },
+
+  proCompareYearRail: { gap: 7, paddingBottom: 10 },
+  proCompareYearChip: { minWidth: 68, height: 34, borderRadius: 17, borderWidth: 1, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
+  proCompareYearText: { fontSize: 11, ...weight('900') },
+
+  proCompareMonthScroll: { paddingBottom: 8 },
+  proCompareMonthGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  proCompareMonthTile: { width: '31%', minHeight: 66, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 8, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  proCompareMonthCheck: { position: 'absolute', top: 6, right: 6, width: 18, height: 18, borderRadius: 6, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  proCompareMonthText: { fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: 'center', paddingHorizontal: 3 },
+
+  proCompareYearGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  proCompareYearTile: { width: '31%', minHeight: 58, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5 },
+  proCompareYearTileText: { fontSize: 12, lineHeight: 17, ...weight('900') },
+
+  proCompareSheetFooter: { borderTopWidth: 1, paddingTop: 11, marginTop: 4 },
+  proCompareSelectionSummary: { fontSize: 10, lineHeight: 15, ...weight('800'), marginBottom: 8 },
+  proCompareDoneBtn: { minHeight: 46, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 },
+  proCompareDoneText: { fontSize: 13, ...weight('900') },
+  /* MYFI_COMPARE_PRO_STYLES_V3_END */
+
 });

@@ -1,8 +1,83 @@
-import { today, normalizeDate } from '../../utils/calc';
-import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
-import { deferredCommitmentDueISO, monthKey, normalizeCommitments } from '../../lib/commitments';
+﻿import { today, normalizeDate } from '../../utils/calc';
+import { canSpendFromWallet, getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
+import { commitmentCycleMonth, deferredCommitmentDueISO, monthKey, normalizeCommitments } from '../../lib/commitments';
 import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
-import { syncCommitmentPaidMonth, uid } from '../domain';
+import { financialDataCount, syncCommitmentPaidMonth, uid } from '../domain';
+const localNumber = value => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const cleanLinkName = value => String(value || '')
+  .trim()
+  .replace(/\s+/g, ' ')
+  .replace(/\s*\((Guest|ضيف)\)\s*$/i, '')
+  .toLowerCase();
+
+const debtRemainingLocal = item => Math.max(
+  0,
+  Math.abs(localNumber(item?.total)) - Math.abs(localNumber(item?.paid)),
+);
+
+const goalRemainingLocal = item => (
+  ['released', 'settled'].includes(item?.status)
+    ? 0
+    : Math.max(0, Math.abs(localNumber(item?.target)) - Math.abs(localNumber(item?.cur)))
+);
+
+const restoreArchivedItem = (item, active) => {
+  const next = { ...item };
+  const wasActive = item.archivedFromActive !== false;
+  delete next.archivedAt;
+  delete next.archivedFromActive;
+  if (active) next.active = wasActive;
+  return next;
+};
+
+const linkNamesMatch = (a, b) => {
+  const left = cleanLinkName(a);
+  const right = cleanLinkName(b);
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+};
+
+const findRepairLinkedTarget = ({ commitment, linkedType, linkedId, debts = [], goals = [] }) => {
+  if (linkedType === 'debt' || linkedType === 'receivable') {
+    const direction = linkedType === 'receivable' ? 'receivable' : 'owed';
+    const current = debts.find(item => item.id === linkedId);
+    if (current && current.direction === direction && debtRemainingLocal(current) > 0) return current;
+
+    const candidates = debts.filter(item => (
+      item.direction === direction
+      && !item.archivedAt
+      && debtRemainingLocal(item) > 0
+      && (!commitment?.scope || !item.scope || item.scope === commitment.scope)
+    ));
+
+    const sourceName = current?.name || commitment?.name;
+    const byName = candidates.find(item => linkNamesMatch(item.name, sourceName));
+    if (byName) return byName;
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
+  if (linkedType === 'goal') {
+    const current = goals.find(item => item.id === linkedId);
+    if (current && goalRemainingLocal(current) > 0) return current;
+
+    const candidates = goals.filter(item => (
+      !item.archivedAt
+      && goalRemainingLocal(item) > 0
+      && (!commitment?.scope || !item.scope || item.scope === commitment.scope)
+    ));
+
+    const sourceName = current?.name || commitment?.name;
+    const byName = candidates.find(item => linkNamesMatch(item.name, sourceName));
+    if (byName) return byName;
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
+  return null;
+};
 
 export const createManagementSlice = (set, get) => ({
   setCats: async (cats) => {
@@ -53,10 +128,11 @@ export const createManagementSlice = (set, get) => ({
     const commitment = normalizeCommitments(get().commitments, defaultWalletId).find(item => item.id === id);
     if (!commitment || commitment.active === false) return false;
     const deferredUntilISO = deferredCommitmentDueISO(commitment, option);
+    const deferredCycleMonth = commitmentCycleMonth(commitment, new Date());
     set(s => ({
       commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
         item.id === id
-          ? normalizeCommitments([{ ...item, deferredUntilISO }], defaultWalletId)[0]
+          ? normalizeCommitments([{ ...item, deferredUntilISO, deferredCycleMonth }], defaultWalletId)[0]
           : item
       )),
     }));
@@ -70,7 +146,7 @@ export const createManagementSlice = (set, get) => ({
     set(s => ({
       commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
         item.id === id
-          ? normalizeCommitments([{ ...item, deferredUntilISO: null }], defaultWalletId)[0]
+          ? normalizeCommitments([{ ...item, deferredUntilISO: null, deferredCycleMonth: null }], defaultWalletId)[0]
           : item
       )),
     }));
@@ -114,16 +190,45 @@ export const createManagementSlice = (set, get) => ({
           ? s.debts.map(item => item.id === sourceId ? { ...item, archivedAt } : item)
           : s.debts,
         goals: kind === 'saving'
-          ? s.goals.map(item => item.id === sourceId ? { ...item, archivedAt, active: false } : item)
+          ? s.goals.map(item => item.id === sourceId ? { ...item, archivedAt, archivedFromActive: item.active !== false, active: false } : item)
           : s.goals,
         commitments: s.commitments.map(item => {
-          if (kind === 'monthly' && item.id === sourceId) return { ...item, archivedAt, active: false };
+          if (kind === 'monthly' && item.id === sourceId) return { ...item, archivedAt, archivedFromActive: item.active !== false, active: false };
           if (debtKinds && (item.linkedType === 'debt' || item.linkedType === 'receivable') && item.linkedId === sourceId) {
-            return { ...item, archivedAt, active: false };
+            return { ...item, archivedAt, archivedFromActive: item.active !== false, active: false };
           }
           if (kind === 'saving' && item.linkedType === 'goal' && item.linkedId === sourceId) {
-            return { ...item, archivedAt, active: false };
+            return { ...item, archivedAt, archivedFromActive: item.active !== false, active: false };
           }
+          return item;
+        }),
+      };
+    });
+    await get().saveLocal();
+    await get().syncCloud();
+    return true;
+  },
+
+  restoreTracker: async (kind, sourceId) => {
+    if (!sourceId) return false;
+    set(s => {
+      const debtKinds = kind === 'owed' || kind === 'receivable';
+      return {
+        debts: debtKinds
+          ? s.debts.map(item => item.id === sourceId ? restoreArchivedItem(item, false) : item)
+          : s.debts,
+        goals: kind === 'saving'
+          ? s.goals.map(item => item.id === sourceId
+            ? restoreArchivedItem(item, item.status !== 'released')
+            : item)
+          : s.goals,
+        commitments: s.commitments.map(item => {
+          const linkedToDebt = debtKinds
+            && (item.linkedType === 'debt' || item.linkedType === 'receivable')
+            && item.linkedId === sourceId;
+          const linkedToGoal = kind === 'saving' && item.linkedType === 'goal' && item.linkedId === sourceId;
+          if (kind === 'monthly' && item.id === sourceId) return restoreArchivedItem(item, true);
+          if (linkedToDebt || linkedToGoal) return restoreArchivedItem(item, true);
           return item;
         }),
       };
@@ -142,12 +247,14 @@ export const createManagementSlice = (set, get) => ({
     const archivedAt = today();
     set(s => ({
       debts: s.debts.map(item => debtIds.has(item.id) ? { ...item, archivedAt } : item),
-      goals: s.goals.map(item => goalIds.has(item.id) ? { ...item, archivedAt, active: false } : item),
+      goals: s.goals.map(item => goalIds.has(item.id) ? { ...item, archivedAt, archivedFromActive: item.active !== false, active: false } : item),
       commitments: s.commitments.map(item => {
         const selected = commitmentIds.has(item.id);
         const debtLinked = (item.linkedType === 'debt' || item.linkedType === 'receivable') && debtIds.has(item.linkedId);
         const goalLinked = item.linkedType === 'goal' && goalIds.has(item.linkedId);
-        return selected || debtLinked || goalLinked ? { ...item, archivedAt, active: false } : item;
+        return selected || debtLinked || goalLinked
+          ? { ...item, archivedAt, archivedFromActive: item.active !== false, active: false }
+          : item;
       }),
     }));
     await get().saveLocal();
@@ -201,16 +308,31 @@ export const createManagementSlice = (set, get) => ({
     return true;
   },
 
-  payCommitment: async (id, dateISO = today(), walletId = null) => {
+  payCommitment: async (id, dateISO = today(), walletId = null, cycleMonth = null) => {
     const entryDate = normalizeDate(dateISO);
     const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
     const commitment = normalizeCommitments(get().commitments, defaultWalletId).find(item => item.id === id);
     if (!commitment || !commitment.active || !commitment.amt) return { ok: false, reason: 'not_found' };
     const paymentWalletId = walletId || commitment.walletId || defaultWalletId;
-    const paidMonth = monthKey(entryDate);
+    const paidMonth = cycleMonth || commitmentCycleMonth(commitment, new Date(`${entryDate}T12:00:00`));
     if (commitment.lastPaidMonth === paidMonth) return { ok: false, reason: 'already_paid' };
     const linkedType = commitment.linkedType || 'none';
-    const linkedId = commitment.linkedId || null;
+    let linkedId = commitment.linkedId || null;
+    const repairedLinkedTarget = findRepairLinkedTarget({
+      commitment,
+      linkedType,
+      linkedId,
+      debts: get().debts,
+      goals: get().goals,
+    });
+    if (repairedLinkedTarget?.id && repairedLinkedTarget.id !== linkedId) {
+      linkedId = repairedLinkedTarget.id;
+      set(s => ({
+        commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
+          item.id === id ? { ...item, linkedId } : item
+        )),
+      }));
+    }
     const requestedAmount = Math.abs(Number(commitment.amt) || 0);
     const linkedMeta = {
       title: commitment.name,
@@ -228,7 +350,7 @@ export const createManagementSlice = (set, get) => ({
       if (!applied) return { ok: false, reason: 'linked_unavailable' };
       set(s => ({
         commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
-          item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, active: item.repeatMonthly === false ? false : item.active } : item
+          item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, deferredCycleMonth: null, active: item.repeatMonthly === false ? false : item.active } : item
         )),
       }));
       await get().saveLocal();
@@ -240,16 +362,27 @@ export const createManagementSlice = (set, get) => ({
       if (!applied) return { ok: false, reason: 'linked_unavailable' };
       set(s => ({
         commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
-          item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, active: item.repeatMonthly === false ? false : item.active } : item
+          item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, deferredCycleMonth: null, active: item.repeatMonthly === false ? false : item.active } : item
         )),
       }));
       await get().saveLocal();
       await get().syncCloud();
       return { ok: true, partial: applied < requestedAmount - 0.0001, appliedAmount: applied, requestedAmount };
     }
+    const spendCheck = canSpendFromWallet({
+      wallets: get().wallets,
+      trans: get().trans,
+      currency: get().cfg.currency,
+      defaultWalletId: get().cfg.defaultWalletId,
+      walletId: paymentWalletId,
+      amount: requestedAmount,
+    });
+    if (!spendCheck.ok) {
+      return { ok: false, reason: 'insufficient_balance', availableBalance: spendCheck.availableBalance };
+    }
     set(s => ({
       commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
-        item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, active: item.repeatMonthly === false ? false : item.active } : item
+        item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, deferredCycleMonth: null, active: item.repeatMonthly === false ? false : item.active } : item
       )),
       trans: [
         {
@@ -324,7 +457,7 @@ export const createManagementSlice = (set, get) => ({
       })).filter(tx => tx.kind !== 'transfer' || tx.fromWalletId !== tx.toWalletId),
       commitments: s.commitments.map(item => item.walletId === id ? { ...item, walletId: fallback.id } : item),
     }));
-    await get().saveLocal();
+    await get().saveLocal({ force: financialDataCount(get()) === 0 });
     await get().syncCloud();
     return true;
   },
@@ -353,7 +486,7 @@ export const createManagementSlice = (set, get) => ({
         selected.has(item.walletId) ? { ...item, walletId: fallback.id } : item
       )),
     }));
-    await get().saveLocal();
+    await get().saveLocal({ force: financialDataCount(get()) === 0 });
     await get().syncCloud();
     return true;
   },

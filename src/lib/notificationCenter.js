@@ -1,6 +1,8 @@
 import { buildDecisionItems } from './decisionEngine';
 
 export const NOTIFICATION_DISMISSED_STORAGE_KEY = 'MYFI_DISMISSED_NOTIFICATIONS_V1';
+export const NOTIFICATION_RETENTION_DAYS = 30;
+export const NOTIFICATION_RETENTION_MS = NOTIFICATION_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 export const buildNotificationItems = (params = {}) => (
   buildDecisionItems(params).filter(item => item.channel !== 'quiet')
@@ -34,6 +36,13 @@ export const filterDismissedNotifications = (items = [], dismissedKeys = [], now
   return (Array.isArray(items) ? items : []).filter(item => {
     const lastShown = dismissed.get(item.id);
     if (lastShown == null) return true;
-    return (now - lastShown) >= (item.throttleHours || 12) * 3600000;
+    return (now - lastShown) >= NOTIFICATION_RETENTION_MS;
   });
 };
+
+export const pruneNotificationKeys = (items = [], now = Date.now()) => (
+  sanitizeNotificationReadKeys(items).filter(key => {
+    const parsed = parseDismissedKey(key);
+    return parsed && now - parsed.at < NOTIFICATION_RETENTION_MS;
+  })
+);
