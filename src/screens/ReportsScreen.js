@@ -15,7 +15,6 @@ import { generateFinancialReportPDF } from '../lib/pdf';
 import { RADIUS, SHADOW, weight } from '../lib/tokens';
 import { isRTL, rowDirFor, textAlignFor, writingDirectionFor } from '../lib/layout';
 import { filterByActiveScope, filterFeatureEntities, getActiveScope, getModules, transactionFeatureEnabled } from '../lib/modules';
-import { getBudgetRows, getBudgetSummary } from '../lib/budgets';
 import { getWalletLabel } from '../lib/wallets';
 
 const MONTHS_AR = ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'];
@@ -56,7 +55,6 @@ const copy = (lang) => {
     selectContent: ar ? 'حدد محتوى ملف PDF' : 'Choose PDF contents',
     summarySection: ar ? 'ملخص الدخل والمصروف والصافي' : 'Income, expense, and net summary',
     debtsSection: ar ? 'دين عليّ ودين لي' : 'Debt I owe and debt owed to me',
-    budgetSection: ar ? 'الميزانية' : 'Budget',
     categoriesSection: ar ? 'توزيع المصروفات' : 'Expense breakdown',
     transactionsSection: ar ? 'تفاصيل الحركات' : 'Transaction details',
     comparisonSection: ar ? 'المقارنة المحددة' : 'Selected comparison',
@@ -88,11 +86,6 @@ const copy = (lang) => {
     noComparison: ar ? 'لا توجد بيانات كافية للمقارنة' : 'Not enough data to compare',
     topSpending: ar ? 'أين تذهب مصروفاتك؟' : 'Where your money goes',
     topSpendingHint: ar ? 'أكبر البنود مرتبة من الأعلى إلى الأقل' : 'Largest categories, ranked from highest to lowest',
-    monthlyBudget: ar ? 'حد الإنفاق الشهري' : 'Monthly spending limit',
-    budgetRemaining: ar ? 'متبقي' : 'remaining',
-    budgetOf: ar ? 'من أصل' : 'of',
-    budgetOnTrack: ar ? 'الصرف ضمن الحد المحدد' : 'Spending is within the set limit',
-    budgetOver: ar ? 'تم تجاوز الحد المحدد' : 'The set limit has been exceeded',
     noData: ar ? 'لا توجد بيانات ضمن هذه الفترة' : 'No data in this period',
     smartTitle: ar ? 'التحليل والاتجاهات' : 'Insights from your activity',
     smartHint: ar ? 'تحليل محلي للاتجاهات حتى نهاية الفترة المختارة، ولا يغيّر الأرقام الأساسية.' : 'Local forecasts and rules; your data is not sent to an external model',
@@ -361,11 +354,6 @@ export default function ReportsScreen() {
       percent: total ? Math.round((Number(item.spent || 0) / total) * 100) : 0,
     }));
   }, [periodTrans, cats]);
-  const budgetRows = useMemo(
-    () => getBudgetRows(walletScopedTrans, cats, cfg.categoryBudgets, selectedMonth),
-    [walletScopedTrans, cats, cfg.categoryBudgets, selectedMonth],
-  );
-  const budgetSummary = useMemo(() => getBudgetSummary(budgetRows), [budgetRows]);
   const comparisonOptions = comparisonMode === 'month' ? monthOptions : yearOptions;
   const comparisonLimit = comparisonMode === 'month' ? 12 : 10;
   const comparisonSeries = useMemo(() => comparisonPeriods
@@ -403,7 +391,6 @@ export default function ReportsScreen() {
   const shareOptions = [
     { value: 'summary', label: C.summarySection, icon: 'stats-chart-outline' },
     (modules.debtsOwed || modules.debtsReceivable) ? { value: 'debts', label: C.debtsSection, icon: 'card-outline' } : null,
-    scope === 'month' && modules.budgets && budgetSummary.limit > 0 ? { value: 'budget', label: C.budgetSection, icon: 'speedometer-outline' } : null,
     { value: 'categories', label: C.categoriesSection, icon: 'pie-chart-outline' },
     { value: 'transactions', label: C.transactionsSection, icon: 'receipt-outline' },
     comparisonMode !== 'none' && comparisonSeries.length
@@ -436,7 +423,6 @@ export default function ReportsScreen() {
         debtRows: viewDebts.filter(item => item.direction !== 'receivable'),
         receivableRows: viewDebts.filter(item => item.direction === 'receivable'),
         topCategories: categories,
-        budget: budgetSummary,
         comparison: comparisonSeries,
         cfg,
         sections: selected,
@@ -634,54 +620,6 @@ export default function ReportsScreen() {
             })}
           </View>
         </SectionCard>
-
-        {scope === 'month' && modules.budgets && budgetSummary.limit > 0 ? (
-          <SectionCard
-            th={th}
-            title={C.monthlyBudget}
-            subtitle={budgetSummary.over
-              ? C.budgetOver
-              : `${C.budgetRemaining}: ${money(budgetSummary.remaining, cfg.lang, cfg.currency)} ${sym}`}
-            icon="speedometer-outline"
-            lang={cfg.lang}
-          >
-            <View style={[s.spendingLimitRow, { flexDirection: rowDir }]}>
-              <View style={[s.spendingLimitMetric, { backgroundColor: th.cardHigh }]}>
-                <Text style={[s.spendingLimitLabel, { color: th.sub }]}>{ar ? 'المصروف' : 'Spent'}</Text>
-                <Text style={[s.spendingLimitValue, { color: budgetSummary.over ? th.exp : th.text }]}>
-                  {money(budgetSummary.spent, cfg.lang, cfg.currency)} {sym}
-                </Text>
-              </View>
-              <View style={[s.spendingLimitMetric, { backgroundColor: th.cardHigh }]}>
-                <Text style={[s.spendingLimitLabel, { color: th.sub }]}>{ar ? 'الحد' : 'Limit'}</Text>
-                <Text style={[s.spendingLimitValue, { color: th.text }]}>
-                  {money(budgetSummary.limit, cfg.lang, cfg.currency)} {sym}
-                </Text>
-              </View>
-              <View style={[s.spendingLimitMetric, { backgroundColor: th.cardHigh }]}>
-                <Text style={[s.spendingLimitLabel, { color: th.sub }]}>{C.budgetRemaining}</Text>
-                <Text style={[s.spendingLimitValue, { color: budgetSummary.remaining >= 0 ? th.inc : th.exp }]}>
-                  {money(budgetSummary.remaining, cfg.lang, cfg.currency)} {sym}
-                </Text>
-              </View>
-            </View>
-            <View style={[s.spendingLimitTrack, { backgroundColor: th.cardHigh }]}>
-              <View
-                style={[
-                  s.spendingLimitFill,
-                  {
-                    backgroundColor: budgetSummary.over ? th.exp : th.primary,
-                    width: `${Math.min(100, budgetSummary.percent || 0)}%`,
-                    alignSelf: ar ? 'flex-end' : 'flex-start',
-                  },
-                ]}
-              />
-            </View>
-            <Text style={[s.spendingLimitPercent, { color: budgetSummary.over ? th.exp : th.primary, textAlign: align }]}>
-              {Math.round(budgetSummary.percent || 0)}%
-            </Text>
-          </SectionCard>
-        ) : null}
 
         <SectionCard th={th} title={C.topSpending} subtitle={C.topSpendingHint} icon="pie-chart-outline" lang={cfg.lang}>
           {categories.length ? (
@@ -1531,18 +1469,6 @@ const s = StyleSheet.create({
   allPeriodIcon: { width: 58, height: 58, borderRadius: 19, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   allPeriodTitle: { fontSize: 17, lineHeight: 23, ...weight('900') },
   allPeriodHint: { fontSize: 12, lineHeight: 18, textAlign: 'center', ...weight('700'), marginTop: 4 },
-  budgetCard: { borderRadius: RADIUS.xl, borderWidth: 1, padding: 15, marginBottom: 12, ...SHADOW.card },
-  budgetHead: { alignItems: 'center', gap: 10, marginBottom: 14 },
-  budgetIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  budgetTitle: { flex: 1, fontSize: 14, lineHeight: 20, ...weight('900') },
-  budgetStatus: { minWidth: 48, minHeight: 30, borderRadius: 15, paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center' },
-  budgetStatusText: { fontSize: 12, lineHeight: 17, ...weight('900') },
-  budgetNumbers: { alignItems: 'baseline', justifyContent: 'space-between', gap: 12 },
-  budgetSpent: { flexShrink: 1, fontSize: 18, lineHeight: 25, ...weight('900') },
-  budgetLimit: { flexShrink: 1, fontSize: 11, lineHeight: 17, ...weight('700') },
-  budgetTrack: { height: 8, borderRadius: 8, overflow: 'hidden', marginTop: 10 },
-  budgetFill: { height: 8, borderRadius: 8 },
-  budgetFoot: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 8 },
   compareFieldLabel: { fontSize: 12, ...weight('800') },
   comparisonPanel: { borderRadius: RADIUS.xl, borderWidth: 1, padding: 14, marginBottom: 12, ...SHADOW.card },
   addComparisonCard: { minHeight: 58, borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, alignItems: 'center', gap: 10, marginBottom: 12, ...SHADOW.card },
@@ -1603,14 +1529,6 @@ const s = StyleSheet.create({
   shareSubmit: { minHeight: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginTop: 8 },
   empty: { borderWidth: 1, borderStyle: 'dashed', borderRadius: RADIUS.lg, minHeight: 96, alignItems: 'center', justifyContent: 'center', padding: 16, gap: 8 },
   emptyText: { fontSize: 12, lineHeight: 18, textAlign: 'center', ...weight('700') },
-  spendingLimitRow: { gap: 8, marginBottom: 12 },
-  spendingLimitMetric: { flex: 1, minWidth: 0, borderRadius: RADIUS.md, paddingHorizontal: 9, paddingVertical: 10 },
-  spendingLimitLabel: { fontSize: 10, lineHeight: 14, ...weight('800'), textAlign: 'center' },
-  spendingLimitValue: { fontSize: 13, lineHeight: 19, ...weight('900'), marginTop: 3, textAlign: 'center' },
-  spendingLimitTrack: { height: 7, borderRadius: 7, overflow: 'hidden' },
-  spendingLimitFill: { height: 7, borderRadius: 7 },
-  spendingLimitPercent: { fontSize: 11, lineHeight: 16, ...weight('900'), marginTop: 7 },
-
   comparisonActionRow: { alignItems: 'center', gap: 8, marginBottom: 10 },
   compareStartBtn: { minHeight: 72, borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 11, alignItems: 'center', gap: 10 },
   compareStartIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },

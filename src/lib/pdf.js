@@ -83,7 +83,6 @@ export const generateFinancialReportPDF = async ({
   debtRows = [],
   receivableRows = [],
   topCategories = [],
-  budget = {},
   comparison = [],
   cfg = {},
   sections = ['summary', 'debts', 'categories', 'transactions'],
@@ -103,10 +102,6 @@ export const generateFinancialReportPDF = async ({
     paid: ar ? 'المسدّد' : 'Paid',
     remaining: ar ? 'المتبقي' : 'Remaining',
     categories: ar ? 'أبرز المصروفات' : 'Top expenses',
-    budget: ar ? 'الميزانية' : 'Budget',
-    budgetSpent: ar ? 'المصروف' : 'Spent',
-    budgetLimit: ar ? 'الحد' : 'Limit',
-    budgetRemaining: ar ? 'المتبقي' : 'Remaining',
     comparison: ar ? 'المقارنة المحددة' : 'Selected comparison',
     period: ar ? 'الفترة' : 'Period',
     transactions: ar ? 'تفاصيل الحركات' : 'Transaction details',
@@ -186,11 +181,6 @@ export const generateFinancialReportPDF = async ({
     </div>
     ${owedRows ? `<h2>${label.debt}</h2><table><thead><tr><th>${label.description}</th><th>${label.total}</th><th>${label.paid}</th><th>${label.remaining}</th></tr></thead><tbody>${owedRows}</tbody></table>` : ''}
     ${dueRows ? `<h2>${label.due}</h2><table><thead><tr><th>${label.description}</th><th>${label.total}</th><th>${label.paid}</th><th>${label.remaining}</th></tr></thead><tbody>${dueRows}</tbody></table>` : ''}` : ''}
-    ${selected.has('budget') ? `<h2>${label.budget}</h2><div class="stats">
-      <div class="stat"><span>${label.budgetSpent}</span><strong>${fmt(budget.spent)} ${escapeHtml(sym)}</strong></div>
-      <div class="stat"><span>${label.budgetLimit}</span><strong>${fmt(budget.limit)} ${escapeHtml(sym)}</strong></div>
-      <div class="stat"><span>${label.budgetRemaining}</span><strong>${fmt(budget.remaining)} ${escapeHtml(sym)}</strong></div>
-    </div>` : ''}
     ${selected.has('categories') && categoryRows ? `<h2>${label.categories}</h2>${categoryRows}` : ''}
     ${selected.has('comparison') && comparisonRows ? `<h2>${label.comparison}</h2><table><thead><tr><th>${label.period}</th><th>${label.income}</th><th>${label.expense}</th><th>${label.net}</th></tr></thead><tbody>${comparisonRows}</tbody></table>` : ''}
     ${selected.has('transactions') ? `<h2>${label.transactions}</h2><table><thead><tr><th>${label.date}</th><th>${label.description}</th><th>${label.transactionTag}</th><th>${label.category}</th><th>${label.amount}</th></tr></thead><tbody>${rows || `<tr><td colspan="5">${label.noData}</td></tr>`}</tbody></table>` : ''}

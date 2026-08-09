@@ -121,6 +121,7 @@ assert(walletBalanceCard.includes('walletWarning'), 'Wallet cards must render a 
 
 const history = fs.readFileSync(path.join(srcRoot, 'screens', 'HistoryScreen.js'), 'utf8');
 const reports = fs.readFileSync(path.join(srcRoot, 'screens', 'ReportsScreen.js'), 'utf8');
+const pdf = fs.readFileSync(path.join(srcRoot, 'lib', 'pdf.js'), 'utf8');
 const trackers = fs.readFileSync(path.join(srcRoot, 'screens', 'TrackersLabScreen.js'), 'utf8');
 const home = fs.readFileSync(path.join(srcRoot, 'screens', 'HomeScreen.js'), 'utf8');
 assert.equal(/<TextInpu\b/.test(history), false, 'History must use the imported TextInput component');
@@ -135,6 +136,10 @@ assert.equal(history.includes('searchableTransactionTags'), false, 'Transaction 
 assert(reports.indexOf('const financialReport =') < reports.indexOf('const stats ='), 'Reports must create the shared report model before reading its stats');
 assert(reports.includes('periodCard: { minHeight: 78'), 'Reports period selector must stay compact at the top of the screen');
 assert(reports.includes('shareCenterBtn: { width: 58'), 'Reports share action must not create a tall top row');
+assert.equal(reports.includes('monthlyBudget'), false, 'Reports must not show the monthly spending limit card');
+assert.equal(reports.includes("value: 'budget'"), false, 'Reports PDF sharing must not expose the removed budget section');
+assert.equal(reports.includes('spendingLimit'), false, 'Reports must not keep monthly spending limit styles');
+assert.equal(pdf.includes("selected.has('budget')"), false, 'Generated report PDFs must not render the removed budget section');
 assert(trackers.includes('const paidThisMonth ='), 'Commitment cards must derive whether the current month was paid');
 assert(trackers.includes('{T.paidMonth}'), 'Commitment cards must show the current-month payment message');
 assert(trackers.includes('T.completionRetention'), 'Completed trackers must explain the seven-day review period');
