@@ -9,11 +9,27 @@ export default function PasswordRecoveryModal({ visible, onClose, th, lang = 'ar
   const ar = lang === 'ar';
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmationVisible, setConfirmationVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const passwordStarted = password.length > 0;
+  const confirmationStarted = confirmation.length > 0;
+  const passwordsMatch = passwordStarted && confirmationStarted && password === confirmation;
+  const passwordsMismatch = passwordStarted && confirmationStarted && password !== confirmation;
+  const passwordTooShort = passwordStarted && password.length < 8;
+  const helperText = passwordTooShort
+    ? (ar ? 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.' : 'Password must be at least 8 characters.')
+    : passwordsMatch
+      ? (ar ? 'كلمتا المرور متطابقتان.' : 'Passwords match.')
+      : passwordsMismatch
+        ? (ar ? 'كلمتا المرور غير متطابقتين.' : 'Passwords do not match.')
+        : (ar ? 'استخدم 8 أحرف على الأقل، ثم أكّدها في الحقل الثاني.' : 'Use at least 8 characters, then confirm it below.');
 
   const resetAndClose = () => {
     setPassword('');
     setConfirmation('');
+    setPasswordVisible(false);
+    setConfirmationVisible(false);
     onClose?.();
   };
 
@@ -56,24 +72,60 @@ export default function PasswordRecoveryModal({ visible, onClose, th, lang = 'ar
           <Text style={[s.body, { color: th.sub }]}>
             {ar ? 'اكتب كلمة مرور قوية لحساب MYFI.' : 'Choose a strong password for your MYFI account.'}
           </Text>
-          <TextInput
-            value={password}
-            onChangeText={setPassword}
-            placeholder={ar ? 'كلمة المرور الجديدة' : 'New password'}
-            placeholderTextColor={th.faint}
-            secureTextEntry
-            autoCapitalize="none"
-            style={[s.input, { backgroundColor: th.input, borderColor: th.border, color: th.text }]}
-          />
-          <TextInput
-            value={confirmation}
-            onChangeText={setConfirmation}
-            placeholder={ar ? 'تأكيد كلمة المرور' : 'Confirm password'}
-            placeholderTextColor={th.faint}
-            secureTextEntry
-            autoCapitalize="none"
-            style={[s.input, { backgroundColor: th.input, borderColor: th.border, color: th.text }]}
-          />
+          <View style={[s.passwordField, { backgroundColor: th.input, borderColor: th.border }]}>
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              placeholder={ar ? 'كلمة المرور الجديدة' : 'New password'}
+              placeholderTextColor={th.faint}
+              secureTextEntry={!passwordVisible}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="new-password"
+              textContentType="newPassword"
+              style={[s.input, { color: th.text }]}
+            />
+            <TouchableOpacity
+              onPress={() => setPasswordVisible(value => !value)}
+              style={s.eyeButton}
+              accessibilityRole="button"
+              accessibilityLabel={passwordVisible ? 'Hide new password' : 'Show new password'}
+            >
+              <Ionicons name={passwordVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color={th.sub} />
+            </TouchableOpacity>
+          </View>
+          <View style={[s.passwordField, { backgroundColor: th.input, borderColor: th.border }]}>
+            <TextInput
+              value={confirmation}
+              onChangeText={setConfirmation}
+              placeholder={ar ? 'تأكيد كلمة المرور' : 'Confirm password'}
+              placeholderTextColor={th.faint}
+              secureTextEntry={!confirmationVisible}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="new-password"
+              textContentType="newPassword"
+              style={[s.input, { color: th.text }]}
+            />
+            <TouchableOpacity
+              onPress={() => setConfirmationVisible(value => !value)}
+              style={s.eyeButton}
+              accessibilityRole="button"
+              accessibilityLabel={confirmationVisible ? 'Hide confirmation password' : 'Show confirmation password'}
+            >
+              <Ionicons name={confirmationVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color={th.sub} />
+            </TouchableOpacity>
+          </View>
+          <View style={[s.matchRow, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
+            <Ionicons
+              name={passwordsMatch ? 'checkmark-circle-outline' : passwordsMismatch || passwordTooShort ? 'alert-circle-outline' : 'information-circle-outline'}
+              size={17}
+              color={passwordsMatch ? th.inc : passwordsMismatch || passwordTooShort ? th.exp : th.sub}
+            />
+            <Text style={[s.matchText, { color: passwordsMatch ? th.inc : passwordsMismatch || passwordTooShort ? th.exp : th.sub, textAlign: ar ? 'right' : 'left' }]}>
+              {helperText}
+            </Text>
+          </View>
           <TouchableOpacity onPress={submit} disabled={loading} style={[s.primary, { backgroundColor: th.primary, opacity: loading ? 0.6 : 1 }]}>
             <Text style={[s.primaryText, { color: th.onPrimary }]}>{loading ? '...' : (ar ? 'حفظ كلمة المرور' : 'Save password')}</Text>
           </TouchableOpacity>
@@ -92,7 +144,11 @@ const s = StyleSheet.create({
   icon: { width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   title: { fontSize: 18, ...weight('900'), textAlign: 'center' },
   body: { fontSize: 12, lineHeight: 19, ...weight('700'), textAlign: 'center', marginTop: 6, marginBottom: 16 },
-  input: { width: '100%', minHeight: 50, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 14, marginBottom: 10, fontSize: 14, textAlign: 'left', writingDirection: 'ltr' },
+  passwordField: { width: '100%', minHeight: 50, borderRadius: RADIUS.md, borderWidth: 1, marginBottom: 10, flexDirection: 'row', alignItems: 'center' },
+  input: { flex: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, textAlign: 'left', writingDirection: 'ltr' },
+  eyeButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  matchRow: { width: '100%', alignItems: 'center', gap: 7, marginBottom: 10 },
+  matchText: { flex: 1, fontSize: 12, lineHeight: 18, ...weight('800') },
   primary: { width: '100%', minHeight: 50, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
   primaryText: { fontSize: 14, ...weight('900') },
   cancel: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18, marginTop: 6 },

@@ -135,6 +135,7 @@ const UI = {
     requiredFields: 'اكتب البريد الإلكتروني وكلمة المرور.',
     invalidEmail: 'اكتب بريداً إلكترونياً صحيحاً.',
     passwordLength: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.',
+    invalidCredentials: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
     verificationTitle: 'الحساب غير مفعّل بعد',
     verificationPending: 'أرسلنا رابط التفعيل إلى بريدك. افتحه على هذا الهاتف لإكمال التسجيل والعودة إلى MYFI.',
     verificationUnconfirmed: 'لم يتم إنشاء حساب جديد. قد يكون البريد مستخدماً أو غير صالح؛ تحقق من البريد وحاول تسجيل الدخول أو الاستعادة.',
@@ -263,6 +264,7 @@ const UI = {
     requiredFields: 'Enter your email and password.',
     invalidEmail: 'Enter a valid email address.',
     passwordLength: 'Password must be at least 8 characters.',
+    invalidCredentials: 'Email or password is incorrect.',
     verificationTitle: 'Account not active yet',
     verificationPending: 'We sent an activation link. Open it on this phone to finish registration and return to MYFI.',
     verificationUnconfirmed: 'No new account was created. The email may already be used or invalid; check the address, then try sign-in or recovery.',
@@ -686,15 +688,10 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
         Alert.alert('', T.authUnavailable);
       }
     } catch (e) {
-      const { data } = await supabase.auth.getSession();
-      if (data?.session?.user) {
-        await setUser(data.session.user);
-        Alert.alert('', T.loginSuccess);
-        return;
-      }
       const message = String(e?.message || '');
+      const invalidCredentials = /invalid login credentials/i.test(message);
       const networkFailure = /network|fetch|resolve|connection/i.test(message);
-      Alert.alert('', networkFailure ? T.authUnavailable : message);
+      Alert.alert('', invalidCredentials ? T.invalidCredentials : networkFailure ? T.authUnavailable : message);
     } finally {
       setLoading(false);
     }

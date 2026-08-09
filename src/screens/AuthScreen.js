@@ -34,6 +34,13 @@ export default function AuthScreen({ onSkip }) {
     switch_i: ar ? 'سجّل دخولك'    : 'Sign in',
     tagline:  ar ? 'تحكّم بمصاريفك بذكاء' : 'Smart expense tracking',
     emailChk: ar ? 'تحقق من بريدك لتفعيل الحساب ✉️' : 'Check your email to confirm your account ✉️',
+    invalidCredentials: ar ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' : 'Email or password is incorrect.',
+  };
+
+  const authErrorMessage = (error) => {
+    const message = String(error?.message || '');
+    if (/invalid login credentials/i.test(message)) return S.invalidCredentials;
+    return message || (ar ? 'تعذر تسجيل الدخول حالياً.' : 'Could not sign in right now.');
   };
 
   const authHealthMessage = (health = {}) => {
@@ -100,12 +107,7 @@ export default function AuthScreen({ onSkip }) {
         }
       }
     } catch (e) {
-      const { data } = await supabase.auth.getSession();
-      if (data?.session?.user) {
-        await setUser(data.session.user);
-        return;
-      }
-      Alert.alert('', e.message);
+      Alert.alert('', authErrorMessage(e));
     } finally {
       setLoading(false);
     }
