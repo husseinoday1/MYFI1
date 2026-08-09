@@ -4,7 +4,7 @@
 
 ## النتيجة الحالية
 
-لم يكتمل اختبار `npm run test:cloud:managed` لأن Supabase CLI يحتاج تسجيل دخول أو `SUPABASE_ACCESS_TOKEN` للوصول إلى مفاتيح المشروع.
+اكتمل اختبار `npm run test:cloud:managed` بنجاح بعد تسجيل دخول Supabase CLI.
 
 السكربت أصبح يدعم الآن ثلاثة مسارات للعثور على الأداة:
 
@@ -22,6 +22,10 @@ Supabase CLI was not found. Install it with `npm install --save-dev supabase`, `
 
 - تم تثبيت Supabase CLI كاعتماد تطوير.
 - السكربت وجد CLI وشغّله.
+- تم إنشاء مستخدم اختبار مؤقت وحذفه بنجاح.
+- تم التحقق من تسجيل الدخول وRLS وقراءة/كتابة `user_data`.
+- تم التحقق من `smart-ocr`.
+- تم التحقق من `smart-transcribe`.
 - السكربت ينشئ ملفات اختبار مؤقتة للصورة والصوت.
 - السكربت ينظف الملفات المؤقتة حتى عند الفشل.
 - لا يتم حفظ `service_role` داخل المشروع.
@@ -32,7 +36,22 @@ Supabase CLI was not found. Install it with `npm install --save-dev supabase`, `
   - استدعاء `smart-transcribe`.
   - حذف بيانات الاختبار والمستخدم المؤقت.
 
-## طريقة الإغلاق
+## نتيجة الإغلاق
+
+آخر نتيجة ناجحة:
+
+```text
+temporary-user: created
+auth: ok
+sync-and-rls: ok
+image-analysis: ok
+voice-analysis: ok
+cloud-cleanup: ok
+temporary-user: removed
+temporary-files: removed
+```
+
+## طريقة إعادة الفحص
 
 سجل دخول Supabase على الجهاز:
 
