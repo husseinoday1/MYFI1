@@ -128,6 +128,7 @@ function AppRoot() {
   const [readNotifKeys, setReadNotifKeys] = useState([]);
   const [dismissedNotifKeys, setDismissedNotifKeys] = useState([]);
   const guestPromptOpen = useRef(false);
+  const mergeRollbackPromptTimer = useRef(null);
   const conflictPromptOpen = useRef(false);
   const handledAuthUrls = useRef(new Set());
   const lockBackgroundAt = useRef(null);
@@ -161,6 +162,10 @@ function AppRoot() {
     });
     return () => subscription.remove();
   }, [archiveOpen]);
+
+  useEffect(() => () => {
+    if (mergeRollbackPromptTimer.current) clearTimeout(mergeRollbackPromptTimer.current);
+  }, []);
 
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
@@ -310,7 +315,10 @@ function AppRoot() {
               );
               return;
             }
-            Alert.alert(
+            if (mergeRollbackPromptTimer.current) clearTimeout(mergeRollbackPromptTimer.current);
+            mergeRollbackPromptTimer.current = setTimeout(() => {
+              mergeRollbackPromptTimer.current = null;
+              Alert.alert(
               result?.reason === 'duplicate_only'
                 ? (ar ? 'تم تنظيف البيانات المكررة' : 'Duplicate data cleaned')
                 : (ar ? 'تم دمج البيانات' : 'Data merged'),
@@ -329,9 +337,10 @@ function AppRoot() {
                     );
                   },
                 },
-                { text: ar ? 'تم' : 'Done' },
+                { text: ar ? 'إبقاء التغييرات' : 'Keep changes', style: 'cancel' },
               ],
-            );
+              );
+            }, 30000);
           },
         },
       ],

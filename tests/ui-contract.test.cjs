@@ -15,6 +15,7 @@ assert.equal(
 assert(appRoot.includes('Review data merge'), 'Guest data transfer must warn before merging local/account data');
 assert(appRoot.includes('Merge safely'), 'Guest data transfer must use an explicit safe merge action');
 assert(appRoot.includes('restoreLastMergeRollback'), 'Guest data transfer must expose a rollback path after merging');
+assert(appRoot.includes('mergeRollbackPromptTimer') && appRoot.includes('setTimeout') && appRoot.includes('30000'), 'Guest merge rollback prompt must be delayed so users can review merged data first');
 assert(appRoot.includes('merged without repetition'), 'Device sync merge notices must explain duplicate-safe merging');
 assert(appRoot.includes('BackHandler.addEventListener') && appRoot.includes('hardwareBackPress') && appRoot.includes('setArchiveOpen(false)'), 'Android back must close the archive view instead of exiting the app');
 
