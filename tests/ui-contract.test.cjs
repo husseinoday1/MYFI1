@@ -90,6 +90,9 @@ assert(addModal.includes("{selected?.detail || ' '}"), 'Select fields must reser
 assert(addModal.includes('selectField:{ minHeight: 64'), 'Wallet and category select cards must share a fixed visual height');
 assert(addModal.includes('dateButton:{ minHeight: 64'), 'Date field must match the larger select card height');
 assert(addModal.includes('repeatField:{ minHeight: 64'), 'Monthly repeat field must match the larger select card height');
+assert(addModal.includes('labelInside'), 'Date fields in the transaction modal must keep labels inside matching field cards');
+assert.equal(addModal.includes('`${categoryFlowHint} ·'), false, 'Category select details must not repeat the income/expense category label below the selected category');
+assert.equal(/detail:\s*categoryFlowHint/.test(addModal), false, 'Category select details must not duplicate the field label under every category');
 assert(addModal.includes("id: 'tracker-wallet'"), 'Tracker payments must allow choosing a wallet instead of forcing the default');
 assert(addModal.includes('const isTrackerPayment ='), 'Tracker payment wallet choice must be guarded by an explicit mode check');
 assert(addModal.includes('const eligibleTransferWallets = transferWalletList;'), 'Transfer choices must include every wallet');

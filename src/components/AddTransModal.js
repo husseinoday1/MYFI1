@@ -821,8 +821,8 @@ export default function AddTransModal({
     value: category.id,
     label: cfg.lang === 'ar' ? category.label : category.labelEn,
     detail: category.id === defaultEntryCat
-      ? `${categoryFlowHint} · ${cfg.lang === 'ar' ? 'افتراضي' : 'Default'}`
-      : categoryFlowHint,
+      ? (cfg.lang === 'ar' ? 'افتراضي' : 'Default')
+      : '',
     icon: category.icon || 'cube-outline',
     color: category.color,
   }));
@@ -1141,23 +1141,27 @@ export default function AddTransModal({
                     lang={cfg.lang}
                     label={cfg.lang === 'ar' ? 'التاريخ' : 'Date'}
                     style={s.selectFieldBlock}
-                    buttonStyle={s.dateButton}
+                    buttonStyle={[s.dateButton, { backgroundColor: th.cardHigh, borderColor: th.border }]}
+                    labelInside
                   />
                   {modules.recurring && isMoneyEntry ? (
                     <View style={s.selectFieldBlock}>
-                      <Text style={[s.selectLabel, { color: th.sub, textAlign: align }]}>
-                        {cfg.lang === 'ar' ? 'التكرار الشهري' : 'Monthly repeat'}
-                      </Text>
                       <TouchableOpacity
                         onPress={() => setRecurring(current => !current)}
                         accessibilityRole="switch"
                         accessibilityState={{ checked: recurring }}
-                        style={[s.repeatField, { backgroundColor: recurring ? th.primSoft : th.input, borderColor: recurring ? th.primary : th.border, flexDirection: rowDir }]}
+                        style={[s.repeatField, { backgroundColor: recurring ? th.primSoft : th.cardHigh, borderColor: recurring ? th.primary : th.border, flexDirection: rowDir }]}
                       >
                         <Ionicons name="repeat" size={17} color={recurring ? th.primary : th.sub} />
                         <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={[s.selectLabel, { color: th.sub, textAlign: align }]}>
+                            {cfg.lang === 'ar' ? 'التكرار الشهري' : 'Monthly repeat'}
+                          </Text>
                           <Text numberOfLines={1} style={[s.repeatValue, { color: recurring ? th.primary : th.text, textAlign: align }]}>
                             {recurring ? (cfg.lang === 'ar' ? 'مفعل شهرياً' : 'Monthly on') : (cfg.lang === 'ar' ? 'غير مكرر' : 'Off')}
+                          </Text>
+                          <Text numberOfLines={1} style={[s.selectDetail, { color: th.sub, textAlign: align }]}>
+                            {' '}
                           </Text>
                         </View>
                         <Ionicons name={recurring ? 'checkmark-circle' : 'ellipse-outline'} size={17} color={recurring ? th.primary : th.faint} />
@@ -1207,7 +1211,8 @@ export default function AddTransModal({
                   lang={cfg.lang}
                   label={cfg.lang === 'ar' ? 'تاريخ الدفع' : 'Payment date'}
                   style={s.selectFieldBlock}
-                  buttonStyle={s.dateButton}
+                  buttonStyle={[s.dateButton, { backgroundColor: th.cardHigh, borderColor: th.border }]}
+                  labelInside
                 />
               </View>
               </>
@@ -1241,7 +1246,8 @@ export default function AddTransModal({
                     lang={cfg.lang}
                     label={cfg.lang === 'ar' ? 'التاريخ' : 'Date'}
                     style={s.selectFieldBlock}
-                    buttonStyle={s.dateButton}
+                    buttonStyle={[s.dateButton, { backgroundColor: th.cardHigh, borderColor: th.border }]}
+                    labelInside
                   />
                 </View>
               </View>
@@ -1386,7 +1392,7 @@ const s = StyleSheet.create({
   amountInput:{ minHeight: 44, paddingHorizontal: 0, paddingVertical: 0, fontSize: 30, lineHeight: 38, ...weight('900') },
   dateRepeatRow:{ alignItems: 'stretch', gap: 8, marginBottom: 2 },
   dateButton:{ minHeight: 64, paddingHorizontal: 10 },
-  repeatField:{ minHeight: 64, borderRadius: RADIUS.md, borderWidth: 0.5, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 8 },
+  repeatField:{ minHeight: 64, borderRadius: 13, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7, alignItems: 'center', justifyContent: 'center', gap: 8 },
   repeatValue:{ fontSize: 12, lineHeight: 18, ...weight('900') },
   smartBox:   { borderWidth: 1, borderStyle: 'dashed', borderRadius: 12, padding: 9, marginBottom: 8, gap: 9 },
   smartActionGrid:{ alignItems: 'stretch', gap: 7 },

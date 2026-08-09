@@ -85,6 +85,7 @@ export default function DateField({
   textStyle,
   allowEmpty = false,
   monthOnly = false,
+  labelInside = false,
 }) {
   const [open, setOpen] = useState(false);
   const currentValue = isISODate(value) ? value : today();
@@ -122,7 +123,7 @@ export default function DateField({
 
   return (
     <View style={style}>
-      {!!label && <Text style={[s.label, { color: th.sub, textAlign: align }]}>{label}</Text>}
+      {!!label && !labelInside && <Text style={[s.label, { color: th.sub, textAlign: align }]}>{label}</Text>}
       <TouchableOpacity
         onPress={openPicker}
         style={[
@@ -132,9 +133,15 @@ export default function DateField({
         ]}
       >
         <Ionicons name="calendar-outline" size={16} color={th.sub} />
-        <Text style={[s.buttonText, { color: th.text, textAlign: align }, textStyle]} numberOfLines={1} adjustsFontSizeToFit>
-          {isISODate(value) ? (monthOnly ? formatMonth(currentValue, lang) : formatDate(currentValue, lang)) : T.anyDate}
-        </Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          {!!label && labelInside ? (
+            <Text style={[s.inlineLabel, { color: th.sub, textAlign: align }]}>{label}</Text>
+          ) : null}
+          <Text style={[s.buttonText, { color: th.text, textAlign: align }, textStyle]} numberOfLines={1} adjustsFontSizeToFit>
+            {isISODate(value) ? (monthOnly ? formatMonth(currentValue, lang) : formatDate(currentValue, lang)) : T.anyDate}
+          </Text>
+          {labelInside ? <Text style={[s.inlineDetail, { color: th.sub, textAlign: align }]}>{' '}</Text> : null}
+        </View>
         {allowEmpty && isISODate(value) ? (
           <TouchableOpacity onPress={() => onChange?.('')} accessibilityLabel={T.clear} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Ionicons name="backspace-outline" size={17} color={th.sub} />
@@ -259,6 +266,8 @@ export default function DateField({
 
 const s = StyleSheet.create({
   label: { fontSize: TYPE.meta, lineHeight: 17, ...weight('900'), marginBottom: 8 },
+  inlineLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
+  inlineDetail: { fontSize: 9, lineHeight: 13, ...weight('700'), marginTop: 1 },
   button: {
     minHeight: 46,
     borderRadius: RADIUS.md,
@@ -268,7 +277,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  buttonText: { flex: 1, fontSize: TYPE.meta, lineHeight: 18, ...weight('900') },
+  buttonText: { fontSize: TYPE.meta, lineHeight: 18, ...weight('900') },
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
