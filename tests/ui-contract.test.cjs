@@ -40,6 +40,8 @@ jsFiles(srcRoot).forEach(file => {
 const settings = fs.readFileSync(path.join(srcRoot, 'screens', 'SettingsScreen.js'), 'utf8');
 assert.equal(settings.includes('identityPanel'), false, 'Duplicate account identity panel must stay out of settings');
 assert.equal(settings.includes('statusPanel'), false, 'Account/data/security summary panel must stay out of settings');
+assert(settings.includes('accountDisplayName'), 'Settings account row must show the signed-in user identity');
+assert(settings.includes('accountCard'), 'Settings must show a signed-in account card with email and sync state');
 ['forecastAlert', 'budgetAlert', 'recurringAlert', 'unusualSpendAlert', 'goalProgressAlert'].forEach(key => {
   assert.equal(settings.includes(`label={T.${key}}`), false, `Report insights must not be exposed as notification switches: ${key}`);
 });
@@ -72,6 +74,9 @@ assert.equal(addModal.includes('{isSmartLaunch ? ('), false, 'Smart input must n
 assert.equal(addModal.includes('smartText'), false, 'Smart input must not expose manual text entry state');
 assert.equal(addModal.includes('smartLabels.text'), false, 'Smart input must only offer image and voice modes');
 assert.equal(addModal.includes('smartQuotaText'), false, 'Smart input must not keep a persistent explanatory text row');
+assert(addModal.includes("key: 'camera'"), 'Smart input must expose camera as a direct action');
+assert(addModal.includes("key: 'image'"), 'Smart input must expose gallery image as a direct action');
+assert(addModal.includes('smartActionGrid'), 'Smart input actions must be arranged as labeled cards, not centered icon-only buttons');
 assert.equal(addModal.includes('عرض التفاصيل الإضافية'), false, 'Entry details must stay visible without a secondary reveal step');
 assert(addModal.includes('dateRepeatRow'), 'Date and monthly recurrence must share a compact row');
 assert(addModal.includes('repeatField'), 'Monthly recurrence must render as a symmetric field beside the date');
@@ -131,12 +136,18 @@ assert(trackers.includes('{T.paidMonth}'), 'Commitment cards must show the curre
 assert(trackers.includes('T.completionRetention'), 'Completed trackers must explain the seven-day review period');
 assert(trackers.includes("item.status === 'done' && !item.ended"), 'Completed trackers must show the retention notice before archive');
 assert(trackers.includes('filterMenuOpen'), 'Trackers must use a compact dropdown filter instead of a crowded chip rail');
-assert(trackers.includes('screenHeader'), 'Trackers must have the shared screen header and add action');
-assert(trackers.includes('trackerQuickEntry'), 'Trackers must show a Home-style add panel');
-assert(trackers.includes('onPress={onNewTracker}'), 'Trackers quick add card must open tracker creation');
-assert.equal(trackers.includes('trackerType: action.key'), false, 'Trackers quick add must expose one add path, not multiple type-specific add buttons');
+assert.equal(trackers.includes('<View style={[s.screenHeader'), false, 'Trackers must not show an explanatory header above the quick entry panel');
+assert.equal(trackers.includes('الالتزامات تقاس بالشهر'), false, 'Trackers must not show the explanatory subtitle');
+assert(trackers.includes('trackerQuickEntry'), 'Trackers must show a Home-style quick action panel');
+assert(trackers.includes("cfg.entryMode === 'quick'"), 'Trackers quick action panel must render only in the shared quick-entry mode');
+assert(home.includes("cfg.entryMode === 'quick'"), 'Home quick actions must render only in the shared quick-entry mode');
+assert.equal(trackers.includes('trackerQuickEntryTitle'), false, 'Trackers quick action panel must not add a title above its single action');
+assert(trackers.includes("onNewTracker?.({ trackerType: 'owed' })"), 'Quick entry must provide a dedicated debt-I-owe card');
+assert(trackers.includes("onNewTracker?.({ trackerType: 'receivable' })"), 'Quick entry must provide a dedicated debt-owed-to-me card');
+assert(trackers.includes("onNewTracker?.({ trackerType: 'goal' })"), 'Quick entry must provide a dedicated saving card');
+assert(trackers.includes("onNewTracker?.({ trackerType: 'commitment' })"), 'Quick entry must provide a dedicated commitment card');
 assert.equal(trackers.includes('headerAddBtn'), false, 'Trackers must not keep the add button in the top header');
-assert.equal(trackers.includes('quickTrackerEntry'), false, 'Trackers add panel must not disappear in classic entry mode');
+assert.equal(trackers.includes('quickTrackerEntry'), false, 'Trackers must not use a separate tracker-only entry-mode flag');
 assert.equal(trackers.includes("sort((a, b) => (a.id === openId"), false, 'Opening a tracker card must not move it to the top');
 assert(trackers.includes('expandedPaymentHistoryId'), 'Tracker payment history must stay hidden behind an explicit reveal state');
 assert(trackers.includes('historyToggle'), 'Tracker payment history must use a reveal button instead of opening automatically');
@@ -146,7 +157,9 @@ assert.equal(trackers.includes('+ إدخال كامل'), false, 'Trackers screen
 assert.equal(trackers.includes('onQuickEntry'), false, 'Trackers must keep financial entry actions out of tracker creation');
 assert.equal(trackers.includes('trackerAddPanel'), false, 'Trackers must not show a second add panel under the header');
 assert.equal(trackers.includes('quickEntry'), false, 'Trackers must not receive money-entry mode props');
-assert(appRoot.includes("classicEntry && tab === 'home'"), 'Classic floating money entry must stay off the trackers tab');
+assert(appRoot.includes("classicEntry && tab === 'home'"), 'Classic mode must keep the money-entry FAB on Home');
+assert(appRoot.includes("classicEntry && tab === 'trackers'"), 'Classic mode must show the matching FAB on Trackers');
+assert(appRoot.includes('onPress={() => openNewTracker()}'), 'Classic tracker FAB must open tracker creation, including commitments');
 assert.equal(/<AddTransModal[\s\S]*?onNewTracker=\{openNewTracker\}/.test(appRoot), false, 'Transaction modal must not open tracker creation from money entry');
 assert.equal(appRoot.includes("['home', 'trackers']"), false, 'Trackers must not share the general floating entry button');
 assert(newItemModal.includes('headerIconBtn'), 'Tracker creation modal must use the refreshed compact header');
@@ -161,6 +174,8 @@ assert(newItemModal.includes("id: 'plan-wallet'"), 'Linked monthly commitments m
 assert(newItemModal.includes("id: 'commitment-wallet'"), 'Standalone commitments must use the redesigned wallet picker');
 assert(notificationCenter.includes('policyStrip'), 'Notification center must explain automatic dismissal retention');
 assert(notificationCenter.includes('dismiss(itemKeys)'), 'Notification center must allow dismissing all visible alerts');
+assert(home.includes('profilePill'), 'Home top bar must show a labeled account pill, not only a person icon');
+assert(home.includes('accountName'), 'Home top account pill must show the account name or email');
 assert(home.includes('attentionHeader'), 'Important states must use the shared attention header');
 assert(home.includes('expandedRecentId'), 'Home transactions must expose inline expandable details');
 assert(home.includes('detailsToggle'), 'Home transaction rows must use a down-arrow details toggle');

@@ -742,6 +742,9 @@ function AppRoot() {
       {classicEntry && tab === 'home' ? (
         <DraggableFab th={th} onPress={handleFab} bottomInset={bottomInset} label="" color={th.primary} />
       ) : null}
+      {classicEntry && tab === 'trackers' ? (
+        <DraggableFab th={th} onPress={() => openNewTracker()} bottomInset={bottomInset} label="" color={th.primary} />
+      ) : null}
 
       <AddTransModal
         visible={showAdd}

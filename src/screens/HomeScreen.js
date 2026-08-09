@@ -127,7 +127,7 @@ export default function HomeScreen({
   onOpenTab = noop,
   onNotificationAction = noop,
 }) {
-  const { trans, debts, goals, wallets, commitments, cats, cfg, notif, setCfg, deleteTrans, deleteTransMany } = useStore();
+  const { trans, debts, goals, wallets, commitments, cats, cfg, notif, user, setCfg, deleteTrans, deleteTransMany } = useStore();
   const th  = TH[cfg.theme] || TH.dark;
   const L   = STR[cfg.lang]  || STR.ar;
   const C   = copy(cfg.lang);
@@ -136,6 +136,12 @@ export default function HomeScreen({
   const align = textAlignFor(cfg.lang);
   const rowDir = rowDirFor(cfg.lang);
   const modules = getModules(cfg);
+  const accountEmail = user?.email || '';
+  const accountName = user?.user_metadata?.full_name
+    || user?.user_metadata?.name
+    || accountEmail.split('@')[0]
+    || (isAr ? '\u062d\u0633\u0627\u0628 \u0645\u062d\u0644\u064a' : 'Local account');
+  const accountInitial = (accountName || 'M').trim().charAt(0).toUpperCase();
   const scopedTransAll = filterByActiveScope(trans, cfg);
   const scopedTrans = scopedTransAll.filter(item => transactionFeatureEnabled(item, cfg));
   const scopedWallets = filterByActiveScope(wallets, cfg);
@@ -847,8 +853,20 @@ export default function HomeScreen({
             <Text style={[s.brandTitle, { color: th.primary }]}>MYFI</Text>
           </View>
           <View style={[s.headerActions, { flexDirection: rowDir }]}>
-            <TouchableOpacity onPress={() => setCenterMode('profile')} style={[s.profileBtn, { backgroundColor: th.primSoft }]}>
-              <Ionicons name="person-outline" size={19} color={th.primary} />
+            <TouchableOpacity
+              onPress={() => setCenterMode('profile')}
+              style={[s.profilePill, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}
+              accessibilityRole="button"
+              accessibilityLabel={isAr ? '\u0641\u062a\u062d \u0627\u0644\u062d\u0633\u0627\u0628' : 'Open account'}
+            >
+              <View style={[s.profileAvatar, { backgroundColor: th.primSoft }]}>
+                <Text style={{ color: th.primary, fontSize: 13, ...weight('900') }}>{accountInitial}</Text>
+                {user ? <View style={[s.profileStatus, { backgroundColor: th.inc, borderColor: th.card }]} /> : null}
+              </View>
+              <View style={s.profileTextBlock}>
+                <Text numberOfLines={1} style={[s.profileName, { color: th.text, textAlign: align }]}>{accountName}</Text>
+              </View>
+              <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={14} color={th.faint} />
             </TouchableOpacity>
           </View>
         </View>
@@ -909,7 +927,7 @@ export default function HomeScreen({
 
         {renderWalletPanel()}
 
-        {cfg.entryMode !== 'classic' ? (
+        {cfg.entryMode === 'quick' ? (
           <View style={[s.quickEntry, { backgroundColor: th.card, borderColor: th.border }]}>
             <Text style={[s.quickEntryTitle, { color: th.sub, textAlign: align }]}>{C.quickActions}</Text>
             <View style={[s.quickEntryRow, { flexDirection: rowDir }]}>
@@ -990,9 +1008,13 @@ const s = StyleSheet.create({
   notifyBtn:    { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center', ...SHADOW.card },
   notifyBadge:  { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, position: 'absolute', top: -4, right: -4 },
   brandLockup:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerActions: { alignItems: 'center', gap: 5 },
+  headerActions: { alignItems: 'center', gap: 5, flexShrink: 1 },
   headerIconBtn: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  profileBtn:   { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  profilePill:   { minHeight: 46, maxWidth: 142, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 7, paddingHorizontal: 7, paddingVertical: 6, ...SHADOW.subtle },
+  profileAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' },
+  profileStatus: { width: 9, height: 9, borderRadius: 5, borderWidth: 2, position: 'absolute', bottom: -1, right: -1 },
+  profileTextBlock:{ flex: 1, minWidth: 0 },
+  profileName: { fontSize: 12, lineHeight: 17, ...weight('900') },
   brandTitle:   { fontSize: 23, lineHeight: 28, ...weight('900'), letterSpacing: 0 },
   hero:         { borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 9, ...SHADOW.card },
   heroTop:      { alignItems: 'flex-start', gap: 8 },

@@ -63,6 +63,7 @@
   "private": true,
   "devDependencies": {
     "@types/react": "~19.1.10",
+    "eas-cli": "^21.7.0",
     "supabase": "^2.113.0",
     "typescript": "~5.9.2"
   }

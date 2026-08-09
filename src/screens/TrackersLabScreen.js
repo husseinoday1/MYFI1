@@ -68,7 +68,6 @@ const copy = (lang) => {
     dueMonth: ar ? 'موعده شهر' : 'Due in',
     noPlan: ar ? 'لا يوجد التزام مرتبط' : 'No linked commitment',
     details: ar ? 'التفاصيل' : 'Details',
-    quickActions: ar ? 'الإضافات السريعة' : 'Quick actions',
     newTracker: ar ? '\u0645\u062a\u0627\u0628\u0639\u0629 \u062c\u062f\u064a\u062f\u0629' : 'New tracker',
     empty: ar ? 'لا توجد متابعات حالياً' : 'No trackers yet',
     pay: ar ? 'تسجيل سداد' : 'Record repayment',
@@ -643,29 +642,35 @@ export default function TrackersLabScreen({
   return (
     <>
     <ScrollView style={{ flex: 1, backgroundColor: th.bg }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 112 }}>
-      <View style={[s.screenHeader, { flexDirection: rowDir }]}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[s.screenTitle, { color: th.text, textAlign: align }]}>{T.title}</Text>
-          <Text style={[s.screenSubtitle, { color: th.sub, textAlign: align }]}>
-            {isAr ? 'الالتزامات تقاس بالشهر، والتأجيل يتم من بطاقة الالتزام.' : 'Commitments are monthly; deferral is managed from each card.'}
-          </Text>
+      {cfg.entryMode === 'quick' ? (
+        <View style={[s.trackerQuickEntry, { backgroundColor: th.card, borderColor: th.border }]}>
+          <View style={[s.trackerQuickEntryRow, { flexDirection: rowDir }]}>
+            {[
+              modules.debtsOwed
+                ? { key: 'owed', label: T.owed, icon: 'arrow-down-outline', color: th.exp, onPress: () => onNewTracker?.({ trackerType: 'owed' }) }
+                : null,
+              modules.debtsReceivable
+                ? { key: 'receivable', label: T.receivable, icon: 'arrow-up-outline', color: th.inc, onPress: () => onNewTracker?.({ trackerType: 'receivable' }) }
+                : null,
+              modules.goals
+                ? { key: 'goal', label: T.saving, icon: 'wallet-outline', color: th.primary, onPress: () => onNewTracker?.({ trackerType: 'goal' }) }
+                : null,
+              modules.commitments
+                ? { key: 'commitment', label: T.monthly, icon: 'calendar-outline', color: commitmentColor, onPress: () => onNewTracker?.({ trackerType: 'commitment' }) }
+                : null,
+            ].filter(Boolean).map(action => (
+              <TouchableOpacity key={action.key} onPress={action.onPress} style={s.trackerQuickEntryAction}>
+                <View style={[s.trackerQuickEntryIcon, { backgroundColor: `${action.color}18`, borderColor: `${action.color}44` }]}>
+                  <Ionicons name={action.icon} size={18} color={action.color} />
+                </View>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={[s.trackerQuickEntryLabel, { color: th.text }]}>
+                  {action.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-      </View>
-
-      <View style={[s.trackerQuickEntry, { backgroundColor: th.card, borderColor: th.border }]}>
-        <Text style={[s.trackerQuickEntryTitle, { color: th.sub, textAlign: align }]}>{T.quickActions}</Text>
-        <View style={[s.trackerQuickEntryRow, { flexDirection: rowDir }]}>
-          <TouchableOpacity onPress={onNewTracker} style={s.trackerQuickEntryAction}>
-            <View style={[s.trackerQuickEntryIcon, { backgroundColor: `${th.warn}18`, borderColor: `${th.warn}44` }]}>
-              <Ionicons name="add-circle-outline" size={20} color={th.warn} />
-            </View>
-            <Text numberOfLines={1} adjustsFontSizeToFit style={[s.trackerQuickEntryLabel, { color: th.text }]}>
-              {T.newTracker}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
+      ) : null}
       <View style={s.filterBlock}>
         <TouchableOpacity
           onPress={() => setFilterMenuOpen(current => !current)}
@@ -1199,11 +1204,7 @@ function DetailTile({ th, lang, label, value, tone }) {
 }
 
 const s = StyleSheet.create({
-  screenHeader: { alignItems: 'center', gap: 10, marginBottom: 12 },
-  screenTitle: { fontSize: 20, lineHeight: 27, ...weight('900') },
-  screenSubtitle: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 2 },
-  trackerQuickEntry: { borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingTop: 11, paddingBottom: 10, marginBottom: 10 },
-  trackerQuickEntryTitle: { fontSize: 12, lineHeight: 17, ...weight('800'), marginBottom: 7 },
+  trackerQuickEntry: { borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
   trackerQuickEntryRow: { alignItems: 'flex-start', justifyContent: 'space-between' },
   trackerQuickEntryAction: { width: '24%', minHeight: 68, alignItems: 'center', justifyContent: 'center', gap: 6 },
   trackerQuickEntryIcon: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },

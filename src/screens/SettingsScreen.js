@@ -525,6 +525,12 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
           : dirty
             ? { icon: 'cloud-upload-outline', color: th.warn, text: isAr ? 'بانتظار المزامنة' : 'Pending sync' }
             : { icon: 'cloud-done-outline', color: th.inc, text: isAr ? 'محفوظ ومتصل' : 'Saved and connected' };
+  const accountEmailText = user?.email || (isAr ? '\u063a\u064a\u0631 \u0645\u0633\u062c\u0644' : 'Not signed in');
+  const accountDisplayName = user?.user_metadata?.full_name
+    || user?.user_metadata?.name
+    || user?.email?.split('@')[0]
+    || (isAr ? '\u062d\u0633\u0627\u0628 \u0645\u062d\u0644\u064a' : 'Local account');
+  const accountInitial = (accountDisplayName || 'M').trim().charAt(0).toUpperCase();
   const walletRows = getWalletAvailableBalances(wallets, trans, cfg.currency, defaultWalletId)
     .sort((a, b) => (a.id === defaultWalletId ? -1 : b.id === defaultWalletId ? 1 : 0));
   const walletSelection = useMultiSelect(
@@ -1808,19 +1814,57 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
         <Row label={T.deleteAll} onPress={confirmReset} danger last />
       </Section>
 
+      {user ? (
+        <TouchableOpacity
+          onPress={() => {
+            setExpandedSections(current => new Set([...current, 'account']));
+            setOpen('account');
+          }}
+          style={[s.accountOverview, { backgroundColor: th.card, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}
+          accessibilityRole="button"
+        >
+          <View style={[s.accountOverviewAvatar, { backgroundColor: th.primSoft }]}>
+            <Text style={{ color: th.primary, fontSize: 17, ...weight('900') }}>{accountInitial}</Text>
+            <View style={[s.accountOverviewStatus, { backgroundColor: th.inc, borderColor: th.card }]} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text numberOfLines={1} style={[s.accountName, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{accountDisplayName}</Text>
+            <Text numberOfLines={1} style={[s.accountEmail, { color: th.sub, textAlign: 'left', writingDirection: 'ltr' }]}>{accountEmailText}</Text>
+          </View>
+          <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={18} color={th.faint} />
+        </TouchableOpacity>
+      ) : null}
+
       <Section id="account" title={T.account}>
         <Row
-          label={user ? T.connected : T.notConnected}
-          value={user ? syncState.text : (authServiceStatus === 'down' ? T.accountServiceDown : undefined)}
+          label={user ? accountDisplayName : T.notConnected}
+          value={user ? accountEmailText : (authServiceStatus === 'down' ? T.accountServiceDown : undefined)}
           onPress={() => toggleOpen('account')}
           last={open !== 'account'}
         />
         {open === 'account' ? (
           <Expanded>
             {user ? (
-              <TouchableOpacity onPress={handleSignOut} style={[s.secondaryButton, { backgroundColor: th.expBg }]}>
-                <Text style={{ color: th.exp, fontSize: 13, ...weight('900') }}>{T.signOut}</Text>
-              </TouchableOpacity>
+              <>
+                <View style={[s.accountCard, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                  <View style={[s.accountCardHead, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+                    <View style={[s.accountAvatar, { backgroundColor: th.primSoft }]}>
+                      <Text style={{ color: th.primary, fontSize: 16, ...weight('900') }}>{accountInitial}</Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text numberOfLines={1} style={[s.accountName, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{accountDisplayName}</Text>
+                      <Text numberOfLines={1} style={[s.accountEmail, { color: th.sub, textAlign: 'left', writingDirection: 'ltr' }]}>{accountEmailText}</Text>
+                    </View>
+                  </View>
+                  <View style={[s.accountSyncRow, { backgroundColor: th.card, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+                    <Ionicons name={syncState.icon} size={16} color={syncState.color} />
+                    <Text style={{ color: syncState.color, fontSize: 12, ...weight('900'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>{syncState.text}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={handleSignOut} style={[s.secondaryButton, { backgroundColor: th.expBg }]}>
+                  <Text style={{ color: th.exp, fontSize: 13, ...weight('900') }}>{T.signOut}</Text>
+                </TouchableOpacity>
+              </>
             ) : (
               <>
                 <View style={[s.statusNote, { backgroundColor: authServiceStatus === 'ready' ? th.incBg : authServiceStatus === 'down' ? th.expBg : th.cardHigh, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
@@ -2362,6 +2406,15 @@ const s = StyleSheet.create({
   subtitle: { fontSize: 12, lineHeight: 17, ...weight('700'), marginTop: 2 },
   statusPill: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 10 },
   statusNote: { minHeight: 42, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
+  accountOverview: { minHeight: 72, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 10, marginBottom: 10, ...SHADOW.subtle },
+  accountOverviewAvatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' },
+  accountOverviewStatus: { width: 11, height: 11, borderRadius: 6, borderWidth: 2, position: 'absolute', bottom: -1, right: -1 },
+  accountCard: { borderRadius: RADIUS.lg, borderWidth: 1, padding: 12, gap: 10 },
+  accountCardHead: { alignItems: 'center', gap: 10 },
+  accountAvatar: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  accountName: { fontSize: 15, lineHeight: 21, ...weight('900') },
+  accountEmail: { fontSize: 12, lineHeight: 17, ...weight('700'), marginTop: 2 },
+  accountSyncRow: { minHeight: 36, alignItems: 'center', gap: 8, borderRadius: RADIUS.md, paddingHorizontal: 10, paddingVertical: 8 },
   section: { marginBottom: 10 },
   sectionToggle: { minHeight: 52, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 14, marginBottom: 7, ...SHADOW.subtle },
   sectionMark: { width: 4, height: 16, borderRadius: 4 },
