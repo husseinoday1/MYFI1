@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, View, Text, TextInput, StyleSheet } from 'react-native';
+import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View, Text, TextInput, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
@@ -286,6 +286,40 @@ export default function TrackersLabScreen({
   const currentTrackers = trackers.filter(item => !item.ended && !item.archived);
   const endedTrackers = trackers.filter(item => item.ended && !item.archived);
   const archivedTrackers = trackers.filter(item => item.archived);
+  const summaryTiles = [
+    modules.debtsOwed ? {
+      key: 'owed',
+      label: T.owedTotal,
+      value: currentTrackers.filter(item => item.kind === 'owed').reduce((sum, item) => sum + Number(item.remaining || 0), 0),
+      icon: 'card-outline',
+      color: th.exp,
+      bg: th.expBg,
+    } : null,
+    modules.debtsReceivable ? {
+      key: 'receivable',
+      label: T.receivableTotal,
+      value: currentTrackers.filter(item => item.kind === 'receivable').reduce((sum, item) => sum + Number(item.remaining || 0), 0),
+      icon: 'cash-outline',
+      color: th.inc,
+      bg: th.incBg,
+    } : null,
+    modules.goals ? {
+      key: 'saving',
+      label: T.savingLeft,
+      value: currentTrackers.filter(item => item.kind === 'saving').reduce((sum, item) => sum + Number(item.remaining || 0), 0),
+      icon: 'flag-outline',
+      color: th.primary,
+      bg: th.primSoft,
+    } : null,
+    modules.commitments ? {
+      key: 'monthly',
+      label: T.monthlyTotal,
+      value: currentTrackers.filter(item => item.kind === 'monthly' && item.status !== 'done').reduce((sum, item) => sum + Number(item.total || 0), 0),
+      icon: 'calendar-outline',
+      color: commitmentColor,
+      bg: commitmentBg,
+    } : null,
+  ].filter(Boolean);
   const filters = [
     { key: 'all', label: T.all, count: currentTrackers.length },
     modules.debtsOwed ? { key: 'owed', label: T.owed, count: currentTrackers.filter(item => item.kind === 'owed').length } : null,
@@ -669,6 +703,19 @@ export default function TrackersLabScreen({
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+      ) : null}
+      {summaryTiles.length ? (
+        <View style={[s.summaryGrid, { flexDirection: rowDir }]}>
+          {summaryTiles.map(item => (
+            <SummaryTile
+              key={item.key}
+              th={th}
+              lang={cfg.lang}
+              item={item}
+              value={`${money(item.value)} ${sym}`}
+            />
+          ))}
         </View>
       ) : null}
       <View style={s.filterBlock}>
@@ -1109,7 +1156,11 @@ export default function TrackersLabScreen({
       })}
     </ScrollView>
     <Modal visible={!!editTrackerDraft} transparent animationType="slide" onRequestClose={closeTrackerEdit}>
-      <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+        style={[s.modalOverlay, { backgroundColor: th.overlay }]}
+      >
         <Pressable style={StyleSheet.absoluteFill} onPress={closeTrackerEdit} />
         <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>
           <View style={[s.sheetHeader, { flexDirection: rowDir }]}>
@@ -1149,10 +1200,14 @@ export default function TrackersLabScreen({
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
     <Modal visible={!!editPaymentDraft} transparent animationType="slide" onRequestClose={closePaymentEdit}>
-      <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+        style={[s.modalOverlay, { backgroundColor: th.overlay }]}
+      >
         <Pressable style={StyleSheet.absoluteFill} onPress={closePaymentEdit} />
         <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>
           <View style={[s.sheetHeader, { flexDirection: rowDir }]}>
@@ -1185,7 +1240,7 @@ export default function TrackersLabScreen({
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
     </>
   );
@@ -1205,12 +1260,34 @@ function DetailTile({ th, lang, label, value, tone }) {
   );
 }
 
+function SummaryTile({ th, lang, item, value }) {
+  const align = textAlignFor(lang);
+  return (
+    <View style={[s.summaryTile, { backgroundColor: th.card, borderColor: th.border }]}>
+      <View style={[s.summaryIcon, { backgroundColor: item.bg }]}>
+        <Ionicons name={item.icon} size={16} color={item.color} />
+      </View>
+      <Text numberOfLines={1} adjustsFontSizeToFit style={[s.summaryLabel, { color: th.sub, textAlign: align }]}>
+        {item.label}
+      </Text>
+      <Text numberOfLines={1} adjustsFontSizeToFit style={[s.summaryValue, { color: item.color, textAlign: align }]}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
   trackerQuickEntry: { borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
   trackerQuickEntryRow: { alignItems: 'flex-start', justifyContent: 'space-between' },
   trackerQuickEntryAction: { width: '24%', minHeight: 68, alignItems: 'center', justifyContent: 'center', gap: 6 },
   trackerQuickEntryIcon: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   trackerQuickEntryLabel: { fontSize: 12, lineHeight: 17, ...weight('800'), textAlign: 'center', maxWidth: '100%' },
+  summaryGrid: { flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  summaryTile: { width: '48.5%', minHeight: 82, borderRadius: RADIUS.md, borderWidth: 1, padding: 10, justifyContent: 'center', ...SHADOW.card },
+  summaryIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 7 },
+  summaryLabel: { fontSize: 11, lineHeight: 15, ...weight('800') },
+  summaryValue: { fontSize: 16, lineHeight: 22, marginTop: 2, ...weight('900') },
   filterBlock: { marginBottom: 10 },
   filterSelect: { minHeight: 58, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8, alignItems: 'center', gap: 9 },
   filterSelectLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },

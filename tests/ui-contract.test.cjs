@@ -165,6 +165,8 @@ assert(trackers.includes("onNewTracker?.({ trackerType: 'goal' })"), 'Quick entr
 assert(trackers.includes("onNewTracker?.({ trackerType: 'commitment' })"), 'Quick entry must provide a dedicated commitment card');
 assert.equal(trackers.includes('headerAddBtn'), false, 'Trackers must not keep the add button in the top header');
 assert.equal(trackers.includes('quickTrackerEntry'), false, 'Trackers must not use a separate tracker-only entry-mode flag');
+assert(trackers.includes('summaryGrid') && trackers.includes('SummaryTile'), 'Trackers must show debt, saving, and commitment summary tiles');
+assert(trackers.includes('KeyboardAvoidingView') && trackers.includes("behavior={Platform.OS === 'ios' ? 'padding' : 'height'}"), 'Tracker edit modals must rise with the keyboard');
 assert.equal(trackers.includes("sort((a, b) => (a.id === openId"), false, 'Opening a tracker card must not move it to the top');
 assert(trackers.includes('expandedPaymentHistoryId'), 'Tracker payment history must stay hidden behind an explicit reveal state');
 assert(trackers.includes('historyToggle'), 'Tracker payment history must use a reveal button instead of opening automatically');
@@ -184,6 +186,10 @@ assert(newItemModal.includes('active ? option.color : th.cardHigh'), 'Tracker cr
 assert(newItemModal.includes('selectSheetPanel'), 'Tracker creation choices must use the floating picker design');
 assert(newItemModal.includes("typeBtn: { width: '48.5%'"), 'Tracker creation type cards must be symmetric instead of squeezed into one row');
 assert(newItemModal.includes('requestedTrackerType'), 'Tracker creation must honor the tracker type selected from quick actions');
+assert(newItemModal.includes('dedicatedTrackerLaunch'), 'Tracker quick actions must open a dedicated creation sheet for the selected tracker type');
+assert(newItemModal.includes('isTracker && !dedicatedTrackerLaunch'), 'Dedicated tracker creation sheets must not show the classic tracker type switcher');
+assert(addModal.includes('dedicatedQuickEntry'), 'Home quick actions must open dedicated money-entry sheets');
+assert(addModal.includes('!dedicatedQuickEntry'), 'Dedicated money-entry sheets must not show the classic entry type switcher');
 assert(newItemModal.includes('selectField: { minHeight: 64'), 'Tracker creation select cards must match the larger dropdown field size');
 assert.equal(newItemModal.includes('selectedFirstOptions'), false, 'Tracker creation wallet choices must keep their stable order');
 assert.equal(newItemModal.includes('walletChip'), false, 'Tracker creation must not keep the old horizontal wallet chip rail');

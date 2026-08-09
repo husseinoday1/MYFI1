@@ -670,6 +670,7 @@ export default function AddTransModal({
   const isPlanningAction = ['debt', 'goal', 'commitment'].includes(type);
   const isAmountEntry = ['exp', 'inc', 'transfer'].includes(type);
   const isContextualPlanningLaunch = !!(initialDebtId || initialGoalId || initialCommitmentId);
+  const dedicatedQuickEntry = focusedEntry && !isEdit && !isContextualPlanningLaunch;
   const smartEntryAvailable = !isEdit && !isPlanningAction;
   const planningSeg = [
     (modules.debtsOwed || modules.debtsReceivable) ? { k: 'debt', l: cfg.lang === 'ar' ? 'دين' : 'Debt' } : null,
@@ -710,6 +711,14 @@ export default function AddTransModal({
   const finalSaveColor = type === 'debt' ? debtColor : saveColor;
   const entryTitle = isEdit
     ? L.editTrans
+    : dedicatedQuickEntry && smartOpen
+      ? (cfg.lang === 'ar' ? 'إدخال ذكي' : 'Smart entry')
+    : dedicatedQuickEntry && type === 'inc'
+      ? (cfg.lang === 'ar' ? 'إدخال دخل' : 'Income entry')
+    : dedicatedQuickEntry && type === 'transfer'
+      ? transferLabel
+    : dedicatedQuickEntry && type === 'exp'
+      ? (cfg.lang === 'ar' ? 'إدخال صرف' : 'Expense entry')
     : focusedEntry
       ? (cfg.lang === 'ar' ? 'إدخال سريع' : 'Quick entry')
       : (cfg.lang === 'ar' ? 'إدخال كامل' : 'Full entry');
@@ -854,7 +863,7 @@ export default function AddTransModal({
               <Text style={[s.title, { color: th.text, textAlign: 'center' }]}>{entryTitle}</Text>
               <View style={s.headerIconBtn} />
             </View>
-            {!isEdit && !isContextualPlanningLaunch && (
+            {!isEdit && !isContextualPlanningLaunch && !dedicatedQuickEntry && (
               <View style={[s.typeRow, { flexDirection: rowDir }]}>
                 {seg.filter(sg => sg.k !== 'planning').map(sg => {
                   const active = sg.k === 'smart' ? smartOpen : (!smartOpen && type === sg.k);

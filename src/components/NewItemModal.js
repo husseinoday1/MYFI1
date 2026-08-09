@@ -92,6 +92,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const requestedTrackerType = ['owed', 'receivable', 'goal', 'commitment'].includes(preset?.trackerType)
     ? preset.trackerType
     : null;
+  const dedicatedTrackerLaunch = isTracker && !!requestedTrackerType && !linkedPlanMode;
   const presetKind = preset?.linkedType === 'goal'
     ? 'goal'
     : preset?.linkedType === 'receivable'
@@ -170,6 +171,8 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
 
   const title = linkedPlanMode
     ? T.planTitle
+    : dedicatedTrackerLaunch
+      ? (currentKind === 'receivable' ? T.receivable : currentKind === 'goal' ? T.goal : currentKind === 'commitment' ? T.commitment : T.owed)
     : isTracker
       ? T.trackerTitle
       : isCommitment
@@ -391,7 +394,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
             </View>
           ) : (
             <>
-              {isTracker ? (
+              {isTracker && !dedicatedTrackerLaunch ? (
                 <View style={[s.typeGrid, { flexDirection: rowDir }]}>
                   {trackerTypes.map(option => {
                     const active = trackerType === option.value;
