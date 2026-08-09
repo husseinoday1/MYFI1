@@ -188,6 +188,9 @@ assert(newItemModal.includes("typeBtn: { width: '48.5%'"), 'Tracker creation typ
 assert(newItemModal.includes('requestedTrackerType'), 'Tracker creation must honor the tracker type selected from quick actions');
 assert(newItemModal.includes('dedicatedTrackerLaunch'), 'Tracker quick actions must open a dedicated creation sheet for the selected tracker type');
 assert(newItemModal.includes('isTracker && !dedicatedTrackerLaunch'), 'Dedicated tracker creation sheets must not show the classic tracker type switcher');
+assert(newItemModal.includes('trackerHeaderCard') && newItemModal.includes('entryField') && newItemModal.includes('amountInput'), 'Tracker creation sheets must use the voted dedicated card layout');
+assert(newItemModal.includes('walletEffect') && newItemModal.includes('originImpactText'), 'Debt creation must explain when wallet balance changes');
+assert(newItemModal.includes('commitmentRepeatMonthly') && newItemModal.includes('repeatMonthly: commitmentRepeatMonthly'), 'Commitment creation must persist monthly versus one-time repeat mode');
 assert(addModal.includes('dedicatedQuickEntry'), 'Home quick actions must open dedicated money-entry sheets');
 assert(addModal.includes('!dedicatedQuickEntry'), 'Dedicated money-entry sheets must not show the classic entry type switcher');
 assert(newItemModal.includes('selectField: { minHeight: 64'), 'Tracker creation select cards must match the larger dropdown field size');

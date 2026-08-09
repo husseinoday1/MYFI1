@@ -618,6 +618,55 @@ const runLinkedStoreAssertions = async () => {
 
   useStore.setState({
     trans: [],
+    debts: [],
+    goals: [],
+    commitments: [],
+    wallets,
+    cfg: { ...initialCfg, currency: 'IQD', defaultWalletId: 'cash' },
+    user: null,
+  });
+  const previousDebt = await useStore.getState().addDebt({
+    name: 'Old debt',
+    total: 400,
+    createdAt: '2026-07-04',
+    direction: 'owed',
+    originMode: 'previous',
+    walletId: 'cash',
+  });
+  assert.ok(previousDebt?.id);
+  assert.equal(useStore.getState().trans.length, 0, 'old debt creation must not change wallet balance');
+  await useStore.getState().addDebt({
+    name: 'Received loan',
+    total: 300,
+    createdAt: '2026-07-04',
+    direction: 'owed',
+    originMode: 'received',
+    walletId: 'cash',
+  });
+  state = useStore.getState();
+  assert.equal(state.trans.find(item => item.isDebtOrigin && item.flowType === FLOW_TYPES.DEBT_PROCEEDS)?.amt, 300, 'received debt must add proceeds to the selected wallet');
+  await useStore.getState().addDebt({
+    name: 'Friend loan',
+    total: 200,
+    createdAt: '2026-07-04',
+    direction: 'receivable',
+    originMode: 'lent',
+    walletId: 'cash',
+  });
+  state = useStore.getState();
+  assert.equal(state.trans.find(item => item.isDebtOrigin && item.flowType === FLOW_TYPES.RECEIVABLE_CREATED)?.amt, -200, 'debt owed to me created from lent cash must reduce the selected wallet');
+  await useStore.getState().addCommitment({
+    name: 'One-time fee',
+    amt: 70,
+    firstDueISO: '2026-07-01',
+    walletId: 'cash',
+    linkedType: 'none',
+    repeatMonthly: false,
+  });
+  assert.equal(useStore.getState().commitments.find(item => item.name === 'One-time fee')?.repeatMonthly, false, 'one-time commitment creation must persist repeatMonthly=false');
+
+  useStore.setState({
+    trans: [],
     debts: [{ id: 'debt-1', name: 'Loan', total: 1000, paid: 0, payments: [], direction: 'owed' }],
     goals: [{ id: 'goal-1', name: 'Reserve', target: 800, cur: 0, savings: [] }],
     commitments: [{ id: 'commit-1', name: 'Internet', amt: 100, day: 10, active: true, repeatMonthly: true, walletId: 'cash', linkedType: 'none', linkedId: null }],

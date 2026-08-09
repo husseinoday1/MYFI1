@@ -57,10 +57,22 @@ const modalCopy = (lang = 'ar') => {
     saveTracker: ar ? 'حفظ المتابعة' : 'Save tracker',
     saveCommitment: ar ? 'حفظ الالتزام' : 'Save commitment',
     savePlan: ar ? 'حفظ الالتزام' : 'Save commitment',
+    saveDebt: ar ? 'حفظ الدين' : 'Save debt',
+    saveGoal: ar ? 'حفظ التوفير' : 'Save saving',
     debtPlaceholder: ar ? 'مثلاً: قسط سيارة' : 'e.g. Car payment',
     receivablePlaceholder: ar ? 'مثلاً: دين لصديق' : 'e.g. Loan to a friend',
     goalPlaceholder: ar ? 'مثلاً: سفر' : 'e.g. Travel',
     commitmentPlaceholder: ar ? 'مثلاً: إيجار أو اشتراك إنترنت' : 'e.g. Rent or internet subscription',
+    balanceEffect: ar ? 'أثر الرصيد' : 'Balance effect',
+    noBalanceChange: ar ? 'لا يغيّر رصيد المحفظة' : 'No wallet balance change',
+    walletEffect: ar ? 'محفظة التأثير' : 'Effect wallet',
+    savingMode: ar ? 'طريقة التوفير' : 'Saving method',
+    savingReserveLater: ar ? 'الحجز يبدأ عند إضافة مبلغ توفير، وليس عند إنشاء الهدف.' : 'Reserved balance starts when you add a saving amount, not when creating the target.',
+    linkedPlanOptional: ar ? 'اختياري · دفعة شهرية' : 'Optional · monthly payment',
+    reminderOptional: ar ? 'اختياري · نهاية الشهر' : 'Optional · month end',
+    monthlyRepeat: ar ? 'شهري' : 'Monthly',
+    oneTimeRepeat: ar ? 'مرة واحدة' : 'One time',
+    repeatMode: ar ? 'تكرار الالتزام' : 'Commitment repeat',
   };
 };
 
@@ -110,6 +122,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const [originMode, setOriginMode] = useState('previous');
   const [commitmentCat, setCommitmentCat] = useState('other');
   const [commitmentCatTouched, setCommitmentCatTouched] = useState(false);
+  const [commitmentRepeatMonthly, setCommitmentRepeatMonthly] = useState(true);
   const [expandedPicker, setExpandedPicker] = useState(null);
 
   useEffect(() => {
@@ -130,6 +143,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setOriginMode('previous');
     setCommitmentCat(suggestCategoryForText(presetName, commitmentCategories));
     setCommitmentCatTouched(false);
+    setCommitmentRepeatMonthly(true);
     setExpandedPicker(null);
   }, [visible, linkedPlanMode, presetKind, preset?.linkedName, requestedTrackerType, defaultWalletId]);
 
@@ -144,7 +158,17 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const isCommitment = currentKind === 'commitment';
   const canLinkPlan = modules.commitments && !linkedPlanMode && (isDebt || isGoal);
   const activeColor = linkedPlanMode ? th.warn : isCommitment ? th.warn : isGoal ? th.primary : isReceivable ? th.inc : th.exp;
-  const saveLabel = linkedPlanMode ? T.savePlan : isCommitment ? T.saveCommitment : isTracker ? T.saveTracker : L.save;
+  const saveLabel = linkedPlanMode
+    ? T.savePlan
+    : isCommitment
+      ? T.saveCommitment
+      : isGoal
+        ? T.saveGoal
+        : isDebt
+          ? T.saveDebt
+          : isTracker
+            ? T.saveTracker
+            : L.save;
 
   const trackerTypes = [
     { value: 'owed', label: T.owed, icon: 'card-outline', color: th.exp },
@@ -163,6 +187,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
       setStartDate(monthStartISO());
       setCommitmentCat(suggestCategoryForText(name, commitmentCategories));
       setCommitmentCatTouched(false);
+      setCommitmentRepeatMonthly(true);
     }
     if (value === 'receivable' && !modules.debtsReceivable) {
       await setCfg({ enabledModules: { debtsReceivable: true } });
@@ -202,6 +227,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setOriginMode('previous');
     setCommitmentCat('other');
     setCommitmentCatTouched(false);
+    setCommitmentRepeatMonthly(true);
     setExpandedPicker(null);
   };
 
@@ -248,6 +274,48 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     icon: cat.icon || 'pricetag-outline',
     color: cat.color || th.primary,
   }));
+  const trackerMeta = {
+    owed: { label: T.owed, icon: 'arrow-down-outline', color: th.exp, bg: th.expBg },
+    receivable: { label: T.receivable, icon: 'arrow-up-outline', color: th.inc, bg: th.incBg },
+    goal: { label: T.goal, icon: 'flag-outline', color: th.primary, bg: th.primSoft },
+    commitment: { label: T.commitment, icon: 'calendar-outline', color: th.warn, bg: th.warnBg },
+  };
+  const activeMeta = linkedPlanMode
+    ? { label: T.planTitle, icon: 'calendar-outline', color: th.warn, bg: th.warnBg }
+    : trackerMeta[currentKind] || trackerMeta.owed;
+  const amountValue = Math.abs(cleanNumber(amt));
+  const moneyPreview = (value) => `${Math.round(Math.abs(Number(value) || 0)).toLocaleString()} ${sym}`;
+  const originImpactText = originMode === 'received'
+    ? (isAr ? `يزيد الرصيد ${moneyPreview(amountValue)}` : `Adds ${moneyPreview(amountValue)} to balance`)
+    : originMode === 'lent'
+      ? (isAr ? `ينقص الرصيد ${moneyPreview(amountValue)}` : `Subtracts ${moneyPreview(amountValue)} from balance`)
+      : T.noBalanceChange;
+
+  const renderTextField = ({ label, value, onChangeText, placeholder, keyboardType = 'default', tone = th.text, large = false }) => (
+    <View style={[s.entryField, large ? s.amountField : null, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+      <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType={keyboardType}
+        placeholder={placeholder}
+        placeholderTextColor={th.faint}
+        style={[large ? s.amountInput : s.inlineInput, { color: tone, textAlign: align }]}
+      />
+    </View>
+  );
+
+  const renderInfoCard = ({ icon, label, value, tone = activeColor }) => (
+    <View style={[s.infoCard, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}>
+      <View style={[s.infoIcon, { backgroundColor: `${tone}18` }]}>
+        <Ionicons name={icon} size={16} color={tone} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.selectLabel, { color: th.sub, textAlign: align }]}>{label}</Text>
+        <Text numberOfLines={2} style={[s.infoValue, { color: th.text, textAlign: align }]}>{value}</Text>
+      </View>
+    </View>
+  );
 
   const renderSelectField = ({ id, label, value, options, onChange, icon = 'chevron-down-outline', tone = th.sub }) => {
     const selected = options.find(option => option.value === value) || options[0];
@@ -313,6 +381,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         walletId: planWalletId,
         cat: commitmentCat || suggestCategoryForText(name, commitmentCategories),
         linkedType: 'none',
+        repeatMonthly: commitmentRepeatMonthly,
       });
       handleClose();
       return;
@@ -414,44 +483,78 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                 </View>
               ) : null}
 
-              <Text style={[s.label, { color: th.sub, textAlign: align }]}>{nameLabel}</Text>
-              <TextInput
-                value={name}
-                onChangeText={handleNameChange}
-                placeholder={placeholder}
-                placeholderTextColor={th.sub}
-                style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]}
-              />
-
-              <Text style={[s.label, { color: th.sub, textAlign: align }]}>{amountLabel} ({sym})</Text>
-              <TextInput
-                value={amt}
-                onChangeText={(value) => setAmt(formatNumberInput(value))}
-                keyboardType="numeric"
-                placeholder="0"
-                placeholderTextColor={th.sub}
-                style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]}
-              />
-
-              {isCommitment ? (
-                <View style={s.categoryBlock}>
-                  {renderSelectField({
-                    id: 'commitment-category',
-                    label: T.category,
-                    value: commitmentCat,
-                    options: commitmentCategoryOptions,
-                    icon: 'pricetag-outline',
-                    tone: th.warn,
-                    onChange: selectCommitmentCategory,
-                  })}
-                  <Text style={[s.categoryHint, { color: th.faint, textAlign: align }]}>{T.categoryHint}</Text>
+              <View style={[s.trackerHeaderCard, { backgroundColor: activeMeta.bg, borderColor: `${activeMeta.color}44`, flexDirection: rowDir }]}>
+                <View style={[s.trackerHeaderIcon, { backgroundColor: activeMeta.color }]}>
+                  <Ionicons name={activeMeta.icon} size={18} color="#fff" />
                 </View>
-              ) : null}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={[s.trackerHeaderTitle, { color: th.text, textAlign: align }]}>
+                    {activeMeta.label}
+                  </Text>
+                  <Text numberOfLines={1} style={[s.trackerHeaderMeta, { color: activeMeta.color, textAlign: align }]}>
+                    {amountValue > 0 ? moneyPreview(amountValue) : (isAr ? 'جاهز للإدخال' : 'Ready to enter')}
+                  </Text>
+                </View>
+              </View>
+
+              {renderTextField({
+                label: nameLabel,
+                value: name,
+                onChangeText: handleNameChange,
+                placeholder,
+              })}
+
+              {renderTextField({
+                label: `${amountLabel} (${sym})`,
+                value: amt,
+                onChangeText: (value) => setAmt(formatNumberInput(value)),
+                keyboardType: 'numeric',
+                placeholder: `0 ${sym}`,
+                tone: activeColor,
+                large: true,
+              })}
 
               {isGoal ? (
-                <Text style={{ color: th.faint, fontSize: 12, lineHeight: 18, ...weight('700'), textAlign: align, marginBottom: 14 }}>
-                  {T.savingReservedHint}
-                </Text>
+                renderInfoCard({
+                  icon: 'wallet-outline',
+                  label: T.savingMode,
+                  value: T.savingReserveLater,
+                  tone: th.primary,
+                })
+              ) : null}
+
+              {isDebt ? (
+                <View style={s.originBlock}>
+                  <Text style={[s.label, { color: th.sub, textAlign: align }]}>{T.debtOrigin}</Text>
+                  <View style={[s.originModes, { flexDirection: rowDir }]}>
+                    {[
+                      { value: 'previous', label: T.previousDebt },
+                      ...(isReceivable
+                        ? [{ value: 'lent', label: T.lentDebt }]
+                        : [{ value: 'received', label: T.receivedDebt }]),
+                    ].map(option => {
+                      const active = originMode === option.value;
+                      return (
+                        <TouchableOpacity
+                          key={option.value}
+                          onPress={() => setOriginMode(option.value)}
+                          style={[s.originMode, { backgroundColor: active ? `${activeColor}18` : th.cardHigh, borderColor: active ? activeColor : th.border }]}
+                        >
+                          <Text style={{ color: active ? activeColor : th.sub, fontSize: 12, ...weight('900') }}>{option.label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  {renderInfoCard({
+                    icon: originMode === 'previous' ? 'remove-circle-outline' : 'wallet-outline',
+                    label: T.balanceEffect,
+                    value: originImpactText,
+                    tone: activeColor,
+                  })}
+                  <Text style={{ color: th.faint, fontSize: 12, lineHeight: 18, ...weight('700'), textAlign: align }}>
+                    {originMode === 'received' ? T.receivedHint : originMode === 'lent' ? T.lentHint : T.previousHint}
+                  </Text>
+                </View>
               ) : null}
 
               {isCommitment ? (
@@ -477,6 +580,28 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                     onChange: setPlanWalletId,
                   }) : null}
                 </View>
+              ) : isDebt && originMode !== 'previous' && walletList.length > 0 ? (
+                <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
+                  <DateField
+                    value={startDate}
+                    onChange={setStartDate}
+                    th={th}
+                    lang={cfg.lang}
+                    monthNameStyle={cfg.monthNameStyle}
+                    label={T.startDate}
+                    style={s.selectFieldBlock}
+                    buttonStyle={s.dateButton}
+                  />
+                  {renderSelectField({
+                    id: 'origin-wallet',
+                    label: T.walletEffect,
+                    value: planWalletId,
+                    options: walletOptions,
+                    icon: 'wallet-outline',
+                    tone: th.primary,
+                    onChange: setPlanWalletId,
+                  })}
+                </View>
               ) : (
                 <DateField
                   value={startDate}
@@ -490,46 +615,41 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                 />
               )}
 
-              {isDebt ? (
-                <View style={s.originBlock}>
-                  <Text style={[s.label, { color: th.sub, textAlign: align }]}>{T.debtOrigin}</Text>
-                  <View style={[s.originModes, { flexDirection: rowDir }]}>
-                    {[
-                      { value: 'previous', label: T.previousDebt },
-                      ...(isReceivable
-                        ? [{ value: 'lent', label: T.lentDebt }]
-                        : [{ value: 'received', label: T.receivedDebt }]),
-                    ].map(option => {
-                      const active = originMode === option.value;
-                      return (
-                        <TouchableOpacity
-                          key={option.value}
-                          onPress={() => setOriginMode(option.value)}
-                          style={[s.originMode, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent' }]}
-                        >
-                          <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('900') }}>{option.label}</Text>
-                        </TouchableOpacity>
-                      );
+              {isCommitment ? (
+                <>
+                  <View style={s.categoryBlock}>
+                    {renderSelectField({
+                      id: 'commitment-category',
+                      label: T.category,
+                      value: commitmentCat,
+                      options: commitmentCategoryOptions,
+                      icon: 'pricetag-outline',
+                      tone: th.warn,
+                      onChange: selectCommitmentCategory,
                     })}
+                    <Text style={[s.categoryHint, { color: th.faint, textAlign: align }]}>{T.categoryHint}</Text>
                   </View>
-                  <Text style={{ color: th.faint, fontSize: 12, lineHeight: 18, ...weight('700'), textAlign: align }}>
-                    {originMode === 'received' ? T.receivedHint : originMode === 'lent' ? T.lentHint : T.previousHint}
-                  </Text>
-                </View>
-              ) : null}
-
-              {isDebt && originMode !== 'previous' && walletList.length > 0 ? (
-                <View style={s.walletBlock}>
-                  {renderSelectField({
-                    id: 'origin-wallet',
-                    label: T.wallet,
-                    value: planWalletId,
-                    options: walletOptions,
-                    icon: 'wallet-outline',
-                    tone: th.primary,
-                    onChange: setPlanWalletId,
-                  })}
-                </View>
+                  <View style={s.repeatBlock}>
+                    <Text style={[s.label, { color: th.sub, textAlign: align }]}>{T.repeatMode}</Text>
+                    <View style={[s.originModes, { flexDirection: rowDir }]}>
+                      {[
+                        { value: true, label: T.monthlyRepeat },
+                        { value: false, label: T.oneTimeRepeat },
+                      ].map(option => {
+                        const active = commitmentRepeatMonthly === option.value;
+                        return (
+                          <TouchableOpacity
+                            key={String(option.value)}
+                            onPress={() => setCommitmentRepeatMonthly(option.value)}
+                            style={[s.originMode, { backgroundColor: active ? th.warnBg : th.cardHigh, borderColor: active ? th.warn : th.border }]}
+                          >
+                            <Text style={{ color: active ? th.warn : th.sub, fontSize: 12, ...weight('900') }}>{option.label}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </>
               ) : null}
             </>
           )}
@@ -557,15 +677,14 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                     <Text style={{ color: th.text, fontSize: 13, ...weight('900') }}>{T.planTitle}</Text>
                   </View>
 
-                  <Text style={[s.label, { color: th.sub, textAlign: align }]}>{T.planAmount} ({sym})</Text>
-                  <TextInput
-                    value={planAmount}
-                    onChangeText={(value) => setPlanAmount(formatNumberInput(value))}
-                    keyboardType="numeric"
-                    placeholder="0"
-                    placeholderTextColor={th.sub}
-                    style={[s.input, s.planInput, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: align }]}
-                  />
+                  {renderTextField({
+                    label: `${T.planAmount} (${sym})`,
+                    value: planAmount,
+                    onChangeText: (value) => setPlanAmount(formatNumberInput(value)),
+                    keyboardType: 'numeric',
+                    placeholder: `0 ${sym}`,
+                    tone: th.warn,
+                  })}
 
                   <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
                     <DateField
@@ -686,6 +805,17 @@ const s = StyleSheet.create({
   title: { flex: 1, fontSize: 18, lineHeight: 24, ...weight('900') },
   typeGrid: { gap: 8, marginBottom: 12, flexWrap: 'wrap' },
   typeBtn: { width: '48.5%', minWidth: 0, minHeight: 70, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 8 },
+  trackerHeaderCard: { minHeight: 64, borderRadius: 16, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
+  trackerHeaderIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  trackerHeaderTitle: { fontSize: 15, lineHeight: 21, ...weight('900') },
+  trackerHeaderMeta: { fontSize: 12, lineHeight: 17, ...weight('900'), marginTop: 2 },
+  entryField: { minHeight: 64, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 9, justifyContent: 'center' },
+  amountField: { minHeight: 76 },
+  fieldLabel: { fontSize: 11, lineHeight: 15, ...weight('800'), marginBottom: 4 },
+  inlineInput: { minHeight: 28, padding: 0, fontSize: 14, lineHeight: 19, ...weight('900') },
+  amountInput: { minHeight: 36, padding: 0, fontSize: 22, lineHeight: 30, ...weight('900') },
+  infoCard: { minHeight: 58, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 9, paddingHorizontal: 10, paddingVertical: 9, marginBottom: 8 },
+  infoValue: { fontSize: 12, lineHeight: 17, ...weight('900'), marginTop: 1 },
   infoBox: { borderRadius: 14, borderWidth: 0.5, padding: 12, gap: 10, marginBottom: 16, alignItems: 'center' },
   infoIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   label: { fontSize: 12, lineHeight: 17, ...weight('900'), marginBottom: 8 },
@@ -695,6 +825,7 @@ const s = StyleSheet.create({
   categoryBlock: { marginBottom: 16 },
   categoryHint: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: -3, marginBottom: 9 },
   originBlock: { marginBottom: 14 },
+  repeatBlock: { marginBottom: 12 },
   goalPurposeBlock: { marginBottom: 14 },
   originModes: { gap: 8, marginBottom: 7 },
   originMode: { flex: 1, minHeight: 40, borderRadius: 11, borderWidth: 0.5, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
