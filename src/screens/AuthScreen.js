@@ -100,6 +100,11 @@ export default function AuthScreen({ onSkip }) {
         }
       }
     } catch (e) {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.user) {
+        await setUser(data.session.user);
+        return;
+      }
       Alert.alert('', e.message);
     } finally {
       setLoading(false);

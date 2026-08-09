@@ -686,6 +686,12 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
         Alert.alert('', T.authUnavailable);
       }
     } catch (e) {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.user) {
+        await setUser(data.session.user);
+        Alert.alert('', T.loginSuccess);
+        return;
+      }
       const message = String(e?.message || '');
       const networkFailure = /network|fetch|resolve|connection/i.test(message);
       Alert.alert('', networkFailure ? T.authUnavailable : message);
