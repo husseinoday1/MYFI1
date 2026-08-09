@@ -25,7 +25,7 @@ import { getTransactionTagMeta } from '../lib/transactionTags';
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import WalletBalanceCard from '../components/WalletBalanceCard';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
-const IRAQI_MONTHS_AR = ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'];
+import { formatMonthLabel } from '../lib/months';
 const noop = () => {};
 
 const copy = (lang) => {
@@ -220,7 +220,11 @@ export default function HomeScreen({
   const goalsTarget = activeGoals.reduce((sum, goal) => sum + Number(goal.target || 0), 0);
   const goalsProgress = pct(totalSaved, goalsTarget, { cap: true });
   const currentMonthKey = today().slice(0, 7);
-  const currentMonthName = isAr ? IRAQI_MONTHS_AR[new Date().getMonth()] : new Intl.DateTimeFormat('en-US', { month: 'long' }).format(new Date());
+  const currentMonthName = formatMonthLabel(new Date().getFullYear(), new Date().getMonth(), {
+    style: cfg.monthNameStyle,
+    length: 'long',
+    includeYear: false,
+  });
   const dueCommitments = upcomingCommitments.filter(item => (
     item.actionable
     || Number(item.monthsUntil || 0) <= 0

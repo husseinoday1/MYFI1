@@ -1,3 +1,5 @@
+import { normalizeMonthNameStyle } from './months';
+
 export const STORAGE = {
   DATA:      'MYFI_DATA_V1',
   SETTINGS:  'MYFI_SETTINGS_V1',
@@ -195,6 +197,7 @@ const HOME_LAYOUT_VERSION = 2;
 
 export const DEF_CFG = {
   theme: 'dark', themeMode: 'manual', lang: detectSystemLang(), langMode: 'system', currency: 'IQD',
+  monthNameStyle: 'numeric',
   country: 'IQ', name: 'المستخدم', avatar: '🌿',
   profileType: 'personal',
   activeScope: 'personal',
@@ -269,6 +272,7 @@ export const normalizeCfg = (cfg = {}) => {
     lockDelaySeconds,
     langMode,
     lang: langMode === 'system' ? detectSystemLang() : manualLang,
+    monthNameStyle: normalizeMonthNameStyle(cfg.monthNameStyle),
     themeMode: cfg.themeMode === 'system' ? 'system' : 'manual',
     theme: cfg.theme === 'light' ? 'light' : 'dark',
     categoryBudgets: Object.fromEntries(Object.entries(cfg.categoryBudgets || {}).filter(([, value]) => Number(value) > 0)),

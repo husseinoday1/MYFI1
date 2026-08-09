@@ -1135,6 +1135,7 @@ export default function TrackersLabScreen({
             onChange={(date) => setEditTrackerDraft(draft => draft ? { ...draft, date } : draft)}
             th={th}
             lang={cfg.lang}
+            monthNameStyle={cfg.monthNameStyle}
             label={editTrackerDraft?.kind === 'monthly' ? T.planDue : T.date}
             monthOnly={editTrackerDraft?.kind === 'monthly'}
             style={{ marginBottom: 2 }}
@@ -1172,6 +1173,7 @@ export default function TrackersLabScreen({
             onChange={(date) => setEditPaymentDraft(draft => draft ? { ...draft, date } : draft)}
             th={th}
             lang={cfg.lang}
+            monthNameStyle={cfg.monthNameStyle}
             style={{ marginBottom: 2 }}
           />
           <View style={[s.modalButtons, { flexDirection: rowDir }]}>

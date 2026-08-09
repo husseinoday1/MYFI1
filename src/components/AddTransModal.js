@@ -1139,6 +1139,7 @@ export default function AddTransModal({
                     onChange={setDateISO}
                     th={th}
                     lang={cfg.lang}
+                    monthNameStyle={cfg.monthNameStyle}
                     label={cfg.lang === 'ar' ? 'التاريخ' : 'Date'}
                     style={s.selectFieldBlock}
                     buttonStyle={[s.dateButton, { backgroundColor: th.cardHigh, borderColor: th.border }]}
@@ -1209,6 +1210,7 @@ export default function AddTransModal({
                   onChange={setDateISO}
                   th={th}
                   lang={cfg.lang}
+                  monthNameStyle={cfg.monthNameStyle}
                   label={cfg.lang === 'ar' ? 'تاريخ الدفع' : 'Payment date'}
                   style={s.selectFieldBlock}
                   buttonStyle={[s.dateButton, { backgroundColor: th.cardHigh, borderColor: th.border }]}
@@ -1244,6 +1246,7 @@ export default function AddTransModal({
                     onChange={setDateISO}
                     th={th}
                     lang={cfg.lang}
+                    monthNameStyle={cfg.monthNameStyle}
                     label={cfg.lang === 'ar' ? 'التاريخ' : 'Date'}
                     style={s.selectFieldBlock}
                     buttonStyle={[s.dateButton, { backgroundColor: th.cardHigh, borderColor: th.border }]}

@@ -152,6 +152,7 @@ export default function GoalsScreen({ onQuickSave }) {
             onChange={(date) => setEditingSaving(prev => ({ ...prev, date }))}
             th={th}
             lang={cfg.lang}
+            monthNameStyle={cfg.monthNameStyle}
             style={{ width: '100%' }}
           />
           <View style={[s.iconActions, { flexDirection: rowDir }]}>
@@ -234,6 +235,7 @@ export default function GoalsScreen({ onQuickSave }) {
                   onChange={(createdAt) => setEditingGoal(prev => ({ ...prev, createdAt }))}
                   th={th}
                   lang={cfg.lang}
+                  monthNameStyle={cfg.monthNameStyle}
                   style={{ marginBottom: 8 }}
                 />
                 <View style={[s.editActions, { flexDirection: rowDir }]}>

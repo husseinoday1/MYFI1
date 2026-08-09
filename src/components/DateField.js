@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Touchable as TouchableOpacity } from './AppPrimitives';
 import { isISODate, today } from '../utils/calc';
 import { RADIUS, SHADOW, TYPE, weight } from '../lib/tokens';
+import { formatMonthLabel, monthNames } from '../lib/months';
 
 const pad = (n) => String(n).padStart(2, '0');
 const toISO = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -15,8 +16,6 @@ const parseISO = (value) => {
 const shiftMonth = (date, delta) =>
   new Date(date.getFullYear(), date.getMonth() + delta, 1, 12, 0, 0);
 
-const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-const EN_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const AR_DAYS = ['سبت', 'أحد', 'اثن', 'ثلا', 'أرب', 'خمي', 'جمع'];
 const EN_DAYS = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
@@ -43,18 +42,6 @@ const formatDate = (value, lang) => {
     }).format(date);
   } catch {
     return toISO(date);
-  }
-};
-
-const formatMonth = (value, lang) => {
-  const date = parseISO(value);
-  try {
-    return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-IQ' : 'en-US', {
-      month: 'long',
-      year: 'numeric',
-    }).format(date);
-  } catch {
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
   }
 };
 
@@ -86,6 +73,7 @@ export default function DateField({
   allowEmpty = false,
   monthOnly = false,
   labelInside = false,
+  monthNameStyle = 'numeric',
 }) {
   const [open, setOpen] = useState(false);
   const currentValue = isISODate(value) ? value : today();
@@ -95,14 +83,13 @@ export default function DateField({
   const isAr = lang === 'ar';
   const rowDir = isAr ? 'row-reverse' : 'row';
   const align = isAr ? 'right' : 'left';
-  const monthName = isAr ? AR_MONTHS[viewDate.getMonth()] : EN_MONTHS[viewDate.getMonth()];
+  const monthName = monthNames({ style: monthNameStyle, length: 'long' })[viewDate.getMonth()];
   const dayNames = isAr ? AR_DAYS : EN_DAYS;
   const days = useMemo(() => buildMonth(viewDate), [viewDate]);
   const monthOptions = useMemo(() => Array.from({ length: 12 }, (_, month) => ({
     month,
-    label: new Intl.DateTimeFormat(lang === 'ar' ? 'ar-IQ' : 'en-US', { month: 'long' })
-      .format(new Date(2024, month, 1, 12, 0, 0)),
-  })), [lang]);
+    label: monthNames({ style: monthNameStyle, length: 'long' })[month],
+  })), [monthNameStyle]);
   const todayISO = today();
 
   const openPicker = () => {
@@ -138,7 +125,7 @@ export default function DateField({
             <Text style={[s.inlineLabel, { color: th.sub, textAlign: align }]}>{label}</Text>
           ) : null}
           <Text style={[s.buttonText, { color: th.text, textAlign: align }, textStyle]} numberOfLines={1} adjustsFontSizeToFit>
-            {isISODate(value) ? (monthOnly ? formatMonth(currentValue, lang) : formatDate(currentValue, lang)) : T.anyDate}
+            {isISODate(value) ? (monthOnly ? formatMonthLabel(selectedDate.getFullYear(), selectedDate.getMonth(), { style: monthNameStyle, length: 'long' }) : formatDate(currentValue, lang)) : T.anyDate}
           </Text>
           {labelInside ? <Text style={[s.inlineDetail, { color: th.sub, textAlign: align }]}>{' '}</Text> : null}
         </View>

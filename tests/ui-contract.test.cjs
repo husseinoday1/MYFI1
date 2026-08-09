@@ -122,6 +122,7 @@ assert(walletBalanceCard.includes('walletWarning'), 'Wallet cards must render a 
 const history = fs.readFileSync(path.join(srcRoot, 'screens', 'HistoryScreen.js'), 'utf8');
 const reports = fs.readFileSync(path.join(srcRoot, 'screens', 'ReportsScreen.js'), 'utf8');
 const pdf = fs.readFileSync(path.join(srcRoot, 'lib', 'pdf.js'), 'utf8');
+const constants = fs.readFileSync(path.join(srcRoot, 'lib', 'constants.js'), 'utf8');
 const trackers = fs.readFileSync(path.join(srcRoot, 'screens', 'TrackersLabScreen.js'), 'utf8');
 const home = fs.readFileSync(path.join(srcRoot, 'screens', 'HomeScreen.js'), 'utf8');
 assert.equal(/<TextInpu\b/.test(history), false, 'History must use the imported TextInput component');
@@ -140,6 +141,12 @@ assert.equal(reports.includes('monthlyBudget'), false, 'Reports must not show th
 assert.equal(reports.includes("value: 'budget'"), false, 'Reports PDF sharing must not expose the removed budget section');
 assert.equal(reports.includes('spendingLimit'), false, 'Reports must not keep monthly spending limit styles');
 assert.equal(pdf.includes("selected.has('budget')"), false, 'Generated report PDFs must not render the removed budget section');
+assert.equal(reports.includes('الرصيد المرحّل بنهاية الفترة'), false, 'Reports must not use the confusing carried-balance title');
+assert(reports.includes('comparisonExpanded') && reports.includes('expandedChartPanel'), 'Comparison charts must offer an expanded view');
+assert(reports.includes('svgSafe: true'), 'Comparison chart month labels must avoid broken Arabic SVG text shaping');
+assert(settings.includes('monthNameStyle') && settings.includes('monthStyleLabel'), 'Settings must expose a global month display preference');
+assert(constants.includes("monthNameStyle: 'numeric'"), 'Month display preference must default to numeric labels');
+assert(home.includes('formatMonthLabel') && home.includes('cfg.monthNameStyle'), 'Home month labels must follow the global month display preference');
 assert(trackers.includes('const paidThisMonth ='), 'Commitment cards must derive whether the current month was paid');
 assert(trackers.includes('{T.paidMonth}'), 'Commitment cards must show the current-month payment message');
 assert(trackers.includes('T.completionRetention'), 'Completed trackers must explain the seven-day review period');

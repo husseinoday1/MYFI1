@@ -20,6 +20,7 @@ import { filterByActiveScope, getActiveScope, getTransactionDisplayAmount, trans
 import { getTransactionTagMeta } from '../lib/transactionTags';
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
+import { formatMonthLabel } from '../lib/months';
 
 export default function ArchiveScreen() {
   const {
@@ -82,7 +83,7 @@ export default function ArchiveScreen() {
     if (!q) return months;
     return months
       .map(month => {
-        const name = `${L.months[month.month]} ${month.year}`.toLowerCase();
+        const name = formatMonthLabel(month.year, month.month, { style: cfg.monthNameStyle, length: 'short' }).toLowerCase();
         const filteredTrans = month.trans.filter(t => {
           const cat = displayCats.find(c => c.id === t.cat);
           const hay = [
@@ -98,7 +99,7 @@ export default function ArchiveScreen() {
         return name.includes(q) ? month : { ...month, trans: filteredTrans };
       })
       .filter(month => month.trans.length > 0);
-  }, [months, search, displayCats, L.months]);
+  }, [months, search, displayCats, cfg.monthNameStyle]);
   const filteredTransactionIds = useMemo(
     () => filteredMonths.flatMap(month => month.trans.map(item => item.id)),
     [filteredMonths],
@@ -467,7 +468,7 @@ export default function ArchiveScreen() {
     const stats = calcStats(m.trans);
     const top = catSpend(m.trans, displayCats).sort((a, b) => b.spent - a.spent).slice(0, 3);
     const open = expanded === m.key;
-    const name = `${L.months[m.month]} ${m.year}`;
+    const name = formatMonthLabel(m.year, m.month, { style: cfg.monthNameStyle, length: 'short' });
 
     return (
       <View style={[s.card, { backgroundColor: th.card, borderColor: th.border, marginBottom: 10 }]}>

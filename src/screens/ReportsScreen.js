@@ -16,11 +16,8 @@ import { RADIUS, SHADOW, weight } from '../lib/tokens';
 import { isRTL, rowDirFor, textAlignFor, writingDirectionFor } from '../lib/layout';
 import { filterByActiveScope, filterFeatureEntities, getActiveScope, getModules, transactionFeatureEnabled } from '../lib/modules';
 import { getWalletLabel } from '../lib/wallets';
+import { formatMonthLabel, monthNames } from '../lib/months';
 
-const MONTHS_AR = ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'];
-const MONTHS_AR_SHORT = ['ك2', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'ت1', 'ت2', 'ك1'];
-const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const MONTHS_EN_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const CHART_COLORS = ['#138A57', '#447FC1', '#C18428', '#C25761', '#6E68B5', '#4E8975'];
 
 const dateOf = (item) => {
@@ -73,6 +70,8 @@ const copy = (lang) => {
     annualComparison: ar ? 'سنوية' : 'Annual',
     chartView: ar ? 'الرسم' : 'Chart',
     detailsView: ar ? 'التفاصيل' : 'Details',
+    expandChart: ar ? 'تكبير المخطط' : 'Expand chart',
+    closeChart: ar ? 'إغلاق المخطط' : 'Close chart',
     addComparison: ar ? 'إضافة مقارنة' : 'Add comparison',
     removeComparison: ar ? 'حذف المقارنة' : 'Remove comparison',
     choosePeriods: ar ? 'اختر الفترات' : 'Choose periods',
@@ -97,8 +96,8 @@ const copy = (lang) => {
     exportFailed: ar ? 'تعذر إنشاء الملف أو فتح المشاركة. حاول مرة أخرى.' : 'Could not create the file or open sharing. Try again.',
     walletScope: ar ? 'المحفظة' : 'Wallet',
     allWallets: ar ? 'كل المحافظ' : 'All wallets',
-    liquidityTitle: ar ? 'الرصيد المرحّل بنهاية الفترة' : 'Carried balance at period end',
-    liquidityHint: ar ? 'الرصيد الفعلي يشمل التوفير المحجوز، والمتاح هو القابل للصرف الآن.' : 'Physical balance includes reserved savings; available is what can be spent now.',
+    liquidityTitle: ar ? 'رصيدك الآن' : 'Your balance now',
+    liquidityHint: ar ? 'يوضح ما تملكه في المحافظ، وما هو محجوز للتوفير، وما يمكن صرفه.' : 'Shows wallet cash, reserved savings, and what is available to spend.',
     physicalBalance: ar ? 'الرصيد الفعلي' : 'Physical balance',
     reservedSavings: ar ? 'محجوز للتوفير' : 'Reserved savings',
     availableBalance: ar ? 'المتاح للصرف' : 'Available to spend',
@@ -137,7 +136,8 @@ export default function ReportsScreen() {
   const ar = isRTL(cfg.lang);
   const align = textAlignFor(cfg.lang);
   const rowDir = rowDirFor(cfg.lang);
-  const months = ar ? MONTHS_AR : MONTHS_EN;
+  const monthStyle = cfg.monthNameStyle || 'numeric';
+  const fullMonths = monthNames({ style: monthStyle, length: 'long' });
   const sym = getSymbol(cfg.currency);
   const modules = getModules(cfg);
   const allScopedTrans = filterByActiveScope(trans, cfg);
@@ -161,6 +161,7 @@ export default function ReportsScreen() {
   const [selectedMonthKey, setSelectedMonthKey] = useState(currentMonthKey);
   const [comparisonMode, setComparisonMode] = useState('none');
   const [comparisonView, setComparisonView] = useState('chart');
+  const [comparisonExpanded, setComparisonExpanded] = useState(false);
   const [comparisonPeriods, setComparisonPeriods] = useState([currentMonthKey, previousMonthKey]);
   const [sheet, setSheet] = useState(null);
   const [shareSections, setShareSections] = useState(['summary', 'categories']);
@@ -177,9 +178,9 @@ export default function ReportsScreen() {
     });
     return [...keys].sort((a, b) => b.localeCompare(a)).map(key => {
       const [year, month] = key.split('-').map(Number);
-      return { value: key, label: `${months[month - 1]} ${year}`, icon: 'calendar-outline' };
+      return { value: key, label: formatMonthLabel(year, month - 1, { style: monthStyle, length: 'short' }), icon: 'calendar-outline' };
     });
-  }, [trans, months, now.getMonth(), now.getFullYear()]);
+  }, [trans, monthStyle, now.getMonth(), now.getFullYear()]);
   const yearOptions = useMemo(() => {
     const years = new Set(Array.from({ length: 10 }, (_, index) => now.getFullYear() - index));
     viewTrans.forEach(item => {
@@ -222,7 +223,7 @@ export default function ReportsScreen() {
     const [year, month] = selectedMonthKey.split('-').map(Number);
     return new Date(year, month - 1, 15);
   }, [selectedMonthKey]);
-  const selectedMonthLabel = `${months[selectedMonth.getMonth()]} ${selectedMonth.getFullYear()}`;
+  const selectedMonthLabel = formatMonthLabel(selectedMonth.getFullYear(), selectedMonth.getMonth(), { style: monthStyle, length: 'short' });
   const periodLabel = scope === 'month'
     ? selectedMonthLabel
     : scope === 'year' ? String(selectedMonth.getFullYear()) : C.allTime;
@@ -365,14 +366,14 @@ export default function ReportsScreen() {
         label: option?.label || key,
         shortLabel: comparisonMode === 'month'
           ? (() => {
-              const [, month] = String(key).split('-').map(Number);
-              return ar ? `${MONTHS_AR_SHORT[month - 1]} ${String(key).slice(2, 4)}` : `${String(option?.label || key).split(' ')[0].slice(0, 3)} ${String(key).slice(2, 4)}`;
+              const [year, month] = String(key).split('-').map(Number);
+              return formatMonthLabel(year, month - 1, { style: monthStyle, length: 'short', svgSafe: true });
             })()
           : String(key),
         ...periodStats,
       };
     })
-    .sort((a, b) => a.key.localeCompare(b.key)), [viewTrans, comparisonPeriods, comparisonMode, comparisonOptions, walletFilter, cfg.defaultWalletId]);
+    .sort((a, b) => a.key.localeCompare(b.key)), [viewTrans, comparisonPeriods, comparisonMode, comparisonOptions, walletFilter, cfg.defaultWalletId, monthStyle]);
 
   const changeComparisonMode = (mode) => {
     setComparisonMode(mode);
@@ -763,6 +764,13 @@ export default function ReportsScreen() {
               {comparisonSeries.length ? (
                 comparisonView === 'chart' ? (
                   <View style={[s.proCompareResultBox, { borderColor: th.border }]}>
+                    <TouchableOpacity
+                      onPress={() => setComparisonExpanded(true)}
+                      style={[s.proCompareExpandBtn, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}
+                    >
+                      <Ionicons name="expand-outline" size={15} color={th.primary} />
+                      <Text style={[s.proCompareExpandText, { color: th.primary }]}>{C.expandChart}</Text>
+                    </TouchableOpacity>
                     <TrendChart data={comparisonSeries} th={th} lang={cfg.lang} />
                     <View style={[s.legend, { flexDirection: rowDir }]}>
                       <Legend color={th.inc} label={C.income} th={th} />
@@ -854,6 +862,7 @@ export default function ReportsScreen() {
         scope={scope}
         selectedMonthKey={selectedMonthKey}
         yearOptions={yearOptions}
+        monthNamesList={fullMonths}
         th={th}
         lang={cfg.lang}
       />
@@ -876,6 +885,7 @@ export default function ReportsScreen() {
         onToggle={toggleComparisonPeriod}
         limit={comparisonLimit}
         mode={comparisonMode}
+        monthStyle={monthStyle}
         th={th}
         lang={cfg.lang}
       />
@@ -891,11 +901,32 @@ export default function ReportsScreen() {
         th={th}
         lang={cfg.lang}
       />
+      <Modal visible={comparisonExpanded} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setComparisonExpanded(false)}>
+        <View style={[s.expandedChartOverlay, { backgroundColor: th.overlay }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setComparisonExpanded(false)} />
+          <View style={[s.expandedChartPanel, { backgroundColor: th.card, borderColor: th.border }]}>
+            <View style={[s.expandedChartHead, { flexDirection: rowDir }]}>
+              <View style={[s.expandedChartIcon, { backgroundColor: th.primSoft }]}>
+                <Ionicons name="analytics-outline" size={19} color={th.primary} />
+              </View>
+              <Text style={[s.expandedChartTitle, { color: th.text, textAlign: align }]}>{C.comparisonTitle}</Text>
+              <TouchableOpacity onPress={() => setComparisonExpanded(false)} style={[s.expandedChartClose, { backgroundColor: th.cardHigh }]}>
+                <Ionicons name="chevron-down" size={18} color={th.sub} />
+              </TouchableOpacity>
+            </View>
+            <TrendChart data={comparisonSeries} th={th} lang={cfg.lang} expanded />
+            <View style={[s.legend, { flexDirection: rowDir }]}>
+              <Legend color={th.inc} label={C.income} th={th} />
+              <Legend color={th.exp} label={C.expense} th={th} />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
 
-function ComparisonPeriodSheet({ visible, onClose, options, values, onToggle, limit, mode, th, lang }) {
+function ComparisonPeriodSheet({ visible, onClose, options, values, onToggle, limit, mode, monthStyle = 'numeric', th, lang }) {
   const ar = lang === 'ar';
   const C = copy(lang);
   const currentYear = new Date().getFullYear();
@@ -929,11 +960,11 @@ function ComparisonPeriodSheet({ visible, onClose, options, values, onToggle, li
       const option = options.find(item => item.value === value);
       return {
         value,
-        label: option?.label || `${ar ? MONTHS_AR[index] : MONTHS_EN_FULL[index]} ${year}`,
-        monthLabel: ar ? MONTHS_AR[index] : MONTHS_EN_FULL[index],
+        label: option?.label || formatMonthLabel(year, index, { style: monthStyle, length: 'short' }),
+        monthLabel: monthNames({ style: monthStyle, length: 'long' })[index],
       };
     });
-  }, [mode, year, options, ar]);
+  }, [mode, year, options, monthStyle]);
 
   const selectedCount = values.length;
   const canSelectMore = selectedCount < limit;
@@ -1161,13 +1192,15 @@ function ReportShareSheet({ visible, onClose, onShare, options, values, onToggle
   );
 }
 
-function ReportPeriodSheet({ visible, onClose, onSelect, scope, selectedMonthKey, yearOptions, th, lang }) {
+function ReportPeriodSheet({ visible, onClose, onSelect, scope, selectedMonthKey, yearOptions, monthNamesList, th, lang }) {
   const ar = lang === 'ar';
   const C = copy(lang);
   const selectedYear = Number(String(selectedMonthKey).slice(0, 4)) || new Date().getFullYear();
   const [mode, setMode] = useState(scope);
   const [monthYear, setMonthYear] = useState(selectedYear);
-  const monthNames = ar ? MONTHS_AR : MONTHS_EN_FULL;
+  const monthNamesListSafe = Array.isArray(monthNamesList) && monthNamesList.length === 12
+    ? monthNamesList
+    : monthNames({ style: 'numeric', length: 'long' });
   const years = useMemo(
     () => yearOptions.map(option => Number(option.value)).filter(Number.isFinite),
     [yearOptions],
@@ -1238,7 +1271,7 @@ function ReportPeriodSheet({ visible, onClose, onSelect, scope, selectedMonthKey
                 })}
               </ScrollView>
               <View style={s.monthGrid}>
-                {monthNames.map((label, index) => {
+                {monthNamesListSafe.map((label, index) => {
                   const value = `${monthYear}-${String(index + 1).padStart(2, '0')}`;
                   const active = scope === 'month' && selectedMonthKey === value;
                   return (
@@ -1343,22 +1376,25 @@ function ComparisonMetric({ label, value, color, lang, currency, sym }) {
   );
 }
 
-function TrendChart({ data, th, lang }) {
-  const width = Math.max(360, data.length * 128);
-  const height = 190;
+function TrendChart({ data, th, lang, expanded = false }) {
+  const width = Math.max(expanded ? 620 : 360, data.length * (expanded ? 156 : 128));
+  const height = expanded ? 250 : 190;
   const top = 24;
-  const bottom = 150;
+  const bottom = expanded ? 205 : 150;
   const max = Math.max(1, ...data.flatMap(item => [item.inc, item.exp]));
   const step = width / data.length;
+  const barHeight = expanded ? 148 : 98;
+  const labelY = expanded ? 232 : 176;
+  const gridStep = (bottom - top) / 2;
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chartScroll}>
       <View style={[s.chartWrap, { width }]}>
       <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-        {[0, 1, 2].map(index => <Line key={index} x1="0" x2={width} y1={top + index * 56} y2={top + index * 56} stroke={th.border} strokeWidth="1" />)}
+        {[0, 1, 2].map(index => <Line key={index} x1="0" x2={width} y1={top + index * gridStep} y2={top + index * gridStep} stroke={th.border} strokeWidth="1" />)}
         {data.map((item, index) => {
           const x = index * step;
-          const incomeHeight = (Number(item.inc || 0) / max) * 98;
-          const expenseHeight = (Number(item.exp || 0) / max) * 98;
+          const incomeHeight = (Number(item.inc || 0) / max) * barHeight;
+          const expenseHeight = (Number(item.exp || 0) / max) * barHeight;
           const incomeY = bottom - incomeHeight;
           const expenseY = bottom - expenseHeight;
           return (
@@ -1367,7 +1403,7 @@ function TrendChart({ data, th, lang }) {
               <SvgText x={x + 94} y={Math.max(13, expenseY - 5)} fontSize="10" fill={th.exp} textAnchor="middle">{chartMoney(item.exp)}</SvgText>
               <Rect x={x + 24} y={incomeY} width="20" height={Math.max(2, incomeHeight)} rx="4" fill={th.inc} opacity=".88" />
               <Rect x={x + 84} y={expenseY} width="20" height={Math.max(2, expenseHeight)} rx="4" fill={th.exp} opacity=".78" />
-              <SvgText x={x + 64} y="176" fontSize="11" fill={th.sub} textAnchor="middle">{item.shortLabel || item.label}</SvgText>
+              <SvgText x={x + 64} y={labelY} fontSize={expanded ? '12' : '11'} fill={th.sub} textAnchor="middle">{item.shortLabel || item.label}</SvgText>
             </React.Fragment>
           );
         })}
@@ -1573,6 +1609,8 @@ const s = StyleSheet.create({
   proCompareViewText: { fontSize: 11, lineHeight: 16, ...weight('900') },
 
   proCompareResultBox: { borderWidth: 1, borderRadius: RADIUS.lg, paddingHorizontal: 8, paddingTop: 7, paddingBottom: 9 },
+  proCompareExpandBtn: { alignSelf: 'flex-end', minHeight: 32, borderRadius: 16, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 6 },
+  proCompareExpandText: { fontSize: 10, lineHeight: 14, ...weight('900') },
   proCompareDetails: { gap: 9 },
   proComparePeriodCard: { borderWidth: 1, borderRadius: RADIUS.lg, padding: 11 },
   proComparePeriodHead: { alignItems: 'center', gap: 8, marginBottom: 10 },
@@ -1615,6 +1653,12 @@ const s = StyleSheet.create({
   proCompareSelectionSummary: { fontSize: 10, lineHeight: 15, ...weight('800'), marginBottom: 8 },
   proCompareDoneBtn: { minHeight: 46, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 },
   proCompareDoneText: { fontSize: 13, ...weight('900') },
+  expandedChartOverlay: { flex: 1, justifyContent: 'flex-end', paddingTop: 36 },
+  expandedChartPanel: { maxHeight: '88%', borderTopLeftRadius: RADIUS.sheet, borderTopRightRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 18, ...SHADOW.float },
+  expandedChartHead: { alignItems: 'center', gap: 10, marginBottom: 12 },
+  expandedChartIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  expandedChartTitle: { flex: 1, fontSize: 16, lineHeight: 22, ...weight('900') },
+  expandedChartClose: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   /* MYFI_COMPARE_PRO_STYLES_V3_END */
 
 });

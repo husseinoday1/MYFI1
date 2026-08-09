@@ -20,6 +20,7 @@ import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components
 import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
 import { resolveSystemTheme } from '../lib/systemTheme';
 import { inspectBackupData } from '../lib/backupData';
+import { MONTH_NAME_STYLES, monthStyleLabel } from '../lib/months';
 
 const UI = {
   ar: {
@@ -34,6 +35,7 @@ const UI = {
     data: 'البيانات',
     account: 'الحساب',
     language: 'اللغة',
+    monthNames: 'عرض الأشهر',
     systemLanguage: 'النظام',
     arabicLanguage: 'عربي',
     englishLanguage: 'English',
@@ -163,6 +165,7 @@ const UI = {
     data: 'Data',
     account: 'Account',
     language: 'Language',
+    monthNames: 'Month display',
     systemLanguage: 'System',
     arabicLanguage: 'Arabic',
     englishLanguage: 'English',
@@ -1226,6 +1229,11 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
           onPress={() => setSettingsSheet('language')}
         />
         <Row
+          label={T.monthNames}
+          value={monthStyleLabel(cfg.monthNameStyle, cfg.lang)}
+          onPress={() => setSettingsSheet('monthNames')}
+        />
+        <Row
           label={T.theme}
           value={cfg.themeMode === 'system' ? `${T.systemLanguage} — ${cfg.theme === 'dark' ? T.darkTheme : T.lightTheme}` : cfg.theme === 'dark' ? T.darkTheme : T.lightTheme}
           onPress={() => setSettingsSheet('theme')}
@@ -1994,13 +2002,15 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                 ? T.language
                 : settingsSheet === 'theme'
                   ? T.theme
-                  : settingsSheet === 'startTab'
-                    ? startTabTitle
-                    : settingsSheet === 'homeContent'
-                      ? homeContentTitle
-                        : settingsSheet === 'currency'
-                          ? T.currency
-                          : T.country}
+                  : settingsSheet === 'monthNames'
+                    ? T.monthNames
+                    : settingsSheet === 'startTab'
+                      ? startTabTitle
+                      : settingsSheet === 'homeContent'
+                        ? homeContentTitle
+                          : settingsSheet === 'currency'
+                            ? T.currency
+                            : T.country}
             </Text>
           </View>
 
@@ -2034,6 +2044,37 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                   </TouchableOpacity>
                 );
               }) : null}
+            </View>
+          ) : null}
+
+          {settingsSheet === 'monthNames' ? (
+            <View style={s.sheetScroll}>
+              {MONTH_NAME_STYLES.map(style => {
+                const active = (cfg.monthNameStyle || 'numeric') === style;
+                const detail = style === 'numeric'
+                  ? (isAr ? '08/2026' : '08/2026')
+                  : style === 'english'
+                    ? 'Aug 2026'
+                    : 'آب 2026';
+                return (
+                  <TouchableOpacity
+                    key={style}
+                    onPress={() => { setCfg({ monthNameStyle: style }); setSettingsSheet(null); }}
+                    style={[s.optionCard, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent', flexDirection: isAr ? 'row-reverse' : 'row' }]}
+                  >
+                    <Ionicons name={style === 'numeric' ? 'keypad-outline' : 'calendar-outline'} size={18} color={active ? th.primary : th.sub} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: active ? th.primary : th.text, fontSize: 14, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>
+                        {monthStyleLabel(style, cfg.lang)}
+                      </Text>
+                      <Text style={{ color: th.sub, fontSize: 12, lineHeight: 17, marginTop: 2, textAlign: isAr ? 'right' : 'left' }}>
+                        {detail}
+                      </Text>
+                    </View>
+                    {active ? <Ionicons name="checkmark-circle" size={18} color={th.primary} /> : null}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           ) : null}
 

@@ -458,6 +458,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                     onChange={setStartDate}
                     th={th}
                     lang={cfg.lang}
+                    monthNameStyle={cfg.monthNameStyle}
                     label={T.planDate}
                     monthOnly
                     style={s.selectFieldBlock}
@@ -479,6 +480,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                   onChange={setStartDate}
                   th={th}
                   lang={cfg.lang}
+                  monthNameStyle={cfg.monthNameStyle}
                   label={T.startDate}
                   style={{ marginBottom: 16 }}
                   buttonStyle={s.dateButton}
@@ -568,6 +570,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                       onChange={setPlanDate}
                       th={th}
                       lang={cfg.lang}
+                      monthNameStyle={cfg.monthNameStyle}
                       label={T.planDate}
                       monthOnly
                       style={s.selectFieldBlock}

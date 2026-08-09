@@ -159,6 +159,7 @@ export default function DebtsScreen({ direction = 'owed', onQuickPay }) {
             onChange={(date) => setEditingPayment(prev => ({ ...prev, date }))}
             th={th}
             lang={cfg.lang}
+            monthNameStyle={cfg.monthNameStyle}
             style={{ width: '100%' }}
           />
           <View style={[s.iconActions, { flexDirection: rowDir }]}>
@@ -241,6 +242,7 @@ export default function DebtsScreen({ direction = 'owed', onQuickPay }) {
                   onChange={(createdAt) => setEditingDebt(prev => ({ ...prev, createdAt }))}
                   th={th}
                   lang={cfg.lang}
+                  monthNameStyle={cfg.monthNameStyle}
                   style={{ marginBottom: 8 }}
                 />
                 <View style={[s.editActions, { flexDirection: rowDir }]}>

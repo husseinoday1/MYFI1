@@ -559,11 +559,11 @@ export default function HistoryScreen() {
               <View style={[s.dateRange, { flexDirection: rowDir }]}>
                 <View style={s.dateRangeField}>
                   <Text style={[s.filterLabel, { color: th.sub, textAlign: align }]}>{T.fromDate}</Text>
-                  <DateField value={currentDraft.dateFrom} onChange={value => updateDraft('dateFrom', value)} th={th} lang={cfg.lang} allowEmpty />
+                  <DateField value={currentDraft.dateFrom} onChange={value => updateDraft('dateFrom', value)} th={th} lang={cfg.lang} monthNameStyle={cfg.monthNameStyle} allowEmpty />
                 </View>
                 <View style={s.dateRangeField}>
                   <Text style={[s.filterLabel, { color: th.sub, textAlign: align }]}>{T.toDate}</Text>
-                  <DateField value={currentDraft.dateTo} onChange={value => updateDraft('dateTo', value)} th={th} lang={cfg.lang} allowEmpty />
+                  <DateField value={currentDraft.dateTo} onChange={value => updateDraft('dateTo', value)} th={th} lang={cfg.lang} monthNameStyle={cfg.monthNameStyle} allowEmpty />
                 </View>
               </View>
             ) : null}
