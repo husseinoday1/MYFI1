@@ -117,6 +117,7 @@ tmp/                   ملفات العمل المؤقتة، ولا ترفع إ
 - [حزمة Play Console](docs/PLAY_CONSOLE_SUBMISSION_AR.md)
 - [حالة اختبار التكامل السحابي](docs/CLOUD_INTEGRATION_STATUS_AR.md)
 - [مراجعة حزمة تغييرات Git](docs/GIT_CHANGESET_REVIEW_AR.md)
+- [الخطة المستقبلية والإصدار الأول](docs/FUTURE_ROADMAP_AND_RELEASE_PLAN_AR.md)
 - [خطة دليل المستخدم والدعم](docs/USER_GUIDE_AND_SUPPORT_PLAN_AR.md)
 - [مواصفات الإدخال الذكي](docs/smart-capture.md)
 - [مخطط المنتج](MYFI_PRODUCT_BLUEPRINT.md)
