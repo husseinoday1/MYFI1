@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, Appearance, I18nManager, Image, Linking, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Alert, AppState, Appearance, BackHandler, I18nManager, Image, Linking, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
@@ -152,6 +152,15 @@ function AppRoot() {
       appStateSub.remove();
     };
   }, [cfg.themeMode, systemColorScheme]);
+
+  useEffect(() => {
+    if (!archiveOpen) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setArchiveOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [archiveOpen]);
 
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;

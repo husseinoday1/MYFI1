@@ -16,6 +16,7 @@ assert(appRoot.includes('Review data merge'), 'Guest data transfer must warn bef
 assert(appRoot.includes('Merge safely'), 'Guest data transfer must use an explicit safe merge action');
 assert(appRoot.includes('restoreLastMergeRollback'), 'Guest data transfer must expose a rollback path after merging');
 assert(appRoot.includes('merged without repetition'), 'Device sync merge notices must explain duplicate-safe merging');
+assert(appRoot.includes('BackHandler.addEventListener') && appRoot.includes('hardwareBackPress') && appRoot.includes('setArchiveOpen(false)'), 'Android back must close the archive view instead of exiting the app');
 
 const jsFiles = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
   const target = path.join(dir, entry.name);
