@@ -9,7 +9,7 @@
       "ios",
       "web"
     ],
-    "orientation": "portrait",
+    "orientation": "default",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/myfi-app-icon-v2.png",
     "splash": {

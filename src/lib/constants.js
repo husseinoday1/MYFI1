@@ -197,6 +197,7 @@ const HOME_LAYOUT_VERSION = 2;
 
 export const DEF_CFG = {
   theme: 'dark', themeMode: 'manual', lang: detectSystemLang(), langMode: 'system', currency: 'IQD',
+  orientationMode: 'system',
   monthNameStyle: 'numeric',
   displayName: '', username: '', phone: '', avatarUri: '', accountConsentAccepted: false,
   country: 'IQ', name: 'المستخدم', avatar: '🌿',
@@ -287,6 +288,7 @@ export const normalizeCfg = (cfg = {}) => {
     lockDelaySeconds,
     langMode,
     lang: langMode === 'system' ? detectSystemLang() : manualLang,
+    orientationMode: ['system', 'portrait', 'landscape'].includes(cfg.orientationMode) ? cfg.orientationMode : 'system',
     monthNameStyle: normalizeMonthNameStyle(cfg.monthNameStyle),
     themeMode: cfg.themeMode === 'system' ? 'system' : 'manual',
     theme: cfg.theme === 'light' ? 'light' : 'dark',

@@ -1355,6 +1355,17 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
           onPress={() => setSettingsSheet('theme')}
         />
         <Row
+          label={isAr ? 'اتجاه الشاشة' : 'Screen orientation'}
+          value={
+            cfg.orientationMode === 'portrait'
+              ? (isAr ? 'طولي' : 'Portrait')
+              : cfg.orientationMode === 'landscape'
+                ? (isAr ? 'عرضي' : 'Landscape')
+                : (isAr ? 'حسب الجهاز' : 'Follow device')
+          }
+          onPress={() => setSettingsSheet('orientation')}
+        />
+        <Row
           label={T.country}
           value={`${selectedCountry.flag} ${isAr ? selectedCountry.name : selectedCountry.nameEn}`}
           onPress={() => setSettingsSheet('country')}
@@ -2179,7 +2190,9 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                 ? T.language
                 : settingsSheet === 'theme'
                   ? T.theme
-                  : settingsSheet === 'monthNames'
+                  : settingsSheet === 'orientation'
+                    ? (isAr ? 'اتجاه الشاشة' : 'Screen orientation')
+                    : settingsSheet === 'monthNames'
                     ? T.monthNames
                     : settingsSheet === 'startTab'
                       ? startTabTitle
@@ -2249,6 +2262,71 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                       </Text>
                     </View>
                     {active ? <Ionicons name="checkmark-circle" size={18} color={th.primary} /> : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
+
+          {settingsSheet === 'orientation' ? (
+            <View style={s.sheetScroll}>
+              {[
+                {
+                  value: 'system',
+                  label: isAr ? 'حسب الجهاز' : 'Follow device',
+                  icon: 'phone-portrait-outline',
+                },
+                {
+                  value: 'portrait',
+                  label: isAr ? 'طولي' : 'Portrait',
+                  icon: 'phone-portrait-outline',
+                },
+                {
+                  value: 'landscape',
+                  label: isAr ? 'عرضي' : 'Landscape',
+                  icon: 'phone-landscape-outline',
+                },
+              ].map(option => {
+                const active = (cfg.orientationMode || 'system') === option.value;
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    onPress={() => {
+                      setCfg({ orientationMode: option.value });
+                      setSettingsSheet(null);
+                    }}
+                    style={[
+                      s.optionCard,
+                      {
+                        backgroundColor: active ? th.primSoft : th.cardHigh,
+                        borderColor: active ? th.primary : 'transparent',
+                        flexDirection: isAr ? 'row-reverse' : 'row',
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={option.icon}
+                      size={18}
+                      color={active ? th.primary : th.sub}
+                    />
+                    <Text
+                      style={{
+                        color: active ? th.primary : th.text,
+                        fontSize: 14,
+                        ...weight('900'),
+                        flex: 1,
+                        textAlign: isAr ? 'right' : 'left',
+                      }}
+                    >
+                      {option.label}
+                    </Text>
+                    {active ? (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={18}
+                        color={th.primary}
+                      />
+                    ) : null}
                   </TouchableOpacity>
                 );
               })}

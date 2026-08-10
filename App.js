@@ -16,6 +16,7 @@ import { buildNotificationItems, filterDismissedNotifications, NOTIFICATION_DISM
 import { applyGlobalFont, fontAssets } from './src/lib/fonts';
 import { RADIUS, SHADOW } from './src/lib/tokens';
 import { resolveSystemTheme } from './src/lib/systemTheme';
+import { applyOrientationMode } from './src/lib/screenOrientation';
 
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import HomeScreen from './src/screens/HomeScreen';
@@ -34,6 +35,8 @@ import PasswordRecoveryModal from './src/components/PasswordRecoveryModal';
 import { filterByActiveScope, getEntryScope, getModules, normalizeScope, shouldShowTrackersTab } from './src/lib/modules';
 import { handleAuthCallback } from './src/lib/authCallback';
 import { normalizeWallets } from './src/lib/wallets';
+
+const FORCE_ONBOARDING = process.env.EXPO_PUBLIC_FORCE_ONBOARDING === '1';
 
 const BASE_TABS = [
   { key: 'home', icon: 'home-outline', labelKey: 'home' },
@@ -155,6 +158,10 @@ function AppRoot() {
   }, [cfg.themeMode, systemColorScheme]);
 
   useEffect(() => {
+    applyOrientationMode(cfg.orientationMode || 'system').catch(() => {});
+  }, [cfg.orientationMode]);
+
+  useEffect(() => {
     if (!archiveOpen) return undefined;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       setArchiveOpen(false);
@@ -207,7 +214,7 @@ function AppRoot() {
     (async () => {
       await loadLocal();
       const completed = await AsyncStorage.getItem(STORAGE.ONBOARD);
-      setShowOnboard(completed !== 'true');
+      setShowOnboard(FORCE_ONBOARDING || completed !== 'true');
       setReady(true);
     })();
 

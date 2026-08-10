@@ -13,6 +13,20 @@ if (-not (Test-Path -LiteralPath $expoCli)) {
   Write-Error 'Expo dependencies were not found in this MYFI folder.'
 }
 
-Write-Host 'Starting MYFI for Expo Go with a clean Metro cache...' -ForegroundColor Cyan
-Write-Host 'Keep this terminal open and scan the QR code from your phone.' -ForegroundColor Yellow
-& $nodePath $expoCli start --host lan --clear
+# Development-only first-run mode.
+# This does NOT delete transactions, wallets, trackers, settings, or account data.
+# App.js reads this flag and only forces the onboarding UI to appear.
+$env:EXPO_PUBLIC_FORCE_ONBOARDING = '1'
+
+Write-Host 'Starting MYFI in FIRST-RUN TEST MODE...' -ForegroundColor Magenta
+Write-Host 'Onboarding will appear as if this is the first app launch.' -ForegroundColor Yellow
+Write-Host 'Your saved financial data is NOT deleted.' -ForegroundColor Green
+Write-Host 'Keep this terminal open and scan the QR code from your phone.' -ForegroundColor Cyan
+
+try {
+  & $nodePath $expoCli start --host lan --clear
+}
+finally {
+  # Do not leave the test flag enabled in this PowerShell session after Expo exits.
+  Remove-Item Env:EXPO_PUBLIC_FORCE_ONBOARDING -ErrorAction SilentlyContinue
+}
