@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Touchable as TouchableOpacity } from './AppPrimitives';
 import { isISODate, today } from '../utils/calc';
 import { RADIUS, SHADOW, TYPE, weight } from '../lib/tokens';
+import { formatMonthLabel, monthNames } from '../lib/months';
 
 const pad = (n) => String(n).padStart(2, '0');
 const toISO = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -15,8 +16,6 @@ const parseISO = (value) => {
 const shiftMonth = (date, delta) =>
   new Date(date.getFullYear(), date.getMonth() + delta, 1, 12, 0, 0);
 
-const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-const EN_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const AR_DAYS = ['سبت', 'أحد', 'اثن', 'ثلا', 'أرب', 'خمي', 'جمع'];
 const EN_DAYS = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
@@ -72,6 +71,9 @@ export default function DateField({
   buttonStyle,
   textStyle,
   allowEmpty = false,
+  monthOnly = false,
+  labelInside = false,
+  monthNameStyle = 'numeric',
 }) {
   const [open, setOpen] = useState(false);
   const currentValue = isISODate(value) ? value : today();
@@ -81,9 +83,13 @@ export default function DateField({
   const isAr = lang === 'ar';
   const rowDir = isAr ? 'row-reverse' : 'row';
   const align = isAr ? 'right' : 'left';
-  const monthName = isAr ? AR_MONTHS[viewDate.getMonth()] : EN_MONTHS[viewDate.getMonth()];
+  const monthName = monthNames({ style: monthNameStyle, length: 'long' })[viewDate.getMonth()];
   const dayNames = isAr ? AR_DAYS : EN_DAYS;
   const days = useMemo(() => buildMonth(viewDate), [viewDate]);
+  const monthOptions = useMemo(() => Array.from({ length: 12 }, (_, month) => ({
+    month,
+    label: monthNames({ style: monthNameStyle, length: 'long' })[month],
+  })), [monthNameStyle]);
   const todayISO = today();
 
   const openPicker = () => {
@@ -97,9 +103,14 @@ export default function DateField({
     setOpen(false);
   };
 
+  const chooseMonth = (month) => {
+    onChange?.(`${viewDate.getFullYear()}-${pad(month + 1)}-01`);
+    setOpen(false);
+  };
+
   return (
     <View style={style}>
-      {!!label && <Text style={[s.label, { color: th.sub, textAlign: align }]}>{label}</Text>}
+      {!!label && !labelInside && <Text style={[s.label, { color: th.sub, textAlign: align }]}>{label}</Text>}
       <TouchableOpacity
         onPress={openPicker}
         style={[
@@ -109,9 +120,15 @@ export default function DateField({
         ]}
       >
         <Ionicons name="calendar-outline" size={16} color={th.sub} />
-        <Text style={[s.buttonText, { color: th.text, textAlign: align }, textStyle]} numberOfLines={1} adjustsFontSizeToFit>
-          {isISODate(value) ? formatDate(currentValue, lang) : T.anyDate}
-        </Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          {!!label && labelInside ? (
+            <Text style={[s.inlineLabel, { color: th.sub, textAlign: align }]}>{label}</Text>
+          ) : null}
+          <Text style={[s.buttonText, { color: th.text, textAlign: align }, textStyle]} numberOfLines={1} adjustsFontSizeToFit>
+            {isISODate(value) ? (monthOnly ? formatMonthLabel(selectedDate.getFullYear(), selectedDate.getMonth(), { style: monthNameStyle, length: 'long' }) : formatDate(currentValue, lang)) : T.anyDate}
+          </Text>
+          {labelInside ? <Text style={[s.inlineDetail, { color: th.sub, textAlign: align }]}>{' '}</Text> : null}
+        </View>
         {allowEmpty && isISODate(value) ? (
           <TouchableOpacity onPress={() => onChange?.('')} accessibilityLabel={T.clear} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Ionicons name="backspace-outline" size={17} color={th.sub} />
@@ -130,56 +147,103 @@ export default function DateField({
               <Text style={[s.sheetTitle, { color: th.text, textAlign: align }]}>{label || T.pickDate}</Text>
             </View>
 
-            <View style={[s.monthHead, { flexDirection: rowDir }]}>
-              <TouchableOpacity
-                onPress={() => setViewDate(prev => shiftMonth(prev, -1))}
-                accessibilityLabel={T.previousMonth}
-                style={[s.monthBtn, { backgroundColor: th.input }]}
-              >
-                <Ionicons name={isAr ? 'chevron-forward' : 'chevron-back'} size={18} color={th.text} />
-              </TouchableOpacity>
-              <Text style={[s.monthTitle, { color: th.text }]}>
-                {monthName} {viewDate.getFullYear()}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setViewDate(prev => shiftMonth(prev, 1))}
-                accessibilityLabel={T.nextMonth}
-                style={[s.monthBtn, { backgroundColor: th.input }]}
-              >
-                <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={18} color={th.text} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={s.weekRow}>
-              {dayNames.map((name) => (
-                <Text key={name} style={[s.weekDay, { color: th.faint }]}>{name}</Text>
-              ))}
-            </View>
-
-            <View style={s.grid}>
-              {days.map((item) => {
-                const active = item.iso === currentValue;
-                const isToday = item.iso === todayISO;
-                return (
+            {monthOnly ? (
+              <>
+                <View style={[s.monthHead, { flexDirection: rowDir }]}>
                   <TouchableOpacity
-                    key={item.iso}
-                    onPress={() => chooseDate(item.iso)}
-                    style={[
-                      s.dayCell,
-                      {
-                        backgroundColor: active ? th.primary : isToday ? th.primSoft : 'transparent',
-                        borderColor: active ? th.primary : isToday ? th.primary : th.border,
-                        opacity: item.inMonth ? 1 : 0.42,
-                      },
-                    ]}
+                    onPress={() => setViewDate(prev => new Date(prev.getFullYear() - 1, 0, 1, 12, 0, 0))}
+                    accessibilityLabel={T.previousMonth}
+                    style={[s.monthBtn, { backgroundColor: th.input }]}
                   >
-                    <Text style={[s.dayText, { color: active ? th.onPrimary : isToday ? th.primary : th.text }]}>
-                      {item.day}
-                    </Text>
+                    <Ionicons name={isAr ? 'chevron-forward' : 'chevron-back'} size={18} color={th.text} />
                   </TouchableOpacity>
-                );
-              })}
-            </View>
+                  <Text style={[s.monthTitle, { color: th.text }]}>{viewDate.getFullYear()}</Text>
+                  <TouchableOpacity
+                    onPress={() => setViewDate(prev => new Date(prev.getFullYear() + 1, 0, 1, 12, 0, 0))}
+                    accessibilityLabel={T.nextMonth}
+                    style={[s.monthBtn, { backgroundColor: th.input }]}
+                  >
+                    <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={18} color={th.text} />
+                  </TouchableOpacity>
+                </View>
+                <View style={s.monthGrid}>
+                  {monthOptions.map(item => {
+                    const active = selectedDate.getFullYear() === viewDate.getFullYear()
+                      && selectedDate.getMonth() === item.month;
+                    return (
+                      <TouchableOpacity
+                        key={item.month}
+                        onPress={() => chooseMonth(item.month)}
+                        style={[
+                          s.monthCell,
+                          {
+                            backgroundColor: active ? th.primary : th.input,
+                            borderColor: active ? th.primary : th.border,
+                          },
+                        ]}
+                      >
+                        <Text style={[s.monthCellText, { color: active ? th.onPrimary : th.text }]} numberOfLines={1} adjustsFontSizeToFit>
+                          {item.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={[s.monthHead, { flexDirection: rowDir }]}>
+                  <TouchableOpacity
+                    onPress={() => setViewDate(prev => shiftMonth(prev, -1))}
+                    accessibilityLabel={T.previousMonth}
+                    style={[s.monthBtn, { backgroundColor: th.input }]}
+                  >
+                    <Ionicons name={isAr ? 'chevron-forward' : 'chevron-back'} size={18} color={th.text} />
+                  </TouchableOpacity>
+                  <Text style={[s.monthTitle, { color: th.text }]}>
+                    {monthName} {viewDate.getFullYear()}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setViewDate(prev => shiftMonth(prev, 1))}
+                    accessibilityLabel={T.nextMonth}
+                    style={[s.monthBtn, { backgroundColor: th.input }]}
+                  >
+                    <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={18} color={th.text} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={s.weekRow}>
+                  {dayNames.map((name) => (
+                    <Text key={name} style={[s.weekDay, { color: th.faint }]}>{name}</Text>
+                  ))}
+                </View>
+
+                <View style={s.grid}>
+                  {days.map((item) => {
+                    const active = item.iso === currentValue;
+                    const isToday = item.iso === todayISO;
+                    return (
+                      <TouchableOpacity
+                        key={item.iso}
+                        onPress={() => chooseDate(item.iso)}
+                        style={[
+                          s.dayCell,
+                          {
+                            backgroundColor: active ? th.primary : isToday ? th.primSoft : 'transparent',
+                            borderColor: active ? th.primary : isToday ? th.primary : th.border,
+                            opacity: item.inMonth ? 1 : 0.42,
+                          },
+                        ]}
+                      >
+                        <Text style={[s.dayText, { color: active ? th.onPrimary : isToday ? th.primary : th.text }]}>
+                          {item.day}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -189,6 +253,8 @@ export default function DateField({
 
 const s = StyleSheet.create({
   label: { fontSize: TYPE.meta, lineHeight: 17, ...weight('900'), marginBottom: 8 },
+  inlineLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
+  inlineDetail: { fontSize: 9, lineHeight: 13, ...weight('700'), marginTop: 1 },
   button: {
     minHeight: 46,
     borderRadius: RADIUS.md,
@@ -198,7 +264,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  buttonText: { flex: 1, fontSize: TYPE.meta, lineHeight: 18, ...weight('900') },
+  buttonText: { fontSize: TYPE.meta, lineHeight: 18, ...weight('900') },
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -223,6 +289,9 @@ const s = StyleSheet.create({
   weekRow: { flexDirection: 'row', gap: 4 },
   weekDay: { flex: 1, textAlign: 'center', fontSize: 12, lineHeight: 17, ...weight('900') },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
+  monthGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  monthCell: { width: '31%', minHeight: 44, flexGrow: 1, borderRadius: RADIUS.md, borderWidth: 0.5, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  monthCellText: { fontSize: TYPE.meta, lineHeight: 18, ...weight('900'), textAlign: 'center' },
   dayCell: {
     width: '14.2857%',
     aspectRatio: 1,

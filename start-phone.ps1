@@ -13,6 +13,6 @@ if (-not (Test-Path -LiteralPath $expoCli)) {
   Write-Error 'Expo dependencies were not found in this MYFI folder.'
 }
 
-Write-Host 'Starting MYFI for Expo Go...' -ForegroundColor Cyan
+Write-Host 'Starting MYFI for Expo Go with a clean Metro cache...' -ForegroundColor Cyan
 Write-Host 'Keep this terminal open and scan the QR code from your phone.' -ForegroundColor Yellow
-& $nodePath $expoCli start --host lan
+& $nodePath $expoCli start --host lan --clear

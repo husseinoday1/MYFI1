@@ -13,6 +13,7 @@
     "smart:capture:deploy:ocr": "npx supabase functions deploy smart-ocr",
     "smart:capture:deploy:voice": "npx supabase functions deploy smart-transcribe",
     "test:logic": "node tests/run-financial-core.cjs",
+    "test:sync-scenarios": "node tests/run-sync-scenarios.cjs",
     "test:db-schema": "node tests/db-schema.test.cjs",
     "test:backfill": "node tests/backfill-normalized.test.cjs",
     "test:ui": "node tests/ui-contract.test.cjs",
@@ -62,6 +63,8 @@
   "private": true,
   "devDependencies": {
     "@types/react": "~19.1.10",
+    "eas-cli": "^21.7.0",
+    "supabase": "^2.113.0",
     "typescript": "~5.9.2"
   }
 }

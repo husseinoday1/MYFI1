@@ -28,7 +28,32 @@ export const createDataSlice = (set, get) => ({
   exitDemoMode: async () => {
     const vault = await readVaultSnapshot(get().workspaceNamespace);
     const legacyRaw = !vault.snapshot ? await AsyncStorage.getItem(STORAGE.DEMO_REAL) : null;
-    if (!vault.snapshot && !legacyRaw) return false;
+    if (!vault.snapshot && !legacyRaw) {
+      const current = get();
+      const wallets = normalizeWallets([], current.cfg.currency);
+      const defaultWalletId = getDefaultWalletId(wallets, current.cfg.currency, current.cfg.defaultWalletId);
+      set({
+        trans: [],
+        debts: [],
+        goals: [],
+        wallets,
+        commitments: [],
+        cats: DEF_CATS,
+        cfg: {
+          ...current.cfg,
+          demoMode: false,
+          defaultWalletId,
+          archiveSummaries: [],
+          categoryBudgets: {},
+        },
+        syncConflict: null,
+        lastSyncError: null,
+        dirty: true,
+      });
+      await AsyncStorage.multiRemove([STORAGE.DEMO_REAL, STORAGE.DEMO_DATA]);
+      await get().saveLocal({ force: true, dirty: true });
+      return true;
+    }
     try {
       const snapshot = vault.snapshot || JSON.parse(legacyRaw);
       const loaded = stateFromSnapshot(snapshot, DEF_CFG);

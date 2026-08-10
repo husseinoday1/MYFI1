@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import { STR } from './strings';
 import { STORAGE } from './constants';
 import { getUpcomingRecurring } from '../utils/calc';
-import { getUpcomingCommitments } from './commitments';
+import { formatCommitmentDate, getUpcomingCommitments } from './commitments';
 import { getDefaultWalletId, getWalletBalances } from './wallets';
 import { buildDecisionItems } from './decisionEngine';
 import { BRAND_GREEN } from './theme';
@@ -204,8 +204,7 @@ export const checkRecurringAlerts = async (lang = 'ar', trans = []) => {
 
 export const checkCommitmentAlerts = async (lang = 'ar', commitments = [], notifCfg = {}) => {
   if (!notifCfg.commitment?.on) return { ok: false };
-  const daysAhead = Number(notifCfg.commitment.value || 3);
-  const due = getUpcomingCommitments(commitments).filter(item => item.daysUntil <= daysAhead);
+  const due = getUpcomingCommitments(commitments).filter(item => item.actionable);
   if (due.length === 0) return { ok: false };
   const permission = await ensureNotificationPermission(lang);
   if (!permission.ok) return permission;
@@ -214,7 +213,9 @@ export const checkCommitmentAlerts = async (lang = 'ar', commitments = [], notif
   const ar = lang === 'ar';
   const first = due[0];
   const deferredText = first.deferredUntilISO
-    ? (ar ? ` - مؤجل إلى ${first.dueISO}` : ` - deferred until ${first.dueISO}`)
+    ? (ar
+      ? ` - \u0645\u0624\u062c\u0644 \u0625\u0644\u0649 ${formatCommitmentDate(first.dueISO, lang)}`
+      : ` - deferred to ${formatCommitmentDate(first.dueISO, lang)}`)
     : '';
   await Notifications.scheduleNotificationAsync({
     content: {

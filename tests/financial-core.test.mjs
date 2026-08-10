@@ -4,7 +4,7 @@ import { buildFinancialCoach, getBudgetRows, getBudgetSummary, normalizeBudgets,
 import { getWalletBalances, getWalletMonthlyMovement, normalizeWallets } from '../src/lib/wallets.js';
 import { analyzeSmartEntry } from '../src/lib/smartEntry.js';
 import { normalizeCfg, normalizeHomeCards } from '../src/lib/constants.js';
-import { buildChartData, buildFinancialSnapshot, byMonth, calcCashFlow, calcStats, catSpend, getUpcomingRecurring, pct } from '../src/utils/calc.js';
+import { buildChartData, buildFinancialReport, buildFinancialSnapshot, byMonth, calcCashFlow, calcStats, catSpend, getUpcomingRecurring, monthlyForecast, pct } from '../src/utils/calc.js';
 import { auditFinancialData } from '../src/lib/financialIntegrity.js';
 import { useStore } from '../src/store/useStore.js';
 import { formatNumberInput, normalizeNumberInput, parseNumberInput } from '../src/lib/numberInput.js';
@@ -23,7 +23,13 @@ import { resolveSystemTheme } from '../src/lib/systemTheme.js';
 import { getVisibleHistoryTransactions } from '../src/lib/history.js';
 import { getTransactionTagLabel, inferTransactionTag, normalizeTransactionTag } from '../src/lib/transactionTags.js';
 import { buildLeakInsights, suggestCategoryFromHistory } from '../src/lib/localIntelligence.js';
-import { filterDismissedNotifications, notificationReadKey } from '../src/lib/notificationCenter.js';
+import { commitmentCycleMonth, commitmentDueISO, deferredCommitmentDueISO, getUpcomingCommitments, monthsBetween } from '../src/lib/commitments.js';
+import { filterDismissedNotifications, notificationReadKey, pruneNotificationKeys } from '../src/lib/notificationCenter.js';
+import { CATEGORY_FLOWS, getCategoriesForFlow, getDefaultCategoryId, normalizeCategoryFlow } from '../src/lib/categories.js';
+import { buildDecisionItems } from '../src/lib/decisionEngine.js';
+import { dedupeWorkspaceData, normalizeDebtItems, normalizeGoalItems } from '../src/store/domain.js';
+import { reopenCompletionCommitments } from '../src/lib/trackerLifecycle.js';
+import { mergeWorkspaceStates } from '../src/store/multiDeviceSync.js';
 import {
   buildSnapshotSignature,
   compareSnapshots,
@@ -65,6 +71,38 @@ const changedNormalizedFixture = JSON.parse(JSON.stringify(normalizedFixture));
 changedNormalizedFixture.data.trans[0].amt = -31;
 assert.equal(compareSnapshots(normalizedFixture, changedNormalizedFixture).passed, false);
 
+const settledDebt = normalizeDebtItems([{
+  id: 'settled-debt',
+  name: 'Final instalment',
+  total: 100,
+  payments: [{ id: 'final-payment', amt: 100, date: '2026-08-07' }],
+}])[0];
+const settledGoal = normalizeGoalItems([{
+  id: 'settled-goal',
+  name: 'Emergency fund',
+  target: 250,
+  savings: [{ id: 'final-saving', amt: 250, date: '2026-08-07' }],
+}])[0];
+assert.equal(settledDebt.status, 'settled', 'a fully paid debt must remain explicitly settled');
+assert.equal(settledDebt.completedAt, '2026-08-07', 'debt completion must retain its completion date');
+assert.equal(settledGoal.status, 'settled', 'a fully saved goal must remain explicitly settled');
+assert.equal(settledGoal.completedAt, '2026-08-07', 'goal completion must retain its completion date');
+const completionNotices = buildDecisionItems({
+  debts: [settledDebt],
+  goals: [settledGoal],
+  cfg: { lang: 'ar', currency: 'IQD', profileType: 'personal' },
+  date: new Date('2026-08-08T12:00:00'),
+});
+assert.ok(completionNotices.some(item => item.title === 'انتهى الدين'), 'recent debt completion must be visible in notifications');
+assert.ok(completionNotices.some(item => item.title === 'اكتمل الهدف'), 'recent goal completion must be visible in notifications');
+const reopenedCommitments = reopenCompletionCommitments([
+  { id: 'auto-ended', linkedType: 'debt', linkedId: 'settled-debt', active: false, endReason: 'debt_settled', endedAt: '2026-08-07' },
+  { id: 'manual-ended', linkedType: 'debt', linkedId: 'settled-debt', active: false, endReason: 'manual', endedAt: '2026-08-07' },
+], [{ linkedType: 'debt', linkedId: 'settled-debt', endReason: 'debt_settled' }]);
+assert.equal(reopenedCommitments[0].active, true, 'reopening a tracker must restore only commitments stopped by completion');
+assert.equal('endReason' in reopenedCommitments[0], false, 'restored commitments must clear the automatic end marker');
+assert.equal(reopenedCommitments[1].active, false, 'manual commitment stops must remain untouched');
+
 assert.equal(inferTransactionTag({ flowType: FLOW_TYPES.DEBT_PAYMENT }), 'debt_owed');
 assert.equal(inferTransactionTag({ flowType: FLOW_TYPES.RECEIVABLE_COLLECTION }), 'debt_receivable');
 assert.equal(inferTransactionTag({ isGoalSaving: true }), 'saving');
@@ -73,6 +111,31 @@ assert.equal(normalizeTransactionTag({ transactionTag: 'installment' }).transact
 assert.equal(getTransactionTagLabel('saving', 'ar'), 'توفير');
 assert.equal(normalizeCfg({ lockDelaySeconds: 900 }).lockDelaySeconds, 900);
 assert.equal(normalizeCfg({ lockDelaySeconds: 5 }).lockDelaySeconds, 300);
+assert.equal(
+  normalizeCfg({ enabledModules: { recurring: false } }).enabledModules.recurring,
+  true,
+  'monthly recurrence must be restored for profiles that previously hid it',
+);
+const categoryFlowFixture = [
+  { id: 'food', label: 'Food' },
+  { id: 'salary', label: 'Salary' },
+  { id: 'c_legacy', label: 'Legacy custom' },
+  { id: 'new_income', label: 'Freelance', flow: CATEGORY_FLOWS.INCOME },
+  { id: 'other', label: 'Other' },
+];
+assert.equal(normalizeCategoryFlow({ id: 'salary' }), CATEGORY_FLOWS.INCOME);
+assert.equal(normalizeCategoryFlow({ id: 'food' }), CATEGORY_FLOWS.EXPENSE);
+assert.deepEqual(
+  getCategoriesForFlow(categoryFlowFixture, CATEGORY_FLOWS.INCOME).map(item => item.id),
+  ['salary', 'c_legacy', 'new_income', 'other'],
+  'income entry must show income and legacy custom categories only',
+);
+assert.deepEqual(
+  getCategoriesForFlow(categoryFlowFixture, CATEGORY_FLOWS.EXPENSE).map(item => item.id),
+  ['food', 'c_legacy', 'other'],
+  'expense entry must show expense and legacy custom categories only',
+);
+assert.equal(getDefaultCategoryId(categoryFlowFixture, CATEGORY_FLOWS.INCOME), 'salary');
 assert.equal(resolveSystemTheme('dark'), 'dark', 'system dark mode must stay dark');
 assert.equal(resolveSystemTheme('light'), 'light', 'system light mode must stay light');
 assert.equal(resolveSystemTheme(null, 'light'), 'light', 'unknown system mode must preserve the current theme');
@@ -99,6 +162,17 @@ assert.deepEqual(
   filterDismissedNotifications([notificationFixture], [notificationReadKey(notificationFixture)]),
   [],
   'dismissed notifications must stay out of the notification center',
+);
+const expiredNotificationKey = notificationReadKey(notificationFixture, Date.now() - (31 * 24 * 60 * 60 * 1000));
+assert.deepEqual(
+  filterDismissedNotifications([notificationFixture], [expiredNotificationKey]),
+  [notificationFixture],
+  'dismissed notifications must become eligible again after the retention window',
+);
+assert.equal(
+  pruneNotificationKeys([expiredNotificationKey, notificationReadKey(notificationFixture)]).length,
+  1,
+  'old notification records must be removed automatically',
 );
 assert.deepEqual(
   getVisibleHistoryTransactions([{ id: 'legacy-personal', scope: 'personal' }], { profileType: 'business' }).map(item => item.id),
@@ -158,6 +232,116 @@ assert.equal(
   0,
   'a confirmed occurrence must prevent a duplicate suggestion in the same month',
 );
+
+const monthlyCommitment = {
+  id: 'monthly-internet',
+  name: 'Internet',
+  amt: 100,
+  firstDueISO: '2026-08-01',
+  day: 1,
+  repeatMonthly: true,
+  active: true,
+};
+const augustCommitment = getUpcomingCommitments(
+  [monthlyCommitment],
+  new Date('2026-08-20T12:00:00'),
+)[0];
+assert.equal(augustCommitment?.dueMonth, '2026-08');
+assert.equal(augustCommitment?.monthsUntil, 0, 'commitments are due for a month, not by a remaining-day countdown');
+assert.equal(monthsBetween(new Date('2026-08-31T12:00:00'), '2026-09-01'), 1);
+assert.equal(
+  deferredCommitmentDueISO(monthlyCommitment, 'day', new Date('2026-08-20T12:00:00')),
+  '2026-08-21',
+  'a monthly commitment may be deferred operationally by one day',
+);
+assert.equal(
+  deferredCommitmentDueISO(monthlyCommitment, 'three_days', new Date('2026-08-20T12:00:00')),
+  '2026-08-23',
+  'a monthly commitment may be deferred operationally by three days',
+);
+assert.equal(
+  deferredCommitmentDueISO(monthlyCommitment, 'next_month', new Date('2026-08-20T12:00:00')),
+  '2026-09-01',
+  'a monthly commitment may still be deferred to the next month',
+);
+const carriedCommitment = {
+  ...monthlyCommitment,
+  deferredUntilISO: '2026-09-01',
+  deferredCycleMonth: '2026-08',
+};
+assert.equal(commitmentCycleMonth(carriedCommitment, new Date('2026-09-03T12:00:00')), '2026-08');
+assert.equal(
+  commitmentDueISO(carriedCommitment, new Date('2026-09-03T12:00:00')),
+  '2026-09-01',
+  'a commitment deferred into the next month must retain its original cycle month',
+);
+assert.equal(
+  getUpcomingCommitments([carriedCommitment], new Date('2026-09-02T12:00:00'))[0]?.cycleMonth,
+  '2026-08',
+  'upcoming commitments must expose the unpaid monthly occurrence',
+);
+const deferredCommitment = { ...monthlyCommitment, deferredUntilISO: '2026-08-23' };
+assert.equal(
+  getUpcomingCommitments([deferredCommitment], new Date('2026-08-20T12:00:00'))[0]?.actionable,
+  false,
+  'a commitment must not demand action before its day-level deferral expires',
+);
+assert.equal(
+  getUpcomingCommitments([deferredCommitment], new Date('2026-08-23T12:00:00'))[0]?.actionable,
+  true,
+  'a commitment must become actionable again on its deferred date',
+);
+const carriedForecast = monthlyForecast([], new Date('2026-09-03T12:00:00'), [carriedCommitment]);
+assert.equal(carriedForecast.remainingCommitments, 100, 'forecast must carry a deferred commitment into its unpaid cycle month');
+
+const syncConflicts = [];
+const mergedWorkspace = mergeWorkspaceStates({
+  base: { trans: [{ id: 'tx-1', title: 'Old', amt: -10 }], cfg: { theme: 'dark' } },
+  local: { trans: [{ id: 'tx-1', title: 'Local title', amt: -10 }], cfg: { theme: 'light' } },
+  remote: { trans: [{ id: 'tx-1', title: 'Remote title', amt: -25 }], cfg: { theme: 'system' } },
+  conflicts: syncConflicts,
+});
+assert.equal(mergedWorkspace.trans[0].title, 'Local title', 'device merge must retain the current device value for a true scalar conflict');
+assert.equal(mergedWorkspace.trans[0].amt, -25, 'device merge must retain non-conflicting remote fields');
+assert(syncConflicts.some(item => item.path === 'trans[tx-1].title'), 'device merge must record the conflicted field path');
+assert(syncConflicts.some(item => item.path === 'cfg.theme'), 'device merge must record settings conflicts too');
+const deletionConflicts = [];
+mergeWorkspaceStates({
+  base: { goals: [{ id: 'goal-1', name: 'Trip' }] },
+  local: { goals: [] },
+  remote: { goals: [{ id: 'goal-1', name: 'Trip updated' }] },
+  conflicts: deletionConflicts,
+});
+assert.equal(deletionConflicts[0]?.resolution, 'deletion', 'deletion versus edit must be explicit in the sync conflict log');
+
+const duplicateGuestData = dedupeWorkspaceData({
+  cfg: { currency: 'IQD', defaultWalletId: 'wallet-main', profileType: 'personal' },
+  wallets: [
+    { id: 'wallet-main', name: 'Main wallet', nameEn: 'Main wallet', type: 'cash', currency: 'IQD', openingBalance: 0, scope: 'personal' },
+    { id: 'wallet-guest', name: 'Main wallet (Guest)', nameEn: 'Main wallet (Guest)', type: 'cash', currency: 'IQD', openingBalance: 0, scope: 'personal' },
+  ],
+  trans: [
+    { id: 'tx-guest-copy', title: 'Ali', amt: -175000, cat: 'other', walletId: 'wallet-guest', dateISO: '2026-08-08', scope: 'personal' },
+    { id: 'tx-main-copy', title: 'Ali', amt: -175000, cat: 'other', walletId: 'wallet-main', dateISO: '2026-08-08', scope: 'personal' },
+  ],
+  debts: [],
+  goals: [],
+  commitments: [],
+  cats: [{ id: 'other', label: 'Other' }],
+});
+assert.equal(duplicateGuestData.wallets.length, 1, 'same guest/account wallet must collapse into one wallet');
+assert.equal(duplicateGuestData.trans.length, 1, 'same transaction imported through a duplicate wallet must collapse into one transaction');
+assert.equal(duplicateGuestData.trans[0].walletId, 'wallet-main', 'deduped transactions must point at the surviving wallet');
+
+const annualReport = buildFinancialReport({
+  trans: [
+    { id: 'annual-income', amt: 1000, dateISO: '2026-01-10' },
+    { id: 'annual-expense', amt: -250, dateISO: '2026-02-10' },
+  ],
+  scope: 'year',
+}, new Date('2026-02-15T12:00:00'));
+assert.deepEqual(annualReport.stats, { inc: 1000, exp: 250, bal: 750 }, 'annual reports must use the shared financial engine for period totals');
+assert.equal(annualReport.periodCashFlow.net, 750, 'annual reports must use the shared cash-flow definition');
 
 assert.equal(parseNumberInput('٣٬٥٠٠'), 3500, 'Arabic-Indic amounts must be accepted in transaction forms');
 assert.equal(parseNumberInput('١٢٫٥٠'), 12.5, 'Arabic decimal separators must be accepted');
@@ -236,7 +420,11 @@ assert.deepEqual(
   { inc: 1000, exp: 200, bal: 800 },
   'linked balance movements must not be counted as income or expense',
 );
-assert.deepEqual(calcCashFlow(linkedFlows), { inflow: 1150, outflow: 625, net: 525 }, 'cash flow must include linked wallet movements');
+assert.deepEqual(
+  calcCashFlow(linkedFlows),
+  { inflow: 1150, outflow: 500, net: 650 },
+  'cash flow must include real linked wallet movements but exclude goal allocations because they reserve cash without moving it',
+);
 assert.equal(pct(120, 100), 120, 'progress must expose values over 100%');
 assert.equal(pct(120, 100, { cap: true }), 100, 'capped progress remains available for visual bars');
 assert.equal(
@@ -364,6 +552,7 @@ const runLinkedStoreAssertions = async () => {
     'syncCloud',
     'loadCloud',
     'transferGuestToCurrent',
+    'restoreLastMergeRollback',
     'resolveSyncConflict',
     'addTrans',
     'duplicateTrans',
@@ -401,6 +590,11 @@ const runLinkedStoreAssertions = async () => {
   const addedTx = state.trans.find(item => item.amt === 250 && item.cat === 'salary');
   assert.ok(addedTx, 'transaction slice must add a normal transaction');
   assert.equal(addedTx.flowType, FLOW_TYPES.INCOME);
+  const transCountBeforeOverspend = state.trans.length;
+  assert.equal(await useStore.getState().addTrans({ amt: -100000, cat: 'food', walletId: 'cash', dateISO: '2026-07-02' }), false);
+  assert.equal(useStore.getState().trans.length, transCountBeforeOverspend, 'overspending a wallet must not create an expense transaction');
+  assert.equal(await useStore.getState().editTrans(addedTx.id, { amt: -100000 }), false);
+  assert.equal(useStore.getState().trans.find(item => item.id === addedTx.id).amt, 250, 'invalid expense edit must preserve the original transaction');
   assert.equal(await useStore.getState().duplicateTrans(addedTx.id), true);
   state = useStore.getState();
   assert.equal(
@@ -421,6 +615,55 @@ const runLinkedStoreAssertions = async () => {
   assert.equal(useStore.getState().trans.find(item => item.id === crossScopeTransfer.id).transferAmount, 75, 'invalid transfer edit must preserve the original amount');
   assert.equal(await useStore.getState().editTrans(crossScopeTransfer.id, { toWalletId: 'savings' }), true);
   assert.equal(useStore.getState().trans.find(item => item.id === crossScopeTransfer.id).toWalletId, 'savings', 'transfer edits must accept another wallet scope');
+
+  useStore.setState({
+    trans: [],
+    debts: [],
+    goals: [],
+    commitments: [],
+    wallets,
+    cfg: { ...initialCfg, currency: 'IQD', defaultWalletId: 'cash' },
+    user: null,
+  });
+  const previousDebt = await useStore.getState().addDebt({
+    name: 'Old debt',
+    total: 400,
+    createdAt: '2026-07-04',
+    direction: 'owed',
+    originMode: 'previous',
+    walletId: 'cash',
+  });
+  assert.ok(previousDebt?.id);
+  assert.equal(useStore.getState().trans.length, 0, 'old debt creation must not change wallet balance');
+  await useStore.getState().addDebt({
+    name: 'Received loan',
+    total: 300,
+    createdAt: '2026-07-04',
+    direction: 'owed',
+    originMode: 'received',
+    walletId: 'cash',
+  });
+  state = useStore.getState();
+  assert.equal(state.trans.find(item => item.isDebtOrigin && item.flowType === FLOW_TYPES.DEBT_PROCEEDS)?.amt, 300, 'received debt must add proceeds to the selected wallet');
+  await useStore.getState().addDebt({
+    name: 'Friend loan',
+    total: 200,
+    createdAt: '2026-07-04',
+    direction: 'receivable',
+    originMode: 'lent',
+    walletId: 'cash',
+  });
+  state = useStore.getState();
+  assert.equal(state.trans.find(item => item.isDebtOrigin && item.flowType === FLOW_TYPES.RECEIVABLE_CREATED)?.amt, -200, 'debt owed to me created from lent cash must reduce the selected wallet');
+  await useStore.getState().addCommitment({
+    name: 'One-time fee',
+    amt: 70,
+    firstDueISO: '2026-07-01',
+    walletId: 'cash',
+    linkedType: 'none',
+    repeatMonthly: false,
+  });
+  assert.equal(useStore.getState().commitments.find(item => item.name === 'One-time fee')?.repeatMonthly, false, 'one-time commitment creation must persist repeatMonthly=false');
 
   useStore.setState({
     trans: [],
@@ -465,6 +708,20 @@ const runLinkedStoreAssertions = async () => {
   assert.equal(state.commitments[0].lastPaidMonth, '2026-08', 'editing a commitment transaction date must update its paid month');
   await state.deleteTrans(commitmentTx.id);
   assert.equal(useStore.getState().commitments[0].lastPaidMonth, null, 'deleting a commitment transaction must reopen it');
+
+  useStore.setState({
+    trans: [],
+    debts: [],
+    goals: [],
+    commitments: [{ id: 'commit-low-cash', name: 'Rent', amt: 100, day: 10, active: true, repeatMonthly: true, walletId: 'cash', linkedType: 'none', linkedId: null }],
+    wallets: normalizeWallets([{ id: 'cash', name: 'Cash', openingBalance: 50, currency: 'IQD', scope: 'personal' }]),
+    cfg: { ...initialCfg, currency: 'IQD', defaultWalletId: 'cash' },
+    user: null,
+  });
+  const lowCashCommitment = await useStore.getState().payCommitment('commit-low-cash', '2026-07-10', 'cash');
+  assert.equal(lowCashCommitment.ok, false);
+  assert.equal(lowCashCommitment.reason, 'insufficient_balance');
+  assert.equal(useStore.getState().trans.length, 0, 'insufficient commitment payment must not create a transaction');
 
   useStore.setState({
     wallets,

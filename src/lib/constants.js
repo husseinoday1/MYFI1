@@ -1,3 +1,5 @@
+import { normalizeMonthNameStyle } from './months';
+
 export const STORAGE = {
   DATA:      'MYFI_DATA_V1',
   SETTINGS:  'MYFI_SETTINGS_V1',
@@ -195,6 +197,8 @@ const HOME_LAYOUT_VERSION = 2;
 
 export const DEF_CFG = {
   theme: 'dark', themeMode: 'manual', lang: detectSystemLang(), langMode: 'system', currency: 'IQD',
+  monthNameStyle: 'numeric',
+  displayName: '', username: '', phone: '', avatarUri: '', accountConsentAccepted: false,
   country: 'IQ', name: 'المستخدم', avatar: '🌿',
   profileType: 'personal',
   activeScope: 'personal',
@@ -247,6 +251,15 @@ export const normalizeCfg = (cfg = {}) => {
     : DEF_START_TAB;
   const country = COUNTRIES.some(item => item.code === cfg.country) ? cfg.country : DEF_CFG.country;
   const currency = CURRENCIES.some(item => item.code === cfg.currency) ? cfg.currency : DEF_CFG.currency;
+  const displayName = String(cfg.displayName || cfg.name || '').trim().replace(/\s+/g, ' ').slice(0, 48);
+  const username = String(cfg.username || '').trim().toLowerCase()
+    .replace(/^@+/, '')
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 24);
+  const phone = String(cfg.phone || '').trim().replace(/[^\d+]/g, '').slice(0, 18);
+  const avatarUri = String(cfg.avatarUri || '').trim().slice(0, 2048);
   const profileType = ['personal', 'personal_business', 'business'].includes(cfg.profileType)
     ? cfg.profileType
     : DEF_CFG.profileType;
@@ -264,15 +277,23 @@ export const normalizeCfg = (cfg = {}) => {
     ...cfg,
     country,
     currency,
+    displayName,
+    username,
+    phone,
+    avatarUri,
+    accountConsentAccepted: cfg.accountConsentAccepted === true,
     profileType,
     activeScope,
     lockDelaySeconds,
     langMode,
     lang: langMode === 'system' ? detectSystemLang() : manualLang,
+    monthNameStyle: normalizeMonthNameStyle(cfg.monthNameStyle),
     themeMode: cfg.themeMode === 'system' ? 'system' : 'manual',
     theme: cfg.theme === 'light' ? 'light' : 'dark',
     categoryBudgets: Object.fromEntries(Object.entries(cfg.categoryBudgets || {}).filter(([, value]) => Number(value) > 0)),
-    enabledModules: normalizeModules(cfg.enabledModules),
+    // Monthly recurrence is a core entry capability. Existing profiles that
+    // hid the old optional module are migrated back to the enabled state.
+    enabledModules: { ...normalizeModules(cfg.enabledModules), recurring: true },
     homeCards: normalizeHomeCards(resetHomeLayout ? DEF_HOME_CARDS : cfg.homeCards),
     homeSections: normalizeVisibilityList(DEF_HOME_SECTIONS, resetHomeLayout ? DEF_HOME_SECTIONS : cfg.homeSections),
     quickActions: normalizeVisibilityList(DEF_QUICK_ACTIONS, cfg.quickActions),
@@ -285,7 +306,7 @@ export const normalizeCfg = (cfg = {}) => {
 
 export const DEF_NOTIF = {
   debt:   { on: true, value: 3 },
-  commitment: { on: true, value: 3 },
+  commitment: { on: true },
   daily:  { on: false, value: 21 },
   low:    { on: false, value: 500000 },
   forecast: { on: false },

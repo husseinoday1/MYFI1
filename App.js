@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, Appearance, I18nManager, Image, Linking, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Alert, AppState, Appearance, BackHandler, I18nManager, Image, Linking, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,7 +12,7 @@ import { STORAGE, getSymbol } from './src/lib/constants';
 import { supabase } from './src/lib/supabase';
 import { authenticate } from './src/lib/biometric';
 import { checkDecisionAlerts } from './src/lib/notifications';
-import { buildNotificationItems, filterDismissedNotifications, NOTIFICATION_DISMISSED_STORAGE_KEY, notificationReadKey, sanitizeNotificationReadKeys } from './src/lib/notificationCenter';
+import { buildNotificationItems, filterDismissedNotifications, NOTIFICATION_DISMISSED_STORAGE_KEY, notificationReadKey, pruneNotificationKeys, sanitizeNotificationReadKeys } from './src/lib/notificationCenter';
 import { applyGlobalFont, fontAssets } from './src/lib/fonts';
 import { RADIUS, SHADOW } from './src/lib/tokens';
 import { resolveSystemTheme } from './src/lib/systemTheme';
@@ -105,8 +105,10 @@ function AppRoot() {
     notif,
     workspaceReady,
     pendingGuestTransfer,
+    guestTransferPreview,
     transferGuestToCurrent,
     dismissGuestTransfer,
+    restoreLastMergeRollback,
     syncConflict,
     resolveSyncConflict,
   } = useStore();
@@ -126,6 +128,7 @@ function AppRoot() {
   const [readNotifKeys, setReadNotifKeys] = useState([]);
   const [dismissedNotifKeys, setDismissedNotifKeys] = useState([]);
   const guestPromptOpen = useRef(false);
+  const mergeRollbackPromptTimer = useRef(null);
   const conflictPromptOpen = useRef(false);
   const handledAuthUrls = useRef(new Set());
   const lockBackgroundAt = useRef(null);
@@ -150,6 +153,19 @@ function AppRoot() {
       appStateSub.remove();
     };
   }, [cfg.themeMode, systemColorScheme]);
+
+  useEffect(() => {
+    if (!archiveOpen) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setArchiveOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [archiveOpen]);
+
+  useEffect(() => () => {
+    if (mergeRollbackPromptTimer.current) clearTimeout(mergeRollbackPromptTimer.current);
+  }, []);
 
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
@@ -265,11 +281,18 @@ function AppRoot() {
     if (!ready || !user || !workspaceReady || !pendingGuestTransfer || guestPromptOpen.current) return;
     guestPromptOpen.current = true;
     const ar = cfg.lang === 'ar';
+    const preview = guestTransferPreview || {};
+    const incoming = Number(preview.incomingRecords || 0);
+    const added = Number(preview.addedRecords || 0);
+    const duplicates = Number(preview.duplicateRecords || 0);
+    const previewLine = ar
+      ? `العناصر القادمة: ${incoming}. المختلف الذي سيضاف: ${added}. المكرر الذي سيدمج بدون تكرار: ${duplicates}.`
+      : `Incoming items: ${incoming}. New items to add: ${added}. Duplicates to merge without repeating: ${duplicates}.`;
     Alert.alert(
-      ar ? 'بيانات محفوظة على الجهاز' : 'Local data found',
+      ar ? 'مراجعة دمج البيانات' : 'Review data merge',
       ar
-        ? 'توجد بيانات استخدمتها قبل تسجيل الدخول. هل تريد نقلها إلى هذا الحساب؟ لن تُحذف النسخة المحلية إلا بعد نجاح المزامنة.'
-        : 'Data created before sign-in was found. Move it to this account? The local copy is kept until sync succeeds.',
+        ? `توجد بيانات محفوظة على هذا الجهاز قبل تسجيل الدخول. إذا وافقت، سيضيف MYFI المعلومات المختلفة فقط، ويدمج المعلومات المكررة حتى لا تظهر مرتين. ${previewLine} سنحفظ نقطة رجوع قبل التنفيذ.`
+        : `Data saved on this device was found before sign-in. If you continue, MYFI will add only different information and merge duplicates so they do not appear twice. ${previewLine} A rollback point will be saved before the change.`,
       [
         {
           text: ar ? 'إبقاؤها منفصلة' : 'Keep separate',
@@ -280,16 +303,44 @@ function AppRoot() {
           },
         },
         {
-          text: ar ? 'نقل البيانات' : 'Move data',
+          text: ar ? 'دمج بأمان' : 'Merge safely',
           onPress: async () => {
-            const moved = await transferGuestToCurrent();
+            const result = await transferGuestToCurrent();
+            const moved = result === true || !!result?.ok;
             guestPromptOpen.current = false;
             if (!moved) {
               Alert.alert(
-                ar ? 'لم يكتمل النقل' : 'Transfer not completed',
+                ar ? 'لم يكتمل الدمج' : 'Merge not completed',
                 ar ? 'بقيت بياناتك المحلية محفوظة. تحقق من الاتصال وحاول لاحقاً.' : 'Your local data is still safe. Check the connection and try again.',
               );
+              return;
             }
+            if (mergeRollbackPromptTimer.current) clearTimeout(mergeRollbackPromptTimer.current);
+            mergeRollbackPromptTimer.current = setTimeout(() => {
+              mergeRollbackPromptTimer.current = null;
+              Alert.alert(
+              result?.reason === 'duplicate_only'
+                ? (ar ? 'تم تنظيف البيانات المكررة' : 'Duplicate data cleaned')
+                : (ar ? 'تم دمج البيانات' : 'Data merged'),
+              result?.reason === 'duplicate_only'
+                ? (ar ? 'كانت البيانات الموجودة على الجهاز مكررة ولا تضيف معلومات جديدة، لذلك تم تنظيف نسخة الضيف بدون تكرار السجل.' : 'The device data was duplicated and added no new information, so the guest copy was cleaned without repeating history.')
+                : (ar ? 'تمت إضافة المختلف ودمج المكرر. إذا لاحظت نتيجة غير مناسبة يمكنك الرجوع إلى حالة ما قبل الدمج الآن.' : 'Different information was added and duplicates were merged. You can roll back to the pre-merge state now if the result is not right.'),
+              [
+                {
+                  text: ar ? 'رجوع' : 'Roll back',
+                  style: 'destructive',
+                  onPress: async () => {
+                    const restored = await restoreLastMergeRollback();
+                    Alert.alert(
+                      restored ? (ar ? 'تم الرجوع' : 'Rolled back') : (ar ? 'تعذر الرجوع' : 'Rollback failed'),
+                      restored ? (ar ? 'عادت البيانات إلى حالتها قبل خطوة الدمج.' : 'Your data is back to the state before the merge.') : (ar ? 'لم نجد نقطة رجوع صالحة لهذه العملية.' : 'No valid rollback point was found for this operation.'),
+                    );
+                  },
+                },
+                { text: ar ? 'إبقاء التغييرات' : 'Keep changes', style: 'cancel' },
+              ],
+              );
+            }, 30000);
           },
         },
       ],
@@ -300,20 +351,34 @@ function AppRoot() {
     user,
     workspaceReady,
     pendingGuestTransfer,
+    guestTransferPreview,
     cfg.lang,
     transferGuestToCurrent,
     dismissGuestTransfer,
+    restoreLastMergeRollback,
   ]);
 
   useEffect(() => {
     if (!ready || !syncConflict || conflictPromptOpen.current) return;
     conflictPromptOpen.current = true;
     const ar = cfg.lang === 'ar';
+    if (syncConflict.type === 'merged_changes' && !syncConflict.cloud) {
+      const count = Number(syncConflict.total || syncConflict.items?.length || 0);
+      Alert.alert(
+        ar ? 'تم دمج تغييرات الأجهزة' : 'Device changes merged',
+        ar
+          ? `تمت إضافة المعلومات المختلفة ودمج المتكرر أو المتعارض البسيط بدون تكرار. عدد البنود التي راجعها النظام: ${count}. راجع السجل والمحافظ إذا تريد التأكد.`
+          : `Different information was added and duplicate or simple overlapping records were merged without repetition. Items reviewed: ${count}. Review history and wallets if you want to verify.`,
+        [{ text: ar ? 'فهمت' : 'Got it', onPress: async () => { await resolveSyncConflict('dismiss'); conflictPromptOpen.current = false; } }],
+        { cancelable: false },
+      );
+      return;
+    }
     Alert.alert(
-      ar ? 'تغييرات من جهاز آخر' : 'Changes from another device',
+      ar ? 'تعارض في البيانات' : 'Data conflict',
       ar
-        ? 'توجد نسخة أحدث على السحابة مع تغييرات محلية غير متزامنة. اختر النسخة التي تريد الاحتفاظ بها.'
-        : 'A newer cloud copy and unsynced local changes both exist. Choose which copy to keep.',
+        ? 'توجد نسخة سحابية وتغييرات محلية لا يمكن دمجها تلقائيا بثقة. اختر النسخة التي تريد الاحتفاظ بها.'
+        : 'A cloud copy and local changes cannot be merged with confidence. Choose which copy to keep.',
       [
         {
           text: ar ? 'استخدام نسخة السحابة' : 'Use cloud copy',
@@ -338,7 +403,7 @@ function AppRoot() {
     AsyncStorage.getItem('MYFI_READ_NOTIFICATIONS_V1')
       .then(raw => {
         if (!raw) return;
-        const safe = sanitizeNotificationReadKeys(JSON.parse(raw));
+        const safe = pruneNotificationKeys(sanitizeNotificationReadKeys(JSON.parse(raw)));
         setReadNotifKeys(safe);
         AsyncStorage.setItem('MYFI_READ_NOTIFICATIONS_V1', JSON.stringify(safe)).catch(() => {});
       })
@@ -349,10 +414,29 @@ function AppRoot() {
     AsyncStorage.getItem(NOTIFICATION_DISMISSED_STORAGE_KEY)
       .then(raw => {
         if (!raw) return;
-        const safe = sanitizeNotificationReadKeys(JSON.parse(raw));
+        const safe = pruneNotificationKeys(sanitizeNotificationReadKeys(JSON.parse(raw)));
         setDismissedNotifKeys(safe);
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const cleanExpiredNotificationKeys = async () => {
+      try {
+        const entries = await AsyncStorage.multiGet(['MYFI_READ_NOTIFICATIONS_V1', NOTIFICATION_DISMISSED_STORAGE_KEY]);
+        const values = new Map(entries);
+        const nextRead = pruneNotificationKeys(sanitizeNotificationReadKeys(JSON.parse(values.get('MYFI_READ_NOTIFICATIONS_V1') || '[]')));
+        const nextDismissed = pruneNotificationKeys(sanitizeNotificationReadKeys(JSON.parse(values.get(NOTIFICATION_DISMISSED_STORAGE_KEY) || '[]')));
+        setReadNotifKeys(current => JSON.stringify(current) === JSON.stringify(nextRead) ? current : nextRead);
+        setDismissedNotifKeys(current => JSON.stringify(current) === JSON.stringify(nextDismissed) ? current : nextDismissed);
+        await AsyncStorage.multiSet([
+          ['MYFI_READ_NOTIFICATIONS_V1', JSON.stringify(nextRead)],
+          [NOTIFICATION_DISMISSED_STORAGE_KEY, JSON.stringify(nextDismissed)],
+        ]);
+      } catch {}
+    };
+    const timer = setInterval(cleanExpiredNotificationKeys, 60 * 60 * 1000);
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -384,7 +468,7 @@ function AppRoot() {
 
   useEffect(() => {
     if (!ready) return;
-    checkDecisionAlerts({ trans, debts, goals, wallets, commitments, cats, cfg, notif, symbol: sym });
+    try { checkDecisionAlerts({ trans, debts, goals, wallets, commitments, cats, cfg, notif, symbol: sym }); } catch {}
   }, [ready, trans, debts, goals, wallets, commitments, cats, cfg, notif, sym]);
 
   useEffect(() => {
@@ -483,7 +567,7 @@ function AppRoot() {
     setShowAdd(true);
   };
   const openSmartEntry = () => {
-    setAddDraft({ smartMode: 'text' });
+    setAddDraft({ smartMode: 'image' });
     setAddPreset({ mode: 'exp', debtId: null, goalId: null, commitmentId: null, focused: true });
     setShowAdd(true);
   };
@@ -502,9 +586,9 @@ function AppRoot() {
     setAddPreset({ mode: 'commitment', debtId: null, goalId: null, commitmentId });
     setShowAdd(true);
   };
-  const openNewTracker = () => {
+  const openNewTracker = (preset = null) => {
     if (!shouldShowTrackersTab(cfg)) return;
-    setNewItemPreset(null);
+    setNewItemPreset(preset || null);
     setShowNewItem(true);
   };
   const openLinkedPlan = (preset) => {
@@ -512,7 +596,7 @@ function AppRoot() {
     setShowNewItem(true);
   };
 
-  const handleFab = tab === 'trackers' ? openNewTracker : () => openAddExp(false);
+  const handleFab = () => openAddExp(false);
   const classicEntry = cfg.entryMode === 'classic';
 
   const openNotifications = async () => {
@@ -523,7 +607,7 @@ function AppRoot() {
   };
 
   const dismissNotifications = async (keys = []) => {
-    const next = Array.from(new Set([...dismissedNotifKeys, ...keys])).slice(-200);
+    const next = pruneNotificationKeys(Array.from(new Set([...dismissedNotifKeys, ...keys])).slice(-200));
     setDismissedNotifKeys(next);
     await AsyncStorage.setItem(NOTIFICATION_DISMISSED_STORAGE_KEY, JSON.stringify(next));
   };
@@ -592,7 +676,16 @@ function AppRoot() {
       />
     ),
     history: <HistoryScreen />,
-    trackers: <TrackersLabScreen focusRequest={trackerFocus} onQuickPay={openQuickPay} onQuickSave={openQuickSave} onQuickCommitment={openQuickCommitment} onAddLinkedPlan={openLinkedPlan} onNewTracker={openNewTracker} quickEntry={!classicEntry} />,
+    trackers: (
+      <TrackersLabScreen
+        focusRequest={trackerFocus}
+        onQuickPay={openQuickPay}
+        onQuickSave={openQuickSave}
+        onQuickCommitment={openQuickCommitment}
+        onAddLinkedPlan={openLinkedPlan}
+        onNewTracker={openNewTracker}
+      />
+    ),
     reports: <ReportsScreen />,
     settings: <SettingsScreen onOpenArchive={() => setArchiveOpen(true)} tabs={visibleTabs} />,
   };
@@ -606,7 +699,7 @@ function AppRoot() {
           <View style={[s.demoBanner, { backgroundColor: th.warnBg, borderColor: th.warn }]}>
             <Ionicons name="flask-outline" size={14} color={th.warn} />
             <Text style={{ color: th.warn, fontSize: 11, fontWeight: '900' }}>
-              {cfg.lang === 'ar' ? 'بيانات تجريبية — لا تتم مزامنتها' : 'Demo data — never synced'}
+              {cfg.lang === 'ar' ? 'بيانات تجريبية - لا تتم مزامنتها' : 'Demo data - never synced'}
             </Text>
           </View>
         ) : null}
@@ -664,8 +757,11 @@ function AppRoot() {
         </View>
       </View>
 
-      {classicEntry && ['home', 'trackers'].includes(tab) ? (
-        <DraggableFab th={th} onPress={handleFab} bottomInset={bottomInset} label="" color={tab === 'trackers' ? th.warn : th.primary} />
+      {classicEntry && tab === 'home' ? (
+        <DraggableFab th={th} onPress={handleFab} bottomInset={bottomInset} label="" color={th.primary} />
+      ) : null}
+      {classicEntry && tab === 'trackers' ? (
+        <DraggableFab th={th} onPress={() => openNewTracker()} bottomInset={bottomInset} label="" color={th.primary} />
       ) : null}
 
       <AddTransModal

@@ -1,5 +1,5 @@
 import { today, normalizeDate } from '../../utils/calc';
-import { getDefaultWalletId, getWalletAvailableBalances, normalizeWallets } from '../../lib/wallets';
+import { canSpendFromWallet, getDefaultWalletId, getWalletAvailableBalances, normalizeWallets } from '../../lib/wallets';
 import { monthKey } from '../../lib/commitments';
 import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
 import { inferTransactionTag } from '../../lib/transactionTags';
@@ -11,6 +11,7 @@ import {
   syncCommitmentPaidMonth,
   uid,
 } from '../domain';
+import { debtLifecycle, goalLifecycle, reopenCompletionCommitments } from '../../lib/trackerLifecycle';
 
 export const createTransactionSlice = (set, get) => ({
   addTrans: async (t) => {
@@ -33,9 +34,21 @@ export const createTransactionSlice = (set, get) => ({
       ts: Date.now(),
       dateISO: t.dateISO || today(),
     };
+    if (Number(tx.amt || 0) < 0) {
+      const spendCheck = canSpendFromWallet({
+        wallets: get().wallets,
+        trans: get().trans,
+        currency: get().cfg.currency,
+        defaultWalletId: get().cfg.defaultWalletId,
+        walletId: tx.walletId,
+        amount: Math.abs(tx.amt),
+      });
+      if (!spendCheck.ok) return false;
+    }
     set(s => ({ trans: [tx, ...s.trans] }));
     await get().saveLocal();
     await get().syncCloud();
+    return true;
 
   },
 
@@ -159,6 +172,19 @@ export const createTransactionSlice = (set, get) => ({
     const nextAmt = hasAmt
       ? (current.isDebtPayment ? debtSign * linkedAbsAmt : current.isGoalSaving ? 0 : (Number(safePatch.amt) < 0 ? -linkedAbsAmt : linkedAbsAmt))
       : current.amt;
+    const nextWalletId = safePatch.walletId || current.walletId || getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
+    if (Number(nextAmt || 0) < 0) {
+      const spendCheck = canSpendFromWallet({
+        wallets: get().wallets,
+        trans: get().trans,
+        currency: get().cfg.currency,
+        defaultWalletId: get().cfg.defaultWalletId,
+        walletId: nextWalletId,
+        amount: Math.abs(nextAmt),
+        excludeTransactionId: id,
+      });
+      if (!spendCheck.ok) return false;
+    }
     const nextCommitmentMonth = current.isCommitmentPayment && safePatch.dateISO
       ? monthKey(safePatch.dateISO)
       : current.commitmentMonth;
@@ -198,7 +224,9 @@ export const createTransactionSlice = (set, get) => ({
                 ? { ...p, ...(hasAmt ? { amt: Math.abs(nextAmt) } : {}), ...(patch.dateISO ? { date: patch.dateISO } : {}) }
                 : p
             ));
-            return { ...d, payments, paid: debtPaidTotal(d, payments) };
+            const paid = debtPaidTotal(d, payments);
+            const next = { ...d, payments, paid };
+            return { ...next, ...debtLifecycle(next, paid, patch.dateISO || today()) };
           })
         : current.isDebtOrigin
           ? s.debts.map(d => d.id === current.debtId ? {
@@ -215,7 +243,9 @@ export const createTransactionSlice = (set, get) => ({
                 ? { ...sv, ...(hasAmt ? { amt: Math.abs(nextAmt) } : {}), ...(patch.dateISO ? { date: patch.dateISO } : {}) }
                 : sv
             ));
-            return { ...g, savings, cur: Math.min(goalSavedTotal(g, savings), g.target) };
+            const cur = Math.min(goalSavedTotal(g, savings), g.target);
+            const next = { ...g, savings, cur };
+            return { ...next, ...goalLifecycle(next, cur, patch.dateISO || today()) };
           })
         : s.goals,
         commitments: current.isCommitmentPayment
@@ -223,6 +253,26 @@ export const createTransactionSlice = (set, get) => ({
           : s.commitments,
       };
     });
+    if (current.isDebtPayment || current.isGoalSaving) {
+      const linkedDebtAfter = current.isDebtPayment ? get().debts.find(item => item.id === current.debtId) : null;
+      const linkedGoalAfter = current.isGoalSaving ? get().goals.find(item => item.id === current.goalId) : null;
+      const completionNotice = linkedDebtAfter?.status === 'settled'
+        ? 'debt_ended'
+        : linkedGoalAfter?.status === 'settled'
+          ? 'goal_completed'
+          : undefined;
+      set(s => ({
+        trans: s.trans.map(item => item.id === id ? { ...item, completionNotice } : item),
+        commitments: reopenCompletionCommitments(s.commitments, [
+          ...(linkedDebt?.status === 'settled' && linkedDebtAfter?.status === 'active'
+            ? [{ linkedType: linkedDebt.direction === 'receivable' ? 'receivable' : 'debt', linkedId: current.debtId, endReason: 'debt_settled' }]
+            : []),
+          ...(linkedGoal?.status === 'settled' && linkedGoalAfter?.status === 'active'
+            ? [{ linkedType: 'goal', linkedId: current.goalId, endReason: 'goal_completed' }]
+            : []),
+        ]),
+      }));
+    }
     await get().saveLocal();
     await get().syncCloud();
     return true;
@@ -230,6 +280,8 @@ export const createTransactionSlice = (set, get) => ({
 
   deleteTrans: async (id) => {
     const t = get().trans.find(x => x.id === id);
+    const linkedDebtBefore = t?.isDebtPayment ? get().debts.find(item => item.id === t.debtId) : null;
+    const linkedGoalBefore = t?.isGoalSaving ? get().goals.find(item => item.id === t.goalId) : null;
     set(s => {
       const trans = s.trans.filter(x => x.id !== id);
       return {
@@ -239,7 +291,8 @@ export const createTransactionSlice = (set, get) => ({
             if (d.id !== t.debtId) return d;
             const payments = (d.payments || []).filter(p => p.id !== t.paymentId);
             const paid = debtPaidTotal(d, payments);
-            return { ...d, payments, paid };
+            const next = { ...d, payments, paid };
+            return { ...next, ...debtLifecycle(next, paid, today()) };
           })
         : (t && t.isDebtOrigin)
           ? s.debts.map(d => d.id === t.debtId ? { ...d, originMode: 'previous', originTransactionId: null } : d)
@@ -249,12 +302,23 @@ export const createTransactionSlice = (set, get) => ({
             if (g.id !== t.goalId) return g;
             const savings = (g.savings || []).filter(sv => sv.id !== t.savingId);
             const cur = goalSavedTotal(g, savings);
-            return { ...g, savings, cur };
+            const next = { ...g, savings, cur: Math.min(cur, g.target) };
+            return { ...next, ...goalLifecycle(next, next.cur, today()) };
           })
         : s.goals,
-        commitments: (t && t.isCommitmentPayment)
-        ? syncCommitmentPaidMonth(s.commitments, trans, t.commitmentId)
-        : s.commitments,
+        commitments: reopenCompletionCommitments(
+          (t && t.isCommitmentPayment)
+            ? syncCommitmentPaidMonth(s.commitments, trans, t.commitmentId)
+            : s.commitments,
+          [
+            ...(linkedDebtBefore?.status === 'settled'
+              ? [{ linkedType: linkedDebtBefore.direction === 'receivable' ? 'receivable' : 'debt', linkedId: t.debtId, endReason: 'debt_settled' }]
+              : []),
+            ...(linkedGoalBefore?.status === 'settled'
+              ? [{ linkedType: 'goal', linkedId: t.goalId, endReason: 'goal_completed' }]
+              : []),
+          ],
+        ),
       };
     });
     await get().saveLocal({ force: financialDataCount(get()) === 0 });
@@ -281,13 +345,21 @@ export const createTransactionSlice = (set, get) => ({
         const payments = (debt.payments || []).filter(payment => !debtPayments.has(`${debt.id}:${payment.id}`));
         return payments.length === (debt.payments || []).length
           ? debt
-          : { ...debt, payments, paid: debtPaidTotal(debt, payments) };
+          : (() => {
+              const paid = debtPaidTotal(debt, payments);
+              const next = { ...debt, payments, paid };
+              return { ...next, ...debtLifecycle(next, paid, today()) };
+            })();
       });
       const goals = s.goals.map(goal => {
         const savings = (goal.savings || []).filter(saving => !goalSavings.has(`${goal.id}:${saving.id}`));
         return savings.length === (goal.savings || []).length
           ? goal
-          : { ...goal, savings, cur: Math.min(goalSavedTotal(goal, savings), goal.target) };
+          : (() => {
+              const cur = Math.min(goalSavedTotal(goal, savings), goal.target);
+              const next = { ...goal, savings, cur };
+              return { ...next, ...goalLifecycle(next, cur, today()) };
+            })();
       });
       return {
         trans,

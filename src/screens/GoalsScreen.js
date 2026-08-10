@@ -22,6 +22,7 @@ const copy = (lang) => {
     remaining: ar ? 'إجمالي المتبقي' : 'Total remaining',
     active: ar ? 'النشطة' : 'Active',
     completed: ar ? 'المكتملة' : 'Completed',
+    ended: ar ? 'اكتمل الهدف' : 'Goal completed',
     lastSave: ar ? 'آخر توفير' : 'Last saving',
     target: ar ? 'الهدف' : 'Target',
     progress: ar ? 'التقدم' : 'Progress',
@@ -151,6 +152,7 @@ export default function GoalsScreen({ onQuickSave }) {
             onChange={(date) => setEditingSaving(prev => ({ ...prev, date }))}
             th={th}
             lang={cfg.lang}
+            monthNameStyle={cfg.monthNameStyle}
             style={{ width: '100%' }}
           />
           <View style={[s.iconActions, { flexDirection: rowDir }]}>
@@ -233,6 +235,7 @@ export default function GoalsScreen({ onQuickSave }) {
                   onChange={(createdAt) => setEditingGoal(prev => ({ ...prev, createdAt }))}
                   th={th}
                   lang={cfg.lang}
+                  monthNameStyle={cfg.monthNameStyle}
                   style={{ marginBottom: 8 }}
                 />
                 <View style={[s.editActions, { flexDirection: rowDir }]}>
@@ -254,7 +257,7 @@ export default function GoalsScreen({ onQuickSave }) {
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: th.text, ...weight('900'), fontSize: 15, textAlign: align }} numberOfLines={1}>{goal.name}</Text>
                       <Text style={{ color: done ? th.inc : th.sub, fontSize: 12, lineHeight: 18, marginTop: 3, textAlign: align }}>
-                        {done ? L.completed : `${T.remaining}: ${fmt(remaining)} ${sym}`}
+                        {done ? T.ended : `${T.remaining}: ${fmt(remaining)} ${sym}`}
                       </Text>
                     </View>
                   </View>

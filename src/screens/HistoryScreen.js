@@ -50,6 +50,8 @@ const copy = (lang) => {
     linked: ar ? 'مرتبطة بمتابعة' : 'Linked tracker',
     recurring: ar ? 'متكررة' : 'Recurring',
     active: ar ? 'مفعّل' : 'active',
+    debtEnded: ar ? 'انتهى الدين' : 'Debt ended',
+    goalCompleted: ar ? 'اكتمل الهدف' : 'Goal completed',
     duplicate: ar ? 'تكرار الحركة' : 'Duplicate transaction',
     fromDate: ar ? 'من تاريخ' : 'From date',
     toDate: ar ? 'إلى تاريخ' : 'To date',
@@ -126,7 +128,7 @@ const HistoryListHeader = ({
 );
 
 export default function HistoryScreen() {
-  const { trans, wallets, cats, cfg, deleteTrans, deleteTransMany, duplicateTrans } = useStore();
+  const { trans, debts, goals, wallets, cats, cfg, deleteTrans, deleteTransMany, duplicateTrans } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
   const T = copy(cfg.lang);
@@ -328,6 +330,19 @@ export default function HistoryScreen() {
     const toWallet = findWallet(item.toWalletId);
     const color = isTransfer || isGoalSaving ? th.primary : amount > 0 ? th.inc : th.exp;
     const linked = item.isDebtPayment || item.isGoalSaving || item.isCommitmentPayment;
+    const debt = item.isDebtPayment ? debts.find(entity => entity.id === item.debtId) : null;
+    const goal = item.isGoalSaving ? goals.find(entity => entity.id === item.goalId) : null;
+    const latestDebtPaymentId = debt?.status === 'settled'
+      ? debt.payments?.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || Number(b.ts || 0) - Number(a.ts || 0))[0]?.id
+      : null;
+    const latestGoalSavingId = goal?.status === 'settled'
+      ? goal.savings?.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || Number(b.ts || 0) - Number(a.ts || 0))[0]?.id
+      : null;
+    const completionLabel = item.completionNotice === 'debt_ended' || (item.isDebtPayment && item.paymentId === latestDebtPaymentId)
+      ? T.debtEnded
+      : item.completionNotice === 'goal_completed' || (item.isGoalSaving && item.savingId === latestGoalSavingId)
+        ? T.goalCompleted
+        : null;
     const title = isTransfer ? T.walletTransfer : item.title;
     const metaLabel = isTransfer
       ? `${getWalletLabel(fromWallet, cfg.lang)} -> ${getWalletLabel(toWallet, cfg.lang)}`
@@ -364,6 +379,11 @@ export default function HistoryScreen() {
                 {metaLabel}
               </Text>
             </View>
+            {completionLabel ? (
+              <Text style={{ color: th.inc, fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: align, writingDirection }}>
+                {completionLabel}
+              </Text>
+            ) : null}
           </View>
           <View style={s.amountBlock}>
             <Text style={{ color, ...weight('900'), fontSize: 15, textAlign: align }} numberOfLines={1}>
@@ -522,7 +542,7 @@ export default function HistoryScreen() {
       <Modal visible={showFilter} transparent animationType="slide" onRequestClose={closeFilters}>
         <View style={[s.overlay, { backgroundColor: th.overlay }]}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={closeFilters} />
-          <View style={[s.sheet, { backgroundColor: th.card, paddingBottom: 14 + Math.max(insets.bottom, 8) }]}>
+          <View style={[s.sheet, { backgroundColor: th.card, paddingBottom: 12 + Math.max(insets.bottom, 8) }]}>
             <View style={[s.sheetHeader, { flexDirection: rowDir }]}>
               <View style={{ flex: 1 }}>
                 <Text style={[s.sheetTitle, { color: th.text, textAlign: align, marginBottom: 3 }]}>{L.filterTitle}</Text>
@@ -539,11 +559,11 @@ export default function HistoryScreen() {
               <View style={[s.dateRange, { flexDirection: rowDir }]}>
                 <View style={s.dateRangeField}>
                   <Text style={[s.filterLabel, { color: th.sub, textAlign: align }]}>{T.fromDate}</Text>
-                  <DateField value={currentDraft.dateFrom} onChange={value => updateDraft('dateFrom', value)} th={th} lang={cfg.lang} allowEmpty />
+                  <DateField value={currentDraft.dateFrom} onChange={value => updateDraft('dateFrom', value)} th={th} lang={cfg.lang} monthNameStyle={cfg.monthNameStyle} allowEmpty />
                 </View>
                 <View style={s.dateRangeField}>
                   <Text style={[s.filterLabel, { color: th.sub, textAlign: align }]}>{T.toDate}</Text>
-                  <DateField value={currentDraft.dateTo} onChange={value => updateDraft('dateTo', value)} th={th} lang={cfg.lang} allowEmpty />
+                  <DateField value={currentDraft.dateTo} onChange={value => updateDraft('dateTo', value)} th={th} lang={cfg.lang} monthNameStyle={cfg.monthNameStyle} allowEmpty />
                 </View>
               </View>
             ) : null}
@@ -571,29 +591,29 @@ export default function HistoryScreen() {
 }
 
 const s = StyleSheet.create({
-  searchBox: { alignItems: 'center', borderRadius: RADIUS.lg, paddingHorizontal: 13, borderWidth: 1, marginBottom: 10, ...SHADOW.card },
-  filterBtn: { borderRadius: RADIUS.lg, paddingHorizontal: 13, paddingVertical: 10, alignItems: 'center', borderWidth: 1, gap: 10, ...SHADOW.card },
+  searchBox: { alignItems: 'center', borderRadius: RADIUS.md, paddingHorizontal: 12, borderWidth: 1, marginBottom: 8, ...SHADOW.card },
+  filterBtn: { borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center', borderWidth: 1, gap: 9, ...SHADOW.card },
   dayBlock: { marginBottom: 6 },
-  row: { minHeight: 58, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: RADIUS.lg, borderWidth: 1, marginBottom: 6, gap: 8 },
+  row: { minHeight: 54, alignItems: 'center', paddingHorizontal: 9, paddingVertical: 6, borderRadius: RADIUS.md, borderWidth: 1, marginBottom: 6, gap: 8 },
   rowMeta: { alignItems: 'center', gap: 6, marginTop: 1 },
   rowMain: { flex: 1, alignItems: 'center' },
   rowContent: { flex: 1, marginHorizontal: 10 },
   amountBlock: { minWidth: 92, alignItems: 'flex-end', justifyContent: 'center' },
-  iconCell: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  iconCell: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   empty: { minHeight: 170, borderRadius: RADIUS.xl, borderWidth: 1, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', padding: 18 },
   emptyAction: { minHeight: 38, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14, marginTop: 12 },
   overlay: { flex: 1, justifyContent: 'flex-end' },
-  sheet: { maxHeight: '88%', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 18 },
-  sheetHeader: { alignItems: 'center', gap: 10, marginBottom: 12 },
-  sheetTitle: { fontSize: TYPE.title, ...weight('900') },
-  filterScroll: { paddingBottom: 18 },
+  sheet: { maxHeight: '76%', borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 16, paddingTop: 14 },
+  sheetHeader: { alignItems: 'center', gap: 8, marginBottom: 10 },
+  sheetTitle: { fontSize: 18, lineHeight: 24, ...weight('900') },
+  filterScroll: { paddingBottom: 12 },
   filterLabel: { fontSize: 12, ...weight('900'), marginBottom: 10 },
   filterPickerBlock: { marginBottom: 8 },
-  filterPickerRow: { minHeight: 56, alignItems: 'center', gap: 11, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
+  filterPickerRow: { minHeight: 50, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 7 },
   filterOptionList: { borderWidth: 1, borderRadius: RADIUS.md, marginTop: 5, padding: 5 },
-  filterOption: { minHeight: 43, alignItems: 'center', gap: 10, borderRadius: RADIUS.sm, paddingHorizontal: 10, paddingVertical: 7 },
-  filterActions: { gap: 10, borderTopWidth: 1, paddingTop: 12 },
-  halfBtn: { flex: 1, minHeight: 46, borderRadius: RADIUS.md, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 },
+  filterOption: { minHeight: 39, alignItems: 'center', gap: 9, borderRadius: RADIUS.sm, paddingHorizontal: 10, paddingVertical: 6 },
+  filterActions: { gap: 9, borderTopWidth: 1, paddingTop: 10 },
+  halfBtn: { flex: 1, minHeight: 42, borderRadius: RADIUS.md, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 },
   dateRange: { gap: 10, marginTop: 14 },
   dateRangeField: { flex: 1 },
   filterInput: { minHeight: 46, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 12, fontSize: 13, ...weight('800') },

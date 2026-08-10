@@ -1,17 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, TextInput, Switch, Alert, Appearance, Pressable, StyleSheet, Modal } from 'react-native';
+import { View, Text, ScrollView, TextInput, Switch, Alert, Appearance, Pressable, StyleSheet, Modal, Image } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
 import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { COUNTRIES, CURRENCIES, ICON_OPTIONS, CAT_COLORS, DEF_HOME_CARDS, DEF_HOME_SECTIONS } from '../lib/constants';
+import { CATEGORY_FLOWS, categoryFlowLabel, getCategoriesForFlow, normalizeCategoryFlow } from '../lib/categories';
 import { checkSupabaseHealth, supabase } from '../lib/supabase';
 import { getAuthRedirectUrl } from '../lib/authCallback';
 import { isBiometricSupported, authenticate } from '../lib/biometric';
 import { setupDailyNotif, cancelNotifs } from '../lib/notifications';
 import { defaultScopeForProfile, getFeatureDataCount, getModules, profileModuleDefaults } from '../lib/modules';
-import { getDefaultWalletId, getWalletBalances, getWalletLabel } from '../lib/wallets';
+import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel } from '../lib/wallets';
 import { RADIUS, SHADOW, TYPE, weight } from '../lib/tokens';
 import ActionMenu from '../components/ActionMenu';
 import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
@@ -19,6 +21,16 @@ import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components
 import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
 import { resolveSystemTheme } from '../lib/systemTheme';
 import { inspectBackupData } from '../lib/backupData';
+import { MONTH_NAME_STYLES, monthStyleLabel } from '../lib/months';
+import {
+  accountIdentityPatch,
+  accountPublicId,
+  deriveDisplayName,
+  isValidUsername,
+  normalizePhone,
+  normalizeUsername,
+  upsertProfileIdentity,
+} from '../lib/accountIdentity';
 
 const UI = {
   ar: {
@@ -33,6 +45,7 @@ const UI = {
     data: 'البيانات',
     account: 'الحساب',
     language: 'اللغة',
+    monthNames: 'عرض الأشهر',
     systemLanguage: 'النظام',
     arabicLanguage: 'عربي',
     englishLanguage: 'English',
@@ -54,8 +67,8 @@ const UI = {
     commitmentsSection: 'التزامات',
     commitmentName: 'اسم الالتزام',
     commitmentAmount: 'مبلغ الالتزام',
-    commitmentDay: 'موعد الالتزام',
-    nextDeduction: 'الاستقطاع القادم',
+    commitmentDay: 'شهر الالتزام',
+    nextDeduction: 'الشهر القادم',
     commitmentReminderInline: 'تذكير الالتزامات',
     commitmentWallet: 'محفظة الدفع',
     commitmentCategory: 'تصنيف الالتزام',
@@ -64,8 +77,6 @@ const UI = {
     repeatMonthly: 'يتكرر شهرياً',
     commitmentDetails: 'تفاصيل الالتزام',
     postponeCommitment: 'تأجيل الدفع',
-    postponeDay: 'يوم',
-    postpone3Days: '3 أيام',
     postponeNextMonth: 'الشهر القادم',
     deferredUntil: 'مؤجل إلى',
     paidThisMonth: 'مدفوع هذا الشهر',
@@ -95,7 +106,7 @@ const UI = {
     fifteenMinutes: '15 دقيقة',
     debtAlert: 'تذكير دين عليّ',
     debtBefore: 'قبل الموعد',
-    commitmentBefore: 'قبل موعد الالتزام',
+    commitmentBefore: '\u062a\u0646\u0628\u064a\u0647 \u062e\u0644\u0627\u0644 \u0634\u0647\u0631 \u0627\u0644\u0627\u0644\u062a\u0632\u0627\u0645',
     dailyAlert: 'تذكير يومي',
     alertTime: 'وقت التذكير',
     testNotification: 'اختبار إشعار',
@@ -136,6 +147,7 @@ const UI = {
     requiredFields: 'اكتب البريد الإلكتروني وكلمة المرور.',
     invalidEmail: 'اكتب بريداً إلكترونياً صحيحاً.',
     passwordLength: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.',
+    invalidCredentials: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
     verificationTitle: 'الحساب غير مفعّل بعد',
     verificationPending: 'أرسلنا رابط التفعيل إلى بريدك. افتحه على هذا الهاتف لإكمال التسجيل والعودة إلى MYFI.',
     verificationUnconfirmed: 'لم يتم إنشاء حساب جديد. قد يكون البريد مستخدماً أو غير صالح؛ تحقق من البريد وحاول تسجيل الدخول أو الاستعادة.',
@@ -163,6 +175,7 @@ const UI = {
     data: 'Data',
     account: 'Account',
     language: 'Language',
+    monthNames: 'Month display',
     systemLanguage: 'System',
     arabicLanguage: 'Arabic',
     englishLanguage: 'English',
@@ -184,8 +197,8 @@ const UI = {
     commitmentsSection: 'Commitments',
     commitmentName: 'Commitment name',
     commitmentAmount: 'Commitment amount',
-    commitmentDay: 'Commitment due date',
-    nextDeduction: 'Next deduction',
+    commitmentDay: 'Commitment month',
+    nextDeduction: 'Next month',
     commitmentReminderInline: 'Commitment reminders',
     commitmentWallet: 'Payment wallet',
     commitmentCategory: 'Category',
@@ -194,8 +207,6 @@ const UI = {
     repeatMonthly: 'Repeat monthly',
     commitmentDetails: 'Commitment details',
     postponeCommitment: 'Postpone payment',
-    postponeDay: '1 day',
-    postpone3Days: '3 days',
     postponeNextMonth: 'Next month',
     deferredUntil: 'Deferred until',
     paidThisMonth: 'Paid this month',
@@ -225,7 +236,7 @@ const UI = {
     fifteenMinutes: '15 minutes',
     debtAlert: 'Amount reminder',
     debtBefore: 'Before due',
-    commitmentBefore: 'Before due',
+    commitmentBefore: 'Alert during the commitment month',
     dailyAlert: 'Daily reminder',
     alertTime: 'Reminder time',
     testNotification: 'Test notification',
@@ -266,6 +277,7 @@ const UI = {
     requiredFields: 'Enter your email and password.',
     invalidEmail: 'Enter a valid email address.',
     passwordLength: 'Password must be at least 8 characters.',
+    invalidCredentials: 'Email or password is incorrect.',
     verificationTitle: 'Account not active yet',
     verificationPending: 'We sent an activation link. Open it on this phone to finish registration and return to MYFI.',
     verificationUnconfirmed: 'No new account was created. The email may already be used or invalid; check the address, then try sign-in or recovery.',
@@ -382,7 +394,6 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
     { key: 'goals', label: T.goalsFeature, icon: 'flag-outline' },
     { key: 'commitments', label: isAr ? 'الالتزامات المتكررة' : 'Recurring commitments', icon: 'calendar-outline' },
     { key: 'budgets', label: isAr ? 'الميزانيات' : 'Budgets', icon: 'pie-chart-outline' },
-    { key: 'recurring', label: isAr ? 'الحركات المتكررة' : 'Recurring entries', icon: 'repeat-outline' },
   ];
   const homeContentTitle = cfg.lang === 'ar' ? 'محتوى الرئيسية' : 'Home content';
   const homeMetricsTitle = cfg.lang === 'ar' ? 'مؤشرات الشهر' : 'Month metrics';
@@ -489,6 +500,10 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
   const [open, setOpen] = useState(null);
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
+  const [accountNameDraft, setAccountNameDraft] = useState(cfg.displayName || '');
+  const [usernameDraft, setUsernameDraft] = useState(cfg.username || '');
+  const [phoneDraft, setPhoneDraft] = useState(cfg.phone || '');
+  const [authAgreement, setAuthAgreement] = useState(cfg.accountConsentAccepted === true);
   const emailRef = useRef('');
   const passRef = useRef('');
   const [authMode, setAuthMode] = useState('signin');
@@ -496,6 +511,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
   const [loading, setLoading] = useState(false);
   const [authServiceStatus, setAuthServiceStatus] = useState('idle');
   const [newCatName, setNewCatName] = useState('');
+  const [newCatFlow, setNewCatFlow] = useState(CATEGORY_FLOWS.EXPENSE);
   const [newCatIcon, setNewCatIcon] = useState(ICON_OPTIONS[0]);
   const [newCatColor, setNewCatColor] = useState(CAT_COLORS[0]);
   const [newWalletName, setNewWalletName] = useState('');
@@ -528,7 +544,11 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
           : dirty
             ? { icon: 'cloud-upload-outline', color: th.warn, text: isAr ? 'بانتظار المزامنة' : 'Pending sync' }
             : { icon: 'cloud-done-outline', color: th.inc, text: isAr ? 'محفوظ ومتصل' : 'Saved and connected' };
-  const walletRows = getWalletBalances(wallets, trans, cfg.currency, defaultWalletId)
+  const accountEmailText = user?.email || (isAr ? '\u063a\u064a\u0631 \u0645\u0633\u062c\u0644' : 'Not signed in');
+  const accountDisplayName = deriveDisplayName({ user, cfg }) || (isAr ? '\u062d\u0633\u0627\u0628 \u0645\u062d\u0644\u064a' : 'Local account');
+  const accountUsername = accountPublicId({ user, cfg });
+  const accountInitial = (accountDisplayName || 'M').trim().charAt(0).toUpperCase();
+  const walletRows = getWalletAvailableBalances(wallets, trans, cfg.currency, defaultWalletId)
     .sort((a, b) => (a.id === defaultWalletId ? -1 : b.id === defaultWalletId ? 1 : 0));
   const walletSelection = useMultiSelect(
     walletRows.filter(wallet => wallet.id !== defaultWalletId).map(wallet => wallet.id),
@@ -543,6 +563,13 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
     if (settingsSheet !== 'country') setCountryQuery('');
     if (settingsSheet !== 'currency') setCurrencyQuery('');
   }, [settingsSheet]);
+
+  useEffect(() => {
+    setAccountNameDraft(deriveDisplayName({ user, cfg }));
+    setUsernameDraft(normalizeUsername(cfg.username || user?.user_metadata?.username || ''));
+    setPhoneDraft(normalizePhone(cfg.phone || user?.user_metadata?.phone || ''));
+    setAuthAgreement(cfg.accountConsentAccepted === true);
+  }, [cfg.displayName, cfg.username, cfg.phone, cfg.accountConsentAccepted, user?.id]);
 
   useEffect(() => {
     if (open !== 'account' || user) return undefined;
@@ -639,17 +666,38 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
   const handleAuth = async () => {
     const emailValue = emailRef.current.trim().toLowerCase();
     const passValue = passRef.current;
+    const usernameValue = normalizeUsername(usernameDraft);
+    const phoneValue = normalizePhone(phoneDraft);
     if (!emailValue || !passValue.trim()) {
-      Alert.alert('', T.requiredFields);
+      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, T.requiredFields);
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(emailValue)) {
-      Alert.alert('', T.invalidEmail);
+      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, T.invalidEmail);
       return;
     }
     if (passValue.length < 8) {
-      Alert.alert('', T.passwordLength);
+      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, T.passwordLength);
       return;
+    }
+    if (authMode === 'signup') {
+      if (!accountNameDraft.trim()) {
+        Alert.alert(T.signUp, isAr ? 'اكتب اسمك حتى يظهر في هوية المستخدم.' : 'Enter your name for your account identity.');
+        return;
+      }
+      if (!isValidUsername(usernameValue)) {
+        Alert.alert(
+          T.signUp,
+          isAr
+            ? 'اكتب يوزر نيم فريد من 3 أحرف على الأقل، بحروف إنكليزية وأرقام وشرطة سفلية.'
+            : 'Use a unique username, 3+ characters, letters, numbers, and underscore.',
+        );
+        return;
+      }
+      if (!authAgreement) {
+        Alert.alert(T.signUp, isAr ? 'وافق على شروط الحساب والمزامنة قبل إنشاء الحساب.' : 'Accept the account and sync terms before creating the account.');
+        return;
+      }
     }
     setLoading(true);
     try {
@@ -665,9 +713,31 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
         ? await supabase.auth.signInWithPassword(credentials)
         : await supabase.auth.signUp({
             ...credentials,
-            options: { emailRedirectTo: getAuthRedirectUrl('confirm') },
+            options: {
+              emailRedirectTo: getAuthRedirectUrl('confirm'),
+              data: {
+                displayName: accountNameDraft.trim(),
+                full_name: accountNameDraft.trim(),
+                username: usernameValue,
+                phone: phoneValue,
+              },
+            },
           });
       if (result.error) throw result.error;
+      if (authMode === 'signup' && result.data?.user?.id) {
+        const profileResult = await upsertProfileIdentity(supabase, result.data.user.id, {
+          displayName: accountNameDraft,
+          username: usernameValue,
+          phone: phoneValue,
+        });
+        if (profileResult.error) throw profileResult.error;
+      }
+      await setCfg(accountIdentityPatch({
+        displayName: accountNameDraft,
+        username: usernameValue,
+        phone: phoneValue,
+        consentAccepted: authMode === 'signup' ? authAgreement : undefined,
+      }));
       if (result.data?.session?.user) {
         await setUser(result.data.session.user);
         Alert.alert('', T.loginSuccess);
@@ -684,16 +754,60 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
       }
     } catch (e) {
       const message = String(e?.message || '');
+      const invalidCredentials = /invalid login credentials/i.test(message);
       const networkFailure = /network|fetch|resolve|connection/i.test(message);
-      Alert.alert('', networkFailure ? T.authUnavailable : message);
+      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, invalidCredentials ? T.invalidCredentials : networkFailure ? T.authUnavailable : message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: 'local' });
     await setUser(null);
+  };
+
+  const saveAccountIdentity = async () => {
+    const usernameValue = normalizeUsername(usernameDraft);
+    if (!accountNameDraft.trim()) {
+      Alert.alert(isAr ? 'حسابي' : 'My account', isAr ? 'اكتب الاسم الذي سيظهر داخل التطبيق.' : 'Enter the name shown in the app.');
+      return;
+    }
+    if (!isValidUsername(usernameValue)) {
+      Alert.alert(
+        isAr ? 'حسابي' : 'My account',
+        isAr
+          ? 'اكتب يوزر نيم فريد من 3 أحرف على الأقل، بحروف إنكليزية وأرقام وشرطة سفلية.'
+          : 'Use a unique username, 3+ characters, letters, numbers, and underscore.',
+      );
+      return;
+    }
+    const patch = accountIdentityPatch({
+      displayName: accountNameDraft,
+      username: usernameValue,
+      phone: phoneDraft,
+      consentAccepted: authAgreement,
+    });
+    if (user?.id) {
+      const profileResult = await upsertProfileIdentity(supabase, user.id, patch);
+      if (profileResult.error) {
+        Alert.alert(isAr ? 'حسابي' : 'My account', profileResult.error.message);
+        return;
+      }
+    }
+    await setCfg(patch);
+    Alert.alert(isAr ? 'حسابي' : 'My account', isAr ? 'تم حفظ هوية الحساب.' : 'Account identity saved.');
+  };
+
+  const pickAccountAvatar = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.75,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    if (result.canceled || !result.assets?.[0]?.uri) return;
+    await setCfg({ avatarUri: result.assets[0].uri });
   };
 
   const handlePasswordReset = async () => {
@@ -792,9 +906,11 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
         emoji: '',
         icon: newCatIcon,
         color: newCatColor,
+        flow: newCatFlow,
       },
     ]);
     setNewCatName('');
+    setNewCatFlow(CATEGORY_FLOWS.EXPENSE);
     setNewCatIcon(ICON_OPTIONS[0]);
     setNewCatColor(CAT_COLORS[0]);
     setCategoryModalOpen(false);
@@ -1070,7 +1186,18 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
         isAr ? 'ستعود بياناتك الحقيقية كما كانت.' : 'Your real data will be restored exactly as it was.',
         [
           { text: T.cancel, style: 'cancel' },
-          { text: isAr ? 'خروج' : 'Exit', onPress: exitDemoMode },
+          {
+            text: isAr ? 'خروج' : 'Exit',
+            onPress: async () => {
+              const ok = await exitDemoMode();
+              Alert.alert(
+                isAr ? 'البيانات التجريبية' : 'Demo data',
+                ok
+                  ? (isAr ? 'تم الخروج من التجربة. تكدر تبدأ ببياناتك الحقيقية الآن.' : 'Demo mode is off. You can start with your real data now.')
+                  : (isAr ? 'لم نتمكن من إيقاف التجربة. حاول مرة أخرى.' : 'Could not exit demo mode. Try again.'),
+              );
+            },
+          },
         ],
       );
       return;
@@ -1218,6 +1345,11 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
           onPress={() => setSettingsSheet('language')}
         />
         <Row
+          label={T.monthNames}
+          value={monthStyleLabel(cfg.monthNameStyle, cfg.lang)}
+          onPress={() => setSettingsSheet('monthNames')}
+        />
+        <Row
           label={T.theme}
           value={cfg.themeMode === 'system' ? `${T.systemLanguage} — ${cfg.theme === 'dark' ? T.darkTheme : T.lightTheme}` : cfg.theme === 'dark' ? T.darkTheme : T.lightTheme}
           onPress={() => setSettingsSheet('theme')}
@@ -1345,7 +1477,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
 
       {modules.wallets ? (
         <Section id="wallets" title={T.walletsSection}>
-          <MultiSelectBar
+<MultiSelectBar
             th={th}
             lang={cfg.lang}
             active={walletSelection.selecting}
@@ -1383,9 +1515,20 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                 <Text style={{ color: th.text, fontSize: 14, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>
                   {getWalletLabel(wallet, cfg.lang)}
                 </Text>
-                <Text style={{ color: th.sub, fontSize: 12, marginTop: 2, textAlign: isAr ? 'right' : 'left' }}>
-                  {wallet.id === defaultWalletId ? `${T.defaultWallet} · ` : ''}{T.currentBalance}: {Math.round(wallet.balance || 0).toLocaleString()} {wallet.currency}
-                </Text>
+                <View style={[s.walletBalanceLine, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+                  <View style={[s.walletBalanceMetric, { backgroundColor: th.cardHigh }]}>
+                    <Text style={[s.walletBalanceLabel, { color: th.sub }]}>{isAr ? 'الكلي' : 'Total'}</Text>
+                    <Text style={[s.walletBalanceValue, { color: th.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+                      {Math.round(wallet.balance || 0).toLocaleString()} {wallet.currency}
+                    </Text>
+                  </View>
+                  <View style={[s.walletBalanceMetric, { backgroundColor: th.primSoft }]}>
+                    <Text style={[s.walletBalanceLabel, { color: th.primary }]}>{isAr ? 'المتاح' : 'Available'}</Text>
+                    <Text style={[s.walletBalanceValue, { color: Number(wallet.availableBalance ?? wallet.balance) >= 0 ? th.primary : th.exp }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+                      {Math.round(wallet.availableBalance ?? wallet.balance ?? 0).toLocaleString()} {wallet.currency}
+                    </Text>
+                  </View>
+                </View>
               </View>
               {walletSelection.selecting ? (
                 wallet.id !== defaultWalletId ? (
@@ -1456,7 +1599,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
             <Text style={[s.miniLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
               {isAr ? 'حد شهري لكل تصنيف. اترك القيمة فارغة لتعطيله.' : 'Monthly limit per category. Leave blank to disable.'}
             </Text>
-            {cats.filter(cat => cat.id !== 'salary').map(cat => (
+            {getCategoriesForFlow(cats, CATEGORY_FLOWS.EXPENSE).map(cat => (
               <View key={cat.id} style={[s.categoryRow, { backgroundColor: th.cardHigh }]}>
                 <View style={[s.categoryInfo, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
                   <Ionicons name={cat.icon || 'cube-outline'} size={16} color={cat.color || th.primary} />
@@ -1530,6 +1673,11 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                     <Text style={{ color: th.text, fontSize: 13, ...weight('800') }}>
                       {isAr ? cat.label : cat.labelEn}
                     </Text>
+                    <View style={[s.categoryFlowBadge, { backgroundColor: normalizeCategoryFlow(cat) === CATEGORY_FLOWS.INCOME ? th.incBg : normalizeCategoryFlow(cat) === CATEGORY_FLOWS.EXPENSE ? th.expBg : th.primSoft }]}>
+                      <Text style={{ color: normalizeCategoryFlow(cat) === CATEGORY_FLOWS.INCOME ? th.inc : normalizeCategoryFlow(cat) === CATEGORY_FLOWS.EXPENSE ? th.exp : th.primary, fontSize: 10, ...weight('900') }}>
+                        {categoryFlowLabel(cat, cfg.lang)}
+                      </Text>
+                    </View>
                   </View>
                   {categorySelection.selecting ? (
                     cat.id !== 'other' ? (
@@ -1648,28 +1796,15 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
           <>
             <Row
               label={T.commitmentReminderInline}
-              value={notif.commitment?.on !== false ? `${notif.commitment?.value || 3} ${T.days}` : T.inactive}
-              last={false}
+              value={notif.commitment?.on !== false ? T.activeStatus : T.inactive}
+              last
             >
               <Switch
                 value={notif.commitment?.on !== false}
-                onValueChange={(on) => setNotif({ commitment: { ...(notif.commitment || { value: 3 }), on } })}
+                onValueChange={(on) => setNotif({ commitment: { ...(notif.commitment || {}), on } })}
                 trackColor={{ true: th.primary, false: th.cardHigh }}
               />
             </Row>
-            {notif.commitment?.on !== false ? (
-              <Expanded bottomBorder>
-                <View style={[s.detailLine, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                  <Text style={{ color: th.sub, fontSize: 12, ...weight('800') }}>{T.commitmentBefore}</Text>
-                  <Stepper
-                    value={notif.commitment?.value || 3}
-                    suffix={` ${T.days}`}
-                    onMinus={() => setNotif({ commitment: { ...(notif.commitment || {}), on: true, value: Math.max(0, Number(notif.commitment?.value || 3) - 1) } })}
-                    onPlus={() => setNotif({ commitment: { ...(notif.commitment || {}), on: true, value: Number(notif.commitment?.value || 3) + 1 } })}
-                  />
-                </View>
-              </Expanded>
-            ) : null}
           </>
         ) : null}
 
@@ -1806,19 +1941,79 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
         <Row label={T.deleteAll} onPress={confirmReset} danger last />
       </Section>
 
-      <Section id="account" title={T.account}>
+      <Section id="account" title={isAr ? 'حسابي' : 'My account'}>
         <Row
-          label={user ? T.connected : T.notConnected}
-          value={user ? syncState.text : (authServiceStatus === 'down' ? T.accountServiceDown : undefined)}
+          label={isAr ? 'معلومات الحساب' : 'Account details'}
+          value={user ? accountUsername : (authServiceStatus === 'down' ? T.accountServiceDown : undefined)}
           onPress={() => toggleOpen('account')}
           last={open !== 'account'}
         />
         {open === 'account' ? (
           <Expanded>
+            <TouchableOpacity onPress={pickAccountAvatar} style={[s.avatarPicker, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+              <View style={[s.accountAvatarLarge, { backgroundColor: th.primSoft }]}>
+                {cfg.avatarUri ? <Image source={{ uri: cfg.avatarUri }} style={s.accountAvatarImage} /> : <Text style={{ color: th.primary, fontSize: 20, ...weight('900') }}>{accountInitial}</Text>}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>{isAr ? 'صورة الحساب' : 'Profile photo'}</Text>
+                <Text style={{ color: th.sub, fontSize: 11, lineHeight: 17, marginTop: 3, textAlign: isAr ? 'right' : 'left' }}>{isAr ? 'متاحة للحساب المحلي والمتصل' : 'Available for local and connected use'}</Text>
+              </View>
+              <Ionicons name="camera-outline" size={18} color={th.primary} />
+            </TouchableOpacity>
             {user ? (
-              <TouchableOpacity onPress={handleSignOut} style={[s.secondaryButton, { backgroundColor: th.expBg }]}>
-                <Text style={{ color: th.exp, fontSize: 13, ...weight('900') }}>{T.signOut}</Text>
-              </TouchableOpacity>
+              <>
+                <View style={[s.accountCard, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                  <View style={[s.accountCardHead, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+                    <View style={[s.accountAvatar, { backgroundColor: th.primSoft }]}>
+                      <Text style={{ color: th.primary, fontSize: 16, ...weight('900') }}>{accountInitial}</Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text numberOfLines={1} style={[s.accountName, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{accountDisplayName}</Text>
+                      <Text numberOfLines={1} style={[s.accountEmail, { color: th.sub, textAlign: 'left', writingDirection: 'ltr' }]}>{accountEmailText}</Text>
+                    </View>
+                  </View>
+                  <View style={[s.accountSyncRow, { backgroundColor: th.card, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+                    <Ionicons name={syncState.icon} size={16} color={syncState.color} />
+                    <Text style={{ color: syncState.color, fontSize: 12, ...weight('900'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>{syncState.text}</Text>
+                  </View>
+                  <View style={[s.accountIdentityGrid, { borderTopColor: th.border }]}>
+                    <TextInput
+                      value={accountNameDraft}
+                      onChangeText={setAccountNameDraft}
+                      placeholder={isAr ? 'الاسم' : 'Name'}
+                      placeholderTextColor={th.sub}
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
+                    />
+                    <TextInput
+                      value={usernameDraft}
+                      onChangeText={(value) => setUsernameDraft(normalizeUsername(value))}
+                      placeholder={isAr ? 'اليوزر نيم' : 'Username'}
+                      placeholderTextColor={th.sub}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
+                    />
+                    <TextInput
+                      value={phoneDraft}
+                      onChangeText={(value) => setPhoneDraft(normalizePhone(value))}
+                      placeholder={isAr ? 'رقم الهاتف' : 'Phone number'}
+                      placeholderTextColor={th.sub}
+                      keyboardType="phone-pad"
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
+                    />
+                    <View style={[s.accountSyncRow, { backgroundColor: th.card, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+                      <Ionicons name="at-outline" size={16} color={th.primary} />
+                      <Text style={{ color: th.text, fontSize: 12, ...weight('900'), flex: 1, textAlign: 'left', writingDirection: 'ltr' }}>{accountUsername}</Text>
+                    </View>
+                    <TouchableOpacity onPress={saveAccountIdentity} style={[s.primaryButton, { backgroundColor: th.primary }]}>
+                      <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>{isAr ? 'حفظ هوية الحساب' : 'Save account identity'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={handleSignOut} style={[s.secondaryButton, { backgroundColor: th.expBg }]}>
+                  <Text style={{ color: th.exp, fontSize: 13, ...weight('900') }}>{T.signOut}</Text>
+                </TouchableOpacity>
+              </>
             ) : (
               <>
                 <View style={[s.statusNote, { backgroundColor: authServiceStatus === 'ready' ? th.incBg : authServiceStatus === 'down' ? th.expBg : th.cardHigh, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
@@ -1839,6 +2034,34 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                     { value: 'signup', label: T.signUp },
                   ]}
                 />
+                {authMode === 'signup' ? (
+                  <>
+                    <TextInput
+                      value={accountNameDraft}
+                      onChangeText={setAccountNameDraft}
+                      placeholder={isAr ? 'الاسم' : 'Name'}
+                      placeholderTextColor={th.sub}
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
+                    />
+                    <TextInput
+                      value={usernameDraft}
+                      onChangeText={(value) => setUsernameDraft(normalizeUsername(value))}
+                      placeholder={isAr ? 'اليوزر نيم' : 'Username'}
+                      placeholderTextColor={th.sub}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
+                    />
+                    <TextInput
+                      value={phoneDraft}
+                      onChangeText={(value) => setPhoneDraft(normalizePhone(value))}
+                      placeholder={isAr ? 'رقم الهاتف' : 'Phone number'}
+                      placeholderTextColor={th.sub}
+                      keyboardType="phone-pad"
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
+                    />
+                  </>
+                ) : null}
                 <TextInput
                   value={email}
                   onChangeText={(value) => { setEmail(value); emailRef.current = value; }}
@@ -1884,6 +2107,17 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                   <TouchableOpacity onPress={handlePasswordReset} disabled={loading} style={[s.secondaryButton, { backgroundColor: th.cardHigh }]}>
                     <Text style={{ color: th.primary, fontSize: 13, ...weight('900') }}>
                       {isAr ? 'نسيت كلمة المرور' : 'Forgot password'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {authMode === 'signup' ? (
+                  <TouchableOpacity
+                    onPress={() => setAuthAgreement(value => !value)}
+                    style={[s.termsRow, { flexDirection: isAr ? 'row-reverse' : 'row' }]}
+                  >
+                    <Ionicons name={authAgreement ? 'checkbox' : 'square-outline'} size={19} color={authAgreement ? th.primary : th.sub} />
+                    <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, flex: 1, textAlign: isAr ? 'right' : 'left' }}>
+                      {isAr ? 'أوافق على شروط الحساب والمزامنة' : 'I agree to account and sync terms'}
                     </Text>
                   </TouchableOpacity>
                 ) : null}
@@ -1945,13 +2179,15 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                 ? T.language
                 : settingsSheet === 'theme'
                   ? T.theme
-                  : settingsSheet === 'startTab'
-                    ? startTabTitle
-                    : settingsSheet === 'homeContent'
-                      ? homeContentTitle
-                        : settingsSheet === 'currency'
-                          ? T.currency
-                          : T.country}
+                  : settingsSheet === 'monthNames'
+                    ? T.monthNames
+                    : settingsSheet === 'startTab'
+                      ? startTabTitle
+                      : settingsSheet === 'homeContent'
+                        ? homeContentTitle
+                          : settingsSheet === 'currency'
+                            ? T.currency
+                            : T.country}
             </Text>
           </View>
 
@@ -1985,6 +2221,37 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                   </TouchableOpacity>
                 );
               }) : null}
+            </View>
+          ) : null}
+
+          {settingsSheet === 'monthNames' ? (
+            <View style={s.sheetScroll}>
+              {MONTH_NAME_STYLES.map(style => {
+                const active = (cfg.monthNameStyle || 'numeric') === style;
+                const detail = style === 'numeric'
+                  ? (isAr ? '08/2026' : '08/2026')
+                  : style === 'english'
+                    ? 'Aug 2026'
+                    : 'آب 2026';
+                return (
+                  <TouchableOpacity
+                    key={style}
+                    onPress={() => { setCfg({ monthNameStyle: style }); setSettingsSheet(null); }}
+                    style={[s.optionCard, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent', flexDirection: isAr ? 'row-reverse' : 'row' }]}
+                  >
+                    <Ionicons name={style === 'numeric' ? 'keypad-outline' : 'calendar-outline'} size={18} color={active ? th.primary : th.sub} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: active ? th.primary : th.text, fontSize: 14, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>
+                        {monthStyleLabel(style, cfg.lang)}
+                      </Text>
+                      <Text style={{ color: th.sub, fontSize: 12, lineHeight: 17, marginTop: 2, textAlign: isAr ? 'right' : 'left' }}>
+                        {detail}
+                      </Text>
+                    </View>
+                    {active ? <Ionicons name="checkmark-circle" size={18} color={th.primary} /> : null}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           ) : null}
 
@@ -2228,6 +2495,24 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
             placeholderTextColor={th.sub}
             style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
           />
+          <View style={[s.categoryFlowPicker, { flexDirection: isAr ? 'row-reverse' : 'row', backgroundColor: th.cardHigh }]}>
+            {[
+              { key: CATEGORY_FLOWS.EXPENSE, label: isAr ? 'صرف' : 'Expense', icon: 'arrow-up-circle-outline', color: th.exp },
+              { key: CATEGORY_FLOWS.INCOME, label: isAr ? 'دخل' : 'Income', icon: 'arrow-down-circle-outline', color: th.inc },
+            ].map(item => {
+              const active = newCatFlow === item.key;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  onPress={() => setNewCatFlow(item.key)}
+                  style={[s.categoryFlowOption, { backgroundColor: active ? `${item.color}22` : 'transparent', borderColor: active ? item.color : 'transparent' }]}
+                >
+                  <Ionicons name={item.icon} size={16} color={active ? item.color : th.sub} />
+                  <Text style={{ color: active ? item.color : th.sub, fontSize: 12, ...weight('900') }}>{item.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           <Text style={[s.miniLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.icon}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.iconRail}>
             {ICON_OPTIONS.map(icon => (
@@ -2342,6 +2627,20 @@ const s = StyleSheet.create({
   subtitle: { fontSize: 12, lineHeight: 17, ...weight('700'), marginTop: 2 },
   statusPill: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 10 },
   statusNote: { minHeight: 42, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
+  accountOverview: { minHeight: 72, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 10, marginBottom: 10, ...SHADOW.subtle },
+  accountOverviewAvatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' },
+  accountOverviewStatus: { width: 11, height: 11, borderRadius: 6, borderWidth: 2, position: 'absolute', bottom: -1, right: -1 },
+  accountCard: { borderRadius: RADIUS.lg, borderWidth: 1, padding: 12, gap: 10 },
+  accountCardHead: { alignItems: 'center', gap: 10 },
+  accountAvatar: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  avatarPicker: { minHeight: 72, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10 },
+  accountAvatarLarge: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  accountAvatarImage: { width: '100%', height: '100%' },
+  accountName: { fontSize: 15, lineHeight: 21, ...weight('900') },
+  accountEmail: { fontSize: 12, lineHeight: 17, ...weight('700'), marginTop: 2 },
+  accountSyncRow: { minHeight: 36, alignItems: 'center', gap: 8, borderRadius: RADIUS.md, paddingHorizontal: 10, paddingVertical: 8 },
+  accountIdentityGrid: { borderTopWidth: 1, paddingTop: 10, gap: 8 },
+  termsRow: { alignItems: 'center', gap: 8, paddingVertical: 6 },
   section: { marginBottom: 10 },
   sectionToggle: { minHeight: 52, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 14, marginBottom: 7, ...SHADOW.subtle },
   sectionMark: { width: 4, height: 16, borderRadius: 4 },
@@ -2357,6 +2656,9 @@ const s = StyleSheet.create({
   categoryRow: { borderRadius: RADIUS.md, padding: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   categoryInfo: { alignItems: 'center', gap: 8, flex: 1 },
   categoryIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  categoryFlowBadge: { minHeight: 22, borderRadius: 11, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
+  categoryFlowPicker: { borderRadius: RADIUS.md, padding: 4, gap: 4, marginBottom: 10 },
+  categoryFlowOption: { flex: 1, minHeight: 42, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 },
   categoryTools: { alignItems: 'center', gap: 5 },
   reorderBtn: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   countryChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS.md, borderWidth: 1 },
@@ -2402,4 +2704,9 @@ const s = StyleSheet.create({
   pickerSearch: { minHeight: 46, alignItems: 'center', borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, marginBottom: 2 },
   optionCard: { minHeight: 52, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10 },
   systemChoice: { minHeight: 62, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10 },
+  walletBalanceLine: { gap: 6, marginTop: 6 },
+  walletBalanceMetric: { flex: 1, minWidth: 0, borderRadius: RADIUS.md, paddingHorizontal: 7, paddingVertical: 5 },
+  walletBalanceLabel: { fontSize: 9, lineHeight: 13, ...weight('800'), textAlign: 'center' },
+  walletBalanceValue: { fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: 'center', marginTop: 1 },
+
 });

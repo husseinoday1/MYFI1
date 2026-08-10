@@ -25,7 +25,7 @@ export const TH = {
     sub: '#5D6962',
     faint: '#758079',
     border: 'rgba(20,32,25,0.12)',
-    overlay: 'rgba(12,18,15,0.48)',
+    overlay: 'rgba(12,18,15,0.22)',
     statusBar: 'dark-content',
 
     cardAlt: '#ECEFED',

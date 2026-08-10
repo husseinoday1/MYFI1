@@ -104,6 +104,32 @@ export const getWalletAvailableBalances = (wallets = [], trans = [], currency = 
   }));
 };
 
+export const canSpendFromWallet = ({
+  wallets = [],
+  trans = [],
+  currency = 'IQD',
+  defaultWalletId = null,
+  walletId = null,
+  amount = 0,
+  excludeTransactionId = null,
+} = {}) => {
+  const normalized = normalizeWallets(wallets, currency);
+  const safeDefault = getDefaultWalletId(normalized, currency, defaultWalletId);
+  const targetWalletId = walletId || safeDefault;
+  const spendAmount = Math.abs(Number(amount) || 0);
+  const sourceTrans = excludeTransactionId
+    ? (Array.isArray(trans) ? trans : []).filter(tx => tx?.id !== excludeTransactionId)
+    : trans;
+  const wallet = getWalletAvailableBalances(normalized, sourceTrans, currency, safeDefault)
+    .find(item => item.id === targetWalletId);
+  const availableBalance = Number(wallet?.availableBalance);
+  return {
+    ok: spendAmount <= 0 || (Number.isFinite(availableBalance) && spendAmount <= availableBalance + 0.0001),
+    availableBalance: Number.isFinite(availableBalance) ? availableBalance : 0,
+    walletId: targetWalletId,
+  };
+};
+
 export const getWalletMonthlyMovement = (wallets = [], trans = [], currency = 'IQD', defaultWalletId = null, targetMonth = '') => {
   const normalized = normalizeWallets(wallets, currency);
   const safeDefault = getDefaultWalletId(normalized, currency, defaultWalletId);

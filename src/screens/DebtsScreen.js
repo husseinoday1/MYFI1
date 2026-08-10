@@ -22,6 +22,7 @@ const text = (lang, receivable) => {
     total: receivable ? (ar ? 'إجمالي دين لي' : 'Total to collect') : (ar ? 'إجمالي دين عليّ' : 'Total I owe'),
     active: ar ? 'النشطة' : 'Active',
     completed: ar ? 'المكتملة' : 'Completed',
+    ended: ar ? 'انتهى الدين' : 'Debt ended',
     lastMove: receivable ? (ar ? 'آخر تحصيل' : 'Last collection') : (ar ? 'آخر سداد' : 'Last repayment'),
     noHistory: receivable ? (ar ? 'لا يوجد تحصيل بعد' : 'No collections yet') : (ar ? 'لا يوجد سداد بعد' : 'No repayments yet'),
     empty: receivable
@@ -158,6 +159,7 @@ export default function DebtsScreen({ direction = 'owed', onQuickPay }) {
             onChange={(date) => setEditingPayment(prev => ({ ...prev, date }))}
             th={th}
             lang={cfg.lang}
+            monthNameStyle={cfg.monthNameStyle}
             style={{ width: '100%' }}
           />
           <View style={[s.iconActions, { flexDirection: rowDir }]}>
@@ -240,6 +242,7 @@ export default function DebtsScreen({ direction = 'owed', onQuickPay }) {
                   onChange={(createdAt) => setEditingDebt(prev => ({ ...prev, createdAt }))}
                   th={th}
                   lang={cfg.lang}
+                  monthNameStyle={cfg.monthNameStyle}
                   style={{ marginBottom: 8 }}
                 />
                 <View style={[s.editActions, { flexDirection: rowDir }]}>
@@ -261,7 +264,7 @@ export default function DebtsScreen({ direction = 'owed', onQuickPay }) {
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: th.text, ...weight('900'), fontSize: 15, textAlign: align }} numberOfLines={1}>{debt.name}</Text>
                       <Text style={{ color: done ? th.inc : th.sub, fontSize: 12, lineHeight: 18, marginTop: 3, textAlign: align }}>
-                        {done ? L.completed : `${T.due}: ${fmt(remaining)} ${sym}`}
+                        {done ? T.ended : `${T.due}: ${fmt(remaining)} ${sym}`}
                       </Text>
                     </View>
                   </View>
