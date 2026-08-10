@@ -10,6 +10,7 @@ import { AppButton, Touchable as TouchableOpacity } from '../components/AppPrimi
 import { defaultScopeForProfile, profileModuleDefaults } from '../lib/modules';
 import { RADIUS, SHADOW, SPACE, TYPE, weight } from '../lib/tokens';
 import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
+import { MONTH_NAME_STYLES, monthStyleLabel } from '../lib/months';
 const stepText = (lang) => {
   const ar = lang === 'ar';
   return {
@@ -42,6 +43,7 @@ const stepText = (lang) => {
     language: ar ? 'اللغة' : 'Language',
     systemLanguage: ar ? 'لغة الهاتف' : 'Phone language',
     currency: ar ? 'العملة' : 'Currency',
+    monthNames: ar ? 'عرض الأشهر' : 'Month display',
     activeFeatures: ar ? 'الميزات المفعلة' : 'Enabled features',
     personal: ar ? 'شخصي' : 'Personal',
     business: ar ? 'مشروع بسيط' : 'Small business',
@@ -55,7 +57,7 @@ const stepText = (lang) => {
     goals: ar ? 'أهداف توفير' : 'Saving goals',
     commitments: ar ? 'الالتزامات' : 'Commitments',
     selected: ar ? 'مطلوب لهذا الاستخدام' : 'Required for this setup',
-    countryCurrencyHint: ar ? 'اختيار الدولة يضبط عملتها الرئيسية، ويمكنك تغيير العملة يدويًا.' : 'Choosing a country sets its main currency; you can still change currency manually.',
+    countryCurrencyHint: ar ? 'الدولة والعملتها إعدادان منفصلان، تقدر تغير كل واحد حسب احتياجك.' : 'Country and currency are separate settings; change each one as needed.',
     startModeTitle: ar ? 'كيف تريد أن تبدأ؟' : 'How would you like to start?',
     startModeBody: ar ? 'يمكنك البدء ببياناتك الحقيقية أو استكشاف نسخة تجريبية كاملة ثم العودة لبياناتك لاحقًا.' : 'Start with your real data or explore a complete demo and return to your real workspace later.',
     realMode: ar ? 'بياناتي الحقيقية' : 'My real data',
@@ -114,6 +116,16 @@ export default function OnboardingScreen({ cfg, onDone }) {
     { value: 'ar', label: 'العربية', detail: 'RTL', icon: 'language-outline' },
     { value: 'en', label: 'English', detail: 'LTR', icon: 'language-outline' },
   ];
+  const monthNameOptions = MONTH_NAME_STYLES.map(style => ({
+    value: style,
+    label: monthStyleLabel(style, lang),
+    detail: style === 'numeric'
+      ? (lang === 'ar' ? '08/2026' : '08/2026')
+      : style === 'arabic'
+        ? 'آب 2026'
+        : 'Aug 2026',
+    icon: 'calendar-outline',
+  }));
 
   const countryOptions = countries.map(country => ({
     value: country.code,
@@ -158,7 +170,6 @@ export default function OnboardingScreen({ cfg, onDone }) {
       options: countryOptions,
       onSelect: (_, option) => {
         setCountryCode(option.country.code);
-        setCurrencyCode(option.country.currency);
       },
     },
     currency: {
@@ -180,6 +191,18 @@ export default function OnboardingScreen({ cfg, onDone }) {
         setLangMode('manual');
         setLang(value);
       },
+    },
+    monthNames: {
+      title: T.monthNames,
+      value: cfg.monthNameStyle || 'numeric',
+      options: monthNameOptions,
+      onSelect: (value) => setCfg({ monthNameStyle: value }),
+    },
+    profile: {
+      title: T.profile,
+      value: profileType,
+      options: profileOptions,
+      onSelect: (value) => setProfile(value),
     },
   };
   const activeChoice = choiceConfig[choiceSheet] || null;
@@ -257,7 +280,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
   );
 
   const nextStep = () => {
-    if (step < 3) setStep(step + 1);
+    if (step < 4) setStep(step + 1);
     else finish();
   };
 
@@ -274,7 +297,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
           </TouchableOpacity>
         ) : <View style={s.skipBtn} />}
         <View style={[s.steps, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-          {[0, 1, 2, 3].map(index => (
+          {[0, 1, 2, 3, 4].map(index => (
             <View
               key={index}
               style={[
@@ -286,7 +309,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
         </View>
       </View>
 
-      {step === 3 ? (
+      {step === 4 ? (
         <View style={s.hero}>
           <View style={[s.mark, { backgroundColor: th.primaryContainer }]}>
             <Ionicons name="sparkles-outline" size={52} color={th.onPrimaryContainer} />
@@ -304,9 +327,43 @@ export default function OnboardingScreen({ cfg, onDone }) {
               <PreviewBadge icon="person-outline" label={T.profile} value={profileOptions.find(item => item.value === profileType)?.label || T.personal} th={th} />
               <PreviewBadge icon="flag-outline" label={T.country} value={`${selectedCountry.flag} ${isAr ? selectedCountry.name : selectedCountry.nameEn}`} th={th} />
             </View>
+            <View style={[s.previewRow, { flexDirection: isAr ? 'row-reverse' : 'row', marginTop: 10 }]}>
+              <PreviewBadge icon="calendar-outline" label={T.monthNames} value={monthStyleLabel(cfg.monthNameStyle, lang)} th={th} />
+              <PreviewBadge icon="cash-outline" label={T.currency} value={`${selectedCurrency.code} - ${selectedCurrency.sym}`} th={th} />
+            </View>
           </View>
         </View>
       ) : step === 0 ? (
+        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled contentContainerStyle={s.ideaContent}>
+          <View style={s.ideaVisual}>
+            <View style={[s.ideaGlow, { backgroundColor: th.primSoft }]} />
+            <View style={[s.ideaPhone, { backgroundColor: th.card, borderColor: th.border }]}>
+              <View style={[s.ideaPhoneHead, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+                <View style={[s.ideaMiniLogo, { backgroundColor: th.primary }]}>
+                  <Ionicons name="layers-outline" size={17} color={th.onPrimary} />
+                </View>
+                <Text style={[s.ideaBrand, { color: th.primary }]}>MYFI</Text>
+              </View>
+              <View style={[s.ideaBalance, { backgroundColor: th.primaryContainer }]}>
+                <Text style={[s.ideaBalanceLabel, { color: th.onPrimaryContainer }]}>OK</Text>
+                <View style={[s.ideaBalanceLine, { backgroundColor: th.primary }]} />
+                <View style={[s.ideaBars, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+                  <View style={[s.ideaBar, { height: 36, backgroundColor: th.inc }]} />
+                  <View style={[s.ideaBar, { height: 56, backgroundColor: th.primary }]} />
+                  <View style={[s.ideaBar, { height: 24, backgroundColor: th.exp }]} />
+                </View>
+              </View>
+            </View>
+          </View>
+          <Text style={[s.ideaTitle, { color: th.text }]}>{T.ideaTitle}</Text>
+          <Text style={[s.ideaBody, { color: th.sub }]}>{T.ideaBody}</Text>
+          <View style={s.ideaList}>
+            <ConceptRow th={th} isAr={isAr} icon="add-circle-outline" title={T.ideaTrack} body={T.ideaTrackBody} />
+            <ConceptRow th={th} isAr={isAr} icon="analytics-outline" title={T.ideaUnderstand} body={T.ideaUnderstandBody} />
+            <ConceptRow th={th} isAr={isAr} icon="document-text-outline" title={T.ideaShare} body={T.ideaShareBody} />
+          </View>
+        </ScrollView>
+      ) : step === 3 ? (
         <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled contentContainerStyle={s.startContent}>
           <View style={[s.startBrand, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
             <View style={[s.ideaMiniLogo, { backgroundColor: th.primary }]}>
@@ -359,46 +416,13 @@ export default function OnboardingScreen({ cfg, onDone }) {
           <Text style={[s.title, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.identityTitle}</Text>
           <Text style={[s.sectionBody, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.identityBody}</Text>
 
-          <View style={s.profileGrid}>
-            {profileOptions.map(option => {
-              const active = profileType === option.value;
-              return (
-                <TouchableOpacity
-                  key={option.value}
-                  onPress={() => setProfile(option.value)}
-                  style={[
-                    s.profileCard,
-                    {
-                      backgroundColor: active ? th.primSoft : th.card,
-                      borderColor: active ? th.primary : th.border,
-                    },
-                  ]}
-                >
-                  <View style={[s.profileCardRow, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                    <View style={[s.profileIcon, { backgroundColor: th.cardHigh, borderColor: active ? th.primary : th.border }]}>
-                      <Ionicons name={option.icon} size={18} color={active ? th.primary : th.sub} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={{ color: active ? th.primary : th.text, fontSize: 14, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.86}
-                      >
-                        {option.label}
-                      </Text>
-                      <Text style={{ color: th.sub, fontSize: 12, marginTop: 3, lineHeight: 18, textAlign: isAr ? 'right' : 'left' }} numberOfLines={2}>
-                        {option.detail}
-                      </Text>
-                    </View>
-                    <ChoiceMark active={active} th={th} />
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
           <View style={s.selectGroup}>
+            {renderIdentityRow({
+              icon: 'person-outline',
+              label: T.profile,
+              value: profileOptions.find(item => item.value === profileType)?.label || T.personal,
+              onPress: () => setChoiceSheet('profile'),
+            })}
             {renderIdentityRow({
               icon: 'flag-outline',
               label: T.country,
@@ -410,6 +434,12 @@ export default function OnboardingScreen({ cfg, onDone }) {
               label: T.language,
               value: langMode === 'system' ? T.systemLanguage : lang === 'ar' ? 'العربية' : 'English',
               onPress: () => setChoiceSheet('language'),
+            })}
+            {renderIdentityRow({
+              icon: 'calendar-outline',
+              label: T.monthNames,
+              value: monthStyleLabel(cfg.monthNameStyle, lang),
+              onPress: () => setChoiceSheet('monthNames'),
             })}
             {renderIdentityRow({
               icon: 'cash-outline',
@@ -496,6 +526,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
               <ReviewRow label={T.profile} value={profileOptions.find(item => item.value === profileType)?.label || T.personal} th={th} isAr={isAr} />
               <ReviewRow label={T.country} value={`${selectedCountry.flag} ${lang === 'ar' ? selectedCountry.name : selectedCountry.nameEn}`} th={th} isAr={isAr} />
               <ReviewRow label={T.currency} value={`${selectedCurrency.code} · ${selectedCurrency.sym}`} th={th} isAr={isAr} />
+              <ReviewRow label={T.monthNames} value={monthStyleLabel(cfg.monthNameStyle, lang)} th={th} isAr={isAr} />
               <ReviewRow label={T.activeFeatures} value={String(activeFeatures.length)} th={th} isAr={isAr} />
               <ReviewRow label={T.startingWorkspace} value={startMode === 'demo' ? T.demoMode : T.realMode} th={th} isAr={isAr} />
             </View>
@@ -516,7 +547,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
         {step > 0 ? (
           <AppButton th={th} lang={lang} tone="secondary" label={T.back} onPress={() => setStep(step - 1)} style={s.secondaryBtn} />
         ) : <View style={{ flex: 1 }} />}
-        <AppButton th={th} lang={lang} label={step === 3 ? T.start : T.next} onPress={nextStep} style={s.primaryBtn} />
+        <AppButton th={th} lang={lang} label={step === 4 ? T.start : T.next} onPress={nextStep} style={s.primaryBtn} />
       </View>
 
       <ChoiceSheet

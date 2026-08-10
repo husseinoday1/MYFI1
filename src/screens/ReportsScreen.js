@@ -55,6 +55,8 @@ const copy = (lang) => {
     categoriesSection: ar ? 'توزيع المصروفات' : 'Expense breakdown',
     transactionsSection: ar ? 'تفاصيل الحركات' : 'Transaction details',
     comparisonSection: ar ? 'المقارنة المحددة' : 'Selected comparison',
+    comparisonChart: ar ? 'مخطط المقارنة' : 'Comparison chart',
+    comparisonDetails: ar ? 'تفاصيل المقارنة' : 'Comparison details',
     selectAll: ar ? 'تحديد الكل' : 'Select all',
     clearAll: ar ? 'إلغاء الكل' : 'Clear all',
     sharePdf: ar ? 'إنشاء ومشاركة PDF' : 'Create and share PDF',
@@ -395,7 +397,10 @@ export default function ReportsScreen() {
     { value: 'categories', label: C.categoriesSection, icon: 'pie-chart-outline' },
     { value: 'transactions', label: C.transactionsSection, icon: 'receipt-outline' },
     comparisonMode !== 'none' && comparisonSeries.length
-      ? { value: 'comparison', label: `${C.comparisonSection} (${comparisonSeries.length})`, icon: 'git-compare-outline' }
+      ? { value: 'comparison_chart', label: `${C.comparisonChart} (${comparisonSeries.length})`, icon: 'analytics-outline' }
+      : null,
+    comparisonMode !== 'none' && comparisonSeries.length
+      ? { value: 'comparison_details', label: `${C.comparisonDetails} (${comparisonSeries.length})`, icon: 'list-outline' }
       : null,
   ].filter(Boolean);
 
@@ -705,7 +710,9 @@ export default function ReportsScreen() {
                   </Text>
                   <Text
                     style={[s.proComparePickerValue, { color: th.text, textAlign: align }]}
-                    numberOfLines={2}
+                    numberOfLines={3}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.82}
                   >
                     {comparisonPeriods
                       .map(value => comparisonOptions.find(option => option.value === value)?.label || value)
@@ -717,22 +724,6 @@ export default function ReportsScreen() {
                   <Ionicons name="chevron-down" size={14} color={th.primary} />
                 </View>
               </TouchableOpacity>
-
-              <View style={s.proCompareChipRail}>
-                {comparisonPeriods.slice(0, 6).map(value => {
-                  const option = comparisonOptions.find(item => item.value === value);
-                  return (
-                    <View
-                      key={value}
-                      style={[s.proCompareChip, { backgroundColor: th.primSoft, borderColor: `${th.primary}30` }]}
-                    >
-                      <Text style={[s.proCompareChipText, { color: th.primary }]} numberOfLines={1}>
-                        {option?.label || value}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
 
               <View style={[s.proCompareViewBar, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
                 {[
@@ -1593,16 +1584,12 @@ const s = StyleSheet.create({
   proCompareEmptyTitle: { fontSize: 14, lineHeight: 20, ...weight('900'), textAlign: 'center' },
   proCompareEmptyHint: { fontSize: 12, lineHeight: 19, ...weight('700'), textAlign: 'center', marginTop: 5, maxWidth: 290 },
 
-  proComparePicker: { minHeight: 76, borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 10, alignItems: 'center', gap: 10 },
+  proComparePicker: { minHeight: 86, borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 10, alignItems: 'flex-start', gap: 10 },
   proComparePickerIcon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   proComparePickerLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
   proComparePickerValue: { fontSize: 12, lineHeight: 18, ...weight('900'), marginTop: 2 },
   proCompareEditPill: { minHeight: 32, borderRadius: 16, paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 4, flexShrink: 0 },
   proCompareEditText: { fontSize: 10, lineHeight: 14, ...weight('900') },
-
-  proCompareChipRail: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, marginBottom: 12 },
-  proCompareChip: { maxWidth: '48%', minHeight: 28, borderRadius: 14, borderWidth: 1, paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center' },
-  proCompareChipText: { fontSize: 10, lineHeight: 14, ...weight('900') },
 
   proCompareViewBar: { minHeight: 44, borderRadius: RADIUS.md, padding: 4, gap: 4, marginBottom: 12 },
   proCompareViewBtn: { flex: 1, minHeight: 36, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', gap: 6 },
@@ -1653,8 +1640,8 @@ const s = StyleSheet.create({
   proCompareSelectionSummary: { fontSize: 10, lineHeight: 15, ...weight('800'), marginBottom: 8 },
   proCompareDoneBtn: { minHeight: 46, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 },
   proCompareDoneText: { fontSize: 13, ...weight('900') },
-  expandedChartOverlay: { flex: 1, justifyContent: 'flex-end', paddingTop: 36 },
-  expandedChartPanel: { maxHeight: '88%', borderTopLeftRadius: RADIUS.sheet, borderTopRightRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 18, ...SHADOW.float },
+  expandedChartOverlay: { flex: 1 },
+  expandedChartPanel: { flex: 1, width: '100%', borderWidth: 0, paddingHorizontal: 14, paddingTop: 48, paddingBottom: 24, ...SHADOW.float },
   expandedChartHead: { alignItems: 'center', gap: 10, marginBottom: 12 },
   expandedChartIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   expandedChartTitle: { flex: 1, fontSize: 16, lineHeight: 22, ...weight('900') },

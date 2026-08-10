@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Alert, Pressable, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, Alert, Pressable, StyleSheet, Image, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useStore } from '../store/useStore';
@@ -26,6 +26,7 @@ import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import WalletBalanceCard from '../components/WalletBalanceCard';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatMonthLabel } from '../lib/months';
+import { accountPublicId, deriveDisplayName } from '../lib/accountIdentity';
 const noop = () => {};
 
 const copy = (lang) => {
@@ -136,11 +137,8 @@ export default function HomeScreen({
   const align = textAlignFor(cfg.lang);
   const rowDir = rowDirFor(cfg.lang);
   const modules = getModules(cfg);
-  const accountEmail = user?.email || '';
-  const accountName = user?.user_metadata?.full_name
-    || user?.user_metadata?.name
-    || accountEmail.split('@')[0]
-    || (isAr ? '\u062d\u0633\u0627\u0628 \u0645\u062d\u0644\u064a' : 'Local account');
+  const accountName = deriveDisplayName({ user, cfg }) || (isAr ? '\u062d\u0633\u0627\u0628 \u0645\u062d\u0644\u064a' : 'Local account');
+  const accountHandle = accountPublicId({ user, cfg });
   const accountInitial = (accountName || 'M').trim().charAt(0).toUpperCase();
   const scopedTransAll = filterByActiveScope(trans, cfg);
   const scopedTrans = scopedTransAll.filter(item => transactionFeatureEnabled(item, cfg));
@@ -779,14 +777,28 @@ export default function HomeScreen({
 
   const renderWalletPanel = () => (
     showWalletStrip ? (
-      <WalletBalanceCard
-        wallets={wallets}
-        transactions={scopedTransAll}
-        cfg={cfg}
-        showWallets
-        onSelectWallet={(id) => setCfg({ defaultWalletId: id })}
-        title={cfg.lang === 'ar' ? 'المحافظ والأرصدة' : 'Wallets & balances'}
-      />
+      <Modal visible={showWalletDetails} transparent animationType="fade" onRequestClose={() => setShowWalletDetails(false)}>
+        <View style={[s.walletPopupOverlay, { backgroundColor: th.overlay }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowWalletDetails(false)} />
+          <View style={[s.walletPopup, { backgroundColor: th.card, borderColor: th.border }]}>
+            <View style={[s.walletPopupHead, { flexDirection: rowDir }]}>
+              <Text style={[s.walletPopupTitle, { color: th.text, textAlign: align }]}>{cfg.lang === 'ar' ? 'المحافظ والأرصدة' : 'Wallets & balances'}</Text>
+              <TouchableOpacity onPress={() => setShowWalletDetails(false)} style={[s.headerIconBtn, { backgroundColor: th.cardHigh }]}>
+                <Ionicons name="chevron-down" size={18} color={th.sub} />
+              </TouchableOpacity>
+            </View>
+            <WalletBalanceCard
+              wallets={wallets}
+              transactions={scopedTransAll}
+              cfg={cfg}
+              showWallets
+              onSelectWallet={(id) => { setCfg({ defaultWalletId: id }); setShowWalletDetails(false); }}
+              title={cfg.lang === 'ar' ? 'اختيار المحفظة الافتراضية' : 'Choose default wallet'}
+              style={{ marginBottom: 0 }}
+            />
+          </View>
+        </View>
+      </Modal>
     ) : null
   );
 
@@ -864,11 +876,12 @@ export default function HomeScreen({
               accessibilityLabel={isAr ? '\u0641\u062a\u062d \u0627\u0644\u062d\u0633\u0627\u0628' : 'Open account'}
             >
               <View style={[s.profileAvatar, { backgroundColor: th.primSoft }]}>
-                <Text style={{ color: th.primary, fontSize: 13, ...weight('900') }}>{accountInitial}</Text>
+                {cfg.avatarUri ? <Image source={{ uri: cfg.avatarUri }} style={s.profileAvatarImage} /> : <Text style={{ color: th.primary, fontSize: 13, ...weight('900') }}>{accountInitial}</Text>}
                 {user ? <View style={[s.profileStatus, { backgroundColor: th.inc, borderColor: th.card }]} /> : null}
               </View>
               <View style={s.profileTextBlock}>
                 <Text numberOfLines={1} style={[s.profileName, { color: th.text, textAlign: align }]}>{accountName}</Text>
+                <Text numberOfLines={1} style={[s.profileHandle, { color: th.faint, textAlign: align, writingDirection: 'ltr' }]}>{accountHandle}</Text>
               </View>
               <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={14} color={th.faint} />
             </TouchableOpacity>
@@ -990,6 +1003,8 @@ export default function HomeScreen({
         }}
         onDismissItems={dismissNotifications}
         items={notificationItems}
+        smartReviewCount={scopedTrans.filter(item => item.smartSource && !item.smartReviewedAt).length}
+        onOpenReview={() => { setNotificationsOpen(false); setCenterMode('review'); }}
         th={th}
         lang={cfg.lang}
       />
@@ -1014,11 +1029,17 @@ const s = StyleSheet.create({
   brandLockup:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerActions: { alignItems: 'center', gap: 5, flexShrink: 1 },
   headerIconBtn: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  profilePill:   { minHeight: 46, maxWidth: 142, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 7, paddingHorizontal: 7, paddingVertical: 6, ...SHADOW.subtle },
+  profilePill:   { minHeight: 50, maxWidth: 158, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 7, paddingHorizontal: 7, paddingVertical: 6, ...SHADOW.subtle },
   profileAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' },
+  profileAvatarImage: { width: '100%', height: '100%', borderRadius: 16 },
+  walletPopupOverlay: { flex: 1, justifyContent: 'flex-end' },
+  walletPopup: { maxHeight: '72%', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, padding: 14, paddingBottom: 22 },
+  walletPopupHead: { alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10 },
+  walletPopupTitle: { flex: 1, fontSize: 16, lineHeight: 22, ...weight('900') },
   profileStatus: { width: 9, height: 9, borderRadius: 5, borderWidth: 2, position: 'absolute', bottom: -1, right: -1 },
   profileTextBlock:{ flex: 1, minWidth: 0 },
-  profileName: { fontSize: 12, lineHeight: 17, ...weight('900') },
+  profileName: { fontSize: 12, lineHeight: 16, ...weight('900') },
+  profileHandle: { fontSize: 9, lineHeight: 12, ...weight('800'), marginTop: 1 },
   brandTitle:   { fontSize: 23, lineHeight: 28, ...weight('900'), letterSpacing: 0 },
   hero:         { borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 9, ...SHADOW.card },
   heroTop:      { alignItems: 'flex-start', gap: 8 },

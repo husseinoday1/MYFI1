@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, TextInput, Switch, Alert, Appearance, Pressable, StyleSheet, Modal } from 'react-native';
+import { View, Text, ScrollView, TextInput, Switch, Alert, Appearance, Pressable, StyleSheet, Modal, Image } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
@@ -21,6 +22,15 @@ import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/my
 import { resolveSystemTheme } from '../lib/systemTheme';
 import { inspectBackupData } from '../lib/backupData';
 import { MONTH_NAME_STYLES, monthStyleLabel } from '../lib/months';
+import {
+  accountIdentityPatch,
+  accountPublicId,
+  deriveDisplayName,
+  isValidUsername,
+  normalizePhone,
+  normalizeUsername,
+  upsertProfileIdentity,
+} from '../lib/accountIdentity';
 
 const UI = {
   ar: {
@@ -490,6 +500,10 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
   const [open, setOpen] = useState(null);
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
+  const [accountNameDraft, setAccountNameDraft] = useState(cfg.displayName || '');
+  const [usernameDraft, setUsernameDraft] = useState(cfg.username || '');
+  const [phoneDraft, setPhoneDraft] = useState(cfg.phone || '');
+  const [authAgreement, setAuthAgreement] = useState(cfg.accountConsentAccepted === true);
   const emailRef = useRef('');
   const passRef = useRef('');
   const [authMode, setAuthMode] = useState('signin');
@@ -531,10 +545,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
             ? { icon: 'cloud-upload-outline', color: th.warn, text: isAr ? 'بانتظار المزامنة' : 'Pending sync' }
             : { icon: 'cloud-done-outline', color: th.inc, text: isAr ? 'محفوظ ومتصل' : 'Saved and connected' };
   const accountEmailText = user?.email || (isAr ? '\u063a\u064a\u0631 \u0645\u0633\u062c\u0644' : 'Not signed in');
-  const accountDisplayName = user?.user_metadata?.full_name
-    || user?.user_metadata?.name
-    || user?.email?.split('@')[0]
-    || (isAr ? '\u062d\u0633\u0627\u0628 \u0645\u062d\u0644\u064a' : 'Local account');
+  const accountDisplayName = deriveDisplayName({ user, cfg }) || (isAr ? '\u062d\u0633\u0627\u0628 \u0645\u062d\u0644\u064a' : 'Local account');
+  const accountUsername = accountPublicId({ user, cfg });
   const accountInitial = (accountDisplayName || 'M').trim().charAt(0).toUpperCase();
   const walletRows = getWalletAvailableBalances(wallets, trans, cfg.currency, defaultWalletId)
     .sort((a, b) => (a.id === defaultWalletId ? -1 : b.id === defaultWalletId ? 1 : 0));
@@ -551,6 +563,13 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
     if (settingsSheet !== 'country') setCountryQuery('');
     if (settingsSheet !== 'currency') setCurrencyQuery('');
   }, [settingsSheet]);
+
+  useEffect(() => {
+    setAccountNameDraft(deriveDisplayName({ user, cfg }));
+    setUsernameDraft(normalizeUsername(cfg.username || user?.user_metadata?.username || ''));
+    setPhoneDraft(normalizePhone(cfg.phone || user?.user_metadata?.phone || ''));
+    setAuthAgreement(cfg.accountConsentAccepted === true);
+  }, [cfg.displayName, cfg.username, cfg.phone, cfg.accountConsentAccepted, user?.id]);
 
   useEffect(() => {
     if (open !== 'account' || user) return undefined;
@@ -647,17 +666,38 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
   const handleAuth = async () => {
     const emailValue = emailRef.current.trim().toLowerCase();
     const passValue = passRef.current;
+    const usernameValue = normalizeUsername(usernameDraft);
+    const phoneValue = normalizePhone(phoneDraft);
     if (!emailValue || !passValue.trim()) {
-      Alert.alert('', T.requiredFields);
+      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, T.requiredFields);
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(emailValue)) {
-      Alert.alert('', T.invalidEmail);
+      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, T.invalidEmail);
       return;
     }
     if (passValue.length < 8) {
-      Alert.alert('', T.passwordLength);
+      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, T.passwordLength);
       return;
+    }
+    if (authMode === 'signup') {
+      if (!accountNameDraft.trim()) {
+        Alert.alert(T.signUp, isAr ? 'اكتب اسمك حتى يظهر في هوية المستخدم.' : 'Enter your name for your account identity.');
+        return;
+      }
+      if (!isValidUsername(usernameValue)) {
+        Alert.alert(
+          T.signUp,
+          isAr
+            ? 'اكتب يوزر نيم فريد من 3 أحرف على الأقل، بحروف إنكليزية وأرقام وشرطة سفلية.'
+            : 'Use a unique username, 3+ characters, letters, numbers, and underscore.',
+        );
+        return;
+      }
+      if (!authAgreement) {
+        Alert.alert(T.signUp, isAr ? 'وافق على شروط الحساب والمزامنة قبل إنشاء الحساب.' : 'Accept the account and sync terms before creating the account.');
+        return;
+      }
     }
     setLoading(true);
     try {
@@ -673,9 +713,31 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
         ? await supabase.auth.signInWithPassword(credentials)
         : await supabase.auth.signUp({
             ...credentials,
-            options: { emailRedirectTo: getAuthRedirectUrl('confirm') },
+            options: {
+              emailRedirectTo: getAuthRedirectUrl('confirm'),
+              data: {
+                displayName: accountNameDraft.trim(),
+                full_name: accountNameDraft.trim(),
+                username: usernameValue,
+                phone: phoneValue,
+              },
+            },
           });
       if (result.error) throw result.error;
+      if (authMode === 'signup' && result.data?.user?.id) {
+        const profileResult = await upsertProfileIdentity(supabase, result.data.user.id, {
+          displayName: accountNameDraft,
+          username: usernameValue,
+          phone: phoneValue,
+        });
+        if (profileResult.error) throw profileResult.error;
+      }
+      await setCfg(accountIdentityPatch({
+        displayName: accountNameDraft,
+        username: usernameValue,
+        phone: phoneValue,
+        consentAccepted: authMode === 'signup' ? authAgreement : undefined,
+      }));
       if (result.data?.session?.user) {
         await setUser(result.data.session.user);
         Alert.alert('', T.loginSuccess);
@@ -694,7 +756,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
       const message = String(e?.message || '');
       const invalidCredentials = /invalid login credentials/i.test(message);
       const networkFailure = /network|fetch|resolve|connection/i.test(message);
-      Alert.alert('', invalidCredentials ? T.invalidCredentials : networkFailure ? T.authUnavailable : message);
+      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, invalidCredentials ? T.invalidCredentials : networkFailure ? T.authUnavailable : message);
     } finally {
       setLoading(false);
     }
@@ -703,6 +765,49 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
   const handleSignOut = async () => {
     await supabase.auth.signOut({ scope: 'local' });
     await setUser(null);
+  };
+
+  const saveAccountIdentity = async () => {
+    const usernameValue = normalizeUsername(usernameDraft);
+    if (!accountNameDraft.trim()) {
+      Alert.alert(isAr ? 'حسابي' : 'My account', isAr ? 'اكتب الاسم الذي سيظهر داخل التطبيق.' : 'Enter the name shown in the app.');
+      return;
+    }
+    if (!isValidUsername(usernameValue)) {
+      Alert.alert(
+        isAr ? 'حسابي' : 'My account',
+        isAr
+          ? 'اكتب يوزر نيم فريد من 3 أحرف على الأقل، بحروف إنكليزية وأرقام وشرطة سفلية.'
+          : 'Use a unique username, 3+ characters, letters, numbers, and underscore.',
+      );
+      return;
+    }
+    const patch = accountIdentityPatch({
+      displayName: accountNameDraft,
+      username: usernameValue,
+      phone: phoneDraft,
+      consentAccepted: authAgreement,
+    });
+    if (user?.id) {
+      const profileResult = await upsertProfileIdentity(supabase, user.id, patch);
+      if (profileResult.error) {
+        Alert.alert(isAr ? 'حسابي' : 'My account', profileResult.error.message);
+        return;
+      }
+    }
+    await setCfg(patch);
+    Alert.alert(isAr ? 'حسابي' : 'My account', isAr ? 'تم حفظ هوية الحساب.' : 'Account identity saved.');
+  };
+
+  const pickAccountAvatar = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.75,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    if (result.canceled || !result.assets?.[0]?.uri) return;
+    await setCfg({ avatarUri: result.assets[0].uri });
   };
 
   const handlePasswordReset = async () => {
@@ -1081,7 +1186,18 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
         isAr ? 'ستعود بياناتك الحقيقية كما كانت.' : 'Your real data will be restored exactly as it was.',
         [
           { text: T.cancel, style: 'cancel' },
-          { text: isAr ? 'خروج' : 'Exit', onPress: exitDemoMode },
+          {
+            text: isAr ? 'خروج' : 'Exit',
+            onPress: async () => {
+              const ok = await exitDemoMode();
+              Alert.alert(
+                isAr ? 'البيانات التجريبية' : 'Demo data',
+                ok
+                  ? (isAr ? 'تم الخروج من التجربة. تكدر تبدأ ببياناتك الحقيقية الآن.' : 'Demo mode is off. You can start with your real data now.')
+                  : (isAr ? 'لم نتمكن من إيقاف التجربة. حاول مرة أخرى.' : 'Could not exit demo mode. Try again.'),
+              );
+            },
+          },
         ],
       );
       return;
@@ -1825,36 +1941,25 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
         <Row label={T.deleteAll} onPress={confirmReset} danger last />
       </Section>
 
-      {user ? (
-        <TouchableOpacity
-          onPress={() => {
-            setExpandedSections(current => new Set([...current, 'account']));
-            setOpen('account');
-          }}
-          style={[s.accountOverview, { backgroundColor: th.card, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}
-          accessibilityRole="button"
-        >
-          <View style={[s.accountOverviewAvatar, { backgroundColor: th.primSoft }]}>
-            <Text style={{ color: th.primary, fontSize: 17, ...weight('900') }}>{accountInitial}</Text>
-            <View style={[s.accountOverviewStatus, { backgroundColor: th.inc, borderColor: th.card }]} />
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text numberOfLines={1} style={[s.accountName, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{accountDisplayName}</Text>
-            <Text numberOfLines={1} style={[s.accountEmail, { color: th.sub, textAlign: 'left', writingDirection: 'ltr' }]}>{accountEmailText}</Text>
-          </View>
-          <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={18} color={th.faint} />
-        </TouchableOpacity>
-      ) : null}
-
-      <Section id="account" title={T.account}>
+      <Section id="account" title={isAr ? 'حسابي' : 'My account'}>
         <Row
-          label={user ? accountDisplayName : T.notConnected}
-          value={user ? accountEmailText : (authServiceStatus === 'down' ? T.accountServiceDown : undefined)}
+          label={isAr ? 'معلومات الحساب' : 'Account details'}
+          value={user ? accountUsername : (authServiceStatus === 'down' ? T.accountServiceDown : undefined)}
           onPress={() => toggleOpen('account')}
           last={open !== 'account'}
         />
         {open === 'account' ? (
           <Expanded>
+            <TouchableOpacity onPress={pickAccountAvatar} style={[s.avatarPicker, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+              <View style={[s.accountAvatarLarge, { backgroundColor: th.primSoft }]}>
+                {cfg.avatarUri ? <Image source={{ uri: cfg.avatarUri }} style={s.accountAvatarImage} /> : <Text style={{ color: th.primary, fontSize: 20, ...weight('900') }}>{accountInitial}</Text>}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>{isAr ? 'صورة الحساب' : 'Profile photo'}</Text>
+                <Text style={{ color: th.sub, fontSize: 11, lineHeight: 17, marginTop: 3, textAlign: isAr ? 'right' : 'left' }}>{isAr ? 'متاحة للحساب المحلي والمتصل' : 'Available for local and connected use'}</Text>
+              </View>
+              <Ionicons name="camera-outline" size={18} color={th.primary} />
+            </TouchableOpacity>
             {user ? (
               <>
                 <View style={[s.accountCard, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
@@ -1870,6 +1975,39 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                   <View style={[s.accountSyncRow, { backgroundColor: th.card, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
                     <Ionicons name={syncState.icon} size={16} color={syncState.color} />
                     <Text style={{ color: syncState.color, fontSize: 12, ...weight('900'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>{syncState.text}</Text>
+                  </View>
+                  <View style={[s.accountIdentityGrid, { borderTopColor: th.border }]}>
+                    <TextInput
+                      value={accountNameDraft}
+                      onChangeText={setAccountNameDraft}
+                      placeholder={isAr ? 'الاسم' : 'Name'}
+                      placeholderTextColor={th.sub}
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
+                    />
+                    <TextInput
+                      value={usernameDraft}
+                      onChangeText={(value) => setUsernameDraft(normalizeUsername(value))}
+                      placeholder={isAr ? 'اليوزر نيم' : 'Username'}
+                      placeholderTextColor={th.sub}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
+                    />
+                    <TextInput
+                      value={phoneDraft}
+                      onChangeText={(value) => setPhoneDraft(normalizePhone(value))}
+                      placeholder={isAr ? 'رقم الهاتف' : 'Phone number'}
+                      placeholderTextColor={th.sub}
+                      keyboardType="phone-pad"
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
+                    />
+                    <View style={[s.accountSyncRow, { backgroundColor: th.card, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+                      <Ionicons name="at-outline" size={16} color={th.primary} />
+                      <Text style={{ color: th.text, fontSize: 12, ...weight('900'), flex: 1, textAlign: 'left', writingDirection: 'ltr' }}>{accountUsername}</Text>
+                    </View>
+                    <TouchableOpacity onPress={saveAccountIdentity} style={[s.primaryButton, { backgroundColor: th.primary }]}>
+                      <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>{isAr ? 'حفظ هوية الحساب' : 'Save account identity'}</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
                 <TouchableOpacity onPress={handleSignOut} style={[s.secondaryButton, { backgroundColor: th.expBg }]}>
@@ -1896,6 +2034,34 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                     { value: 'signup', label: T.signUp },
                   ]}
                 />
+                {authMode === 'signup' ? (
+                  <>
+                    <TextInput
+                      value={accountNameDraft}
+                      onChangeText={setAccountNameDraft}
+                      placeholder={isAr ? 'الاسم' : 'Name'}
+                      placeholderTextColor={th.sub}
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
+                    />
+                    <TextInput
+                      value={usernameDraft}
+                      onChangeText={(value) => setUsernameDraft(normalizeUsername(value))}
+                      placeholder={isAr ? 'اليوزر نيم' : 'Username'}
+                      placeholderTextColor={th.sub}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
+                    />
+                    <TextInput
+                      value={phoneDraft}
+                      onChangeText={(value) => setPhoneDraft(normalizePhone(value))}
+                      placeholder={isAr ? 'رقم الهاتف' : 'Phone number'}
+                      placeholderTextColor={th.sub}
+                      keyboardType="phone-pad"
+                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
+                    />
+                  </>
+                ) : null}
                 <TextInput
                   value={email}
                   onChangeText={(value) => { setEmail(value); emailRef.current = value; }}
@@ -1941,6 +2107,17 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
                   <TouchableOpacity onPress={handlePasswordReset} disabled={loading} style={[s.secondaryButton, { backgroundColor: th.cardHigh }]}>
                     <Text style={{ color: th.primary, fontSize: 13, ...weight('900') }}>
                       {isAr ? 'نسيت كلمة المرور' : 'Forgot password'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {authMode === 'signup' ? (
+                  <TouchableOpacity
+                    onPress={() => setAuthAgreement(value => !value)}
+                    style={[s.termsRow, { flexDirection: isAr ? 'row-reverse' : 'row' }]}
+                  >
+                    <Ionicons name={authAgreement ? 'checkbox' : 'square-outline'} size={19} color={authAgreement ? th.primary : th.sub} />
+                    <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, flex: 1, textAlign: isAr ? 'right' : 'left' }}>
+                      {isAr ? 'أوافق على شروط الحساب والمزامنة' : 'I agree to account and sync terms'}
                     </Text>
                   </TouchableOpacity>
                 ) : null}
@@ -2456,9 +2633,14 @@ const s = StyleSheet.create({
   accountCard: { borderRadius: RADIUS.lg, borderWidth: 1, padding: 12, gap: 10 },
   accountCardHead: { alignItems: 'center', gap: 10 },
   accountAvatar: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  avatarPicker: { minHeight: 72, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10 },
+  accountAvatarLarge: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  accountAvatarImage: { width: '100%', height: '100%' },
   accountName: { fontSize: 15, lineHeight: 21, ...weight('900') },
   accountEmail: { fontSize: 12, lineHeight: 17, ...weight('700'), marginTop: 2 },
   accountSyncRow: { minHeight: 36, alignItems: 'center', gap: 8, borderRadius: RADIUS.md, paddingHorizontal: 10, paddingVertical: 8 },
+  accountIdentityGrid: { borderTopWidth: 1, paddingTop: 10, gap: 8 },
+  termsRow: { alignItems: 'center', gap: 8, paddingVertical: 6 },
   section: { marginBottom: 10 },
   sectionToggle: { minHeight: 52, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 14, marginBottom: 7, ...SHADOW.subtle },
   sectionMark: { width: 4, height: 16, borderRadius: 4 },

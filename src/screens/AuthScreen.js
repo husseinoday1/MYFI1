@@ -10,15 +10,20 @@ import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
 import { weight } from '../lib/tokens';
+import { accountIdentityPatch, isValidUsername, normalizePhone, normalizeUsername, upsertProfileIdentity } from '../lib/accountIdentity';
 
 export default function AuthScreen({ onSkip }) {
-  const { cfg, setUser } = useStore();
+  const { cfg, setCfg, setUser } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const ar = cfg.lang === 'ar';
 
   const [mode,    setMode]    = useState('signin'); // 'signin' | 'signup'
   const [email,   setEmail]   = useState('');
   const [pass,    setPass]    = useState('');
+  const [displayName, setDisplayName] = useState(cfg.displayName || '');
+  const [username, setUsername] = useState(cfg.username || '');
+  const [phone, setPhone] = useState(cfg.phone || '');
+  const [termsAccepted, setTermsAccepted] = useState(cfg.accountConsentAccepted === true);
   const [loading, setLoading] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
 
@@ -27,6 +32,16 @@ export default function AuthScreen({ onSkip }) {
     signup:   ar ? 'إنشاء حساب'    : 'Sign Up',
     email:    ar ? 'البريد الإلكتروني' : 'Email',
     password: ar ? 'كلمة المرور'   : 'Password',
+    name: ar ? 'الاسم' : 'Name',
+    username: ar ? 'اليوزر نيم' : 'Username',
+    phone: ar ? 'رقم الهاتف' : 'Phone number',
+    terms: ar ? 'أوافق على شروط الحساب والمزامنة' : 'I agree to account and sync terms',
+    forgotPassword: ar ? 'نسيت كلمة المرور' : 'Forgot password',
+    authErrorTitle: ar ? 'تعذر الدخول' : 'Could not sign in',
+    signupErrorTitle: ar ? 'تعذر إنشاء الحساب' : 'Could not create account',
+    resetTitle: ar ? 'استعادة كلمة المرور' : 'Password recovery',
+    usernameRule: ar ? 'اكتب يوزر نيم فريد من 3 أحرف على الأقل، حروف إنكليزية وأرقام وشرطة سفلية.' : 'Use a unique username, 3+ characters, letters, numbers, and underscore.',
+    termsRequired: ar ? 'وافق على شروط الحساب قبل إنشاء حساب جديد.' : 'Accept the account terms before creating an account.',
     offline:  ar ? 'متابعة بدون حساب' : 'Continue Offline',
     noAcc:    ar ? 'ليس لديك حساب؟ ' : "Don't have an account? ",
     hasAcc:   ar ? 'لديك حساب؟ '   : 'Already have an account? ',
@@ -82,6 +97,22 @@ export default function AuthScreen({ onSkip }) {
       Alert.alert('', ar ? 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.' : 'Password must be at least 8 characters.');
       return;
     }
+    const usernameValue = normalizeUsername(username);
+    const phoneValue = normalizePhone(phone);
+    if (mode === 'signup') {
+      if (!displayName.trim()) {
+        Alert.alert(S.signupErrorTitle, ar ? 'اكتب اسمك حتى يظهر في هوية المستخدم.' : 'Enter your name for your profile identity.');
+        return;
+      }
+      if (!isValidUsername(usernameValue)) {
+        Alert.alert(S.signupErrorTitle, S.usernameRule);
+        return;
+      }
+      if (!termsAccepted) {
+        Alert.alert(S.signupErrorTitle, S.termsRequired);
+        return;
+      }
+    }
     setLoading(true);
     try {
       const health = await checkSupabaseHealth(10000);
@@ -93,21 +124,44 @@ export default function AuthScreen({ onSkip }) {
         const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pass });
         if (error) throw error;
         await setUser(data.user);
+        await setCfg(accountIdentityPatch({ displayName, username: usernameValue, phone: phoneValue }));
       } else {
         const { data, error } = await supabase.auth.signUp({
           email: email.trim().toLowerCase(),
           password: pass,
-          options: { emailRedirectTo: getAuthRedirectUrl('confirm') },
+          options: {
+            emailRedirectTo: getAuthRedirectUrl('confirm'),
+            data: {
+              displayName: displayName.trim(),
+              full_name: displayName.trim(),
+              username: usernameValue,
+              phone: phoneValue,
+            },
+          },
         });
         if (error) throw error;
+        if (data.user?.id) {
+          const profileResult = await upsertProfileIdentity(supabase, data.user.id, {
+            displayName,
+            username: usernameValue,
+            phone: phoneValue,
+          });
+          if (profileResult.error) throw profileResult.error;
+        }
+        await setCfg(accountIdentityPatch({
+          displayName,
+          username: usernameValue,
+          phone: phoneValue,
+          consentAccepted: termsAccepted,
+        }));
         if (data.user && !data.session) {
-          Alert.alert('', S.emailChk);
+          Alert.alert(S.signup, S.emailChk);
         } else {
           await setUser(data.user);
         }
       }
     } catch (e) {
-      Alert.alert('', authErrorMessage(e));
+      Alert.alert(mode === 'signin' ? S.authErrorTitle : S.signupErrorTitle, authErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -115,7 +169,7 @@ export default function AuthScreen({ onSkip }) {
 
   const handlePasswordReset = async () => {
     if (!email.trim()) {
-      Alert.alert('', ar ? 'أدخل بريدك الإلكتروني أولاً.' : 'Enter your email first.');
+      Alert.alert(S.resetTitle, ar ? 'أدخل بريدك الإلكتروني أولاً.' : 'Enter your email first.');
       return;
     }
     setLoading(true);
@@ -126,9 +180,9 @@ export default function AuthScreen({ onSkip }) {
         redirectTo: getAuthRedirectUrl('recovery'),
       });
       if (error) throw error;
-      Alert.alert('', ar ? 'أُرسلت رسالة الاستعادة إلى بريدك.' : 'A recovery email was sent.');
+      Alert.alert(S.resetTitle, ar ? 'أُرسلت رسالة الاستعادة إلى بريدك.' : 'A recovery email was sent.');
     } catch (error) {
-      Alert.alert('', error?.message || '');
+      Alert.alert(S.resetTitle, error?.message || '');
     } finally {
       setLoading(false);
     }
@@ -167,6 +221,37 @@ export default function AuthScreen({ onSkip }) {
           </View>
 
           {/* Inputs */}
+          {mode === 'signup' ? (
+            <>
+              <TextInput
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder={S.name}
+                placeholderTextColor={th.sub}
+                style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border,
+                  textAlign: ar ? 'right' : 'left' }]}
+              />
+              <TextInput
+                value={username}
+                onChangeText={(value) => setUsername(normalizeUsername(value))}
+                placeholder={S.username}
+                placeholderTextColor={th.sub}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border,
+                  textAlign: 'left', writingDirection: 'ltr' }]}
+              />
+              <TextInput
+                value={phone}
+                onChangeText={(value) => setPhone(normalizePhone(value))}
+                placeholder={S.phone}
+                placeholderTextColor={th.sub}
+                keyboardType="phone-pad"
+                style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border,
+                  textAlign: 'left', writingDirection: 'ltr' }]}
+              />
+            </>
+          ) : null}
           <TextInput
             value={email}
             onChangeText={setEmail}
@@ -213,7 +298,22 @@ export default function AuthScreen({ onSkip }) {
           {mode === 'signin' ? (
             <TouchableOpacity onPress={handlePasswordReset} disabled={loading} style={{ alignItems: 'center', marginTop: 12 }}>
               <Text style={{ color: th.primary, fontSize: 13, ...weight('700') }}>
-                {ar ? 'نسيت كلمة المرور' : 'Forgot password'}
+                {S.forgotPassword}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          {mode === 'signup' ? (
+            <TouchableOpacity
+              onPress={() => setTermsAccepted(value => !value)}
+              style={[s.termsRow, { flexDirection: ar ? 'row-reverse' : 'row' }]}
+            >
+              <Ionicons
+                name={termsAccepted ? 'checkbox' : 'square-outline'}
+                size={19}
+                color={termsAccepted ? th.primary : th.sub}
+              />
+              <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, flex: 1, textAlign: ar ? 'right' : 'left' }}>
+                {S.terms}
               </Text>
             </TouchableOpacity>
           ) : null}
@@ -254,6 +354,7 @@ const s = StyleSheet.create({
   passwordField: { minHeight: 50, borderRadius: 12, borderWidth: 0.5, marginBottom: 12, flexDirection: 'row', alignItems: 'center' },
   passwordInput: { flex: 1, paddingVertical: 14, paddingHorizontal: 14, fontSize: 14 },
   eyeButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  termsRow: { alignItems: 'center', gap: 8, marginTop: 12 },
   btn:        { borderRadius: 14, padding: 15, alignItems: 'center', marginTop: 4 },
   switchRow:  { flexDirection: 'row', justifyContent: 'center', marginTop: 16 },
   skipBtn:    { alignItems: 'center', marginTop: 24, padding: 12 },

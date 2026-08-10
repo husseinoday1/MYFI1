@@ -198,6 +198,7 @@ const HOME_LAYOUT_VERSION = 2;
 export const DEF_CFG = {
   theme: 'dark', themeMode: 'manual', lang: detectSystemLang(), langMode: 'system', currency: 'IQD',
   monthNameStyle: 'numeric',
+  displayName: '', username: '', phone: '', avatarUri: '', accountConsentAccepted: false,
   country: 'IQ', name: 'المستخدم', avatar: '🌿',
   profileType: 'personal',
   activeScope: 'personal',
@@ -250,6 +251,15 @@ export const normalizeCfg = (cfg = {}) => {
     : DEF_START_TAB;
   const country = COUNTRIES.some(item => item.code === cfg.country) ? cfg.country : DEF_CFG.country;
   const currency = CURRENCIES.some(item => item.code === cfg.currency) ? cfg.currency : DEF_CFG.currency;
+  const displayName = String(cfg.displayName || cfg.name || '').trim().replace(/\s+/g, ' ').slice(0, 48);
+  const username = String(cfg.username || '').trim().toLowerCase()
+    .replace(/^@+/, '')
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 24);
+  const phone = String(cfg.phone || '').trim().replace(/[^\d+]/g, '').slice(0, 18);
+  const avatarUri = String(cfg.avatarUri || '').trim().slice(0, 2048);
   const profileType = ['personal', 'personal_business', 'business'].includes(cfg.profileType)
     ? cfg.profileType
     : DEF_CFG.profileType;
@@ -267,6 +277,11 @@ export const normalizeCfg = (cfg = {}) => {
     ...cfg,
     country,
     currency,
+    displayName,
+    username,
+    phone,
+    avatarUri,
+    accountConsentAccepted: cfg.accountConsentAccepted === true,
     profileType,
     activeScope,
     lockDelaySeconds,

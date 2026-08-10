@@ -676,6 +676,19 @@ export default function TrackersLabScreen({
   return (
     <>
     <ScrollView style={{ flex: 1, backgroundColor: th.bg }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 112 }}>
+      {summaryTiles.length ? (
+        <View style={[s.summaryGrid, { flexDirection: rowDir }]}>
+          {summaryTiles.map(item => (
+            <SummaryTile
+              key={item.key}
+              th={th}
+              lang={cfg.lang}
+              item={item}
+              value={`${money(item.value)} ${sym}`}
+            />
+          ))}
+        </View>
+      ) : null}
       {cfg.entryMode === 'quick' ? (
         <View style={[s.trackerQuickEntry, { backgroundColor: th.card, borderColor: th.border }]}>
           <View style={[s.trackerQuickEntryRow, { flexDirection: rowDir }]}>
@@ -703,19 +716,6 @@ export default function TrackersLabScreen({
               </TouchableOpacity>
             ))}
           </View>
-        </View>
-      ) : null}
-      {summaryTiles.length ? (
-        <View style={[s.summaryGrid, { flexDirection: rowDir }]}>
-          {summaryTiles.map(item => (
-            <SummaryTile
-              key={item.key}
-              th={th}
-              lang={cfg.lang}
-              item={item}
-              value={`${money(item.value)} ${sym}`}
-            />
-          ))}
         </View>
       ) : null}
       <View style={s.filterBlock}>
@@ -1284,10 +1284,10 @@ const s = StyleSheet.create({
   trackerQuickEntryIcon: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   trackerQuickEntryLabel: { fontSize: 12, lineHeight: 17, ...weight('800'), textAlign: 'center', maxWidth: '100%' },
   summaryGrid: { flexWrap: 'wrap', gap: 8, marginBottom: 10 },
-  summaryTile: { width: '48.5%', minHeight: 82, borderRadius: RADIUS.md, borderWidth: 1, padding: 10, justifyContent: 'center', ...SHADOW.card },
-  summaryIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 7 },
+  summaryTile: { width: '48.5%', minHeight: 68, borderRadius: RADIUS.md, borderWidth: 1, padding: 8, justifyContent: 'center', ...SHADOW.card },
+  summaryIcon: { width: 26, height: 26, borderRadius: 9, alignItems: 'center', justifyContent: 'center', marginBottom: 5 },
   summaryLabel: { fontSize: 11, lineHeight: 15, ...weight('800') },
-  summaryValue: { fontSize: 16, lineHeight: 22, marginTop: 2, ...weight('900') },
+  summaryValue: { fontSize: 14, lineHeight: 19, marginTop: 2, ...weight('900') },
   filterBlock: { marginBottom: 10 },
   filterSelect: { minHeight: 58, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8, alignItems: 'center', gap: 9 },
   filterSelectLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },

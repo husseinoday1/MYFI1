@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store/useStore';
@@ -10,6 +10,7 @@ import { filterByActiveScope, filterFeatureEntities, getTransactionDisplayAmount
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import { formatCommitmentMonth, getUpcomingCommitments } from '../lib/commitments';
 import { getUpcomingRecurring } from '../utils/calc';
+import { accountPublicId, deriveDisplayName } from '../lib/accountIdentity';
 
 const text = (lang) => {
   const ar = lang === 'ar';
@@ -178,7 +179,8 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
     );
   };
 
-  const profileName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || L.guest;
+  const profileName = deriveDisplayName({ user, cfg }) || L.guest;
+  const profileHandle = accountPublicId({ user, cfg });
   const conflictCount = Number(syncConflict?.total || syncConflict?.items?.length || 0);
   const conflictLabel = syncConflict?.type === 'merged_changes'
     ? (ar ? 'تم دمج تغييرات جهازين' : 'Changes from two devices were merged')
@@ -219,8 +221,10 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
           {mode === 'profile' ? (
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
               <View style={[s.account, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
-                <View style={[s.avatar, { backgroundColor: th.primSoft }]}><Ionicons name="person" size={25} color={th.primary} /></View>
+                <View style={[s.avatar, { backgroundColor: th.primSoft }]}>{cfg.avatarUri ? <Image source={{ uri: cfg.avatarUri }} style={s.avatarImage} /> : <Ionicons name="person" size={25} color={th.primary} />}</View>
                 <Text style={[s.accountName, { color: th.text }]} numberOfLines={1}>{profileName}</Text>
+                <Text style={[s.accountHandle, { color: th.primary }]} numberOfLines={1}>{profileHandle}</Text>
+                {user?.email ? <Text style={{ color: th.sub, fontSize: 12 }}>{user.email}</Text> : null}
                 <Text style={{ color: th.sub, fontSize: 12 }}>{user ? L.signed : L.guest}</Text>
               </View>
               <View style={[s.status, { borderColor: syncConflict || lastSyncError ? th.warn : th.border, backgroundColor: th.cardHigh, flexDirection: dir }]}>
@@ -250,14 +254,10 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
                   </View>
                 </View>
               ) : null}
-              <View style={[s.actions, { flexDirection: dir }]}>
+              <View style={s.actions}>
                 <TouchableOpacity disabled={!user || syncing} onPress={syncCloud} style={[s.primaryAction, { backgroundColor: th.primary, opacity: !user ? 0.45 : 1 }]}>
                   <Ionicons name="sync-outline" size={17} color={th.onPrimary} />
                   <Text style={{ color: th.onPrimary, fontWeight: '900' }}>{syncing ? L.syncing : L.sync}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => onMode?.('review')} style={[s.secondaryAction, { borderColor: th.border, backgroundColor: th.cardHigh }]}>
-                  <Ionicons name="sparkles-outline" size={17} color={th.primary} />
-                  <Text style={{ color: th.text, fontWeight: '900' }}>{L.review} ({smartItems.filter(item => !item.smartReviewedAt).length})</Text>
                 </TouchableOpacity>
               </View>
               <TouchableOpacity onPress={() => { onClose?.(); onOpenTab?.('settings'); }} style={[s.settings, { borderColor: th.border, flexDirection: dir }]}>
@@ -313,11 +313,13 @@ const s = StyleSheet.create({
   titleIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   title: { flex: 1, fontSize: 18, lineHeight: 24, fontWeight: '900' },
   account: { borderWidth: 1, borderRadius: 16, alignItems: 'center', padding: 18, marginBottom: 10 },
-  avatar: { width: 54, height: 54, borderRadius: 27, alignItems: 'center', justifyContent: 'center', marginBottom: 9 },
+  avatar: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 9, overflow: 'hidden' },
+  avatarImage: { width: '100%', height: '100%' },
   accountName: { fontSize: 16, fontWeight: '900', marginBottom: 4, maxWidth: '90%' },
+  accountHandle: { fontSize: 12, fontWeight: '900', marginBottom: 3, writingDirection: 'ltr' },
   status: { borderWidth: 1, borderRadius: 14, padding: 13, gap: 10, alignItems: 'center', marginBottom: 10 },
   actions: { gap: 8, marginBottom: 10 },
-  primaryAction: { minHeight: 46, borderRadius: 13, flex: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, paddingHorizontal: 10 },
+  primaryAction: { minHeight: 46, borderRadius: 13, width: '100%', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, paddingHorizontal: 10 },
   secondaryAction: { minHeight: 46, borderRadius: 13, borderWidth: 1, flex: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, paddingHorizontal: 8 },
   settings: { minHeight: 52, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 13 },
   recoveryBlock: { borderWidth: 1, borderRadius: 14, padding: 14, gap: 10, marginBottom: 10 },

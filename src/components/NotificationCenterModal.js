@@ -13,13 +13,14 @@ const labels = (lang) => {
     select: ar ? '\u062a\u062d\u062f\u064a\u062f' : 'Select',
     selected: ar ? '\u0645\u062d\u062f\u062f' : 'selected',
     dismissAll: ar ? '\u062d\u0630\u0641 \u0627\u0644\u0643\u0644' : 'Dismiss all',
+    review: ar ? 'مراجعة الإدخالات الذكية' : 'Review smart entries',
     retention: ar ? 'الإشعارات المحذوفة تختفي 30 يوماً' : 'Dismissed alerts stay hidden for 30 days',
     emptyTitle: ar ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0625\u0634\u0639\u0627\u0631\u0627\u062a \u062d\u0627\u0644\u064a\u0627' : 'No notifications right now',
     emptyBody: ar ? '\u0643\u0644 \u0634\u064a\u0621 \u064a\u062d\u062a\u0627\u062c \u0627\u0646\u062a\u0628\u0627\u0647 \u0633\u064a\u0638\u0647\u0631 \u0647\u0646\u0627 \u062a\u0644\u0642\u0627\u0626\u064a\u0627.' : 'Anything that needs attention appears here automatically.',
   };
 };
 
-export default function NotificationCenterModal({ visible, onClose, onItemPress, onDismissItems, items = [], th, lang = 'ar' }) {
+export default function NotificationCenterModal({ visible, onClose, onItemPress, onDismissItems, onOpenReview, smartReviewCount = 0, items = [], th, lang = 'ar' }) {
   const L = labels(lang);
   const isRtl = lang === 'ar';
   const insets = useSafeAreaInsets();
@@ -88,6 +89,11 @@ export default function NotificationCenterModal({ visible, onClose, onItemPress,
               <View style={[s.countPill, { backgroundColor: th.primSoft }]}>
                 <Text style={{ color: th.primary, fontSize: 12, fontWeight: '900' }}>{items.length} {L.count}</Text>
               </View>
+            ) : null}
+            {smartReviewCount > 0 ? (
+              <TouchableOpacity accessibilityLabel={L.review} onPress={onOpenReview} style={[s.headerAction, { backgroundColor: th.warnBg }]}>
+                <Ionicons name="sparkles-outline" size={18} color={th.warn} />
+              </TouchableOpacity>
             ) : null}
             {items.length > 0 ? (
               <TouchableOpacity
@@ -175,7 +181,7 @@ export default function NotificationCenterModal({ visible, onClose, onItemPress,
 
 const s = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 16, paddingTop: 12, maxHeight: '82%' },
+  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 16, paddingTop: 10, maxHeight: '74%' },
   handle: { width: 38, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 12 },
   header: { alignItems: 'center', gap: 8, marginBottom: 10 },
   titleIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
@@ -185,7 +191,7 @@ const s = StyleSheet.create({
   headerAction: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   policyStrip: { minHeight: 42, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, gap: 8, alignItems: 'center', marginBottom: 10 },
   policyText: { flex: 1, fontSize: 11, lineHeight: 17, fontWeight: '800' },
-  item: { borderRadius: 13, padding: 10, gap: 8, marginBottom: 8, borderWidth: 1, alignItems: 'stretch' },
+  item: { borderRadius: 13, padding: 9, gap: 7, marginBottom: 7, borderWidth: 1, alignItems: 'stretch' },
   itemContent: { flex: 1, gap: 10, alignItems: 'center' },
   itemIcon: { width: 40, height: 40, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   itemTitle: { fontSize: 14, lineHeight: 20, fontWeight: '900', marginBottom: 4 },

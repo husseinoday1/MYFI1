@@ -18,6 +18,16 @@ const actionIcon = (button = {}) => {
   return 'checkmark-outline';
 };
 
+const inferTone = (dialog) => {
+  const text = `${dialog?.title || ''} ${dialog?.message || ''}`.toLowerCase();
+  if (dialog?.options?.type) return dialog.options.type;
+  if (dialog?.buttons?.some(button => button.style === 'destructive')) return 'danger';
+  if (/error|failed|invalid|incorrect|تعذر|فشل|غير صحيحة|خطأ|غير صالح/.test(text)) return 'danger';
+  if (/warning|confirm|تأكيد|انتبه|تحذير/.test(text)) return 'warning';
+  if (/success|saved|تم|نجاح/.test(text)) return 'success';
+  return 'info';
+};
+
 export default function AppAlertHost({ children }) {
   const cfg = useStore(state => state.cfg);
   const th = TH[cfg.theme] || TH.dark;
@@ -49,6 +59,28 @@ export default function AppAlertHost({ children }) {
     setDialog(null);
     requestAnimationFrame(() => button?.onPress?.());
   };
+  const tone = inferTone(dialog);
+  const toneColor = tone === 'danger'
+    ? th.exp
+    : tone === 'warning'
+      ? th.warn
+      : tone === 'success'
+        ? th.inc
+        : th.primary;
+  const toneBg = tone === 'danger'
+    ? th.expBg
+    : tone === 'warning'
+      ? th.warnBg
+      : tone === 'success'
+        ? th.incBg
+        : th.primSoft;
+  const toneIcon = tone === 'danger'
+    ? 'alert-circle-outline'
+    : tone === 'warning'
+      ? 'warning-outline'
+      : tone === 'success'
+        ? 'checkmark-circle-outline'
+        : 'information-circle-outline';
 
   return (
     <>
@@ -66,11 +98,12 @@ export default function AppAlertHost({ children }) {
       >
         <View style={[s.backdrop, { backgroundColor: th.overlay }]}>
           <View style={[s.card, { backgroundColor: th.card, borderColor: th.border }]}>
-            <View style={[s.mark, { backgroundColor: th.primSoft }]}>
+            <View style={[s.toneBar, { backgroundColor: toneColor }]} />
+            <View style={[s.mark, { backgroundColor: toneBg }]}>
               <Ionicons
-                name={dialog?.buttons?.some(button => button.style === 'destructive') ? 'alert-circle-outline' : 'information-circle-outline'}
+                name={toneIcon}
                 size={25}
-                color={dialog?.buttons?.some(button => button.style === 'destructive') ? th.exp : th.primary}
+                color={toneColor}
               />
             </View>
             {!!dialog?.title && (
@@ -133,8 +166,10 @@ const s = StyleSheet.create({
     borderWidth: 1,
     padding: 18,
     paddingBottom: 16,
+    overflow: 'hidden',
     ...SHADOW.card,
   },
+  toneBar: { position: 'absolute', top: 0, left: 0, right: 0, height: 5 },
   mark: {
     width: 48,
     height: 48,

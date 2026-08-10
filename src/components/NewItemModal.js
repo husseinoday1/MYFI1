@@ -73,6 +73,8 @@ const modalCopy = (lang = 'ar') => {
     monthlyRepeat: ar ? 'شهري' : 'Monthly',
     oneTimeRepeat: ar ? 'مرة واحدة' : 'One time',
     repeatMode: ar ? 'تكرار الالتزام' : 'Commitment repeat',
+    note: ar ? 'ملاحظة' : 'Note',
+    notePlaceholder: ar ? 'أضف ملاحظة اختيارية' : 'Add an optional note',
   };
 };
 
@@ -123,6 +125,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const [commitmentCat, setCommitmentCat] = useState('other');
   const [commitmentCatTouched, setCommitmentCatTouched] = useState(false);
   const [commitmentRepeatMonthly, setCommitmentRepeatMonthly] = useState(true);
+  const [note, setNote] = useState('');
   const [expandedPicker, setExpandedPicker] = useState(null);
 
   useEffect(() => {
@@ -144,6 +147,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setCommitmentCat(suggestCategoryForText(presetName, commitmentCategories));
     setCommitmentCatTouched(false);
     setCommitmentRepeatMonthly(true);
+    setNote('');
     setExpandedPicker(null);
   }, [visible, linkedPlanMode, presetKind, preset?.linkedName, requestedTrackerType, defaultWalletId]);
 
@@ -228,6 +232,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setCommitmentCat('other');
     setCommitmentCatTouched(false);
     setCommitmentRepeatMonthly(true);
+    setNote('');
     setExpandedPicker(null);
   };
 
@@ -334,7 +339,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
             <Text numberOfLines={1} style={[s.selectValue, { color: th.text, textAlign: align }]}>
               {selected?.label || (isAr ? 'اختر' : 'Choose')}
             </Text>
-            <Text numberOfLines={1} style={[s.selectDetail, { color: th.sub, textAlign: align }]}>
+            <Text numberOfLines={2} style={[s.selectDetail, { color: th.sub, textAlign: align }]}>
               {selected?.detail || ' '}
             </Text>
           </View>
@@ -357,6 +362,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         firstDueISO: monthStartISO(planDate),
         walletId: planWalletId,
         cat: preset?.cat || suggestCategoryForText(linkedName, cats),
+        note: note.trim(),
         linkedType: preset?.linkedType || 'debt',
         linkedId: preset?.linkedId || null,
       });
@@ -380,6 +386,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         firstDueISO: monthStartISO(startDate),
         walletId: planWalletId,
         cat: commitmentCat || suggestCategoryForText(name, commitmentCategories),
+        note: note.trim(),
         linkedType: 'none',
         repeatMonthly: commitmentRepeatMonthly,
       });
@@ -398,12 +405,14 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         direction: isReceivable ? 'receivable' : 'owed',
         originMode,
         walletId: planWalletId,
+        note: note.trim(),
       });
     } else {
       created = await addGoal({
         name: name.trim(),
         target: totalValue,
         createdAt: startDate,
+        note: note.trim(),
       });
     }
 
@@ -556,6 +565,20 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                   </Text>
                 </View>
               ) : null}
+
+              <View style={[s.noteBlock, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>{T.note}</Text>
+                <TextInput
+                  value={note}
+                  onChangeText={setNote}
+                  placeholder={T.notePlaceholder}
+                  placeholderTextColor={th.faint}
+                  multiline
+                  numberOfLines={2}
+                  textAlignVertical="top"
+                  style={[s.noteInput, { color: th.text, textAlign: align }]}
+                />
+              </View>
 
               {isCommitment ? (
                 <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
@@ -814,6 +837,8 @@ const s = StyleSheet.create({
   fieldLabel: { fontSize: 11, lineHeight: 15, ...weight('800'), marginBottom: 4 },
   inlineInput: { minHeight: 28, padding: 0, fontSize: 14, lineHeight: 19, ...weight('900') },
   amountInput: { minHeight: 36, padding: 0, fontSize: 22, lineHeight: 30, ...weight('900') },
+  noteBlock: { minHeight: 76, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 10 },
+  noteInput: { minHeight: 38, padding: 0, fontSize: 13, lineHeight: 19, ...weight('700') },
   infoCard: { minHeight: 58, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 9, paddingHorizontal: 10, paddingVertical: 9, marginBottom: 8 },
   infoValue: { fontSize: 12, lineHeight: 17, ...weight('900'), marginTop: 1 },
   infoBox: { borderRadius: 14, borderWidth: 0.5, padding: 12, gap: 10, marginBottom: 16, alignItems: 'center' },
@@ -829,13 +854,13 @@ const s = StyleSheet.create({
   goalPurposeBlock: { marginBottom: 14 },
   originModes: { gap: 8, marginBottom: 7 },
   originMode: { flex: 1, minHeight: 40, borderRadius: 11, borderWidth: 0.5, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-  twoColumnRow: { alignItems: 'stretch', gap: 8, marginBottom: 8 },
+  twoColumnRow: { alignItems: 'stretch', gap: 10, marginBottom: 10 },
   selectFieldBlock: { flex: 1, minWidth: 0, marginBottom: 7 },
-  selectField: { minHeight: 64, alignItems: 'center', gap: 8, borderRadius: 13, borderWidth: 0.5, paddingHorizontal: 10, paddingVertical: 7 },
+  selectField: { minHeight: 74, alignItems: 'center', gap: 8, borderRadius: 13, borderWidth: 0.5, paddingHorizontal: 10, paddingVertical: 8 },
   selectLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
-  selectValue: { fontSize: 12, lineHeight: 18, ...weight('900'), marginTop: 1 },
-  selectDetail: { fontSize: 9, lineHeight: 13, ...weight('700'), marginTop: 1 },
-  dateButton: { minHeight: 64, paddingHorizontal: 10 },
+  selectValue: { fontSize: 13, lineHeight: 18, ...weight('900'), marginTop: 1 },
+  selectDetail: { fontSize: 9, lineHeight: 12, ...weight('700'), marginTop: 1 },
+  dateButton: { minHeight: 74, paddingHorizontal: 10 },
   emptySelect: { padding: 10, fontSize: 12, ...weight('700') },
   selectSheetOverlay: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 12 },
   selectSheetPanel: { width: '100%', maxWidth: 520, alignSelf: 'center', maxHeight: '54%', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, paddingHorizontal: 12, paddingTop: 10 },

@@ -144,6 +144,8 @@ assert.equal(reports.includes('spendingLimit'), false, 'Reports must not keep mo
 assert.equal(pdf.includes("selected.has('budget')"), false, 'Generated report PDFs must not render the removed budget section');
 assert.equal(reports.includes('الرصيد المرحّل بنهاية الفترة'), false, 'Reports must not use the confusing carried-balance title');
 assert(reports.includes('comparisonExpanded') && reports.includes('expandedChartPanel'), 'Comparison charts must offer an expanded view');
+assert(reports.includes("value: 'comparison_chart'") && reports.includes("value: 'comparison_details'"), 'Comparison sharing must separate chart and details');
+assert.equal(reports.includes('proCompareChipRail'), false, 'Comparison periods must not be duplicated as a second chip rail');
 assert(reports.includes('svgSafe: true'), 'Comparison chart month labels must avoid broken Arabic SVG text shaping');
 assert(settings.includes('monthNameStyle') && settings.includes('monthStyleLabel'), 'Settings must expose a global month display preference');
 assert(constants.includes("monthNameStyle: 'numeric'"), 'Month display preference must default to numeric labels');
@@ -186,6 +188,7 @@ assert(newItemModal.includes('active ? option.color : th.cardHigh'), 'Tracker cr
 assert(newItemModal.includes('selectSheetPanel'), 'Tracker creation choices must use the floating picker design');
 assert(newItemModal.includes("typeBtn: { width: '48.5%'"), 'Tracker creation type cards must be symmetric instead of squeezed into one row');
 assert(newItemModal.includes('requestedTrackerType'), 'Tracker creation must honor the tracker type selected from quick actions');
+assert(newItemModal.includes('note: note.trim()') && newItemModal.includes('noteBlock'), 'Tracker creation must keep one unified optional note field');
 assert(newItemModal.includes('dedicatedTrackerLaunch'), 'Tracker quick actions must open a dedicated creation sheet for the selected tracker type');
 assert(newItemModal.includes('isTracker && !dedicatedTrackerLaunch'), 'Dedicated tracker creation sheets must not show the classic tracker type switcher');
 assert(newItemModal.includes('trackerHeaderCard') && newItemModal.includes('entryField') && newItemModal.includes('amountInput'), 'Tracker creation sheets must use the voted dedicated card layout');
@@ -193,7 +196,7 @@ assert(newItemModal.includes('walletEffect') && newItemModal.includes('originImp
 assert(newItemModal.includes('commitmentRepeatMonthly') && newItemModal.includes('repeatMonthly: commitmentRepeatMonthly'), 'Commitment creation must persist monthly versus one-time repeat mode');
 assert(addModal.includes('dedicatedQuickEntry'), 'Home quick actions must open dedicated money-entry sheets');
 assert(addModal.includes('!dedicatedQuickEntry'), 'Dedicated money-entry sheets must not show the classic entry type switcher');
-assert(newItemModal.includes('selectField: { minHeight: 64'), 'Tracker creation select cards must match the larger dropdown field size');
+assert(newItemModal.includes('selectField: { minHeight: 74'), 'Tracker creation select cards must match the larger dropdown field size');
 assert.equal(newItemModal.includes('selectedFirstOptions'), false, 'Tracker creation wallet choices must keep their stable order');
 assert.equal(newItemModal.includes('walletChip'), false, 'Tracker creation must not keep the old horizontal wallet chip rail');
 assert(newItemModal.includes("id: 'plan-wallet'"), 'Linked monthly commitments must use the redesigned wallet picker');
@@ -202,6 +205,8 @@ assert(notificationCenter.includes('policyStrip'), 'Notification center must exp
 assert(notificationCenter.includes('dismiss(itemKeys)'), 'Notification center must allow dismissing all visible alerts');
 assert(home.includes('profilePill'), 'Home top bar must show a labeled account pill, not only a person icon');
 assert(home.includes('accountName'), 'Home top account pill must show the account name or email');
+assert(home.includes('profileHandle'), 'Home top account pill must show the unique username handle');
+assert(home.includes('avatarUri') && home.includes('walletPopup'), 'Home must support a local avatar and popup wallet picker');
 assert(home.includes('attentionHeader'), 'Important states must use the shared attention header');
 assert(home.includes('expandedRecentId'), 'Home transactions must expose inline expandable details');
 assert(home.includes('detailsToggle'), 'Home transaction rows must use a down-arrow details toggle');
