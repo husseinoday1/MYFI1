@@ -58,7 +58,7 @@ const text = (lang) => {
 export default function HomeCenterModal({ visible, mode = 'profile', onClose, onMode, onOpenTab, onEditTransaction, onOpenTransactionDetails }) {
   const {
     trans, debts, goals, commitments, cats, cfg, user, syncing, online, dirty,
-    lastSyncedAt, lastSyncError, syncConflict, vaultRecovery, syncCloud, editTrans,
+    lastSyncedAt, lastSyncError, syncConflict, vaultRecovery, syncCloud,
     retryLoadLocal, clearAndResetVault,
   } = useStore();
   const [query, setQuery] = useState('');
@@ -74,7 +74,7 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
   const scopedTrans = filterByActiveScope(trans, cfg).filter(item => transactionFeatureEnabled(item, cfg));
   const scopedEntities = filterFeatureEntities({ debts, goals, commitments, cfg });
   const smartItems = useMemo(
-    () => scopedTrans.filter(item => item.smartSource).sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 30),
+    () => scopedTrans.filter(item => item.smartSource && !item.smartReviewedAt).sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 30),
     [trans, cfg.activeScope, cfg.profileType],
   );
   const dueItems = useMemo(() => {
@@ -140,12 +140,11 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
     onClose?.();
     onOpenTab?.('trackers');
   };
-  const reviewSmart = async item => {
-    if (!item.smartReviewedAt) await editTrans(item.id, { smartReviewedAt: new Date().toISOString() });
+  const reviewSmart = item => {
     onClose?.();
-    const reviewedItem = { ...item, smartReviewedAt: item.smartReviewedAt || new Date().toISOString() };
-    if (isCurrentMonthTransaction(reviewedItem)) onEditTransaction?.(reviewedItem);
-    else onOpenTransactionDetails?.(reviewedItem);
+    const reviewItem = { ...item, __smartReviewMode: true };
+    if (isCurrentMonthTransaction(reviewItem)) onEditTransaction?.(reviewItem);
+    else onOpenTransactionDetails?.(reviewItem);
   };
 
   const renderRow = (item, kind = 'search') => {

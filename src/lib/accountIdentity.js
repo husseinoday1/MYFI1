@@ -60,17 +60,33 @@ export const accountIdentityPatch = ({ displayName, username, phone, consentAcce
 export const isProfileSchemaError = (error) => /schema cache|column .*profiles|could not find the .*column/i.test(String(error?.message || error || ''));
 
 // Keep local sign-in usable while an older Supabase project is waiting for the identity migration.
+// Attempts progressively smaller payloads only for schema-cache / missing-column errors.
 export const upsertProfileIdentity = async (client, id, patch = {}) => {
   if (!client || !id) return { error: null, skipped: true };
+
   const payload = {
     id,
     display_name: cleanDisplayName(patch.displayName),
     username: normalizeUsername(patch.username),
     phone: normalizePhone(patch.phone) || null,
   };
-  const result = await client.from('profiles').upsert(payload);
-  if (!result.error) return result;
-  if (!isProfileSchemaError(result.error)) return result;
-  const fallback = await client.from('profiles').upsert({ id, display_name: payload.display_name });
-  return { ...fallback, warning: result.error };
+
+  const candidates = [
+    payload,
+    { id, display_name: payload.display_name, username: payload.username },
+    { id, display_name: payload.display_name },
+    { id },
+  ];
+
+  let schemaWarning = null;
+  for (const candidate of candidates) {
+    const result = await client.from('profiles').upsert(candidate);
+    if (!result.error) {
+      return schemaWarning ? { ...result, warning: schemaWarning, degraded: true } : result;
+    }
+    if (!isProfileSchemaError(result.error)) return result;
+    schemaWarning ||= result.error;
+  }
+
+  return { error: schemaWarning, warning: schemaWarning, degraded: true };
 };

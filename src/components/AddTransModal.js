@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, Modal, TextInput, ScrollView, Alert, Pressable, StyleSheet, Image, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -643,6 +643,9 @@ export default function AddTransModal({
       note, recurring, dateISO, walletId,
       recurringGroupId: draftData?.recurringGroupId,
       smartSource: smartSource || editData?.smartSource || null,
+      ...(editData?.__smartReviewMode && (smartSource || editData?.smartSource)
+        ? { smartReviewedAt: new Date().toISOString() }
+        : {}),
     };
     const saved = editData ? await editTrans(editData.id, payload) : await addTrans(payload);
     if (!saved) {

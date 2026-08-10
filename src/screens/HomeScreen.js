@@ -307,6 +307,10 @@ export default function HomeScreen({
     [notificationItems],
   );
   const unreadNotificationCount = notificationKeys.filter(key => !readNotificationKeys.includes(key)).length;
+  const pendingSmartReviewCount = scopedTrans.filter(
+    item => item.smartSource && !item.smartReviewedAt,
+  ).length;
+  const notificationBadgeCount = unreadNotificationCount + pendingSmartReviewCount;
 
   useEffect(() => {
     AsyncStorage.getItem('MYFI_READ_NOTIFICATIONS_V1')
@@ -847,7 +851,7 @@ export default function HomeScreen({
             style={[s.notifyBtn, { backgroundColor: th.card, borderColor: th.border }]}
           >
             <Ionicons name="notifications-outline" size={18} color={th.primary} />
-            {unreadNotificationCount > 0 ? (
+            {notificationBadgeCount > 0 ? (
               <View
                 style={[
                   s.notifyBadge,
@@ -859,7 +863,7 @@ export default function HomeScreen({
                 ]}
               >
                 <Text style={{ color: th.onPrimary, fontSize: 11, ...weight('900') }}>
-                  {Math.min(unreadNotificationCount, 9)}
+                  {Math.min(notificationBadgeCount, 9)}
                 </Text>
               </View>
             ) : null}
@@ -1003,7 +1007,7 @@ export default function HomeScreen({
         }}
         onDismissItems={dismissNotifications}
         items={notificationItems}
-        smartReviewCount={scopedTrans.filter(item => item.smartSource && !item.smartReviewedAt).length}
+        smartReviewCount={pendingSmartReviewCount}
         onOpenReview={() => { setNotificationsOpen(false); setCenterMode('review'); }}
         th={th}
         lang={cfg.lang}
