@@ -1,714 +1,581 @@
+// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
+// MYFI_REAL_STATE_CONSOLIDATED_UX_V5
+// MYFI_SETTINGS_RUNTIME_RECOVERY_V5_0_1
+// MYFI_PERFORMANCE_DATA_LAB_V5_1
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, TextInput, Switch, Alert, Appearance, Pressable, StyleSheet, Modal, Image } from 'react-native';
+import {
+  Alert,
+  Image,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  useColorScheme,
+  View,
+  Linking,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
+import { COUNTRIES, CURRENCIES } from '../lib/constants';
 import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
-import { COUNTRIES, CURRENCIES, ICON_OPTIONS, CAT_COLORS, DEF_HOME_CARDS, DEF_HOME_SECTIONS } from '../lib/constants';
-import { CATEGORY_FLOWS, categoryFlowLabel, getCategoriesForFlow, normalizeCategoryFlow } from '../lib/categories';
-import { checkSupabaseHealth, supabase } from '../lib/supabase';
-import { getAuthRedirectUrl } from '../lib/authCallback';
+import ChoiceSheet from '../components/ChoiceSheet';
 import { isBiometricSupported, authenticate } from '../lib/biometric';
-import { setupDailyNotif, cancelNotifs } from '../lib/notifications';
-import { defaultScopeForProfile, getFeatureDataCount, getModules, profileModuleDefaults } from '../lib/modules';
-import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel } from '../lib/wallets';
-import { RADIUS, SHADOW, TYPE, weight } from '../lib/tokens';
-import ActionMenu from '../components/ActionMenu';
-import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
-import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
 import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
-import { resolveSystemTheme } from '../lib/systemTheme';
 import { inspectBackupData } from '../lib/backupData';
-import { MONTH_NAME_STYLES, monthStyleLabel } from '../lib/months';
+import AccountDeleteModal from '../components/AccountDeleteModal';
+import { supabase } from '../lib/supabase';
+import { getAuthRedirectUrl } from '../lib/authCallback';
 import {
   accountIdentityPatch,
-  accountPublicId,
-  deriveDisplayName,
-  isValidUsername,
-  normalizePhone,
-  normalizeUsername,
+  cleanDisplayName,
   upsertProfileIdentity,
+  uploadProfileAvatar,
+  removeProfileAvatar,
 } from '../lib/accountIdentity';
+import { getModules } from '../lib/modules';
+import { RADIUS, weight } from '../lib/tokens';
+import LegacySettingsScreen from './SettingsLegacyScreen';
+import { PERFORMANCE_TEST_TIERS } from '../dev/performanceTestConfig';
+import { PRODUCT_NAME } from '../lib/productIdentity';
 
-const UI = {
-  ar: {
-    title: 'الإعدادات',
-    statusLocal: 'محلي',
-    general: 'عام',
-    usage: 'نوع الاستخدام',
-    profileEffect: 'اختيار نوع الاستخدام يفعّل الميزات المناسبة تلقائياً. يمكنك تعديلها من القائمة أدناه، ولا تُحذف البيانات المخفية.',
-    money: 'التصنيفات',
-    security: 'الأمان',
-    alerts: 'التنبيهات',
-    data: 'البيانات',
-    account: 'الحساب',
-    language: 'اللغة',
-    monthNames: 'عرض الأشهر',
-    systemLanguage: 'النظام',
-    arabicLanguage: 'عربي',
-    englishLanguage: 'English',
-    theme: 'المظهر',
-    darkTheme: 'داكن',
-    lightTheme: 'فاتح',
-    country: 'الدولة',
-    currency: 'العملة',
-    profile: 'نوع الحساب',
-    personal: 'شخصي',
-    businessProfile: 'مشروع',
-    mixedProfile: 'مزدوج',
-    enabledFeatures: 'الميزات المفعلة',
-    wallets: 'محافظ متعددة',
-    debtsOwed: 'دين عليّ',
-    debtsReceivable: 'دين لي',
-    goalsFeature: 'توفير',
-    commitments: 'التزامات',
-    commitmentsSection: 'التزامات',
-    commitmentName: 'اسم الالتزام',
-    commitmentAmount: 'مبلغ الالتزام',
-    commitmentDay: 'شهر الالتزام',
-    nextDeduction: 'الشهر القادم',
-    commitmentReminderInline: 'تذكير الالتزامات',
-    commitmentWallet: 'محفظة الدفع',
-    commitmentCategory: 'تصنيف الالتزام',
-    addCommitment: 'إضافة التزام',
-    noCommitments: 'لا توجد التزامات',
-    repeatMonthly: 'يتكرر شهرياً',
-    commitmentDetails: 'تفاصيل الالتزام',
-    postponeCommitment: 'تأجيل الدفع',
-    postponeNextMonth: 'الشهر القادم',
-    deferredUntil: 'مؤجل إلى',
-    paidThisMonth: 'مدفوع هذا الشهر',
-    inactive: 'متوقف',
-    activeStatus: 'مفعل',
-    businessFeature: 'أدوات المشروع',
-    walletsSection: 'المحافظ',
-    walletName: 'اسم المحفظة',
-    openingBalance: 'الرصيد الافتتاحي',
-    addWallet: 'إضافة محفظة',
-    currentBalance: 'الرصيد الحالي',
-    defaultWallet: 'المحفظة الافتراضية',
-    makeDefaultWallet: 'جعلها افتراضية',
-    deleteWalletTitle: 'حذف المحفظة',
-    deleteWalletBody: 'سيتم نقل معاملات هذه المحفظة إلى المحفظة الافتراضية أو أقرب محفظة متاحة.',
-    categories: 'التصنيفات',
-    categoriesCount: 'تصنيفات',
-    addCategory: 'إضافة تصنيف',
-    categoryName: 'اسم التصنيف',
-    icon: 'الأيقونة',
-    color: 'اللون',
-    biometric: 'قفل التطبيق',
-    lockDelay: 'إعادة القفل بعد مغادرة التطبيق',
-    lockNow: 'فوراً',
-    oneMinute: 'دقيقة',
-    fiveMinutes: '5 دقائق',
-    fifteenMinutes: '15 دقيقة',
-    debtAlert: 'تذكير دين عليّ',
-    debtBefore: 'قبل الموعد',
-    commitmentBefore: '\u062a\u0646\u0628\u064a\u0647 \u062e\u0644\u0627\u0644 \u0634\u0647\u0631 \u0627\u0644\u0627\u0644\u062a\u0632\u0627\u0645',
-    dailyAlert: 'تذكير يومي',
-    alertTime: 'وقت التذكير',
-    testNotification: 'اختبار إشعار',
-    lowBalance: 'انخفاض الرصيد',
-    lowBelow: 'أقل من',
-    forecastAlert: 'توقع نهاية الشهر',
-    budgetAlert: 'تنبيهات الميزانية',
-    recurringAlert: 'تذكير المتكرر',
-    unusualSpendAlert: 'صرف غير معتاد',
-    goalProgressAlert: 'تقدم التوفير',
-    archive: 'الأرشيف الشهري',
-    exportBackup: 'تصدير نسخة احتياطية',
-    importBackup: 'استيراد نسخة احتياطية',
-    pasteBackup: 'الصق محتوى النسخة الاحتياطية',
-    importWarning: 'سيتم استبدال بيانات التطبيق الحالية بمحتوى النسخة الاحتياطية.',
-    pasteClipboard: 'لصق من الحافظة',
-    clearImport: 'مسح النص',
-    previewBackup: 'معاينة النسخة',
-    backupValid: 'النسخة صالحة للاستيراد',
-    backupInvalid: 'النسخة غير صالحة',
-    backupMonths: 'الأشهر',
-    backupEntries: 'الحركات',
-    backupWallets: 'المحافظ',
-    backupTrackers: 'المتابعات',
-    backupCommitments: 'الالتزامات',
-    backupCurrency: 'العملة',
-    replaceNow: 'استبدال البيانات الآن',
-    deleteAll: 'حذف كل البيانات',
-    deleteConfirm: 'سيتم حذف كل بيانات MYFI من هذا الجهاز.',
-    optional: 'اختياري',
-    connected: 'متصل',
-    notConnected: 'غير متصل',
-    signIn: 'دخول',
-    signUp: 'إنشاء',
-    signOut: 'تسجيل الخروج',
-    email: 'البريد الإلكتروني',
-    password: 'كلمة المرور',
-    requiredFields: 'اكتب البريد الإلكتروني وكلمة المرور.',
-    invalidEmail: 'اكتب بريداً إلكترونياً صحيحاً.',
-    passwordLength: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.',
-    invalidCredentials: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
-    verificationTitle: 'الحساب غير مفعّل بعد',
-    verificationPending: 'أرسلنا رابط التفعيل إلى بريدك. افتحه على هذا الهاتف لإكمال التسجيل والعودة إلى MYFI.',
-    verificationUnconfirmed: 'لم يتم إنشاء حساب جديد. قد يكون البريد مستخدماً أو غير صالح؛ تحقق من البريد وحاول تسجيل الدخول أو الاستعادة.',
-    close: 'إغلاق',
-    loginSuccess: 'تم تسجيل الدخول بنجاح.',
-    authUnavailable: 'تعذر الوصول إلى خدمة الحساب. تحقق من الإنترنت وإعدادات الخادم.',
-    checkingConnection: 'جاري فحص خدمة الحساب...',
-    accountServiceReady: 'خدمة الحساب متصلة',
-    accountServiceDown: 'خدمة الحساب غير متاحة حالياً',
-    importDone: 'تم الاستيراد',
-    importFailed: 'النسخة غير صالحة',
-    cancel: 'إلغاء',
-    delete: 'حذف',
-    days: 'أيام',
-  },
-  en: {
-    title: 'Settings',
-    statusLocal: 'Local',
-    general: 'General',
-    usage: 'Use type',
-    profileEffect: 'Your usage type automatically enables the relevant features. You can adjust them below; hidden data is not deleted.',
-    money: 'Categories',
-    security: 'Security',
-    alerts: 'Notifications',
-    data: 'Data',
-    account: 'Account',
-    language: 'Language',
-    monthNames: 'Month display',
-    systemLanguage: 'System',
-    arabicLanguage: 'Arabic',
-    englishLanguage: 'English',
-    theme: 'Appearance',
-    darkTheme: 'Dark',
-    lightTheme: 'Light',
-    country: 'Country',
-    currency: 'Currency',
-    profile: 'Account type',
-    personal: 'Personal',
-    businessProfile: 'Business',
-    mixedProfile: 'Dual',
-    enabledFeatures: 'Enabled features',
-    wallets: 'Multiple wallets',
-    debtsOwed: 'Amounts I owe',
-    debtsReceivable: 'Amounts owed to me',
-    goalsFeature: 'Saving',
-    commitments: 'Commitments',
-    commitmentsSection: 'Commitments',
-    commitmentName: 'Commitment name',
-    commitmentAmount: 'Commitment amount',
-    commitmentDay: 'Commitment month',
-    nextDeduction: 'Next month',
-    commitmentReminderInline: 'Commitment reminders',
-    commitmentWallet: 'Payment wallet',
-    commitmentCategory: 'Category',
-    addCommitment: 'Add commitment',
-    noCommitments: 'No commitments',
-    repeatMonthly: 'Repeat monthly',
-    commitmentDetails: 'Commitment details',
-    postponeCommitment: 'Postpone payment',
-    postponeNextMonth: 'Next month',
-    deferredUntil: 'Deferred until',
-    paidThisMonth: 'Paid this month',
-    inactive: 'Paused',
-    activeStatus: 'Active',
-    businessFeature: 'Business tools',
-    walletsSection: 'Wallets',
-    walletName: 'Wallet name',
-    openingBalance: 'Opening balance',
-    addWallet: 'Add wallet',
-    currentBalance: 'Current balance',
-    defaultWallet: 'Default wallet',
-    makeDefaultWallet: 'Make default',
-    deleteWalletTitle: 'Delete wallet',
-    deleteWalletBody: 'Transactions in this wallet will move to the default or nearest available wallet.',
-    categories: 'Categories',
-    categoriesCount: 'categories',
-    addCategory: 'Add category',
-    categoryName: 'Category name',
-    icon: 'Icon',
-    color: 'Color',
-    biometric: 'App lock',
-    lockDelay: 'Lock again after leaving the app',
-    lockNow: 'Immediately',
-    oneMinute: '1 minute',
-    fiveMinutes: '5 minutes',
-    fifteenMinutes: '15 minutes',
-    debtAlert: 'Amount reminder',
-    debtBefore: 'Before due',
-    commitmentBefore: 'Alert during the commitment month',
-    dailyAlert: 'Daily reminder',
-    alertTime: 'Reminder time',
-    testNotification: 'Test notification',
-    lowBalance: 'Low balance',
-    lowBelow: 'Below',
-    forecastAlert: 'Month-end forecast',
-    budgetAlert: 'Budget alerts',
-    recurringAlert: 'Recurring entry reminder',
-    unusualSpendAlert: 'Unusual spending',
-    goalProgressAlert: 'Saving progress',
-    archive: 'Monthly archive',
-    exportBackup: 'Export backup',
-    importBackup: 'Import backup',
-    pasteBackup: 'Paste backup content',
-    importWarning: 'Current app data will be replaced with the backup content.',
-    pasteClipboard: 'Paste from clipboard',
-    clearImport: 'Clear text',
-    previewBackup: 'Backup preview',
-    backupValid: 'Backup is ready to import',
-    backupInvalid: 'Invalid backup',
-    backupMonths: 'Months',
-    backupEntries: 'Entries',
-    backupWallets: 'Wallets',
-    backupTrackers: 'Trackers',
-    backupCommitments: 'Commitments',
-    backupCurrency: 'Currency',
-    replaceNow: 'Replace data now',
-    deleteAll: 'Delete all data',
-    deleteConfirm: 'All MYFI data on this device will be deleted.',
-    optional: 'Optional',
-    connected: 'Connected',
-    notConnected: 'Not connected',
-    signIn: 'Sign in',
-    signUp: 'Create',
-    signOut: 'Sign out',
-    email: 'Email',
-    password: 'Password',
-    requiredFields: 'Enter your email and password.',
-    invalidEmail: 'Enter a valid email address.',
-    passwordLength: 'Password must be at least 8 characters.',
-    invalidCredentials: 'Email or password is incorrect.',
-    verificationTitle: 'Account not active yet',
-    verificationPending: 'We sent an activation link. Open it on this phone to finish registration and return to MYFI.',
-    verificationUnconfirmed: 'No new account was created. The email may already be used or invalid; check the address, then try sign-in or recovery.',
-    close: 'Close',
-    loginSuccess: 'Signed in successfully.',
-    authUnavailable: 'Could not reach the account service. Check the connection and server settings.',
-    checkingConnection: 'Checking account service...',
-    accountServiceReady: 'Account service connected',
-    accountServiceDown: 'Account service is currently unavailable',
-    importDone: 'Imported',
-    importFailed: 'Invalid backup',
-    cancel: 'Cancel',
-    delete: 'Delete',
-    days: 'days',
-  },
+const pageCopy = (lang = 'ar') => {
+  const ar = lang === 'ar';
+  return {
+    settings: ar ? 'الإعدادات' : 'Settings',
+    account: ar ? 'الحساب' : 'Account',
+    accountSub: ar ? 'معلوماتك، الأمان والمزامنة' : 'Your information, security and sync',
+    devices: ar ? 'الأجهزة' : 'Devices',
+    devicesSub: ar ? 'الجلسات المرتبطة بحساب MYFI' : 'Sessions linked to your MYFI account',
+    preferences: ar ? 'التفضيلات' : 'Preferences',
+    preferencesSub: ar ? 'اللغة والمظهر' : 'Language and appearance',
+    financial: ar ? 'الإعداد المالي' : 'Financial setup',
+    financialSub: ar ? 'المحافظ، التصنيفات، الميزانيات والوحدات' : 'Wallets, categories, budgets and modules',
+    data: ar ? 'البيانات والتخزين' : 'Data & storage',
+    dataSub: ar ? 'النسخ الاحتياطي، الاستيراد والأرشيف' : 'Backup, restore and archive',
+    security: ar ? 'الخصوصية والأمان' : 'Privacy & security',
+    securitySub: ar ? 'قفل التطبيق وحماية بياناتك المحلية' : 'App lock and local data protection',
+    advanced: ar ? 'إدارة المال والتخطيط' : 'Money & planning management',
+    advancedSub: ar ? 'المحافظ والتصنيفات والميزانيات والتنبيهات وترتيب الرئيسية' : 'Wallets, categories, budgets, alerts and Home arrangement',
+    cloud: ar ? 'حساب MYFI' : 'MYFI account',
+    synced: ar ? 'متزامن' : 'Synced',
+    syncing: ar ? 'جاري المزامنة' : 'Syncing',
+    pending: ar ? 'بانتظار المزامنة' : 'Pending sync',
+    needsAttention: ar ? 'تحتاج مراجعة' : 'Needs attention',
+    localOnly: ar ? 'على هذا الجهاز' : 'On this device',
+    syncNow: ar ? 'مزامنة الآن' : 'Sync now',
+    syncStatus: ar ? 'حالة المزامنة' : 'Sync status',
+    lastSync: ar ? 'آخر مزامنة' : 'Last sync',
+    neverSynced: ar ? 'لم تتم بعد' : 'Not yet',
+    syncDone: ar ? 'تم طلب المزامنة.' : 'Sync requested.',
+    general: ar ? 'عام' : 'General',
+    accountCloud: ar ? 'الحساب' : 'Account',
+    money: ar ? 'المال والتخطيط' : 'Money & planning',
+    privacyData: ar ? 'البيانات والحماية' : 'Data & protection',
+    language: ar ? 'اللغة' : 'Language',
+    appearance: ar ? 'المظهر' : 'Appearance',
+    country: ar ? 'الدولة' : 'Country',
+    currency: ar ? 'العملة الأساسية' : 'Base currency',
+    rotation: ar ? 'تدوير الشاشة' : 'Screen rotation',
+    autoRotate: ar ? 'تدوير تلقائي' : 'Auto rotate',
+    fixedPortrait: ar ? 'ثابت عمودي' : 'Portrait only',
+    system: ar ? 'حسب الجهاز' : 'From device',
+    useDeviceSetting: ar ? 'استخدام إعداد الجهاز' : 'Use device setting',
+    followsDevice: ar ? 'حسب الجهاز' : 'From device',
+    light: ar ? 'فاتح' : 'Light',
+    dark: ar ? 'داكن' : 'Dark',
+    arabic: ar ? 'العربية' : 'Arabic',
+    english: ar ? 'English' : 'English',
+    myInfo: ar ? 'الملف الشخصي' : 'Profile',
+    name: ar ? 'الاسم' : 'Name',
+    namePlaceholder: ar ? 'اكتب اسمك' : 'Enter your name',
+    email: ar ? 'البريد الإلكتروني' : 'Email',
+    localProfile: ar ? 'معلوماتك' : 'Your information',
+    localProfileSection: ar ? 'الحساب' : 'Account',
+    localProfileDeviceSub: ar ? 'الاسم والصورة والمعلومات الأساسية' : 'Name, photo and basic information',
+    profileDeviceOnlySub: ar ? 'محفوظ على هذا الجهاز' : 'Saved on this device',
+    profileSyncedSub: ar ? 'متصل بحساب MYFI' : 'Connected to MYFI',
+    profileTitle: ar ? 'معلوماتك' : 'Your information',
+    profileSub: ar ? 'الاسم والصورة والمعلومات الأساسية' : 'Name, photo and basic information',
+    myfiAccountTitle: ar ? 'حساب MYFI' : 'MYFI account',
+    myfiAccountSub: ar ? 'المزامنة والاستعادة والأجهزة' : 'Sync, recovery and devices',
+    cloudConnectedTitle: ar ? 'متصل بحساب MYFI' : 'Connected to MYFI',
+    cloudConnectedSub: ar ? 'المزامنة والاستعادة مفعّلتان لهذا الحساب.' : 'Sync and recovery are enabled for this account.',
+    cloudDisconnectedTitle: ar ? 'محفوظ على هذا الجهاز' : 'Saved on this device',
+    cloudDisconnectedSub: ar ? 'اربط حساب MYFI فقط إذا أردت المزامنة والاستعادة على أجهزتك.' : 'Connect MYFI only when you want sync and recovery across devices.',
+    localCloudNote: ar ? 'حساب واحد ومعلومات واحدة؛ يتغير فقط ما إذا كانت المزامنة مفعّلة أم لا.' : 'One account identity; only sync availability changes.',
+    personalAccount: ar ? 'حساب شخصي' : 'Personal account',
+    yourInfo: ar ? 'معلوماتك' : 'Your information',
+    accountSecurity: ar ? 'الحساب والأمان' : 'Account & security',
+    syncDevices: ar ? 'المزامنة والأجهزة' : 'Sync & devices',
+    savedOnDevice: ar ? 'محفوظ على هذا الجهاز' : 'Saved on this device',
+    connectedToMyfi: ar ? 'متصل بحساب MYFI' : 'Connected to MYFI',
+    connectBenefits: ar ? 'فعّل المزامنة والاستعادة على أجهزتك' : 'Enable sync and recovery across your devices',
+    connectHint: ar ? 'استخدام MYFI لا يحتاج إلى تسجيل دخول. اربط حسابك عندما تريد استعادة بياناتك أو استخدامها على جهاز آخر.' : 'MYFI works without sign-in. Connect your account when you want recovery or another device.',
+    editProfile: ar ? 'تعديل المعلومات' : 'Edit information',
+    save: ar ? 'حفظ التغييرات' : 'Save changes',
+    cancel: ar ? 'إلغاء' : 'Cancel',
+    addPhoto: ar ? 'إضافة صورة' : 'Add photo',
+    changePhoto: ar ? 'تغيير الصورة' : 'Change photo',
+    removePhoto: ar ? 'إزالة الصورة' : 'Remove photo',
+    signInTitle: ar ? 'ربط حساب MYFI' : 'Connect MYFI account',
+    connectAccount: ar ? 'ربط حساب MYFI' : 'Connect MYFI account',
+    signInSub: ar ? 'سجّل الدخول أو أنشئ حساباً لتفعيل المزامنة والاستعادة.' : 'Sign in or create an account to enable sync and recovery.',
+    signUpProfileHint: ar ? 'سيُحفظ اسمك وصورتك ضمن حسابك ليظهرا على أجهزتك.' : 'Your name and photo will be saved with your account and appear on your devices.',
+    signInProfileHint: ar ? 'بعد تسجيل الدخول ستظهر معلومات حسابك وبياناتك المتزامنة على هذا الجهاز.' : 'After sign-in, your account information and synced data will appear on this device.',
+    signIn: ar ? 'تسجيل الدخول' : 'Sign in',
+    signUp: ar ? 'إنشاء حساب' : 'Create account',
+    password: ar ? 'كلمة المرور' : 'Password',
+    forgotPassword: ar ? 'نسيت كلمة المرور' : 'Forgot password',
+    signOut: ar ? 'تسجيل الخروج من هذا الجهاز' : 'Sign out on this device',
+    signOutOthers: ar ? 'تسجيل الخروج من الجلسات الأخرى' : 'Sign out other sessions',
+    signOutOthersSub: ar ? 'يبقى هذا الجهاز مسجلاً بالدخول.' : 'This device stays signed in.',
+    thisDevice: ar ? 'هذا الجهاز' : 'This device',
+    currentSession: ar ? 'الجلسة الحالية' : 'Current session',
+    otherSessions: ar ? 'الجلسات الأخرى' : 'Other sessions',
+    androidDevice: ar ? 'جهاز Android' : 'Android device',
+    iosDevice: ar ? 'جهاز iPhone / iPad' : 'iPhone / iPad',
+    webDevice: ar ? 'جهاز الويب' : 'Web device',
+    connectedNow: ar ? 'متصل الآن' : 'Connected now',
+    noCloudSession: ar ? 'سجّل الدخول إلى حساب MYFI لإدارة جلساتك.' : 'Sign in to MYFI to manage your sessions.',
+    localData: ar ? 'البيانات المحلية' : 'Local data',
+    transactions: ar ? 'الحركات' : 'Transactions',
+    wallets: ar ? 'المحافظ' : 'Wallets',
+    trackers: ar ? 'المتابعات' : 'Trackers',
+    records: ar ? 'السجلات' : 'Records',
+    backup: ar ? 'نسخة احتياطية' : 'Backup',
+    exportBackup: ar ? 'تصدير نسخة احتياطية' : 'Export backup',
+    exportBackupSub: ar ? 'ملف ZIP قابل للتشفير بكلمة مرور' : 'ZIP package with optional password encryption',
+    importBackup: ar ? 'استعادة نسخة احتياطية' : 'Restore backup',
+    importBackupSub: ar ? 'راجع النسخة ثم استعدها بأمان' : 'Review the backup, then restore it safely',
+    archive: ar ? 'الأرشيف الشهري' : 'Monthly archive',
+    archiveSub: ar ? 'الوصول إلى الأشهر المؤرشفة' : 'Access archived months',
+    deleteLocal: ar ? 'حذف جميع البيانات المحلية' : 'Delete all local data',
+    deleteLocalSub: ar ? 'عملية حساسة ولا يمكن التراجع عنها.' : 'Sensitive action that cannot be undone.',
+    protectBackup: ar ? 'حماية النسخة الاحتياطية' : 'Protect backup',
+    encrypted: ar ? 'تشفير بكلمة مرور' : 'Encrypt with password',
+    unencrypted: ar ? 'بدون كلمة مرور' : 'Without password',
+    passwordMin: ar ? 'اكتب كلمة مرور من 6 أحرف على الأقل.' : 'Use at least 6 characters.',
+    chooseFile: ar ? 'اختيار ملف ZIP' : 'Choose ZIP file',
+    restoreNow: ar ? 'استعادة النسخة الآن' : 'Restore backup now',
+    backupReady: ar ? 'النسخة صالحة للاستعادة' : 'Backup is ready to restore',
+    backupInvalid: ar ? 'النسخة غير صالحة' : 'Backup is invalid',
+    securityTitle: ar ? 'أمان التطبيق' : 'App security',
+    appLock: ar ? 'قفل التطبيق بالبصمة' : 'Biometric app lock',
+    appLockSub: ar ? 'يتطلب بصمة أو تعريفاً حيوياً مدعوماً من الجهاز.' : 'Uses biometrics supported by the device.',
+    relock: ar ? 'إعادة القفل' : 'Relock after',
+    immediately: ar ? 'فوراً' : 'Immediately',
+    oneMinute: ar ? 'دقيقة' : '1 minute',
+    fiveMinutes: ar ? '5 دقائق' : '5 minutes',
+    fifteenMinutes: ar ? '15 دقيقة' : '15 minutes',
+    privacyNote: ar ? 'بياناتك المالية تبدأ محلياً، والمزامنة السحابية اختيارية عند تسجيل الدخول.' : 'Financial data starts locally; cloud sync is optional when you sign in.',
+    financialProfile: ar ? 'نوع الاستخدام' : 'Usage type',
+    enabledModules: ar ? 'الوحدات المفعلة' : 'Enabled modules',
+    categories: ar ? 'التصنيفات' : 'Categories',
+    budgets: ar ? 'الميزانيات' : 'Budgets',
+    fullFinancial: ar ? 'إدارة تفاصيل المال والتخطيط' : 'Manage money & planning details',
+    fullFinancialSub: ar ? 'المحافظ والتصنيفات والميزانيات والوحدات والتنبيهات وترتيب الرئيسية.' : 'Wallets, categories, budgets, modules, alerts and Home arrangement.',
+    local: ar ? 'محلي' : 'Local',
+    cloudAccount: ar ? 'حساب MYFI' : 'MYFI account',
+    connected: ar ? 'متصل' : 'Connected',
+    notSignedIn: ar ? 'غير متصل' : 'Not connected',
+    terms: ar ? 'أوافق على شروط الحساب والمزامنة' : 'I agree to account and sync terms',
+    authFields: ar ? 'اكتب البريد الإلكتروني وكلمة المرور.' : 'Enter your email and password.',
+    invalidEmail: ar ? 'اكتب بريداً إلكترونياً صحيحاً.' : 'Enter a valid email address.',
+    passwordLength: ar ? 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.' : 'Password must be at least 8 characters.',
+    invalidUsername: ar ? 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل ويحتوي أحرفاً إنكليزية أو أرقاماً أو _.' : 'Username must be 3+ characters using letters, numbers or _.',
+    accountCreated: ar ? 'تحقق من بريدك لإكمال تفعيل الحساب.' : 'Check your email to complete account activation.',
+    authFailed: ar ? 'تعذر إكمال العملية. تحقق من الاتصال والبيانات.' : 'Could not complete the request. Check your connection and details.',
+    resetSent: ar ? 'أُرسلت رسالة استعادة كلمة المرور إن كان الحساب موجوداً.' : 'A password recovery email was sent if the account exists.',
+    saved: ar ? 'تم الحفظ.' : 'Saved.',
+    otherSessionsDone: ar ? 'تم تسجيل الخروج من الجلسات الأخرى.' : 'Other sessions were signed out.',
+    noOtherSessions: ar ? 'تعذر إنهاء الجلسات الأخرى.' : 'Could not sign out other sessions.',
+    support: ar ? 'المساعدة والدعم' : 'Help & support',
+    helpCenter: ar ? 'مركز المساعدة' : 'Help center',
+    helpCenterSub: ar ? 'الدليل، النسخ الاحتياطي، الأمان والتواصل مع الدعم' : 'Guide, backup, security and support contact',
+    guideProfessionalSub: ar ? 'تعلم MYFI حسب المهمة: البداية، الحركات، المتابعات والتقارير.' : 'Learn MYFI by task: getting started, entries, trackers and reports.',
+    contactCenter: ar ? 'التواصل ومركز الدعم' : 'Contact & support',
+    contactCenterSub: ar ? 'قنوات الدعم، معلومات التشخيص وملاحظات المنتج' : 'Support channels, diagnostics and product feedback',
+    gettingStarted: ar ? 'البدء الصحيح' : 'Getting started',
+    gettingStartedSub: ar ? 'المحفظة الأولى، الرصيد المتاح وتسجيل أول حركة.' : 'Your first wallet, available balance and first entry.',
+    dailyMoney: ar ? 'إدارة الحركات اليومية' : 'Daily money',
+    dailyMoneySub: ar ? 'دخل، مصروف، تحويل، بحث وتصحيح السجل.' : 'Income, expense, transfer, search and ledger corrections.',
+    planningGuide: ar ? 'التخطيط والمتابعات' : 'Planning & trackers',
+    planningGuideSub: ar ? 'الديون، التوفير، الالتزامات والميزانيات.' : 'Debts, savings, commitments and budgets.',
+    reportsGuide: ar ? 'قراءة التقارير' : 'Reading reports',
+    reportsGuideSub: ar ? 'الفترة، التدفق النقدي، المقارنة وأين تذهب أموالك.' : 'Periods, cash flow, comparison and where your money goes.',
+    cloudGuide: ar ? 'حساب MYFI والمزامنة' : 'MYFI account & sync',
+    cloudGuideSub: ar ? 'متى تحتاج حساب MYFI وكيف تنتقل بين الأجهزة بأمان.' : 'When to use a MYFI account and how to move safely between devices.',
+    supportDiagnostics: ar ? 'معلومات تساعد الدعم' : 'Support diagnostics',
+    supportDiagnosticsSub: ar ? 'الإصدار، المنصة وحالة الحساب بدون كشف بياناتك المالية.' : 'Version, platform and account state without exposing financial data.',
+    productFeedback: ar ? 'ملاحظة أو اقتراح' : 'Feedback or suggestion',
+    productFeedbackSub: ar ? 'شارك تجربة الاستخدام أو اقترح تحسيناً للمنتج.' : 'Share a usability issue or suggest a product improvement.',
+    guide: ar ? 'دليل الاستخدام' : 'User guide',
+    guideSub: ar ? 'جولة مختصرة وعملية على أهم أجزاء MYFI' : 'A concise practical tour of the key MYFI areas',
+    contactSupport: ar ? 'التواصل مع الدعم' : 'Contact support',
+    contactSupportSub: ar ? 'المساعدة الفنية وملاحظات الاستخدام' : 'Technical help and product feedback',
+    supportUnavailableTitle: ar ? 'قناة الدعم غير مهيأة' : 'Support channel is not configured',
+    supportUnavailableBody: ar ? 'أضف رابط أو بريد الدعم في إعدادات بيئة MYFI ثم أعد تشغيل التطبيق.' : 'Add the MYFI support URL or email to the environment configuration and restart the app.',
+    supportResources: ar ? 'موارد المساعدة' : 'Support resources',
+    accountRecovery: ar ? 'الحساب والمزامنة' : 'Account & sync',
+    accountRecoverySub: ar ? 'حساب MYFI، المزامنة والأجهزة' : 'MYFI account, sync and devices',
+    backupHelp: ar ? 'النسخ الاحتياطي والاستعادة' : 'Backup & restore',
+    backupHelpSub: ar ? 'حفظ نسخة محلية واستعادتها بأمان' : 'Create and restore a local backup safely',
+    securityHelp: ar ? 'الخصوصية والأمان' : 'Privacy & security',
+    securityHelpSub: ar ? 'قفل التطبيق وحماية البيانات المحلية' : 'App lock and local data protection',
+    legal: ar ? 'القانوني والخصوصية' : 'Legal & privacy',
+    termsOfUse: ar ? 'شروط الاستخدام' : 'Terms of use',
+    about: ar ? 'حول MYFI' : 'About MYFI',
+    aboutSub: ar ? 'هوية المنتج، الإصدار ومبادئ الخصوصية' : 'Product identity, version and privacy principles',
+    aboutTagline: ar ? 'إدارة مالية شخصية أوضح، عملية ومحلية أولاً.' : 'Clear, practical, local-first personal finance.',
+    aboutPurpose: ar ? 'MYFI يجمع الدخل والمصروفات والمحافظ والمتابعات والتقارير في مساحة مالية واحدة، مع مزامنة سحابية اختيارية.' : 'MYFI brings income, spending, wallets, trackers and reports into one financial workspace, with optional cloud sync.',
+    localFirstPrinciple: ar ? 'Local-first' : 'Local-first',
+    localFirstPrincipleSub: ar ? 'بياناتك تبدأ على جهازك، واستخدام MYFI لا يتطلب حساباً.' : 'Your data starts on your device; MYFI does not require an account.',
+    cloudPrinciple: ar ? 'حساب MYFI اختياري' : 'MYFI account is optional',
+    cloudPrincipleSub: ar ? 'تربطه فقط عندما تريد المزامنة أو الاسترجاع بين الأجهزة.' : 'Connect it only when you want sync or recovery across devices.',
+    bilingualPrinciple: ar ? 'عربي وإنكليزي' : 'Arabic & English',
+    bilingualPrincipleSub: ar ? 'واجهة ثنائية اللغة مع دعم اتجاه RTL وLTR.' : 'Bilingual interface with RTL and LTR support.',
+    versionLabel: ar ? 'الإصدار' : 'Version',
+    privacy: ar ? 'سياسة الخصوصية' : 'Privacy policy',
+    dangerZone: ar ? 'إدارة الحساب' : 'Account management',
+    deleteAccount: ar ? 'حذف حساب MYFI نهائياً' : 'Permanently delete MYFI account',
+    deleteAccountSub: ar ? 'يحذف الحساب والبيانات السحابية، وتبقى بياناتك المالية محفوظة على هذا الجهاز.' : 'Deletes the account and cloud data while keeping your financial data on this device.',
+    deleteAccountTitle: ar ? 'حذف الحساب؟' : 'Delete account?',
+    deleteAccountConfirm: ar ? 'سيُحذف حساب MYFI وبياناته السحابية نهائياً. ستبقى بياناتك المالية على هذا الجهاز، وستتوقف المزامنة السحابية.' : 'Your MYFI account and cloud data will be permanently deleted. Your financial data will remain on this device and cloud sync will stop.',
+    back: ar ? 'رجوع' : 'Back',
+    continueAction: ar ? 'متابعة' : 'Continue',
+    deleteAccountDone: ar ? 'تم حذف الحساب. بياناتك المالية ما زالت محفوظة على هذا الجهاز.' : 'Account deleted. Your financial data is still stored on this device.',
+    deleteAccountFailed: ar ? 'تعذر حذف الحساب' : 'Could not delete account',
+    wrongPassword: ar ? 'كلمة المرور غير صحيحة.' : 'Incorrect password.',
+    accountServiceIssue: ar ? 'تحقق من الاتصال وخدمة الحساب ثم حاول مرة أخرى.' : 'Check your connection and account service, then try again.',
+    localPreservationFailed: ar ? 'تعذر تجهيز نسخة محلية آمنة. لم يتم حذف الحساب.' : 'A safe local copy could not be prepared. The account was not deleted.',
+  };
 };
 
-const formatHour12 = (hour, lang = 'ar') => {
-  const value = ((Number(hour || 0) % 24) + 24) % 24;
-  const displayHour = value % 12 || 12;
-  // Keep clock digits consistent with the rest of the app, including Arabic UI.
-  const locale = 'en-US';
-  const period = lang === 'ar' ? (value < 12 ? 'ص' : 'م') : (value < 12 ? 'AM' : 'PM');
-  return `${displayHour.toLocaleString(locale, { useGrouping: false })}:00 ${period}`;
-};
-
-const previewBackupText = (text = '', lang = 'ar') => {
-  const raw = String(text || '').trim();
-  if (!raw) return { valid: false, empty: true, error: '' };
-
+const formatSyncTime = (value, lang = 'ar') => {
+  if (!value) return lang === 'ar' ? 'لم تتم بعد' : 'Not yet';
   try {
-    const data = JSON.parse(raw);
-    const result = inspectBackupData(data);
-
-    const messageFor = code => {
-      if (code === 'backup_version_newer') {
-        return lang === 'ar'
-          ? 'هذه النسخة أُنشئت بإصدار أحدث من MYFI.'
-          : 'This backup was created by a newer MYFI version.';
-      }
-      if (code === 'backup_config_missing') {
-        return lang === 'ar'
-          ? 'لا توجد إعدادات داخل النسخة.'
-          : 'Backup has no settings.';
-      }
-      if (String(code).startsWith('backup_transfer_')) {
-        return lang === 'ar'
-          ? 'توجد حركة تحويل تشير إلى محفظة مفقودة أو غير صالحة.'
-          : 'A transfer references a missing or invalid wallet.';
-      }
-      if (String(code).includes('duplicate_ids')) {
-        return lang === 'ar'
-          ? 'توجد معرّفات مكررة داخل النسخة.'
-          : 'The backup contains duplicate IDs.';
-      }
-      return lang === 'ar'
-        ? 'النسخة غير صالحة أو بنيتها غير مكتملة.'
-        : 'The backup is invalid or incomplete.';
-    };
-
-    return {
-      ...result,
-      error: result.valid ? '' : messageFor(result.errors[0]),
-      issues: [...result.errors, ...result.warnings],
-    };
+    return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-IQ' : 'en', {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    }).format(new Date(value));
   } catch {
-    return {
-      valid: false,
-      error: lang === 'ar' ? 'النص ليس JSON صالح.' : 'Text is not valid JSON.',
-    };
+    return String(value);
   }
 };
 
-export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
+const openExternal = async (url, unavailableTitle, unavailableBody) => {
+  if (!url) {
+    Alert.alert(unavailableTitle, unavailableBody);
+    return false;
+  }
+  try {
+    const supported = await Linking.canOpenURL(url);
+    if (!supported) throw new Error('unsupported_url');
+    await Linking.openURL(url);
+    return true;
+  } catch {
+    Alert.alert(unavailableTitle, unavailableBody);
+    return false;
+  }
+};
+
+const editableIdentityName = ({ user, cfg } = {}) => {
+  const storedName = cleanDisplayName(cfg?.displayName || cfg?.name);
+  const localName = /^(المستخدم|user)$/i.test(storedName) ? '' : storedName;
+  const metadata = user?.user_metadata || {};
+  return localName || cleanDisplayName(metadata.full_name || metadata.name || metadata.displayName) || '';
+};
+
+export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal = 0 }) {
   const {
-    cfg, setCfg, user, setUser, resetAll,
-    syncing, online, lastSyncError, dirty,
-    notif, setNotif, cats, setCats, trans, setTransCatToOther,
-    wallets, addWallet, deleteWallet, deleteWalletsMany, deleteCategoriesMany,
-    debts, goals, commitments,
-    exportBackup, importBackup,
-    setCategoryBudget, applySuggestedBudgets, clearBudgets,
-    enterDemoMode, exitDemoMode,
+    cfg,
+    setCfg,
+    user,
+    setUser,
+    resetAll,
+    syncing,
+    online,
+    lastSyncError,
+    lastSyncedAt,
+    dirty,
+    trans,
+    wallets,
+    debts,
+    goals,
+    commitments,
+    cats,
+    exportBackup,
+    importBackup,
+    syncCloud,
+    enterDemoMode,
+    exitDemoMode,
+    prepareLocalWorkspaceForAccountDeletion,
+    rollbackLocalWorkspaceAfterAccountDeletionFailure,
+    cleanupDeletedAccountLocalNamespace,
+    dataHealth,
+    refreshDataHealth,
+    financialLedgerV7Cutover,
+    financialMutationSync,
   } = useStore();
 
   const th = TH[cfg.theme] || TH.dark;
+  const deviceColorScheme = useColorScheme();
+  const deviceTheme = deviceColorScheme === 'light' ? 'light' : 'dark';
   const L = STR[cfg.lang] || STR.ar;
   const isAr = cfg.lang === 'ar';
-  const T = UI[cfg.lang] || UI.ar;
-  const selectedCountry = COUNTRIES.find(c => c.code === cfg.country) || COUNTRIES[0];
-  const selectedCurrency = CURRENCIES.find(item => item.code === cfg.currency) || CURRENCIES[0];
-  const modules = getModules(cfg);
-  const profileOptions = [
-    {
-      value: 'personal',
-      label: T.personal,
-      icon: 'person-outline',
-    },
-    {
-      value: 'business',
-      label: T.businessProfile,
-      icon: 'storefront-outline',
-    },
-    {
-      value: 'personal_business',
-      label: T.mixedProfile,
-      icon: 'albums-outline',
-    },
-  ];
-  const moduleRows = [
-    { key: 'wallets', label: T.wallets, icon: 'wallet-outline' },
-    { key: 'debtsOwed', label: T.debtsOwed, icon: 'arrow-up-circle-outline' },
-    { key: 'debtsReceivable', label: T.debtsReceivable, icon: 'arrow-down-circle-outline' },
-    { key: 'goals', label: T.goalsFeature, icon: 'flag-outline' },
-    { key: 'commitments', label: isAr ? 'الالتزامات المتكررة' : 'Recurring commitments', icon: 'calendar-outline' },
-    { key: 'budgets', label: isAr ? 'الميزانيات' : 'Budgets', icon: 'pie-chart-outline' },
-  ];
-  const homeContentTitle = cfg.lang === 'ar' ? 'محتوى الرئيسية' : 'Home content';
-  const homeMetricsTitle = cfg.lang === 'ar' ? 'مؤشرات الشهر' : 'Month metrics';
-  const homeSectionsTitle = cfg.lang === 'ar' ? 'أقسام الرئيسية' : 'Home sections';
-  const homeResetTitle = cfg.lang === 'ar' ? 'إرجاع الافتراضي' : 'Reset layout';
-  const workspaceTitle = cfg.lang === 'ar' ? 'مساحة العمل' : 'Workspace';
-  const startTabTitle = cfg.lang === 'ar' ? 'التبويب الافتراضي' : 'Default start tab';
-  const startTabSummary = cfg.lang === 'ar' ? 'أول شاشة عند فتح التطبيق' : 'First screen when the app opens';
-  const homeCards = (Array.isArray(cfg.homeCards) ? cfg.homeCards : [])
-    .filter(item => item.key !== 'dueSoon' || modules.commitments)
-    .map(item => ({
-    ...item,
-    icon:
-      item.key === 'income' ? 'arrow-down-circle-outline'
-        : item.key === 'expense' ? 'arrow-up-circle-outline'
-          : item.key === 'net' ? 'pulse-outline'
-            : 'calendar-outline',
-    label:
-      item.key === 'income' ? L.income
-        : item.key === 'expense' ? L.expense
-          : item.key === 'net' ? (cfg.lang === 'ar' ? 'صافي الشهر' : 'Month net')
-            : (cfg.lang === 'ar' ? 'مستحقات' : 'Due'),
-    tone:
-      item.key === 'income' ? th.inc
-        : item.key === 'expense' ? th.exp
-          : item.key === 'net' ? th.primary
-            : th.warn,
-  }));
-  const tabLabelFor = (key) => {
-    if (key === 'home') return L.home;
-    if (key === 'history') return cfg.lang === 'ar' ? 'السجل' : 'History';
-    if (key === 'trackers') return cfg.lang === 'ar' ? 'المتابعات' : 'Trackers';
-    if (key === 'reports') return L.reports;
-    if (key === 'settings') return L.settings;
-    return key;
-  };
-  const startTabOptions = (tabs.length ? tabs : [
-    { key: 'home' },
-    { key: 'history' },
-    { key: 'trackers' },
-    { key: 'reports' },
-    { key: 'settings' },
-  ]).map((item) => ({
-    value: item.key,
-    label: tabLabelFor(item.key),
-    icon:
-      item.key === 'home' ? 'home-outline'
-        : item.key === 'history' ? 'receipt-outline'
-          : item.key === 'trackers' ? 'layers-outline'
-            : item.key === 'reports' ? 'bar-chart-outline'
-              : 'settings-outline',
-  }));
-  const homeSections = (Array.isArray(cfg.homeSections) ? cfg.homeSections : [])
-    .filter(item => item?.key !== 'quickActions')
-    .filter(item => item?.key !== 'wallets' || modules.wallets)
-    .filter(item => item?.key !== 'attention' || modules.recurring || modules.commitments)
-    .filter(item => item?.key !== 'goals' || modules.goals)
-    .map(item => ({
-    ...item,
-    icon:
-      item.key === 'hero' ? 'pulse-outline'
-        : item.key === 'attention' ? 'alert-circle-outline'
-          : item.key === 'goals' ? 'flag-outline'
-            : item.key === 'wallets' ? 'wallet-outline'
-              : 'receipt-outline',
-    label:
-      item.key === 'hero' ? (cfg.lang === 'ar' ? 'البطاقة الرئيسية' : 'Hero card')
-        : item.key === 'attention' ? (cfg.lang === 'ar' ? 'تحتاج انتباه' : 'Needs attention')
-          : item.key === 'goals' ? (cfg.lang === 'ar' ? 'توفير' : 'Savings')
-            : item.key === 'wallets' ? T.walletsSection
-              : (cfg.lang === 'ar' ? 'أحدث الحركات' : 'Recent transactions'),
-    tone:
-      item.key === 'hero' ? th.primary
-        : item.key === 'attention' ? th.warn
-          : item.key === 'goals' ? th.inc
-            : item.key === 'wallets' ? th.primary
-              : th.exp,
-  }));
-  const startTabLabel = startTabOptions.find(item => item.value === cfg.startTab)?.label || tabLabelFor(cfg.startTab || 'home');
-  const authHealthMessage = (health = {}) => {
-    if (health.reason === 'not_configured') {
-      return isAr
-        ? '\u0625\u0639\u062f\u0627\u062f\u0627\u062a \u0627\u0644\u062e\u0627\u062f\u0645 \u063a\u064a\u0631 \u0645\u0636\u0645\u0646\u0629 \u062f\u0627\u062e\u0644 \u0647\u0630\u0647 \u0627\u0644\u0646\u0633\u062e\u0629.'
-        : 'Server settings are not embedded in this build.';
-    }
-    if (health.reason === 'timeout') {
-      return isAr
-        ? '\u0627\u0646\u062a\u0647\u062a \u0645\u0647\u0644\u0629 \u0627\u0644\u0627\u062a\u0635\u0627\u0644. \u062c\u0631\u0628 \u0634\u0628\u0643\u0629 \u0623\u062e\u0631\u0649 \u0623\u0648 \u0623\u0637\u0641\u0626 VPN/Private DNS.'
-        : 'Connection timed out. Try another network or turn off VPN/Private DNS.';
-    }
-    if (health.reason === 'network') {
-      return isAr
-        ? '\u0627\u0644\u0647\u0627\u062a\u0641 \u0644\u0627 \u064a\u0635\u0644 \u0625\u0644\u0649 \u062e\u0627\u062f\u0645 \u0627\u0644\u062d\u0633\u0627\u0628. \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0625\u0646\u062a\u0631\u0646\u062a \u0623\u0648 DNS.'
-        : 'This phone cannot reach the account server. Check internet or DNS.';
-    }
-    if (health.reason === 'server_error') {
-      return isAr
-        ? `\u0627\u0644\u062e\u0627\u062f\u0645 \u0631\u062f \u0628\u062e\u0637\u0623 ${health.status || ''}.`
-        : `Server returned error ${health.status || ''}.`;
-    }
-    return T.authUnavailable;
-  };
-
-  const [open, setOpen] = useState(null);
-  const [email, setEmail] = useState('');
-  const [pass, setPass] = useState('');
-  const [accountNameDraft, setAccountNameDraft] = useState(cfg.displayName || '');
-  const [usernameDraft, setUsernameDraft] = useState(cfg.username || '');
-  const [phoneDraft, setPhoneDraft] = useState(cfg.phone || '');
-  const [authAgreement, setAuthAgreement] = useState(cfg.accountConsentAccepted === true);
-  const emailRef = useRef('');
-  const passRef = useRef('');
+  const T = pageCopy(cfg.lang);
+  const [page, setPage] = useState('root');
+  const [navStack, setNavStack] = useState([]);
+  const [choice, setChoice] = useState(null);
+  const [editIdentity, setEditIdentity] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState('signin');
-  const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [authServiceStatus, setAuthServiceStatus] = useState('idle');
-  const [newCatName, setNewCatName] = useState('');
-  const [newCatFlow, setNewCatFlow] = useState(CATEGORY_FLOWS.EXPENSE);
-  const [newCatIcon, setNewCatIcon] = useState(ICON_OPTIONS[0]);
-  const [newCatColor, setNewCatColor] = useState(CAT_COLORS[0]);
-  const [newWalletName, setNewWalletName] = useState('');
-  const [newWalletOpening, setNewWalletOpening] = useState('');
-  const [walletModalOpen, setWalletModalOpen] = useState(false);
-  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
-  const [settingsSheet, setSettingsSheet] = useState(null);
-  const [countryQuery, setCountryQuery] = useState('');
-  const [currencyQuery, setCurrencyQuery] = useState('');
-  const [expandedSections, setExpandedSections] = useState(() => new Set());
-  const [importPackage, setImportPackage] = useState(null);
-  const [fileBusy, setFileBusy] = useState(false);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [agreement, setAgreement] = useState(cfg.accountConsentAccepted === true);
+  const [nameDraft, setNameDraft] = useState(() => editableIdentityName({ user, cfg }));
   const [backupPasswordMode, setBackupPasswordMode] = useState(null);
   const [backupPassword, setBackupPassword] = useState('');
-  const importPreview = useMemo(
-    () => importPackage?.payload?.data
-      ? previewBackupText(JSON.stringify(importPackage.payload.data), cfg.lang)
-      : { valid: false, empty: true, error: '' },
-    [importPackage, cfg.lang],
-  );
-  const defaultWalletId = getDefaultWalletId(wallets, cfg.currency, cfg.defaultWalletId);
+  const [backupDelivery, setBackupDelivery] = useState('share');
+  const [backupExportSheet, setBackupExportSheet] = useState(null);
+  const [importPackage, setImportPackage] = useState(null);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [testDataBusy, setTestDataBusy] = useState(false);
+  const emailRef = useRef('');
+
+  const selectedCountry = COUNTRIES.find(item => item.code === cfg.country) || COUNTRIES[0];
+  const selectedCurrency = CURRENCIES.find(item => item.code === cfg.currency) || CURRENCIES[0];
+  const editableName = editableIdentityName({ user, cfg });
+  const accountName = editableName || (isAr ? 'أضف اسمك' : 'Add your name');
+  const accountEmail = user?.email || '';
+  const accountInitial = editableName.trim().charAt(0).toUpperCase() || 'M';
+  const modules = getModules(cfg);
+
+  const openPage = (nextPage) => {
+    if (!nextPage || nextPage === page) return;
+    setNavStack(stack => [...stack, page]);
+    setPage(nextPage);
+  };
+
+  const goBack = () => {
+    const previous = navStack.length ? navStack[navStack.length - 1] : 'root';
+    setNavStack(stack => stack.slice(0, -1));
+    setPage(previous);
+  };
+
+  const resetToRoot = () => {
+    setPage('root');
+    setNavStack([]);
+  };
+
+  useEffect(() => {
+    if (resetSignal > 0) resetToRoot();
+  }, [resetSignal]);
+
+  useEffect(() => {
+    setNameDraft(editableIdentityName({ user, cfg }));
+    setAgreement(cfg.accountConsentAccepted === true);
+  }, [cfg.displayName, cfg.accountConsentAccepted, user?.id]);
+
   const syncState = cfg.demoMode
     ? { icon: 'flask-outline', color: th.warn, text: isAr ? 'بيانات تجريبية' : 'Demo workspace' }
     : !user
-      ? { icon: 'phone-portrait-outline', color: th.sub, text: isAr ? 'محلي فقط' : 'Local only' }
+      ? { icon: 'phone-portrait-outline', color: th.sub, text: T.localOnly }
       : syncing
-        ? { icon: 'sync-outline', color: th.primary, text: isAr ? 'جاري الحفظ' : 'Syncing' }
+        ? { icon: 'sync-outline', color: th.primary, text: T.syncing }
         : !online || lastSyncError
-          ? { icon: 'cloud-offline-outline', color: th.exp, text: isAr ? 'تحتاج مراجعة' : 'Needs attention' }
+          ? { icon: 'cloud-offline-outline', color: th.exp, text: T.needsAttention }
           : dirty
-            ? { icon: 'cloud-upload-outline', color: th.warn, text: isAr ? 'بانتظار المزامنة' : 'Pending sync' }
-            : { icon: 'cloud-done-outline', color: th.inc, text: isAr ? 'محفوظ ومتصل' : 'Saved and connected' };
-  const accountEmailText = user?.email || (isAr ? '\u063a\u064a\u0631 \u0645\u0633\u062c\u0644' : 'Not signed in');
-  const accountDisplayName = deriveDisplayName({ user, cfg }) || (isAr ? '\u062d\u0633\u0627\u0628 \u0645\u062d\u0644\u064a' : 'Local account');
-  const accountUsername = accountPublicId({ user, cfg });
-  const accountInitial = (accountDisplayName || 'M').trim().charAt(0).toUpperCase();
-  const walletRows = getWalletAvailableBalances(wallets, trans, cfg.currency, defaultWalletId)
-    .sort((a, b) => (a.id === defaultWalletId ? -1 : b.id === defaultWalletId ? 1 : 0));
-  const walletSelection = useMultiSelect(
-    walletRows.filter(wallet => wallet.id !== defaultWalletId).map(wallet => wallet.id),
-  );
-  const categorySelection = useMultiSelect(
-    cats.filter(cat => cat.id !== 'other').map(cat => cat.id),
-  );
+            ? { icon: 'cloud-upload-outline', color: th.warn, text: T.pending }
+            : { icon: 'cloud-done-outline', color: th.inc, text: T.synced };
 
-  const toggleOpen = (key) => setOpen(open === key ? null : key);
+  const dataCounts = useMemo(() => ({
+    transactions: trans.length,
+    wallets: wallets.length,
+    trackers: debts.length + goals.length + commitments.length,
+    categories: cats.length,
+  }), [trans.length, wallets.length, debts.length, goals.length, commitments.length, cats.length]);
 
-  useEffect(() => {
-    if (settingsSheet !== 'country') setCountryQuery('');
-    if (settingsSheet !== 'currency') setCurrencyQuery('');
-  }, [settingsSheet]);
+  const choiceConfig = useMemo(() => {
+    if (choice === 'language') {
+      return {
+        title: T.language,
+        value: cfg.langMode === 'system' ? 'system' : cfg.lang,
+        options: [
+          { value: 'system', label: T.useDeviceSetting, detail: `${T.followsDevice} · ${cfg.lang === 'ar' ? T.arabic : T.english}`, icon: 'phone-portrait-outline' },
+          { value: 'ar', label: T.arabic, leading: 'ع' },
+          { value: 'en', label: T.english, leading: 'EN' },
+        ],
+        onSelect: value => setCfg(value === 'system' ? { langMode: 'system' } : { langMode: 'manual', lang: value }),
+      };
+    }
+    if (choice === 'theme') {
+      return {
+        title: T.appearance,
+        value: cfg.themeMode === 'system' ? 'system' : cfg.theme,
+        options: [
+          { value: 'system', label: T.useDeviceSetting, detail: `${T.followsDevice} · ${deviceTheme === 'dark' ? T.dark : T.light}`, icon: 'phone-portrait-outline' },
+          { value: 'light', label: T.light, icon: 'sunny-outline' },
+          { value: 'dark', label: T.dark, icon: 'moon-outline' },
+        ],
+        onSelect: value => setCfg(value === 'system' ? { themeMode: 'system', theme: deviceTheme } : { themeMode: 'manual', theme: value }),
+      };
+    }
+    if (choice === 'orientation') {
+      return {
+        title: T.rotation,
+        value: ['system', 'auto', 'portrait'].includes(cfg.orientationMode) ? cfg.orientationMode : 'system',
+        options: [
+          { value: 'system', label: T.useDeviceSetting, detail: isAr ? 'يتبع إعداد قفل الدوران في الهاتف' : 'Follows the phone rotation-lock setting', icon: 'phone-portrait-outline' },
+          { value: 'auto', label: T.autoRotate, detail: isAr ? 'يسمح للتطبيق بالدوران تلقائياً' : 'Allows the app to rotate automatically', icon: 'sync-outline' },
+          { value: 'portrait', label: T.fixedPortrait, icon: 'lock-closed-outline' },
+        ],
+        onSelect: value => setCfg({ orientationMode: ['system', 'auto', 'portrait'].includes(value) ? value : 'system' }),
+      };
+    }
+    if (choice === 'country') {
+      return {
+        title: T.country,
+        value: selectedCountry.code,
+        options: COUNTRIES.map(item => ({
+          value: item.code,
+          label: isAr ? item.name : item.nameEn,
+          detail: `${item.code} · ${item.currency}`,
+          leading: item.flag,
+          raw: item,
+        })),
+        onSelect: (_, option) => {
+          const country = option.raw;
+          if (!country) return;
+          const currencyPatch = country.currency && CURRENCIES.some(item => item.code === country.currency)
+            ? { currency: country.currency }
+            : {};
+          setCfg({ country: country.code, ...currencyPatch });
+        },
+      };
+    }
+    if (choice === 'currency') {
+      return {
+        title: T.currency,
+        value: selectedCurrency.code,
+        options: CURRENCIES.map(item => ({
+          value: item.code,
+          label: item.code,
+          detail: `${item.sym} · ${isAr ? item.name : item.nameEn}`,
+          leading: item.sym,
+        })),
+        onSelect: value => setCfg({ currency: value }),
+      };
+    }
+    return null;
+  }, [choice, T, cfg.langMode, cfg.lang, cfg.themeMode, cfg.theme, cfg.orientationMode, deviceTheme, selectedCountry, selectedCurrency, isAr, setCfg]);
 
-  useEffect(() => {
-    setAccountNameDraft(deriveDisplayName({ user, cfg }));
-    setUsernameDraft(normalizeUsername(cfg.username || user?.user_metadata?.username || ''));
-    setPhoneDraft(normalizePhone(cfg.phone || user?.user_metadata?.phone || ''));
-    setAuthAgreement(cfg.accountConsentAccepted === true);
-  }, [cfg.displayName, cfg.username, cfg.phone, cfg.accountConsentAccepted, user?.id]);
-
-  useEffect(() => {
-    if (open !== 'account' || user) return undefined;
-    let active = true;
-    setAuthServiceStatus('checking');
-    checkSupabaseHealth(10000).then((health) => {
-      if (active) setAuthServiceStatus(health.ok ? 'ready' : 'down');
+  const pickAvatar = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.75,
+      allowsEditing: true,
+      aspect: [1, 1],
     });
-    return () => { active = false; };
-  }, [open, user]);
+    const asset = result.assets?.[0];
+    if (result.canceled || !asset?.uri) return;
 
-  const setProfileType = (profileType) => {
-    setCfg({
-      profileType,
-      activeScope: profileType === 'personal_business' ? 'all' : defaultScopeForProfile(profileType),
-      enabledModules: profileModuleDefaults(profileType),
-    });
-  };
-
-  const setModuleEnabled = (key, on) => {
-    if (on) {
-      setCfg({ enabledModules: { [key]: true } });
+    if (!user?.id) {
+      await setCfg({ avatarUri: asset.uri, avatarPath: '' });
       return;
     }
-    const count = getFeatureDataCount(key, { debts, goals, commitments, wallets, trans, cfg });
-    if (!count) {
-      setCfg({ enabledModules: { [key]: false } });
-      return;
+
+    setLoading(true);
+    try {
+      const uploaded = await uploadProfileAvatar(supabase, user.id, asset);
+      await setCfg(uploaded);
+    } catch (error) {
+      Alert.alert('', isAr ? 'تعذر رفع الصورة.' : 'Could not upload photo.');
+    } finally {
+      setLoading(false);
     }
-    Alert.alert(
-      isAr ? 'إخفاء الميزة؟' : 'Hide feature?',
-      isAr
-        ? `ستختفي الميزة و${count} عنصر مرتبط بها، لكن لن تُحذف البيانات ويمكن إظهارها لاحقاً.`
-        : `The feature and ${count} linked item(s) will be hidden, but no data will be deleted.`,
-      [
-        { text: isAr ? 'إلغاء' : 'Cancel', style: 'cancel' },
-        { text: isAr ? 'إخفاء' : 'Hide', onPress: () => setCfg({ enabledModules: { [key]: false } }) },
-      ],
-    );
   };
 
-  const updateHomeCards = (updater) => {
-    const next = typeof updater === 'function' ? updater([...(cfg.homeCards || [])]) : updater;
-    setCfg({ homeCards: next });
-  };
-  const updateHomeSections = (updater) => {
-    const next = typeof updater === 'function' ? updater([...(cfg.homeSections || [])]) : updater;
-    setCfg({ homeSections: next });
-  };
-  const setHomeCardVisible = (key, visible) => {
-    updateHomeCards(cards => cards.map(card => (
-      card.key === key ? { ...card, visible } : card
-    )));
-  };
-  const setHomeSectionVisible = (key, visible) => {
-    updateHomeSections(items => items.map(item => (
-      item.key === key ? { ...item, visible } : item
-    )));
-  };
-  const moveHomeCard = (key, direction) => {
-    updateHomeCards(cards => {
-      const displayedKeys = homeCards.map(item => item.key);
-      const displayedIndex = displayedKeys.indexOf(key);
-      const targetKey = displayedKeys[displayedIndex + direction];
-      const index = cards.findIndex(item => item.key === key);
-      const target = cards.findIndex(item => item.key === targetKey);
-      if (displayedIndex < 0 || !targetKey || index < 0 || target < 0) return cards;
-      const next = [...cards];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
-  };
-  const moveHomeSection = (key, direction) => {
-    updateHomeSections(items => {
-      const displayedKeys = homeSections.map(item => item.key);
-      const displayedIndex = displayedKeys.indexOf(key);
-      const targetKey = displayedKeys[displayedIndex + direction];
-      const index = items.findIndex(item => item.key === key);
-      const target = items.findIndex(item => item.key === targetKey);
-      if (displayedIndex < 0 || !targetKey || index < 0 || target < 0) return items;
-      const next = [...items];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
-  };
-  const resetHomeLayout = () => {
-    setCfg({
-      homeCards: DEF_HOME_CARDS,
-      homeSections: DEF_HOME_SECTIONS,
-      homeBalancesHidden: false,
-    });
-  };
-
-  const handleAuth = async () => {
-    const emailValue = emailRef.current.trim().toLowerCase();
-    const passValue = passRef.current;
-    const usernameValue = normalizeUsername(usernameDraft);
-    const phoneValue = normalizePhone(phoneDraft);
-    if (!emailValue || !passValue.trim()) {
-      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, T.requiredFields);
+  const removeAvatar = async () => {
+    if (!user?.id) {
+      await setCfg({ avatarUri: '', avatarPath: '' });
       return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(emailValue)) {
-      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, T.invalidEmail);
-      return;
-    }
-    if (passValue.length < 8) {
-      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, T.passwordLength);
-      return;
-    }
-    if (authMode === 'signup') {
-      if (!accountNameDraft.trim()) {
-        Alert.alert(T.signUp, isAr ? 'اكتب اسمك حتى يظهر في هوية المستخدم.' : 'Enter your name for your account identity.');
-        return;
-      }
-      if (!isValidUsername(usernameValue)) {
-        Alert.alert(
-          T.signUp,
-          isAr
-            ? 'اكتب يوزر نيم فريد من 3 أحرف على الأقل، بحروف إنكليزية وأرقام وشرطة سفلية.'
-            : 'Use a unique username, 3+ characters, letters, numbers, and underscore.',
-        );
-        return;
-      }
-      if (!authAgreement) {
-        Alert.alert(T.signUp, isAr ? 'وافق على شروط الحساب والمزامنة قبل إنشاء الحساب.' : 'Accept the account and sync terms before creating the account.');
-        return;
-      }
     }
     setLoading(true);
     try {
-      const health = await checkSupabaseHealth(10000);
-      if (!health.ok) {
-        setAuthServiceStatus('down');
-        Alert.alert('', authHealthMessage(health));
+      const removed = await removeProfileAvatar(supabase, user.id, cfg.avatarPath);
+      await setCfg(removed);
+    } catch (error) {
+      Alert.alert('', isAr ? 'تعذر إزالة الصورة.' : 'Could not remove photo.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveIdentity = async () => {
+    const name = cleanDisplayName(nameDraft);
+    if (!name) {
+      Alert.alert('', isAr ? 'اكتب الاسم.' : 'Enter a name.');
+      return;
+    }
+    const patch = accountIdentityPatch({ displayName: name });
+    if (user?.id) {
+      const result = await upsertProfileIdentity(supabase, user.id, patch);
+      if (result.error && !result.degraded) {
+        Alert.alert('', result.error.message || T.authFailed);
         return;
       }
-      setAuthServiceStatus('ready');
-      const credentials = { email: emailValue, password: passValue };
+      const metadataResult = await supabase.auth.updateUser({
+        data: { displayName: patch.displayName, full_name: patch.displayName },
+      });
+      if (metadataResult.error) {
+        Alert.alert('', metadataResult.error.message || T.authFailed);
+        return;
+      }
+    }
+    await setCfg(patch);
+    setEditIdentity(false);
+    Alert.alert('', T.saved);
+  };
+
+  const handleAuth = async () => {
+    const emailValue = email.trim();
+    if (!emailValue || !password) {
+      Alert.alert('', T.authFields);
+      return;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(emailValue)) {
+      Alert.alert('', T.invalidEmail);
+      return;
+    }
+    if (password.length < 8) {
+      Alert.alert('', T.passwordLength);
+      return;
+    }
+    if (authMode === 'signup') {
+      if (!cleanDisplayName(nameDraft)) {
+        Alert.alert('', isAr ? 'اكتب اسمك في الملف الشخصي أولاً.' : 'Enter your name in the profile first.');
+        return;
+      }
+      if (!agreement) {
+        Alert.alert('', T.terms);
+        return;
+      }
+    }
+
+    setLoading(true);
+    try {
+      const credentials = { email: emailValue, password };
       const result = authMode === 'signin'
         ? await supabase.auth.signInWithPassword(credentials)
         : await supabase.auth.signUp({
@@ -716,407 +583,191 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
             options: {
               emailRedirectTo: getAuthRedirectUrl('confirm'),
               data: {
-                displayName: accountNameDraft.trim(),
-                full_name: accountNameDraft.trim(),
-                username: usernameValue,
-                phone: phoneValue,
+                displayName: cleanDisplayName(nameDraft),
+                full_name: cleanDisplayName(nameDraft),
               },
             },
           });
       if (result.error) throw result.error;
+
       if (authMode === 'signup' && result.data?.user?.id) {
-        const profileResult = await upsertProfileIdentity(supabase, result.data.user.id, {
-          displayName: accountNameDraft,
-          username: usernameValue,
-          phone: phoneValue,
-        });
-        if (profileResult.error) throw profileResult.error;
+        await upsertProfileIdentity(supabase, result.data.user.id, accountIdentityPatch({ displayName: nameDraft }));
       }
-      await setCfg(accountIdentityPatch({
-        displayName: accountNameDraft,
-        username: usernameValue,
-        phone: phoneValue,
-        consentAccepted: authMode === 'signup' ? authAgreement : undefined,
-      }));
+
+      if (authMode === 'signup') {
+        await setCfg(accountIdentityPatch({ displayName: nameDraft, consentAccepted: agreement }));
+      }
+
       if (result.data?.session?.user) {
         await setUser(result.data.session.user);
-        Alert.alert('', T.loginSuccess);
+        setAuthOpen(false);
       } else if (authMode === 'signup' && result.data?.user) {
-        const identities = result.data.user.identities;
-        const requestAccepted = !Array.isArray(identities) || identities.length > 0;
-        Alert.alert(
-          T.verificationTitle,
-          requestAccepted ? T.verificationPending : T.verificationUnconfirmed,
-          [{ text: T.close, style: 'cancel' }],
-        );
-      } else {
-        Alert.alert('', T.authUnavailable);
+        Alert.alert('', T.accountCreated);
       }
-    } catch (e) {
-      const message = String(e?.message || '');
-      const invalidCredentials = /invalid login credentials/i.test(message);
-      const networkFailure = /network|fetch|resolve|connection/i.test(message);
-      Alert.alert(authMode === 'signin' ? T.signIn : T.signUp, invalidCredentials ? T.invalidCredentials : networkFailure ? T.authUnavailable : message);
+    } catch (error) {
+      Alert.alert('', error?.message || T.authFailed);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut({ scope: 'local' });
-    await setUser(null);
-  };
-
-  const saveAccountIdentity = async () => {
-    const usernameValue = normalizeUsername(usernameDraft);
-    if (!accountNameDraft.trim()) {
-      Alert.alert(isAr ? 'حسابي' : 'My account', isAr ? 'اكتب الاسم الذي سيظهر داخل التطبيق.' : 'Enter the name shown in the app.');
-      return;
-    }
-    if (!isValidUsername(usernameValue)) {
-      Alert.alert(
-        isAr ? 'حسابي' : 'My account',
-        isAr
-          ? 'اكتب يوزر نيم فريد من 3 أحرف على الأقل، بحروف إنكليزية وأرقام وشرطة سفلية.'
-          : 'Use a unique username, 3+ characters, letters, numbers, and underscore.',
-      );
-      return;
-    }
-    const patch = accountIdentityPatch({
-      displayName: accountNameDraft,
-      username: usernameValue,
-      phone: phoneDraft,
-      consentAccepted: authAgreement,
-    });
-    if (user?.id) {
-      const profileResult = await upsertProfileIdentity(supabase, user.id, patch);
-      if (profileResult.error) {
-        Alert.alert(isAr ? 'حسابي' : 'My account', profileResult.error.message);
-        return;
-      }
-    }
-    await setCfg(patch);
-    Alert.alert(isAr ? 'حسابي' : 'My account', isAr ? 'تم حفظ هوية الحساب.' : 'Account identity saved.');
-  };
-
-  const pickAccountAvatar = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.75,
-      allowsEditing: true,
-      aspect: [1, 1],
-    });
-    if (result.canceled || !result.assets?.[0]?.uri) return;
-    await setCfg({ avatarUri: result.assets[0].uri });
-  };
-
   const handlePasswordReset = async () => {
-    const emailValue = emailRef.current.trim();
+    const emailValue = (user?.email || emailRef.current || email).trim();
     if (!emailValue) {
-      Alert.alert('', isAr ? 'أدخل بريدك الإلكتروني أولاً.' : 'Enter your email first.');
+      Alert.alert('', T.invalidEmail);
       return;
     }
     setLoading(true);
     try {
-      const health = await checkSupabaseHealth(10000);
-      if (!health.ok) throw new Error(authHealthMessage(health));
       const { error } = await supabase.auth.resetPasswordForEmail(emailValue, {
         redirectTo: getAuthRedirectUrl('recovery'),
       });
       if (error) throw error;
-      Alert.alert(
-        '',
-        isAr
-          ? 'أُرسلت رسالة استعادة كلمة المرور إلى بريدك إن كان الحساب موجوداً.'
-          : 'A password recovery email was sent if the account exists.',
-      );
+      Alert.alert('', T.resetSent);
     } catch (error) {
-      Alert.alert('', error?.message || (isAr ? 'تعذر إرسال رسالة الاستعادة.' : 'Could not send recovery email.'));
+      Alert.alert('', error?.message || T.authFailed);
     } finally {
       setLoading(false);
     }
   };
 
-  const hasCurrencySensitiveAmounts = () => (
-    trans.length > 0
-    || debts.length > 0
-    || goals.length > 0
-    || commitments.length > 0
-    || wallets.some(wallet => Number(wallet.openingBalance || 0) !== 0)
-  );
-
-  const visibleCountries = useMemo(() => {
-    const query = countryQuery.trim().toLowerCase();
-    if (!query) return COUNTRIES;
-    return COUNTRIES.filter(country => [country.code, country.name, country.nameEn, country.currency]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-      .includes(query));
-  }, [countryQuery]);
-  const visibleCurrencies = useMemo(() => {
-    const query = currencyQuery.trim().toLowerCase();
-    if (!query) return CURRENCIES;
-    return CURRENCIES.filter(currency => [currency.code, currency.sym, currency.name, currency.nameEn]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-      .includes(query));
-  }, [currencyQuery]);
-
-  const changeBaseCurrency = async (currencyCode, extraPatch = {}) => {
-    if (!currencyCode || currencyCode === cfg.currency) {
-      if (Object.keys(extraPatch).length) await setCfg(extraPatch);
-      setSettingsSheet(null);
-      return;
+  const signOutLocal = async () => {
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } finally {
+      await setUser(null);
     }
-    const apply = async () => {
-      await setCfg({ ...extraPatch, currency: currencyCode });
-      setSettingsSheet(null);
-    };
-    if (!hasCurrencySensitiveAmounts()) {
-      apply();
-      return;
+  };
+
+  const signOutOtherSessions = async () => {
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'others' });
+      if (error) throw error;
+      Alert.alert('', T.otherSessionsDone);
+    } catch (error) {
+      Alert.alert('', error?.message || T.noOtherSessions);
     }
-    Alert.alert(
-      isAr ? 'تغيير العملة الأساسية' : 'Change base currency',
-      isAr
-        ? `ستتغير العملة من ${cfg.currency} إلى ${currencyCode} لجميع المحافظ والتقارير، لكن الأرقام الحالية لن تُحوّل بسعر صرف.`
-        : `All wallets and reports will change from ${cfg.currency} to ${currencyCode}, but existing amounts will not be exchange-rate converted.`,
-      [
-        { text: isAr ? 'إلغاء' : 'Cancel', style: 'cancel' },
-        { text: isAr ? 'تغيير العملة' : 'Change currency', onPress: apply },
-      ],
-    );
   };
 
-  const changeCountry = (country) => {
-    if (!country) return;
-    changeBaseCurrency(country.currency, { country: country.code });
-  };
-
-  const addCategory = () => {
-    if (!newCatName.trim()) return;
-    setCats([
-      ...cats,
-      {
-        id: 'c_' + Date.now().toString(36),
-        label: newCatName.trim(),
-        labelEn: newCatName.trim(),
-        emoji: '',
-        icon: newCatIcon,
-        color: newCatColor,
-        flow: newCatFlow,
-      },
-    ]);
-    setNewCatName('');
-    setNewCatFlow(CATEGORY_FLOWS.EXPENSE);
-    setNewCatIcon(ICON_OPTIONS[0]);
-    setNewCatColor(CAT_COLORS[0]);
-    setCategoryModalOpen(false);
-  };
-
-  const moveCategory = (id, direction) => {
-    if (!id || id === 'other') return;
-    const movable = cats.filter(cat => cat.id !== 'other');
-    const other = cats.find(cat => cat.id === 'other');
-    const index = movable.findIndex(cat => cat.id === id);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= movable.length) return;
-    const next = [...movable];
-    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-    setCats(other ? [...next, other] : next);
-  };
-
-  const createWallet = async () => {
-    if (!newWalletName.trim()) return;
-    await addWallet({
-      name: newWalletName.trim(),
-      nameEn: newWalletName.trim(),
-      currency: cfg.currency,
-      openingBalance: parseNumberInput(newWalletOpening),
-    });
-    setNewWalletName('');
-    setNewWalletOpening('');
-    setWalletModalOpen(false);
-  };
-
-  const confirmDeleteWallet = (wallet) => {
-    if (walletRows.length <= 1) return;
-    Alert.alert(T.deleteWalletTitle, T.deleteWalletBody, [
-      { text: T.cancel, style: 'cancel' },
-      { text: T.delete, style: 'destructive', onPress: () => deleteWallet(wallet.id) },
+  const confirmDeleteAccount = () => {
+    if (!user?.id) return;
+    Alert.alert(T.deleteAccountTitle, T.deleteAccountConfirm, [
+      { text: T.back, style: 'cancel' },
+      { text: T.continueAction, style: 'destructive', onPress: () => setDeleteAccountOpen(true) },
     ]);
   };
 
-  const deleteCategory = (id) => {
-    if (id === 'other') return;
-    Alert.alert(L.delete, '', [
-      { text: T.cancel, style: 'cancel' },
-      {
-        text: T.delete,
-        style: 'destructive',
-        onPress: async () => {
-          await setTransCatToOther(id);
-          setCats(cats.filter(c => c.id !== id));
-        },
-      },
-    ]);
+  const deleteAccountPermanently = async password => {
+    if (!user?.id || !user?.email || !password) return;
+    setDeletingAccount(true);
+    let localPreservation = null;
+    let cloudDeleted = false;
+    try {
+      const reauth = await supabase.auth.signInWithPassword({ email: user.email, password });
+      if (reauth.error) throw reauth.error;
+
+      // Critical safety rule: prepare and verify a local-only workspace BEFORE
+      // invoking permanent cloud deletion. If this step fails, the account is
+      // not deleted and the user's current financial workspace remains intact.
+      localPreservation = await prepareLocalWorkspaceForAccountDeletion();
+      if (localPreservation?.ok !== true) throw new Error('local_account_delete_preservation_failed');
+
+      const result = await supabase.functions.invoke('delete-account', { body: { confirm: true } });
+      if (result.error) throw result.error;
+      if (result.data?.ok !== true) throw new Error(result.data?.error || 'delete_failed');
+      cloudDeleted = true;
+
+      try { await supabase.auth.signOut({ scope: 'local' }); } catch {}
+      await setUser(null);
+      await cleanupDeletedAccountLocalNamespace(localPreservation?.accountNamespace);
+      setDeleteAccountOpen(false);
+      Alert.alert('', T.deleteAccountDone);
+    } catch (error) {
+      if (!cloudDeleted && localPreservation?.ok) {
+        await rollbackLocalWorkspaceAfterAccountDeletionFailure(localPreservation?.rollbackGuestSnapshot || null);
+      }
+      const message = String(error?.message || error || '');
+      Alert.alert(T.deleteAccountFailed, /invalid login credentials/i.test(message) ? T.wrongPassword : /local_account_delete_preservation_failed|guest_workspace_merge_failed/i.test(message) ? T.localPreservationFailed : T.accountServiceIssue);
+    } finally {
+      setDeletingAccount(false);
+    }
   };
 
-  const confirmDeleteSelectedWallets = () => {
-    if (!walletSelection.selectedCount) return;
-    const body = isAr
-      ? `سيتم حذف ${walletSelection.selectedCount} محافظ ونقل حركاتها إلى المحفظة الافتراضية.`
-      : `Delete ${walletSelection.selectedCount} wallets and move their transactions to the default wallet?`;
-    Alert.alert(T.deleteWalletTitle, body, [
-      { text: T.cancel, style: 'cancel' },
-      {
-        text: T.delete,
-        style: 'destructive',
-        onPress: async () => {
-          await deleteWalletsMany(walletSelection.selectedIds);
-          walletSelection.cancel();
-        },
-      },
-    ]);
+  const runSync = async () => {
+    if (!user || syncing) return;
+    try {
+      await syncCloud({ reason: 'manual_settings' });
+    } catch (error) {
+      Alert.alert('', error?.message || T.needsAttention);
+    }
   };
 
-  const confirmDeleteSelectedCategories = () => {
-    if (!categorySelection.selectedCount) return;
-    const body = isAr
-      ? `سيتم حذف ${categorySelection.selectedCount} تصنيفات ونقل حركاتها إلى «أخرى».`
-      : `Delete ${categorySelection.selectedCount} categories and move their transactions to Other?`;
-    Alert.alert(L.delete, body, [
-      { text: T.cancel, style: 'cancel' },
-      {
-        text: T.delete,
-        style: 'destructive',
-        onPress: async () => {
-          await deleteCategoriesMany(categorySelection.selectedIds);
-          categorySelection.cancel();
-        },
-      },
-    ]);
-  };
-
-  const toggleBioLock = async (value) => {
+  const toggleBioLock = async value => {
     if (value) {
       const supported = await isBiometricSupported();
       if (!supported) {
-        Alert.alert('', L.bioNotAvailable);
+        Alert.alert('', L.bioNotAvailable || (isAr ? 'البصمة غير متاحة على هذا الجهاز.' : 'Biometrics are not available on this device.'));
         return;
       }
-      const res = await authenticate(L.bioPrompt);
-      if (!res.success) return;
+      const result = await authenticate(L.bioPrompt || (isAr ? 'تحقق لفتح MYFI' : 'Authenticate to unlock MYFI'));
+      if (!result.success) return;
     }
-    setCfg({ bioLock: value });
+    await setCfg({ bioLock: value });
   };
 
-  const toggleDaily = async (value) => {
-    if (!value) {
-      await cancelNotifs();
-      await setNotif({ daily: { ...notif.daily, on: false } });
-      return;
-    }
-    const result = await setupDailyNotif(cfg.lang, trans, notif.daily.value);
-    if (!result?.ok) {
-      Alert.alert('', result?.reason || (cfg.lang === 'ar' ? 'تعذر تفعيل الإشعارات' : 'Could not enable notifications'));
-      await setNotif({ daily: { ...notif.daily, on: false } });
-      return;
-    }
-    await setNotif({ daily: { ...notif.daily, on: true } });
-  };
-
-  const setDailyHour = async (delta) => {
-    const value = Math.max(0, Math.min(23, notif.daily.value + delta));
-    if (notif.daily.on) {
-      const result = await setupDailyNotif(cfg.lang, trans, value);
-      if (!result?.ok) {
-        Alert.alert('', result?.reason || (cfg.lang === 'ar' ? 'تعذر تحديث الإشعارات' : 'Could not update notifications'));
-        await setNotif({ daily: { ...notif.daily, on: false, value } });
-        return;
-      }
-    }
-    await setNotif({ daily: { ...notif.daily, value } });
-  };
-
-  const runExport = async (password = '') => {
-    if (cfg.demoMode) {
-      Alert.alert('', isAr ? 'اخرج من المساحة التجريبية لتصدير بياناتك الحقيقية.' : 'Exit demo mode before exporting real data.');
-      return;
-    }
-    if (fileBusy) return;
+  const runExport = async (secret = '', delivery = backupDelivery) => {
+    if (cfg.demoMode || fileBusy) return;
     setFileBusy(true);
     try {
       await exportMyfiPackage({
         kind: 'full_backup',
-        data: JSON.parse(exportBackup()),
-        label: 'MYFI',
-        password,
+        data: JSON.parse(await exportBackup()),
+        label: PRODUCT_NAME,
+        password: secret,
+        delivery,
       });
-    } catch (e) {
-      Alert.alert('', e.message);
+    } catch (error) {
+      Alert.alert('', error?.message || T.authFailed);
     } finally {
       setFileBusy(false);
     }
   };
 
-  const handleExport = () => {
-    if (cfg.demoMode) {
-      Alert.alert('', isAr ? 'اخرج من المساحة التجريبية لتصدير بياناتك الحقيقية.' : 'Exit demo mode before exporting real data.');
-      return;
-    }
-    Alert.alert(
-      isAr ? 'حماية النسخة الاحتياطية' : 'Protect backup',
-      isAr
-        ? 'النسخة المشفرة تحمي بياناتك المالية إذا وصل الملف إلى شخص آخر.'
-        : 'An encrypted backup protects your financial data if someone obtains the file.',
-      [
-        {
-          text: isAr ? 'بدون كلمة مرور' : 'Without password',
-          style: 'destructive',
-          onPress: () => Alert.alert(
-            isAr ? 'نسخة غير مشفرة' : 'Unencrypted backup',
-            isAr
-              ? 'سيكون محتوى الملف قابلاً للقراءة. استخدم هذا الخيار فقط إذا كنت ستحفظه في مكان آمن.'
-              : 'The file contents will be readable. Use this only if you will store it securely.',
-            [
-              { text: isAr ? 'إلغاء' : 'Cancel', style: 'cancel' },
-              { text: isAr ? 'تصدير' : 'Export', onPress: () => runExport('') },
-            ],
-          ),
-        },
-        {
-          text: isAr ? 'تشفير بكلمة مرور' : 'Encrypt with password',
-          onPress: () => {
-            setBackupPassword('');
-            setBackupPasswordMode('export');
-          },
-        },
-      ],
-    );
+  const chooseBackupProtection = (delivery) => {
+    setBackupDelivery(delivery);
+    setBackupExportSheet('protection');
   };
 
-  const selectImportFile = async () => {
-    if (cfg.demoMode) {
-      Alert.alert('', isAr ? 'اخرج من المساحة التجريبية قبل استعادة نسخة.' : 'Exit demo mode before restoring a backup.');
-      return;
-    }
+  const handleExport = () => {
+    setBackupExportSheet('delivery');
+  };
+
+  const exportWithoutPassword = async () => {
+    const delivery = backupDelivery;
+    setBackupExportSheet(null);
+    await runExport('', delivery);
+  };
+
+  const exportWithPassword = () => {
+    setBackupExportSheet(null);
+    setBackupPassword('');
+    setBackupPasswordMode('export');
+  };
+
+  const selectImport = async () => {
     if (fileBusy) return;
     setFileBusy(true);
     try {
       const picked = await pickMyfiPackage({ kind: 'full_backup' });
-      if (picked?.passwordRequired) {
-        setImportPackage(picked);
+      if (!picked) return;
+      setImportPackage(picked);
+      if (picked.passwordRequired) {
         setBackupPassword('');
         setBackupPasswordMode('import');
-      } else if (picked) {
-        setImportPackage(picked);
       }
     } catch (error) {
       setImportPackage(null);
-      Alert.alert(T.importBackup, error?.message || T.importFailed);
+      Alert.alert('', error?.message || T.backupInvalid);
     } finally {
       setFileBusy(false);
     }
@@ -1125,1666 +776,1307 @@ export default function SettingsScreen({ onOpenArchive, tabs = [] }) {
   const submitBackupPassword = async () => {
     if (backupPasswordMode === 'export') {
       if (backupPassword.length < 6) {
-        Alert.alert('', isAr ? 'اكتب كلمة مرور من 6 أحرف على الأقل.' : 'Use at least 6 characters.');
+        Alert.alert('', T.passwordMin);
         return;
       }
-      const password = backupPassword;
-      setBackupPasswordMode(null);
+      const secret = backupPassword;
       setBackupPassword('');
-      await runExport(password);
+      setBackupPasswordMode(null);
+      await runExport(secret, backupDelivery);
       return;
     }
-    if (backupPasswordMode === 'import') {
-      if (!backupPassword || !importPackage) return;
+    if (backupPasswordMode === 'import' && importPackage) {
       setFileBusy(true);
       try {
         const unlocked = await unlockMyfiPackage(importPackage, backupPassword, 'full_backup');
         setImportPackage(unlocked);
-        setBackupPasswordMode(null);
         setBackupPassword('');
+        setBackupPasswordMode(null);
       } catch (error) {
-        Alert.alert('', error?.message || T.importFailed);
+        Alert.alert('', error?.message || T.backupInvalid);
       } finally {
         setFileBusy(false);
       }
     }
   };
 
-  const handleImport = async () => {
-    if (!importPackage?.payload?.data) return;
-    if (!importPreview.valid) {
-      Alert.alert('', importPreview.error || T.importFailed);
-      return;
+  const importPreview = useMemo(() => {
+    if (!importPackage?.payload?.data) return null;
+    try {
+      return inspectBackupData(importPackage.payload.data);
+    } catch {
+      return { valid: false, errors: ['invalid'] };
     }
-    Alert.alert(T.importBackup, T.importWarning, [
+  }, [importPackage]);
+
+  const restoreImport = async () => {
+    if (!importPackage?.payload?.data || !importPreview?.valid) return;
+    Alert.alert(
+      T.importBackup,
+      isAr
+        ? 'سيُنشئ MYFI نقطة رجوع آمنة، ثم يستعيد محتوى النسخة. ملف النسخة نفسه لن يُحذف.'
+        : 'MYFI will create a safe rollback point, then restore this backup. The backup file itself is not deleted.',
+      [
       { text: T.cancel, style: 'cancel' },
       {
-        text: T.replaceNow,
+        text: isAr ? 'استعادة النسخة الآن' : 'Restore backup now',
         onPress: async () => {
           const ok = await importBackup(JSON.stringify(importPackage.payload.data));
-          Alert.alert('', ok ? T.importDone : T.importFailed);
-          if (ok) {
-            setImportPackage(null);
-            setOpen(null);
-          }
+          Alert.alert('', ok ? T.saved : T.backupInvalid);
+          if (ok) setImportPackage(null);
         },
       },
-    ]);
-  };
-
-  const confirmReset = () => {
-    Alert.alert(T.deleteAll, T.deleteConfirm, [
-      { text: T.cancel, style: 'cancel' },
-      { text: T.delete, style: 'destructive', onPress: resetAll },
-    ]);
-  };
-
-  const toggleDemoMode = () => {
-    if (cfg.demoMode) {
-      Alert.alert(
-        isAr ? 'الخروج من البيانات التجريبية' : 'Exit demo data',
-        isAr ? 'ستعود بياناتك الحقيقية كما كانت.' : 'Your real data will be restored exactly as it was.',
-        [
-          { text: T.cancel, style: 'cancel' },
-          {
-            text: isAr ? 'خروج' : 'Exit',
-            onPress: async () => {
-              const ok = await exitDemoMode();
-              Alert.alert(
-                isAr ? 'البيانات التجريبية' : 'Demo data',
-                ok
-                  ? (isAr ? 'تم الخروج من التجربة. تكدر تبدأ ببياناتك الحقيقية الآن.' : 'Demo mode is off. You can start with your real data now.')
-                  : (isAr ? 'لم نتمكن من إيقاف التجربة. حاول مرة أخرى.' : 'Could not exit demo mode. Try again.'),
-              );
-            },
-          },
-        ],
-      );
-      return;
-    }
-    Alert.alert(
-      isAr ? 'فتح مساحة تجريبية' : 'Open demo workspace',
-      isAr
-        ? 'ستُحفظ بياناتك الحقيقية جانباً، ولن تتم مزامنة البيانات التجريبية أو خلطها معها.'
-        : 'Your real data stays isolated. Demo data is never synced or mixed with it.',
-      [
-        { text: T.cancel, style: 'cancel' },
-        { text: isAr ? 'فتح التجربة' : 'Open demo', onPress: enterDemoMode },
       ],
     );
   };
 
-  const Section = useMemo(() => ({ id, title, children }) => {
-    const expanded = expandedSections.has(id);
-    return (
-      <View style={s.section}>
-        <TouchableOpacity
-          onPress={() => setExpandedSections(current => {
-            const next = new Set(current);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
-          })}
-          accessibilityRole="button"
-          accessibilityState={{ expanded }}
-          style={[
-            s.sectionToggle,
-            {
-              backgroundColor: th.card,
-              borderColor: th.border,
-              flexDirection: isAr ? 'row-reverse' : 'row',
-            },
-          ]}
-        >
-          <View style={[s.sectionMark, { backgroundColor: th.primary }]} />
-          <Text style={[s.sectionTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{title}</Text>
-          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={th.faint} />
-        </TouchableOpacity>
-        {expanded ? (
-          <View style={[s.group, { backgroundColor: th.card, borderColor: th.border }]}>
-            {children}
-          </View>
-        ) : null}
-      </View>
+  const activatePerformanceTier = tier => {
+    if (!tier || testDataBusy) return;
+    const isLarge = Number(tier.transactions) >= 10000;
+    const active = cfg.demoMode && cfg.performanceTestTier === tier.id;
+    const body = isAr
+      ? `سيتم فتح مساحة اختبار منفصلة تحتوي ${Number(tier.transactions).toLocaleString('en-US')} حركة موزعة على ${tier.months} شهراً (${Math.round(tier.months / 12)} سنوات تقريباً). بياناتك الحقيقية تبقى محفوظة ومشفرة ولا تختلط ببيانات الاختبار ولا تتم مزامنة بيانات الاختبار.${isLarge ? '\n\nهذا المستوى ثقيل وقد يحتاج عدة ثوانٍ على الهاتف، لكنه سيبقى فعالاً حتى تختار العودة إلى بياناتك.' : ''}`
+      : `An isolated test workspace with ${Number(tier.transactions).toLocaleString('en-US')} transactions across ${tier.months} months (about ${Math.round(tier.months / 12)} years) will be loaded. Your real data stays encrypted and separate, and test data is never synced.${isLarge ? '\n\nThis is a heavy tier and may take several seconds on a phone, but it remains active until you return to your real data.' : ''}`;
+    Alert.alert(
+      isAr ? `بيانات اختبار · ${Number(tier.transactions).toLocaleString('en-US')} حركة` : `Test data · ${Number(tier.transactions).toLocaleString('en-US')} transactions`,
+      body,
+      [
+        { text: T.cancel, style: 'cancel' },
+        {
+          text: active ? (isAr ? 'إعادة إنشاء' : 'Regenerate') : (isAr ? 'فتح الاختبار' : 'Open test'),
+          onPress: async () => {
+            setTestDataBusy(true);
+            try {
+              const ok = await enterDemoMode(tier.id);
+              if (!ok) Alert.alert('', isAr ? 'تعذر فتح بيانات الاختبار.' : 'Could not open test data.');
+            } catch (error) {
+              Alert.alert('', String(error?.message || (isAr ? 'تعذر فتح بيانات الاختبار.' : 'Could not open test data.')));
+            } finally {
+              setTestDataBusy(false);
+            }
+          },
+        },
+      ],
     );
-  }, [expandedSections, isAr, th]);
+  };
 
-  const Row = useMemo(() => ({ label, value, children, onPress, danger = false, last = false }) => {
-    const body = (
-      <>
-        <Text style={[s.rowLabel, { color: danger ? th.exp : th.text, textAlign: isAr ? 'right' : 'left' }]} numberOfLines={2}>{label}</Text>
-        <View style={[s.trailing, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-          {value ? (
-            <Text
-              style={{
-                color: th.sub,
-                fontSize: 12,
-                ...weight('700'),
-                textAlign: isAr ? 'right' : 'left',
-                writingDirection: isAr ? 'rtl' : 'ltr',
-              }}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-            >
-              {value}
-            </Text>
-          ) : null}
-          {children}
-          {onPress ? <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={16} color={th.faint} /> : null}
-        </View>
-      </>
+  const leavePerformanceData = () => {
+    if (!cfg.demoMode || testDataBusy) return;
+    Alert.alert(
+      isAr ? 'العودة إلى بياناتي' : 'Return to my data',
+      isAr ? 'سيتم حذف مساحة الاختبار فقط وإعادة بياناتك الحقيقية كما كانت.' : 'Only the test workspace will be removed and your real data will be restored as it was.',
+      [
+        { text: T.cancel, style: 'cancel' },
+        {
+          text: isAr ? 'العودة إلى بياناتي' : 'Return to my data',
+          onPress: async () => {
+            setTestDataBusy(true);
+            try {
+              const ok = await exitDemoMode();
+              if (!ok) Alert.alert('', isAr ? 'تعذر استعادة مساحة البيانات الحقيقية.' : 'Could not restore the real workspace.');
+            } finally {
+              setTestDataBusy(false);
+            }
+          },
+        },
+      ],
     );
+  };
 
-    const rowStyle = [
-      s.row,
-      {
-        borderBottomColor: last ? 'transparent' : th.border,
-        flexDirection: isAr ? 'row-reverse' : 'row',
-      },
-    ];
-
-    if (onPress) {
-      return (
-        <TouchableOpacity onPress={onPress} style={rowStyle} activeOpacity={0.72}>
-          {body}
-        </TouchableOpacity>
-      );
+  const confirmReset = () => {
+    if (cfg.demoMode) {
+      leavePerformanceData();
+      return;
     }
-    return <View style={rowStyle}>{body}</View>;
-  }, [isAr, th]);
+    Alert.alert(T.deleteLocal, T.deleteLocalSub, [
+      { text: T.cancel, style: 'cancel' },
+      { text: isAr ? 'حذف' : 'Delete', style: 'destructive', onPress: resetAll },
+    ]);
+  };
 
-  const Segmented = useMemo(() => ({ options, value, onChange }) => (
-    <View style={[s.segmented, { backgroundColor: th.cardHigh }]}>
-      {options.map(option => {
-        const active = value === option.value;
-        return (
-          <TouchableOpacity
-            key={option.value}
-            onPress={() => onChange(option.value)}
-            style={[s.segmentBtn, { backgroundColor: active ? th.card : 'transparent' }]}
-          >
-            <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('900'), textAlign: 'center' }} numberOfLines={1} adjustsFontSizeToFit>
-              {option.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  ), [th]);
+  const screenTitle = page === 'account' ? T.account
+    : page === 'devices' ? T.devices
+      : page === 'financial' ? T.financial
+        : page === 'data' ? T.data
+          : page === 'security' ? T.security
+            : page === 'support' ? T.helpCenter
+              : page === 'guide' ? T.guide
+                : page === 'contact' ? T.contactCenter
+                  : page === 'about' ? T.about
+                    : T.settings;
 
-  const Stepper = useMemo(() => ({ value, suffix = '', onMinus, onPlus }) => (
-    <View style={[s.stepper, { backgroundColor: th.cardHigh }]}>
-      <TouchableOpacity onPress={onMinus} style={s.stepButton}>
-        <Ionicons name="remove" size={14} color={th.text} />
-      </TouchableOpacity>
-      <Text style={{ color: th.text, minWidth: 54, textAlign: 'center', fontSize: 12, ...weight('900') }}>
-        {value}{suffix}
-      </Text>
-      <TouchableOpacity onPress={onPlus} style={s.stepButton}>
-        <Ionicons name="add" size={14} color={th.text} />
-      </TouchableOpacity>
-    </View>
-  ), [th]);
-
-  const Expanded = useMemo(() => ({ children, bottomBorder = false }) => (
-    <View style={[s.expanded, { borderTopColor: th.border, borderBottomColor: th.border }, bottomBorder && s.expandedSeparated]}>
-      {children}
-    </View>
-  ), [th]);
+  const root = page === 'root';
 
   return (
     <>
-    <ScrollView style={{ flex: 1, backgroundColor: th.bg }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 82 }}>
-      <View style={s.settingsHead}>
-        <Text style={[s.settingsTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.title || L.settings}</Text>
-      </View>
-      <Section id="general" title={T.general}>
-        <Row
-          label={T.language}
-          value={cfg.langMode === 'system' ? `${T.systemLanguage} — ${cfg.lang === 'ar' ? T.arabicLanguage : T.englishLanguage}` : cfg.lang === 'ar' ? T.arabicLanguage : T.englishLanguage}
-          onPress={() => setSettingsSheet('language')}
-        />
-        <Row
-          label={T.monthNames}
-          value={monthStyleLabel(cfg.monthNameStyle, cfg.lang)}
-          onPress={() => setSettingsSheet('monthNames')}
-        />
-        <Row
-          label={T.theme}
-          value={cfg.themeMode === 'system' ? `${T.systemLanguage} — ${cfg.theme === 'dark' ? T.darkTheme : T.lightTheme}` : cfg.theme === 'dark' ? T.darkTheme : T.lightTheme}
-          onPress={() => setSettingsSheet('theme')}
-        />
-        <Row
-          label={isAr ? 'اتجاه الشاشة' : 'Screen orientation'}
-          value={
-            cfg.orientationMode === 'portrait'
-              ? (isAr ? 'طولي' : 'Portrait')
-              : cfg.orientationMode === 'landscape'
-                ? (isAr ? 'عرضي' : 'Landscape')
-                : (isAr ? 'حسب الجهاز' : 'Follow device')
-          }
-          onPress={() => setSettingsSheet('orientation')}
-        />
-        <Row
-          label={T.country}
-          value={`${selectedCountry.flag} ${isAr ? selectedCountry.name : selectedCountry.nameEn}`}
-          onPress={() => setSettingsSheet('country')}
-        />
-        <Row
-          label={T.currency}
-          value={`${selectedCurrency.code} · ${selectedCurrency.sym}`}
-          onPress={() => setSettingsSheet('currency')}
-          last
-        />
-      </Section>
-
-      <Section id="usage" title={T.usage}>
-        <View style={s.profileBlock}>
-          <Text style={[s.focusLabel, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.profile}</Text>
-          <View style={s.profileChoiceList}>
-            {profileOptions.map(option => {
-              const active = option.value === (cfg.profileType || 'personal');
-              return (
-                <TouchableOpacity
-                  key={option.value}
-                  onPress={() => setProfileType(option.value)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: active }}
-                  accessibilityLabel={option.label}
-                  style={[
-                    s.profileChoice,
-                    {
-                      backgroundColor: th.cardHigh,
-                      flexDirection: isAr ? 'row-reverse' : 'row',
-                    },
-                  ]}
-                >
-                  <View style={[s.moduleIcon, { backgroundColor: active ? th.primSoft : th.card }]}>
-                    <Ionicons name={option.icon} size={17} color={active ? th.primary : th.sub} />
-                  </View>
-                  <Text
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.9}
-                    style={[
-                      s.profileChoiceLabel,
-                      {
-                        color: th.text,
-                        textAlign: isAr ? 'right' : 'left',
-                      },
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
-                  <View style={[s.radioOuter, { borderColor: active ? th.primary : th.border }]}>
-                    {active ? <View style={[s.radioInner, { backgroundColor: th.primary }]} /> : null}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
+      <ScrollView
+        style={{ flex: 1, backgroundColor: th.bg }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        contentContainerStyle={s.scrollContent}
+      >
+        {root ? (
+          <View style={s.rootHead}>
+            <Text style={[s.brandEyebrow, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>MYFI</Text>
+            <Text style={[s.rootTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{screenTitle}</Text>
           </View>
-          <Text style={[s.profileEffect, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.profileEffect}</Text>
-        </View>
-        <Row
-          label={T.enabledFeatures}
-          onPress={() => toggleOpen('modules')}
-          last={open !== 'modules'}
-        />
-        {open === 'modules' ? (
-          <Expanded>
-            {moduleRows.map(item => (
-              <View key={item.key} style={[s.moduleRow, { backgroundColor: th.cardHigh, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                <View style={[s.moduleInfo, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                  <View style={[s.moduleIcon, { backgroundColor: modules[item.key] ? th.primSoft : th.card }]}>
-                    <Ionicons name={item.icon} size={16} color={modules[item.key] ? th.primary : th.sub} />
-                  </View>
-                  <Text style={{ color: th.text, fontSize: 13, ...weight('800'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>
-                    {item.label}
-                  </Text>
-                </View>
-                <Switch
-                  value={!!modules[item.key]}
-                  onValueChange={(on) => setModuleEnabled(item.key, on)}
-                  trackColor={{ true: th.primary, false: th.cardHigh }}
-                />
-              </View>
-            ))}
-            <View style={[s.moduleRow, { backgroundColor: th.cardHigh, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-              <View style={[s.moduleInfo, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                <View style={[s.moduleIcon, { backgroundColor: cfg.entryMode !== 'classic' ? th.primSoft : th.card }]}>
-                  <Ionicons name="flash-outline" size={16} color={cfg.entryMode !== 'classic' ? th.primary : th.sub} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: th.text, fontSize: 13, ...weight('800'), textAlign: isAr ? 'right' : 'left' }}>
-                    {isAr ? 'الإدخال السريع' : 'Quick entry'}
-                  </Text>
-                  <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, marginTop: 2, textAlign: isAr ? 'right' : 'left' }}>
-                    {isAr ? 'نماذج مستقلة للمصروف والدخل والتحويل' : 'Focused forms for expenses, income, and transfers'}
-                  </Text>
-                </View>
-              </View>
-              <Switch
-                value={cfg.entryMode !== 'classic'}
-                onValueChange={(enabled) => setCfg({ entryMode: enabled ? 'quick' : 'classic' })}
-                trackColor={{ true: th.primary, false: th.card }}
-              />
-            </View>
-          </Expanded>
-        ) : null}
-      </Section>
-
-      <Section id="workspace" title={workspaceTitle}>
-        <Row
-          label={startTabTitle}
-          value={startTabLabel}
-          onPress={() => setSettingsSheet('startTab')}
-        />
-        <Row
-          label={homeContentTitle}
-          onPress={() => setSettingsSheet('homeContent')}
-          last
-        />
-      </Section>
-
-      {modules.wallets ? (
-        <Section id="wallets" title={T.walletsSection}>
-<MultiSelectBar
+        ) : (
+          <PageHeader
             th={th}
-            lang={cfg.lang}
-            active={walletSelection.selecting}
-            count={walletSelection.selectedCount}
-            total={Math.max(0, walletRows.length - 1)}
-            allSelected={walletSelection.allSelected}
-            onStart={walletSelection.start}
-            onToggleAll={walletSelection.toggleAll}
-            onDelete={confirmDeleteSelectedWallets}
-            onCancel={walletSelection.cancel}
-            style={{ marginHorizontal: 10, marginTop: 10 }}
+            isAr={isAr}
+            title={screenTitle}
+            onBack={goBack}
           />
-          {walletRows.map((wallet, index) => (
-            <Pressable
-              key={wallet.id}
-              onLongPress={() => {
-                if (wallet.id !== defaultWalletId) walletSelection.toggle(wallet.id);
-              }}
-              onPress={() => {
-                if (walletSelection.selecting && wallet.id !== defaultWalletId) walletSelection.toggle(wallet.id);
-              }}
-              style={[
-                s.walletRow,
-                {
-                  backgroundColor: 'transparent',
-                  borderBottomColor: th.border,
-                  flexDirection: isAr ? 'row-reverse' : 'row',
-                },
-              ]}
-            >
-              <View style={[s.walletIcon, { backgroundColor: th.primSoft }]}>
-                <Ionicons name={wallet.id === defaultWalletId ? 'star-outline' : 'wallet-outline'} size={16} color={th.primary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: th.text, fontSize: 14, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>
-                  {getWalletLabel(wallet, cfg.lang)}
-                </Text>
-                <View style={[s.walletBalanceLine, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                  <View style={[s.walletBalanceMetric, { backgroundColor: th.cardHigh }]}>
-                    <Text style={[s.walletBalanceLabel, { color: th.sub }]}>{isAr ? 'الكلي' : 'Total'}</Text>
-                    <Text style={[s.walletBalanceValue, { color: th.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
-                      {Math.round(wallet.balance || 0).toLocaleString()} {wallet.currency}
-                    </Text>
-                  </View>
-                  <View style={[s.walletBalanceMetric, { backgroundColor: th.primSoft }]}>
-                    <Text style={[s.walletBalanceLabel, { color: th.primary }]}>{isAr ? 'المتاح' : 'Available'}</Text>
-                    <Text style={[s.walletBalanceValue, { color: Number(wallet.availableBalance ?? wallet.balance) >= 0 ? th.primary : th.exp }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
-                      {Math.round(wallet.availableBalance ?? wallet.balance ?? 0).toLocaleString()} {wallet.currency}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-              {walletSelection.selecting ? (
-                wallet.id !== defaultWalletId ? (
-                  <SelectionCheckbox
-                    th={th}
-                    selected={walletSelection.selected.has(wallet.id)}
-                    onPress={() => walletSelection.toggle(wallet.id)}
-                  />
-                ) : (
-                  <Ionicons name="lock-closed-outline" size={16} color={th.faint} />
-                )
-              ) : (
-                <ActionMenu
-                  th={th}
-                  lang={cfg.lang}
-                  title={getWalletLabel(wallet, cfg.lang)}
-                  buttonStyle={{ backgroundColor: th.cardHigh }}
-                  items={[
-                    wallet.id !== defaultWalletId
-                      ? {
-                          label: cfg.lang === 'ar' ? 'تعيين كافتراضية' : 'Set as default',
-                          icon: 'star-outline',
-                          color: th.primary,
-                          onPress: () => setCfg({ defaultWalletId: wallet.id }),
-                        }
-                      : null,
-                    walletRows.length > 1
-                      ? {
-                          label: T.delete,
-                          icon: 'trash-outline',
-                          color: th.exp,
-                          danger: true,
-                          onPress: () => confirmDeleteWallet(wallet),
-                        }
-                      : null,
-                  ]}
-                />
-              )}
-            </Pressable>
-          ))}
-          <View style={[s.addPrompt, { borderTopColor: th.border }]}>
-            <TouchableOpacity
-              onPress={() => setWalletModalOpen(true)}
-              style={[s.addPromptButton, { backgroundColor: th.primSoft, flexDirection: isAr ? 'row-reverse' : 'row' }]}
-              activeOpacity={0.82}
-            >
-              <View style={[s.addPromptIcon, { backgroundColor: th.primary }]}>
-                <Ionicons name="add" size={18} color={th.onPrimary} />
-              </View>
-              <Text style={{ color: th.primary, fontSize: 13, ...weight('900'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>
-                {T.addWallet}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </Section>
-      ) : null}
-
-      <Section id="money" title={T.money}>
-        {modules.budgets ? <>
-        <Row
-          label={isAr ? 'الميزانيات الشهرية' : 'Monthly budgets'}
-          value={Object.keys(cfg.categoryBudgets || {}).length ? `${Object.keys(cfg.categoryBudgets || {}).length}` : (isAr ? 'غير محددة' : 'Not set')}
-          onPress={() => toggleOpen('budgets')}
-          last={false}
-        />
-        {open === 'budgets' ? (
-          <Expanded>
-            <Text style={[s.miniLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
-              {isAr ? 'حد شهري لكل تصنيف. اترك القيمة فارغة لتعطيله.' : 'Monthly limit per category. Leave blank to disable.'}
-            </Text>
-            {getCategoriesForFlow(cats, CATEGORY_FLOWS.EXPENSE).map(cat => (
-              <View key={cat.id} style={[s.categoryRow, { backgroundColor: th.cardHigh }]}>
-                <View style={[s.categoryInfo, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                  <Ionicons name={cat.icon || 'cube-outline'} size={16} color={cat.color || th.primary} />
-                  <Text style={{ color: th.text, fontSize: 13, ...weight('800') }}>{isAr ? cat.label : cat.labelEn}</Text>
-                </View>
-                <FormattedNumberField
-                  initialValue={cfg.categoryBudgets?.[cat.id] || ''}
-                  onCommit={(value) => setCategoryBudget(cat.id, value)}
-                  th={th}
-                  style={[s.input, { width: 120, marginBottom: 0, backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'center' }]}
-                />
-              </View>
-            ))}
-            <View style={{ flexDirection: isAr ? 'row-reverse' : 'row', gap: 8 }}>
-              <TouchableOpacity onPress={applySuggestedBudgets} style={[s.smallAction, { backgroundColor: th.primSoft, flex: 1 }]}>
-                <Text style={{ color: th.primary, ...weight('900') }}>{isAr ? 'اقتراح تلقائي' : 'Auto suggest'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={clearBudgets} style={[s.smallAction, { backgroundColor: th.cardHigh, flex: 1 }]}>
-                <Text style={{ color: th.exp, ...weight('900') }}>{isAr ? 'مسح الكل' : 'Clear all'}</Text>
-              </TouchableOpacity>
-            </View>
-          </Expanded>
-        ) : null}
-        </> : null}
-        <Row
-          label={T.categories}
-          value={`${cats.length} ${T.categoriesCount}`}
-          onPress={() => toggleOpen('cats')}
-          last={open !== 'cats'}
-        />
-        {open === 'cats' && (
-          <Expanded>
-            <MultiSelectBar
-              th={th}
-              lang={cfg.lang}
-              active={categorySelection.selecting}
-              count={categorySelection.selectedCount}
-              total={Math.max(0, cats.length - 1)}
-              allSelected={categorySelection.allSelected}
-              onStart={categorySelection.start}
-              onToggleAll={categorySelection.toggleAll}
-              onDelete={confirmDeleteSelectedCategories}
-              onCancel={categorySelection.cancel}
-            />
-            {cats.map(cat => {
-              const movable = cats.filter(item => item.id !== 'other');
-              const orderIndex = movable.findIndex(item => item.id === cat.id);
-              const canMove = cat.id !== 'other' && !categorySelection.selecting;
-              return (
-                <Pressable
-                  key={cat.id}
-                  onLongPress={() => {
-                    if (cat.id !== 'other') categorySelection.toggle(cat.id);
-                  }}
-                  onPress={() => {
-                    if (categorySelection.selecting && cat.id !== 'other') categorySelection.toggle(cat.id);
-                  }}
-                  style={[
-                    s.categoryRow,
-                    {
-                      backgroundColor: th.cardHigh,
-                      borderColor: 'transparent',
-                      borderWidth: 1,
-                    },
-                  ]}
-                >
-                  <View style={[s.categoryInfo, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                    <View style={[s.categoryIcon, { backgroundColor: cat.color + '22' }]}>
-                      <Ionicons name={cat.icon || 'cube-outline'} size={15} color={cat.color} />
-                    </View>
-                    <Text style={{ color: th.text, fontSize: 13, ...weight('800') }}>
-                      {isAr ? cat.label : cat.labelEn}
-                    </Text>
-                    <View style={[s.categoryFlowBadge, { backgroundColor: normalizeCategoryFlow(cat) === CATEGORY_FLOWS.INCOME ? th.incBg : normalizeCategoryFlow(cat) === CATEGORY_FLOWS.EXPENSE ? th.expBg : th.primSoft }]}>
-                      <Text style={{ color: normalizeCategoryFlow(cat) === CATEGORY_FLOWS.INCOME ? th.inc : normalizeCategoryFlow(cat) === CATEGORY_FLOWS.EXPENSE ? th.exp : th.primary, fontSize: 10, ...weight('900') }}>
-                        {categoryFlowLabel(cat, cfg.lang)}
-                      </Text>
-                    </View>
-                  </View>
-                  {categorySelection.selecting ? (
-                    cat.id !== 'other' ? (
-                      <SelectionCheckbox
-                        th={th}
-                        selected={categorySelection.selected.has(cat.id)}
-                        onPress={() => categorySelection.toggle(cat.id)}
-                      />
-                    ) : (
-                      <Ionicons name="lock-closed-outline" size={16} color={th.faint} />
-                    )
-                  ) : cat.id !== 'other' ? (
-                    <View style={[s.categoryTools, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                      <TouchableOpacity
-                        disabled={!canMove || orderIndex <= 0}
-                        onPress={() => moveCategory(cat.id, -1)}
-                        style={[s.reorderBtn, { backgroundColor: th.input, opacity: orderIndex <= 0 ? 0.35 : 1 }]}
-                      >
-                        <Ionicons name="arrow-up-outline" size={15} color={th.sub} />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        disabled={!canMove || orderIndex >= movable.length - 1}
-                        onPress={() => moveCategory(cat.id, 1)}
-                        style={[s.reorderBtn, { backgroundColor: th.input, opacity: orderIndex >= movable.length - 1 ? 0.35 : 1 }]}
-                      >
-                        <Ionicons name="arrow-down-outline" size={15} color={th.sub} />
-                      </TouchableOpacity>
-                      <ActionMenu
-                        th={th}
-                        lang={cfg.lang}
-                        title={isAr ? cat.label : cat.labelEn}
-                        buttonStyle={{ backgroundColor: th.input }}
-                        items={[
-                          {
-                            label: T.delete,
-                            icon: 'trash-outline',
-                            color: th.exp,
-                            danger: true,
-                            onPress: () => deleteCategory(cat.id),
-                          },
-                        ]}
-                      />
-                    </View>
-                  ) : (
-                    <Ionicons name="lock-closed-outline" size={16} color={th.faint} />
-                  )}
-                </Pressable>
-              );
-            })}
-
-            <TouchableOpacity onPress={() => setCategoryModalOpen(true)} style={[s.primaryButton, { backgroundColor: th.primary }]}>
-              <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>{T.addCategory}</Text>
-            </TouchableOpacity>
-          </Expanded>
         )}
-      </Section>
 
-      <Section id="security" title={T.security}>
-        <Row
-          label={T.biometric}
-          value={cfg.bioLock ? T.activeStatus : T.inactive}
-          last={!cfg.bioLock}
-        >
-          <Switch
-            value={!!cfg.bioLock}
-            onValueChange={toggleBioLock}
-            trackColor={{ true: th.primary, false: th.cardHigh }}
+        {root ? (
+          <RootSettings
+            th={th}
+            isAr={isAr}
+            T={T}
+            user={user}
+            cfg={cfg}
+            accountName={accountName}
+            accountEmail={accountEmail}
+            accountInitial={accountInitial}
+            syncState={syncState}
+            selectedCountry={selectedCountry}
+            selectedCurrency={selectedCurrency}
+            onChoice={setChoice}
+            onOpen={openPage}
+            onAdvanced={() => openPage('financial')}
           />
-        </Row>
-        {cfg.bioLock ? (
-          <Expanded>
-            <Text style={[s.focusLabel, { color: th.text, textAlign: isAr ? 'right' : 'left', marginBottom: 9 }]}>{T.lockDelay}</Text>
-            <Segmented
-              value={Number(cfg.lockDelaySeconds ?? 300)}
-              onChange={(value) => setCfg({ lockDelaySeconds: value })}
-              options={[
-                { value: 0, label: T.lockNow },
-                { value: 60, label: T.oneMinute },
-                { value: 300, label: T.fiveMinutes },
-                { value: 900, label: T.fifteenMinutes },
-              ]}
-            />
-          </Expanded>
-        ) : null}
-      </Section>
-
-      <Section id="alerts" title={T.alerts}>
-        {modules.debtsOwed ? <>
-        <Row
-          label={T.debtAlert}
-          value={notif.debt.on ? `${notif.debt.value} ${T.days}` : T.inactive}
-          last={false}
-        >
-          <Switch
-            value={!!notif.debt.on}
-            onValueChange={(on) => setNotif({ debt: { ...notif.debt, on } })}
-            trackColor={{ true: th.primary, false: th.cardHigh }}
-          />
-        </Row>
-        {notif.debt.on ? (
-          <Expanded bottomBorder>
-            <View style={[s.detailLine, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-              <Text style={{ color: th.sub, fontSize: 12, ...weight('800') }}>{T.debtBefore}</Text>
-              <Stepper
-                value={notif.debt.value}
-                suffix={` ${T.days}`}
-                onMinus={() => setNotif({ debt: { ...notif.debt, value: Math.max(1, notif.debt.value - 1) } })}
-                onPlus={() => setNotif({ debt: { ...notif.debt, value: notif.debt.value + 1 } })}
-              />
-            </View>
-          </Expanded>
-        ) : null}
-        </> : null}
-
-        {modules.commitments && (commitments || []).length > 0 ? (
-          <>
-            <Row
-              label={T.commitmentReminderInline}
-              value={notif.commitment?.on !== false ? T.activeStatus : T.inactive}
-              last
-            >
-              <Switch
-                value={notif.commitment?.on !== false}
-                onValueChange={(on) => setNotif({ commitment: { ...(notif.commitment || {}), on } })}
-                trackColor={{ true: th.primary, false: th.cardHigh }}
-              />
-            </Row>
-          </>
         ) : null}
 
-        <Row
-          label={T.dailyAlert}
-          value={notif.daily.on ? formatHour12(notif.daily.value, cfg.lang) : T.inactive}
-          last={false}
-        >
-          <Switch
-            value={!!notif.daily.on}
-            onValueChange={toggleDaily}
-            trackColor={{ true: th.primary, false: th.cardHigh }}
+        {page === 'account' ? (
+          <AccountPage
+            th={th}
+            isAr={isAr}
+            T={T}
+            user={user}
+            cfg={cfg}
+            accountName={accountName}
+            accountEmail={accountEmail}
+            accountInitial={accountInitial}
+            syncState={syncState}
+            lastSyncedAt={lastSyncedAt}
+            editIdentity={editIdentity}
+            setEditIdentity={setEditIdentity}
+            nameDraft={nameDraft}
+            setNameDraft={setNameDraft}
+            onSaveIdentity={saveIdentity}
+            onPickAvatar={pickAvatar}
+            onRemoveAvatar={removeAvatar}
+            onOpenAuth={() => setAuthOpen(true)}
+            onSync={runSync}
+            onDevices={() => openPage('devices')}
+            onPasswordReset={handlePasswordReset}
+            onSignOut={signOutLocal}
+            onDeleteAccount={confirmDeleteAccount}
           />
-        </Row>
-        {notif.daily.on ? (
-          <Expanded bottomBorder>
-            <View style={[s.detailLine, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-              <Text style={{ color: th.sub, fontSize: 12, ...weight('800') }}>{T.alertTime}</Text>
-              <Stepper
-                value={formatHour12(notif.daily.value, cfg.lang)}
-                onMinus={() => setDailyHour(-1)}
-                onPlus={() => setDailyHour(1)}
-              />
-            </View>
-          </Expanded>
         ) : null}
 
-        <Row
-          label={T.lowBalance}
-          value={notif.low.on ? `${Math.round(Number(notif.low.value || 0)).toLocaleString()} ${cfg.currency}` : T.inactive}
-          last={!notif.low.on}
-        >
-          <Switch
-            value={!!notif.low.on}
-            onValueChange={(on) => setNotif({ low: { ...notif.low, on } })}
-            trackColor={{ true: th.primary, false: th.cardHigh }}
+        {page === 'devices' ? (
+          <DevicesPage
+            th={th}
+            isAr={isAr}
+            T={T}
+            user={user}
+            syncState={syncState}
+            lastSyncedAt={lastSyncedAt}
+            onSignOutOthers={signOutOtherSessions}
+            onSignOut={signOutLocal}
           />
-        </Row>
-        {notif.low.on ? (
-          <Expanded>
-            <TextInput
-              value={formatNumberInput(String(notif.low.value || ''))}
-              onChangeText={(value) => setNotif({ low: { ...notif.low, value: parseNumberInput(formatNumberInput(value)) } })}
-              keyboardType="numeric"
-              placeholder={T.lowBelow}
-              placeholderTextColor={th.sub}
-              style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
-            />
-          </Expanded>
         ) : null}
 
-      </Section>
-
-      <Section id="data" title={T.data}>
-        <Row label={T.archive} onPress={onOpenArchive} />
-        <Row label={T.exportBackup} onPress={handleExport} />
-        <Row label={T.importBackup} onPress={() => toggleOpen('import')} last={open !== 'import'} />
-        {open === 'import' ? (
-          <Expanded>
-            <View style={[s.importActions, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-              <TouchableOpacity
-                onPress={selectImportFile}
-                disabled={fileBusy}
-                style={[s.importActionBtn, { backgroundColor: th.cardHigh, borderColor: th.border }]}
-              >
-                <Ionicons name="document-attach-outline" size={14} color={th.primary} />
-                <Text style={{ color: th.text, fontSize: 12, ...weight('900') }}>
-                  {fileBusy ? (isAr ? 'جاري الفحص...' : 'Validating...') : (isAr ? 'اختيار ملف ZIP' : 'Choose ZIP file')}
-                </Text>
-              </TouchableOpacity>
-              {importPackage ? <TouchableOpacity
-                onPress={() => setImportPackage(null)}
-                style={[s.importActionBtn, { backgroundColor: th.expBg, borderColor: th.expBg }]}
-              >
-                <Ionicons name="trash-outline" size={14} color={th.exp} />
-                <Text style={{ color: th.exp, fontSize: 12, ...weight('900') }}>{T.clearImport}</Text>
-              </TouchableOpacity> : null}
-            </View>
-            {importPackage?.name ? (
-              <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, textAlign: isAr ? 'right' : 'left', marginBottom: 8 }}>
-                {importPackage.name}
-              </Text>
-            ) : null}
-            {!importPreview.empty ? (
-              <View style={[s.previewCard, { backgroundColor: importPreview.valid ? th.primSoft : th.expBg, borderColor: importPreview.valid ? th.primary : th.exp }]}>
-                <View style={[s.previewHead, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                  <Ionicons name={importPreview.valid ? 'checkmark-circle-outline' : 'alert-circle-outline'} size={17} color={importPreview.valid ? th.primary : th.exp} />
-                  <Text style={{ color: importPreview.valid ? th.primary : th.exp, fontSize: 13, ...weight('900'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>
-                    {importPreview.valid ? T.backupValid : T.backupInvalid}
-                  </Text>
-                </View>
-                {importPreview.error ? (
-                  <Text style={{ color: importPreview.valid ? th.sub : th.exp, fontSize: 12, lineHeight: 17, ...weight('800'), textAlign: isAr ? 'right' : 'left' }}>
-                    {importPreview.error}
-                  </Text>
-                ) : null}
-                {importPreview.valid ? (
-                  <>
-                    <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: isAr ? 'right' : 'left' }} numberOfLines={1}>
-                      {importPreview.name} · {T.backupCurrency}: {importPreview.currency || cfg.currency}
-                    </Text>
-                    <View style={[s.previewGrid, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                      <PreviewStat th={th} label={T.backupMonths} value={String(importPreview.months.length)} />
-                      <PreviewStat th={th} label={T.backupEntries} value={String(importPreview.entries)} />
-                      <PreviewStat th={th} label={T.backupWallets} value={String(importPreview.wallets)} />
-                      <PreviewStat th={th} label={T.backupTrackers} value={String(importPreview.trackers)} />
-                      <PreviewStat th={th} label={T.backupCommitments} value={String(importPreview.commitments)} />
-                    </View>
-                  </>
-                ) : null}
-              </View>
-            ) : null}
-            <View style={[s.infoLine, { backgroundColor: th.warnBg, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-              <Ionicons name="alert-circle-outline" size={14} color={th.warn} />
-              <Text style={{ color: th.warn, fontSize: 12, ...weight('800'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>
-                {T.importWarning}
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={handleImport}
-              disabled={!importPreview.valid}
-              style={[s.primaryButton, { backgroundColor: importPreview.valid ? th.primary : th.cardHigh, opacity: importPreview.valid ? 1 : 0.7 }]}
-            >
-              <Text style={{ color: importPreview.valid ? th.onPrimary : th.sub, fontSize: 13, ...weight('900') }}>{T.replaceNow}</Text>
-            </TouchableOpacity>
-          </Expanded>
+        {page === 'financial' ? (
+          <FinancialPage
+            th={th}
+            isAr={isAr}
+            T={T}
+            cfg={cfg}
+            modules={modules}
+            counts={dataCounts}
+            tabs={tabs}
+          />
         ) : null}
-        <Row
-          label={cfg.demoMode ? (isAr ? 'الخروج من البيانات التجريبية' : 'Exit demo workspace') : (isAr ? 'تجربة البرنامج ببيانات مثال' : 'Try with demo data')}
-          value={cfg.demoMode ? (isAr ? 'نشط' : 'Active') : undefined}
-          onPress={toggleDemoMode}
-          last={false}
-        />
-        <Row label={T.deleteAll} onPress={confirmReset} danger last />
-      </Section>
 
-      <Section id="account" title={isAr ? 'حسابي' : 'My account'}>
-        <Row
-          label={isAr ? 'معلومات الحساب' : 'Account details'}
-          value={user ? accountUsername : (authServiceStatus === 'down' ? T.accountServiceDown : undefined)}
-          onPress={() => toggleOpen('account')}
-          last={open !== 'account'}
-        />
-        {open === 'account' ? (
-          <Expanded>
-            <TouchableOpacity onPress={pickAccountAvatar} style={[s.avatarPicker, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
-              <View style={[s.accountAvatarLarge, { backgroundColor: th.primSoft }]}>
-                {cfg.avatarUri ? <Image source={{ uri: cfg.avatarUri }} style={s.accountAvatarImage} /> : <Text style={{ color: th.primary, fontSize: 20, ...weight('900') }}>{accountInitial}</Text>}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>{isAr ? 'صورة الحساب' : 'Profile photo'}</Text>
-                <Text style={{ color: th.sub, fontSize: 11, lineHeight: 17, marginTop: 3, textAlign: isAr ? 'right' : 'left' }}>{isAr ? 'متاحة للحساب المحلي والمتصل' : 'Available for local and connected use'}</Text>
-              </View>
-              <Ionicons name="camera-outline" size={18} color={th.primary} />
-            </TouchableOpacity>
-            {user ? (
-              <>
-                <View style={[s.accountCard, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
-                  <View style={[s.accountCardHead, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                    <View style={[s.accountAvatar, { backgroundColor: th.primSoft }]}>
-                      <Text style={{ color: th.primary, fontSize: 16, ...weight('900') }}>{accountInitial}</Text>
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text numberOfLines={1} style={[s.accountName, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{accountDisplayName}</Text>
-                      <Text numberOfLines={1} style={[s.accountEmail, { color: th.sub, textAlign: 'left', writingDirection: 'ltr' }]}>{accountEmailText}</Text>
-                    </View>
-                  </View>
-                  <View style={[s.accountSyncRow, { backgroundColor: th.card, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                    <Ionicons name={syncState.icon} size={16} color={syncState.color} />
-                    <Text style={{ color: syncState.color, fontSize: 12, ...weight('900'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>{syncState.text}</Text>
-                  </View>
-                  <View style={[s.accountIdentityGrid, { borderTopColor: th.border }]}>
-                    <TextInput
-                      value={accountNameDraft}
-                      onChangeText={setAccountNameDraft}
-                      placeholder={isAr ? 'الاسم' : 'Name'}
-                      placeholderTextColor={th.sub}
-                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
-                    />
-                    <TextInput
-                      value={usernameDraft}
-                      onChangeText={(value) => setUsernameDraft(normalizeUsername(value))}
-                      placeholder={isAr ? 'اليوزر نيم' : 'Username'}
-                      placeholderTextColor={th.sub}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
-                    />
-                    <TextInput
-                      value={phoneDraft}
-                      onChangeText={(value) => setPhoneDraft(normalizePhone(value))}
-                      placeholder={isAr ? 'رقم الهاتف' : 'Phone number'}
-                      placeholderTextColor={th.sub}
-                      keyboardType="phone-pad"
-                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
-                    />
-                    <View style={[s.accountSyncRow, { backgroundColor: th.card, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                      <Ionicons name="at-outline" size={16} color={th.primary} />
-                      <Text style={{ color: th.text, fontSize: 12, ...weight('900'), flex: 1, textAlign: 'left', writingDirection: 'ltr' }}>{accountUsername}</Text>
-                    </View>
-                    <TouchableOpacity onPress={saveAccountIdentity} style={[s.primaryButton, { backgroundColor: th.primary }]}>
-                      <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>{isAr ? 'حفظ هوية الحساب' : 'Save account identity'}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-                <TouchableOpacity onPress={handleSignOut} style={[s.secondaryButton, { backgroundColor: th.expBg }]}>
-                  <Text style={{ color: th.exp, fontSize: 13, ...weight('900') }}>{T.signOut}</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <View style={[s.statusNote, { backgroundColor: authServiceStatus === 'ready' ? th.incBg : authServiceStatus === 'down' ? th.expBg : th.cardHigh, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                  <Ionicons
-                    name={authServiceStatus === 'ready' ? 'cloud-done-outline' : authServiceStatus === 'down' ? 'cloud-offline-outline' : 'sync-outline'}
-                    size={16}
-                    color={authServiceStatus === 'ready' ? th.inc : authServiceStatus === 'down' ? th.exp : th.sub}
-                  />
-                  <Text style={{ color: authServiceStatus === 'ready' ? th.inc : authServiceStatus === 'down' ? th.exp : th.sub, fontSize: 12, ...weight('900') }}>
-                    {authServiceStatus === 'ready' ? T.accountServiceReady : authServiceStatus === 'down' ? T.accountServiceDown : T.checkingConnection}
-                  </Text>
-                </View>
-                <Segmented
-                  value={authMode}
-                  onChange={setAuthMode}
-                  options={[
-                    { value: 'signin', label: T.signIn },
-                    { value: 'signup', label: T.signUp },
-                  ]}
-                />
-                {authMode === 'signup' ? (
-                  <>
-                    <TextInput
-                      value={accountNameDraft}
-                      onChangeText={setAccountNameDraft}
-                      placeholder={isAr ? 'الاسم' : 'Name'}
-                      placeholderTextColor={th.sub}
-                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
-                    />
-                    <TextInput
-                      value={usernameDraft}
-                      onChangeText={(value) => setUsernameDraft(normalizeUsername(value))}
-                      placeholder={isAr ? 'اليوزر نيم' : 'Username'}
-                      placeholderTextColor={th.sub}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
-                    />
-                    <TextInput
-                      value={phoneDraft}
-                      onChangeText={(value) => setPhoneDraft(normalizePhone(value))}
-                      placeholder={isAr ? 'رقم الهاتف' : 'Phone number'}
-                      placeholderTextColor={th.sub}
-                      keyboardType="phone-pad"
-                      style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
-                    />
-                  </>
-                ) : null}
-                <TextInput
-                  value={email}
-                  onChangeText={(value) => { setEmail(value); emailRef.current = value; }}
-                  placeholder={T.email}
-                  placeholderTextColor={th.sub}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoComplete="email"
-                  textContentType="emailAddress"
-                  importantForAutofill="yes"
-                  style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
-                />
-                <View style={[s.passwordField, { backgroundColor: th.input, borderColor: th.border }]}>
-                  <TextInput
-                    value={pass}
-                    onChangeText={(value) => { setPass(value); passRef.current = value; }}
-                    placeholder={T.password}
-                    placeholderTextColor={th.sub}
-                    secureTextEntry={!passwordVisible}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    autoComplete={authMode === 'signup' ? 'new-password' : 'password'}
-                    textContentType={authMode === 'signup' ? 'newPassword' : 'password'}
-                    importantForAutofill="yes"
-                    style={[s.passwordInput, { color: th.text, textAlign: 'left', writingDirection: 'ltr' }]}
-                  />
-                  <TouchableOpacity
-                    onPress={() => setPasswordVisible((value) => !value)}
-                    style={s.eyeButton}
-                    accessibilityRole="button"
-                    accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
-                  >
-                    <Ionicons name={passwordVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color={th.sub} />
-                  </TouchableOpacity>
-                </View>
-                <TouchableOpacity onPress={handleAuth} disabled={loading} style={[s.primaryButton, { backgroundColor: th.primary, opacity: loading ? 0.6 : 1 }]}>
-                  <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>
-                    {loading ? '...' : authMode === 'signin' ? T.signIn : T.signUp}
-                  </Text>
-                </TouchableOpacity>
-                {authMode === 'signin' ? (
-                  <TouchableOpacity onPress={handlePasswordReset} disabled={loading} style={[s.secondaryButton, { backgroundColor: th.cardHigh }]}>
-                    <Text style={{ color: th.primary, fontSize: 13, ...weight('900') }}>
-                      {isAr ? 'نسيت كلمة المرور' : 'Forgot password'}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-                {authMode === 'signup' ? (
-                  <TouchableOpacity
-                    onPress={() => setAuthAgreement(value => !value)}
-                    style={[s.termsRow, { flexDirection: isAr ? 'row-reverse' : 'row' }]}
-                  >
-                    <Ionicons name={authAgreement ? 'checkbox' : 'square-outline'} size={19} color={authAgreement ? th.primary : th.sub} />
-                    <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, flex: 1, textAlign: isAr ? 'right' : 'left' }}>
-                      {isAr ? 'أوافق على شروط الحساب والمزامنة' : 'I agree to account and sync terms'}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-              </>
-            )}
-          </Expanded>
+        {page === 'support' ? (
+          <SupportPage
+            th={th}
+            isAr={isAr}
+            T={T}
+            onOpenGuide={() => openPage('guide')}
+            onOpenContact={() => openPage('contact')}
+            onOpenAccount={() => openPage('account')}
+            onOpenData={() => openPage('data')}
+            onOpenSecurity={() => openPage('security')}
+          />
         ) : null}
-      </Section>
 
-      <Text style={{ color: th.faint, fontSize: 12, textAlign: 'center', marginTop: 2 }}>
-        MYFI · {L.appVersion} 1.0.0
-      </Text>
-    </ScrollView>
-    <Modal visible={!!backupPasswordMode} transparent animationType="fade" onRequestClose={() => setBackupPasswordMode(null)}>
-      <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={() => setBackupPasswordMode(null)} />
-        <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>
-          <View style={[s.sheetHeader, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-            <Text style={[s.sheetTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>
-              {backupPasswordMode === 'export'
-                ? (isAr ? 'كلمة مرور النسخة' : 'Backup password')
-                : (isAr ? 'فتح النسخة المشفرة' : 'Unlock encrypted backup')}
-            </Text>
-          </View>
-          <Text style={{ color: th.warn, fontSize: 12, lineHeight: 19, ...weight('800'), textAlign: isAr ? 'right' : 'left', marginBottom: 12 }}>
-            {backupPasswordMode === 'export'
-              ? (isAr ? 'احفظ كلمة المرور جيداً؛ لا يمكن استعادة الملف بدونها.' : 'Keep this password safe; the file cannot be restored without it.')
-              : (isAr ? 'أدخل كلمة المرور التي استُخدمت عند إنشاء الملف.' : 'Enter the password used when this file was created.')}
-          </Text>
-          <TextInput
-            value={backupPassword}
-            onChangeText={setBackupPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder={isAr ? 'كلمة المرور' : 'Password'}
-            placeholderTextColor={th.sub}
-            style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
+        {page === 'guide' ? (
+          <GuidePage
+            th={th}
+            isAr={isAr}
+            T={T}
+            onOpenFinancial={() => openPage('financial')}
+            onOpenAccount={() => openPage('account')}
+            onOpenReports={() => {}}
           />
-          <TouchableOpacity
-            onPress={submitBackupPassword}
-            disabled={fileBusy}
-            style={[s.primaryButton, { backgroundColor: th.primary, opacity: fileBusy ? 0.6 : 1 }]}
-          >
-            <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>
-              {fileBusy ? '...' : backupPasswordMode === 'export' ? (isAr ? 'تشفير وتصدير' : 'Encrypt and export') : (isAr ? 'فتح الملف' : 'Unlock file')}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-    <Modal visible={!!settingsSheet} transparent animationType="slide" onRequestClose={() => setSettingsSheet(null)}>
-      <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setSettingsSheet(null)} />
-        <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>
-          <View style={[s.sheetHeader, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-            <Text style={[s.sheetTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>
-              {settingsSheet === 'language'
-                ? T.language
-                : settingsSheet === 'theme'
-                  ? T.theme
-                  : settingsSheet === 'orientation'
-                    ? (isAr ? 'اتجاه الشاشة' : 'Screen orientation')
-                    : settingsSheet === 'monthNames'
-                    ? T.monthNames
-                    : settingsSheet === 'startTab'
-                      ? startTabTitle
-                      : settingsSheet === 'homeContent'
-                        ? homeContentTitle
-                          : settingsSheet === 'currency'
-                            ? T.currency
-                            : T.country}
-            </Text>
-          </View>
+        ) : null}
 
-          {settingsSheet === 'language' ? (
-            <View style={s.sheetScroll}>
-              <View style={[s.systemChoice, { backgroundColor: th.cardHigh, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                <Ionicons name="phone-portrait-outline" size={18} color={th.primary} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: th.text, fontSize: 14, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>{isAr ? 'النظام' : 'System'}</Text>
-                  <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, marginTop: 2, textAlign: isAr ? 'right' : 'left' }}>
-                    {isAr ? `الحالية: ${cfg.lang === 'ar' ? 'العربية' : 'English'}` : `Current: ${cfg.lang === 'ar' ? 'Arabic' : 'English'}`}
-                  </Text>
-                </View>
-                <Switch
-                  value={cfg.langMode === 'system'}
-                  onValueChange={(enabled) => setCfg(enabled ? { langMode: 'system' } : { langMode: 'manual', lang: cfg.lang })}
-                  trackColor={{ true: th.primary, false: th.border }}
-                />
-              </View>
-              {cfg.langMode !== 'system' ? [
-                { value: 'ar', label: T.arabicLanguage },
-                { value: 'en', label: T.englishLanguage },
-              ].map(option => {
-                const active = cfg.lang === option.value;
-                return (
-                  <TouchableOpacity key={option.value} onPress={() => { setCfg({ langMode: 'manual', lang: option.value }); setSettingsSheet(null); }}
-                    style={[s.optionCard, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent', flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                    <Ionicons name="language-outline" size={18} color={active ? th.primary : th.sub} />
-                    <Text style={{ color: active ? th.primary : th.text, fontSize: 14, ...weight('900'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>{option.label}</Text>
-                    {active ? <Ionicons name="checkmark-circle" size={18} color={th.primary} /> : null}
-                  </TouchableOpacity>
-                );
-              }) : null}
-            </View>
-          ) : null}
+        {page === 'contact' ? (
+          <ContactPage th={th} isAr={isAr} T={T} user={user} />
+        ) : null}
 
-          {settingsSheet === 'monthNames' ? (
-            <View style={s.sheetScroll}>
-              {MONTH_NAME_STYLES.map(style => {
-                const active = (cfg.monthNameStyle || 'numeric') === style;
-                const detail = style === 'numeric'
-                  ? (isAr ? '08/2026' : '08/2026')
-                  : style === 'english'
-                    ? 'Aug 2026'
-                    : 'آب 2026';
-                return (
-                  <TouchableOpacity
-                    key={style}
-                    onPress={() => { setCfg({ monthNameStyle: style }); setSettingsSheet(null); }}
-                    style={[s.optionCard, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent', flexDirection: isAr ? 'row-reverse' : 'row' }]}
-                  >
-                    <Ionicons name={style === 'numeric' ? 'keypad-outline' : 'calendar-outline'} size={18} color={active ? th.primary : th.sub} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: active ? th.primary : th.text, fontSize: 14, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>
-                        {monthStyleLabel(style, cfg.lang)}
-                      </Text>
-                      <Text style={{ color: th.sub, fontSize: 12, lineHeight: 17, marginTop: 2, textAlign: isAr ? 'right' : 'left' }}>
-                        {detail}
-                      </Text>
-                    </View>
-                    {active ? <Ionicons name="checkmark-circle" size={18} color={th.primary} /> : null}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          ) : null}
+        {page === 'about' ? (
+          <AboutPage th={th} isAr={isAr} T={T} />
+        ) : null}
 
-          {settingsSheet === 'orientation' ? (
-            <View style={s.sheetScroll}>
-              {[
-                {
-                  value: 'system',
-                  label: isAr ? 'حسب الجهاز' : 'Follow device',
-                  icon: 'phone-portrait-outline',
-                },
-                {
-                  value: 'portrait',
-                  label: isAr ? 'طولي' : 'Portrait',
-                  icon: 'phone-portrait-outline',
-                },
-                {
-                  value: 'landscape',
-                  label: isAr ? 'عرضي' : 'Landscape',
-                  icon: 'phone-landscape-outline',
-                },
-              ].map(option => {
-                const active = (cfg.orientationMode || 'system') === option.value;
-                return (
-                  <TouchableOpacity
-                    key={option.value}
-                    onPress={() => {
-                      setCfg({ orientationMode: option.value });
-                      setSettingsSheet(null);
-                    }}
-                    style={[
-                      s.optionCard,
-                      {
-                        backgroundColor: active ? th.primSoft : th.cardHigh,
-                        borderColor: active ? th.primary : 'transparent',
-                        flexDirection: isAr ? 'row-reverse' : 'row',
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={option.icon}
-                      size={18}
-                      color={active ? th.primary : th.sub}
-                    />
-                    <Text
-                      style={{
-                        color: active ? th.primary : th.text,
-                        fontSize: 14,
-                        ...weight('900'),
-                        flex: 1,
-                        textAlign: isAr ? 'right' : 'left',
-                      }}
-                    >
-                      {option.label}
-                    </Text>
-                    {active ? (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={18}
-                        color={th.primary}
-                      />
-                    ) : null}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          ) : null}
-
-          {settingsSheet === 'theme' ? (
-            <View style={s.sheetScroll}>
-              <View style={[s.systemChoice, { backgroundColor: th.cardHigh, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                <Ionicons name="phone-portrait-outline" size={18} color={th.primary} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: th.text, fontSize: 14, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>{isAr ? 'النظام' : 'System'}</Text>
-                  <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, marginTop: 2, textAlign: isAr ? 'right' : 'left' }}>
-                    {isAr ? `الحالي: ${cfg.theme === 'dark' ? 'داكن' : 'فاتح'}` : `Current: ${cfg.theme === 'dark' ? 'Dark' : 'Light'}`}
-                  </Text>
-                </View>
-                <Switch
-                  value={cfg.themeMode === 'system'}
-                  onValueChange={(enabled) => setCfg(enabled
-                    ? { themeMode: 'system', theme: resolveSystemTheme(Appearance.getColorScheme(), cfg.theme) }
-                    : { themeMode: 'manual', theme: cfg.theme })}
-                  trackColor={{ true: th.primary, false: th.border }}
-                />
-              </View>
-              {cfg.themeMode !== 'system' ? [
-                { value: 'dark', label: T.darkTheme, icon: 'moon-outline' },
-                { value: 'light', label: T.lightTheme, icon: 'sunny-outline' },
-              ].map(option => {
-                const active = cfg.theme === option.value;
-                return (
-                  <TouchableOpacity key={option.value} onPress={() => { setCfg({ themeMode: 'manual', theme: option.value }); setSettingsSheet(null); }}
-                    style={[s.optionCard, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent', flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                    <Ionicons name={option.icon} size={18} color={active ? th.primary : th.sub} />
-                    <Text style={{ color: active ? th.primary : th.text, fontSize: 14, ...weight('900'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>{option.label}</Text>
-                    {active ? <Ionicons name="checkmark-circle" size={18} color={th.primary} /> : null}
-                  </TouchableOpacity>
-                );
-              }) : null}
-            </View>
-          ) : null}
-
-          {settingsSheet === 'startTab' ? (
-            <View style={s.sheetScroll}>
-              {startTabOptions.map(option => {
-                const active = cfg.startTab === option.value;
-                return (
-                  <TouchableOpacity
-                    key={option.value}
-                    onPress={() => { setCfg({ startTab: option.value }); setSettingsSheet(null); }}
-                    style={[s.optionCard, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent', flexDirection: isAr ? 'row-reverse' : 'row' }]}
-                  >
-                    <Ionicons name={option.icon} size={18} color={active ? th.primary : th.sub} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: active ? th.primary : th.text, fontSize: 14, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>
-                        {option.label}
-                      </Text>
-                      <Text style={{ color: th.sub, fontSize: 11, ...weight('800'), marginTop: 2, textAlign: isAr ? 'right' : 'left' }}>
-                        {startTabSummary}
-                      </Text>
-                    </View>
-                    {active ? <Ionicons name="checkmark-circle" size={18} color={th.primary} /> : null}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          ) : null}
-
-          {settingsSheet === 'homeContent' ? (
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled contentContainerStyle={s.sheetScroll}>
-              <Text style={[s.sheetGroupTitle, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
-                {homeMetricsTitle}
-              </Text>
-              {homeCards.map((item, index) => (
-                <View
-                  key={`card-${item.key}`}
-                  style={[s.moduleRow, { backgroundColor: th.cardHigh, flexDirection: isAr ? 'row-reverse' : 'row' }]}
-                >
-                  <View style={[s.moduleInfo, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                    <View style={[s.moduleIcon, { backgroundColor: item.visible !== false ? th.primSoft : th.card }]}>
-                      <Ionicons name={item.icon} size={16} color={item.visible !== false ? item.tone : th.sub} />
-                    </View>
-                    <Text style={{ color: th.text, fontSize: 13, ...weight('800'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>
-                      {item.label}
-                    </Text>
-                  </View>
-                  <View style={[s.homeTools, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                    <TouchableOpacity
-                      disabled={index === 0}
-                      onPress={() => moveHomeCard(item.key, -1)}
-                      accessibilityLabel={isAr ? 'تحريك للأعلى' : 'Move up'}
-                      style={[s.homeMoveBtn, { backgroundColor: th.card, opacity: index === 0 ? 0.35 : 1 }]}
-                    >
-                      <Ionicons name="chevron-up-outline" size={15} color={th.sub} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      disabled={index === homeCards.length - 1}
-                      onPress={() => moveHomeCard(item.key, 1)}
-                      accessibilityLabel={isAr ? 'تحريك للأسفل' : 'Move down'}
-                      style={[s.homeMoveBtn, { backgroundColor: th.card, opacity: index === homeCards.length - 1 ? 0.35 : 1 }]}
-                    >
-                      <Ionicons name="chevron-down-outline" size={15} color={th.sub} />
-                    </TouchableOpacity>
-                    <Switch
-                      value={item.visible !== false}
-                      onValueChange={(value) => setHomeCardVisible(item.key, value)}
-                      trackColor={{ true: th.primary, false: th.card }}
-                    />
-                  </View>
-                </View>
-              ))}
-
-              <Text style={[s.sheetGroupTitle, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
-                {homeSectionsTitle}
-              </Text>
-              {homeSections.map((item, index) => (
-                <View
-                  key={`section-${item.key}`}
-                  style={[s.moduleRow, { backgroundColor: th.cardHigh, flexDirection: isAr ? 'row-reverse' : 'row' }]}
-                >
-                  <View style={[s.moduleInfo, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                    <View style={[s.moduleIcon, { backgroundColor: item.visible !== false ? th.primSoft : th.card }]}>
-                      <Ionicons name={item.icon} size={16} color={item.visible !== false ? item.tone : th.sub} />
-                    </View>
-                    <Text style={{ color: th.text, fontSize: 13, ...weight('800'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>
-                      {item.label}
-                    </Text>
-                  </View>
-                  <View style={[s.homeTools, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                    <TouchableOpacity
-                      disabled={index === 0}
-                      onPress={() => moveHomeSection(item.key, -1)}
-                      accessibilityLabel={isAr ? 'تحريك للأعلى' : 'Move up'}
-                      style={[s.homeMoveBtn, { backgroundColor: th.card, opacity: index === 0 ? 0.35 : 1 }]}
-                    >
-                      <Ionicons name="chevron-up-outline" size={15} color={th.sub} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      disabled={index === homeSections.length - 1}
-                      onPress={() => moveHomeSection(item.key, 1)}
-                      accessibilityLabel={isAr ? 'تحريك للأسفل' : 'Move down'}
-                      style={[s.homeMoveBtn, { backgroundColor: th.card, opacity: index === homeSections.length - 1 ? 0.35 : 1 }]}
-                    >
-                      <Ionicons name="chevron-down-outline" size={15} color={th.sub} />
-                    </TouchableOpacity>
-                    <Switch
-                      value={item.visible !== false}
-                      onValueChange={(value) => setHomeSectionVisible(item.key, value)}
-                      trackColor={{ true: th.primary, false: th.card }}
-                    />
-                  </View>
-                </View>
-              ))}
-
-              <TouchableOpacity onPress={resetHomeLayout} style={[s.secondaryButton, { backgroundColor: th.cardHigh }]}>
-                <Text style={{ color: th.primary, fontSize: 13, ...weight('900') }}>{homeResetTitle}</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          ) : null}
-
-          {settingsSheet === 'country' ? (
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled contentContainerStyle={s.sheetScroll}>
-              <View style={[s.pickerSearch, { backgroundColor: th.input, borderColor: countryQuery ? th.primary : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                <Ionicons name="search-outline" size={16} color={th.sub} />
-                <TextInput
-                  value={countryQuery}
-                  onChangeText={setCountryQuery}
-                  placeholder={isAr ? 'ابحث عن دولة' : 'Search country'}
-                  placeholderTextColor={th.sub}
-                  style={{ flex: 1, color: th.text, paddingVertical: 9, marginHorizontal: 8, textAlign: isAr ? 'right' : 'left' }}
-                />
-                {!!countryQuery ? <TouchableOpacity onPress={() => setCountryQuery('')}><Ionicons name="backspace-outline" size={16} color={th.sub} /></TouchableOpacity> : null}
-              </View>
-              {visibleCountries.map(country => {
-                const active = country.code === cfg.country;
-                return (
-                  <TouchableOpacity
-                    key={country.code}
-                    onPress={() => changeCountry(country)}
-                    style={[s.optionCard, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent', flexDirection: isAr ? 'row-reverse' : 'row' }]}
-                  >
-                    <Text style={{ fontSize: 20 }}>{country.flag}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: active ? th.primary : th.text, fontSize: 14, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>
-                        {isAr ? country.name : country.nameEn}
-                      </Text>
-                      <Text style={{ color: th.sub, fontSize: 11, ...weight('800'), marginTop: 2, textAlign: isAr ? 'right' : 'left' }}>
-                        {country.code} · {country.currency}
-                      </Text>
-                    </View>
-                    {active ? <Ionicons name="checkmark-circle" size={18} color={th.primary} /> : null}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          ) : null}
-
-          {settingsSheet === 'currency' ? (
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled contentContainerStyle={s.sheetScroll}>
-              <View style={[s.pickerSearch, { backgroundColor: th.input, borderColor: currencyQuery ? th.primary : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-                <Ionicons name="search-outline" size={16} color={th.sub} />
-                <TextInput
-                  value={currencyQuery}
-                  onChangeText={setCurrencyQuery}
-                  placeholder={isAr ? 'ابحث عن عملة' : 'Search currency'}
-                  placeholderTextColor={th.sub}
-                  style={{ flex: 1, color: th.text, paddingVertical: 9, marginHorizontal: 8, textAlign: isAr ? 'right' : 'left' }}
-                />
-                {!!currencyQuery ? <TouchableOpacity onPress={() => setCurrencyQuery('')}><Ionicons name="backspace-outline" size={16} color={th.sub} /></TouchableOpacity> : null}
-              </View>
-              {visibleCurrencies.map(currency => {
-                const active = currency.code === cfg.currency;
-                return (
-                  <TouchableOpacity
-                    key={currency.code}
-                    onPress={() => changeBaseCurrency(currency.code)}
-                    style={[s.optionCard, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : 'transparent', flexDirection: isAr ? 'row-reverse' : 'row' }]}
-                  >
-                    <View style={[s.selectIcon, { backgroundColor: active ? th.primary : th.card }]}>
-                      <Text style={{ color: active ? th.onPrimary : th.text, fontSize: 12, ...weight('900') }}>{currency.sym}</Text>
-                    </View>
-                    <Text style={{ color: active ? th.primary : th.text, fontSize: 14, ...weight('900'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>
-                      {currency.code} · {isAr ? currency.name : currency.nameEn}
-                    </Text>
-                    {active ? <Ionicons name="checkmark-circle" size={18} color={th.primary} /> : null}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          ) : null}
-        </View>
-      </View>
-    </Modal>
-    <Modal visible={categoryModalOpen} transparent animationType="slide" onRequestClose={() => setCategoryModalOpen(false)}>
-      <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setCategoryModalOpen(false)} />
-        <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>
-          <View style={[s.sheetHeader, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-            <Text style={[s.sheetTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.addCategory}</Text>
-          </View>
-          <TextInput
-            value={newCatName}
-            onChangeText={setNewCatName}
-            placeholder={T.categoryName}
-            placeholderTextColor={th.sub}
-            style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
+        {page === 'data' ? (
+          <DataPage
+            th={th}
+            isAr={isAr}
+            T={T}
+            counts={dataCounts}
+            fileBusy={fileBusy}
+            importPackage={importPackage}
+            importPreview={importPreview}
+            onArchive={onOpenArchive}
+            onExport={handleExport}
+            onPickImport={selectImport}
+            onRestore={restoreImport}
+            onClearImport={() => setImportPackage(null)}
+            onReset={confirmReset}
+            cfg={cfg}
+            testDataBusy={testDataBusy}
+            onActivateTestTier={activatePerformanceTier}
+            onExitTestData={leavePerformanceData}
+            dataHealth={dataHealth}
+            onRefreshDataHealth={refreshDataHealth}
+            financialLedgerV7Cutover={financialLedgerV7Cutover}
+            financialMutationSync={financialMutationSync}
           />
-          <View style={[s.categoryFlowPicker, { flexDirection: isAr ? 'row-reverse' : 'row', backgroundColor: th.cardHigh }]}>
-            {[
-              { key: CATEGORY_FLOWS.EXPENSE, label: isAr ? 'صرف' : 'Expense', icon: 'arrow-up-circle-outline', color: th.exp },
-              { key: CATEGORY_FLOWS.INCOME, label: isAr ? 'دخل' : 'Income', icon: 'arrow-down-circle-outline', color: th.inc },
-            ].map(item => {
-              const active = newCatFlow === item.key;
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  onPress={() => setNewCatFlow(item.key)}
-                  style={[s.categoryFlowOption, { backgroundColor: active ? `${item.color}22` : 'transparent', borderColor: active ? item.color : 'transparent' }]}
-                >
-                  <Ionicons name={item.icon} size={16} color={active ? item.color : th.sub} />
-                  <Text style={{ color: active ? item.color : th.sub, fontSize: 12, ...weight('900') }}>{item.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          <Text style={[s.miniLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.icon}</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.iconRail}>
-            {ICON_OPTIONS.map(icon => (
-              <TouchableOpacity
-                key={icon}
-                onPress={() => setNewCatIcon(icon)}
-                style={[
-                  s.iconPick,
-                  {
-                    backgroundColor: newCatIcon === icon ? newCatColor + '33' : th.cardHigh,
-                    borderColor: newCatIcon === icon ? newCatColor : 'transparent',
-                  },
-                ]}
-              >
-                <Ionicons name={icon} size={17} color={newCatIcon === icon ? newCatColor : th.sub} />
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          <Text style={[s.miniLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.color}</Text>
-          <View style={s.colorGrid}>
-            {CAT_COLORS.map(color => (
-              <TouchableOpacity
-                key={color}
-                onPress={() => setNewCatColor(color)}
-                style={[s.colorPick, { backgroundColor: color, borderColor: newCatColor === color ? th.text : 'transparent' }]}
-              />
-            ))}
-          </View>
-          <TouchableOpacity onPress={addCategory} style={[s.primaryButton, { backgroundColor: th.primary }]}>
-            <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>{T.addCategory}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-    <Modal visible={walletModalOpen} transparent animationType="slide" onRequestClose={() => setWalletModalOpen(false)}>
-      <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setWalletModalOpen(false)} />
-        <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>
-          <View style={[s.sheetHeader, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-            <Text style={[s.sheetTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.addWallet}</Text>
-          </View>
-          <TextInput
-            value={newWalletName}
-            onChangeText={setNewWalletName}
-            placeholder={T.walletName}
-            placeholderTextColor={th.sub}
-            style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
+        ) : null}
+
+        {page === 'security' ? (
+          <SecurityPage
+            th={th}
+            isAr={isAr}
+            T={T}
+            cfg={cfg}
+            setCfg={setCfg}
+            onToggleBio={toggleBioLock}
           />
-          <TextInput
-            value={newWalletOpening}
-            onChangeText={(value) => setNewWalletOpening(formatNumberInput(value))}
-            keyboardType="numeric"
-            placeholder={`${T.openingBalance} (${cfg.currency})`}
-            placeholderTextColor={th.sub}
-            style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
-          />
-          <TouchableOpacity onPress={createWallet} style={[s.primaryButton, { backgroundColor: th.primary }]}>
-            <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>{T.addWallet}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
+        ) : null}
+
+      </ScrollView>
+
+      <ChoiceSheet
+        visible={!!choiceConfig}
+        title={choiceConfig?.title || ''}
+        options={choiceConfig?.options || []}
+        value={choiceConfig?.value}
+        onSelect={choiceConfig?.onSelect}
+        onClose={() => setChoice(null)}
+        th={th}
+        lang={cfg.lang}
+      />
+
+      <AuthModal
+        visible={authOpen}
+        onClose={() => setAuthOpen(false)}
+        th={th}
+        isAr={isAr}
+        T={T}
+        authMode={authMode}
+        setAuthMode={setAuthMode}
+        loading={loading}
+        nameDraft={nameDraft}
+        setNameDraft={setNameDraft}
+        email={email}
+        setEmail={value => { setEmail(value); emailRef.current = value; }}
+        password={password}
+        setPassword={setPassword}
+        passwordVisible={passwordVisible}
+        setPasswordVisible={setPasswordVisible}
+        agreement={agreement}
+        profileName={editableName}
+        setAgreement={setAgreement}
+        onSubmit={handleAuth}
+        onReset={handlePasswordReset}
+      />
+
+      <BackupExportSheet
+        visible={!!backupExportSheet}
+        step={backupExportSheet}
+        th={th}
+        isAr={isAr}
+        T={T}
+        delivery={backupDelivery}
+        busy={fileBusy}
+        onClose={() => setBackupExportSheet(null)}
+        onSelectDelivery={chooseBackupProtection}
+        onPlain={exportWithoutPassword}
+        onEncrypted={exportWithPassword}
+      />
+
+      <PasswordModal
+        visible={!!backupPasswordMode}
+        th={th}
+        isAr={isAr}
+        T={T}
+        mode={backupPasswordMode}
+        value={backupPassword}
+        setValue={setBackupPassword}
+        busy={fileBusy}
+        onClose={() => setBackupPasswordMode(null)}
+        onSubmit={submitBackupPassword}
+      />
+
+      <AccountDeleteModal
+        visible={deleteAccountOpen}
+        loading={deletingAccount}
+        onClose={() => setDeleteAccountOpen(false)}
+        onConfirm={deleteAccountPermanently}
+        lang={cfg.lang}
+        th={th}
+      />
     </>
   );
 }
 
-function PreviewStat({ th, label, value }) {
+function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accountInitial, syncState, selectedCountry, selectedCurrency, onChoice, onOpen, onAdvanced }) {
+  const languageValue = cfg.lang === 'ar' ? T.arabic : T.english;
+  const themeValue = cfg.theme === 'dark' ? T.dark : T.light;
+  const languageNote = cfg.langMode === 'system' ? T.followsDevice : null;
+  const themeNote = cfg.themeMode === 'system' ? T.followsDevice : null;
+  const rotationValue = cfg.orientationMode === 'system'
+    ? T.useDeviceSetting
+    : cfg.orientationMode === 'auto' ? T.autoRotate : T.fixedPortrait;
+  const rotationNote = cfg.orientationMode === 'system' ? T.followsDevice : null;
   return (
-    <View style={[s.previewStat, { backgroundColor: th.card }]}>
-      <Text style={{ color: th.primary, fontSize: 14, ...weight('900'), textAlign: 'center' }}>{value}</Text>
-      <Text style={{ color: th.sub, fontSize: 12, lineHeight: 17, ...weight('800'), textAlign: 'center' }} numberOfLines={2}>
-        {label}
-      </Text>
+    <>
+      <SectionLabel th={th} isAr={isAr} text={T.accountCloud} />
+      <TouchableOpacity onPress={() => onOpen('account')} activeOpacity={0.76} style={[s.accountCard, { backgroundColor: th.card, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+        <Avatar th={th} cfg={cfg} initial={accountInitial} size={58} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text numberOfLines={1} style={[s.accountCardName, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{accountName}</Text>
+          <Text numberOfLines={1} style={[s.accountCardEmail, { color: th.sub, textAlign: isAr ? 'right' : 'left', writingDirection: user ? 'ltr' : undefined }]}>
+            {user ? (accountEmail || T.connectedToMyfi) : T.savedOnDevice}
+          </Text>
+          {user ? (
+            <View style={[s.syncInline, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+              <Ionicons name={syncState.icon} size={13} color={syncState.color} />
+              <Text style={[s.syncInlineText, { color: syncState.color }]}>{syncState.text}</Text>
+            </View>
+          ) : null}
+        </View>
+        <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={18} color={th.faint} />
+      </TouchableOpacity>
+
+      <SectionLabel th={th} isAr={isAr} text={T.general} />
+      <MenuGroup th={th}>
+        <MenuRow th={th} isAr={isAr} icon="language-outline" title={T.language} subtitle={languageNote} value={languageValue} onPress={() => onChoice('language')} />
+        <MenuRow th={th} isAr={isAr} icon="color-palette-outline" title={T.appearance} subtitle={themeNote} value={themeValue} onPress={() => onChoice('theme')} />
+        <MenuRow th={th} isAr={isAr} icon="phone-portrait-outline" title={T.rotation} subtitle={rotationNote} value={rotationValue} onPress={() => onChoice('orientation')} />
+        <MenuRow th={th} isAr={isAr} icon="flag-outline" title={T.country} value={`${selectedCountry.flag} ${isAr ? selectedCountry.name : selectedCountry.nameEn}`} onPress={() => onChoice('country')} />
+        <MenuRow th={th} isAr={isAr} icon="cash-outline" title={T.currency} value={`${selectedCurrency.code} · ${selectedCurrency.sym}`} onPress={() => onChoice('currency')} last />
+      </MenuGroup>
+
+      <SectionLabel th={th} isAr={isAr} text={T.money} />
+      <MenuGroup th={th}>
+        <MenuRow th={th} isAr={isAr} icon="wallet-outline" title={T.financial} subtitle={T.financialSub} onPress={onAdvanced} last />
+      </MenuGroup>
+
+      <SectionLabel th={th} isAr={isAr} text={T.privacyData} />
+      <MenuGroup th={th}>
+        <MenuRow th={th} isAr={isAr} icon="server-outline" title={T.data} subtitle={T.dataSub} onPress={() => onOpen('data')} />
+        <MenuRow th={th} isAr={isAr} icon="shield-checkmark-outline" title={T.security} subtitle={T.securitySub} onPress={() => onOpen('security')} last />
+      </MenuGroup>
+
+      <SectionLabel th={th} isAr={isAr} text={T.support} />
+      <MenuGroup th={th}>
+        <MenuRow th={th} isAr={isAr} icon="book-outline" title={T.guide} subtitle={T.guideProfessionalSub} onPress={() => onOpen('guide')} />
+        <MenuRow th={th} isAr={isAr} icon="help-buoy-outline" title={T.helpCenter} subtitle={T.helpCenterSub} onPress={() => onOpen('support')} />
+        <MenuRow th={th} isAr={isAr} icon="information-circle-outline" title={T.about} subtitle={T.aboutSub} value={process.env.EXPO_PUBLIC_MYFI_VERSION || '1.0.0'} onPress={() => onOpen('about')} last />
+      </MenuGroup>
+    </>
+  );
+}
+
+function AccountPage({
+  th, isAr, T, user, cfg, accountName, accountEmail, accountInitial, syncState, lastSyncedAt,
+  editIdentity, setEditIdentity, nameDraft, setNameDraft, onSaveIdentity, onPickAvatar, onRemoveAvatar, onOpenAuth,
+  onSync, onDevices, onPasswordReset, onSignOut, onDeleteAccount,
+}) {
+  return (
+    <>
+      <View style={s.profileHero}>
+        <View style={s.profileAvatarWrap}>
+          <Avatar th={th} cfg={cfg} initial={accountInitial} size={84} />
+          <TouchableOpacity onPress={onPickAvatar} style={[s.cameraButton, { backgroundColor: th.primary, borderColor: th.bg }]}>
+            <Ionicons name="camera-outline" size={16} color={th.onPrimary} />
+          </TouchableOpacity>
+        </View>
+        <Text style={[s.profileName, { color: th.text, textAlign: 'center' }]}>{accountName}</Text>
+        {user ? (
+          <Text style={[s.profileMeta, { color: th.sub, writingDirection: 'ltr', textAlign: 'center' }]}>
+            {accountEmail || T.connectedToMyfi}
+          </Text>
+        ) : null}
+        <View style={[s.accountStatusPill, { backgroundColor: user ? th.incBg : th.cardHigh, borderColor: user ? `${th.inc}45` : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+          <View style={[s.accountStatusDot, { backgroundColor: user ? th.inc : th.sub }]} />
+          <Text style={[s.accountStatusText, { color: user ? th.inc : th.sub }]}>{user ? T.connectedToMyfi : T.savedOnDevice}</Text>
+        </View>
+        <TouchableOpacity onPress={() => setEditIdentity(!editIdentity)} style={[s.editPill, { backgroundColor: th.primSoft }]}>
+          <Ionicons name="create-outline" size={14} color={th.primary} />
+          <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{T.editProfile}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {editIdentity ? (
+        <View style={[s.editorCard, { backgroundColor: th.card, borderColor: th.border }]}>
+          <TextInput value={nameDraft} onChangeText={setNameDraft} placeholder={T.namePlaceholder} placeholderTextColor={th.faint} style={[s.input, s.profileNameInput, { backgroundColor: th.input, borderColor: th.border, color: th.text }]} />
+          <View style={[s.editorActions, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+            <TouchableOpacity onPress={onSaveIdentity} style={[s.primaryAction, { backgroundColor: th.primary }]}><Text style={{ color: th.onPrimary, ...weight('900') }}>{T.save}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setEditIdentity(false)} style={[s.secondaryAction, { backgroundColor: th.cardHigh }]}><Text style={{ color: th.text, ...weight('900') }}>{T.cancel}</Text></TouchableOpacity>
+          </View>
+          <View style={[s.photoActions, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+            <TouchableOpacity onPress={onPickAvatar} style={[s.textAction, { borderColor: th.border }]}><Text style={{ color: th.primary, ...weight('900') }}>{cfg.avatarUri ? T.changePhoto : T.addPhoto}</Text></TouchableOpacity>
+            {cfg.avatarUri ? <TouchableOpacity onPress={onRemoveAvatar} style={[s.textAction, { borderColor: th.border }]}><Text style={{ color: th.exp, ...weight('900') }}>{T.removePhoto}</Text></TouchableOpacity> : null}
+          </View>
+        </View>
+      ) : null}
+
+      {!user ? (
+        <TouchableOpacity onPress={onOpenAuth} activeOpacity={0.76} style={[s.connectAccountCard, { backgroundColor: th.card, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+          <View style={[s.rowIcon, { backgroundColor: th.primSoft }]}><Ionicons name="cloud-outline" size={19} color={th.primary} /></View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[s.connectAccountTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.connectAccount}</Text>
+            <Text style={[s.connectAccountSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.connectHint}</Text>
+          </View>
+          <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={17} color={th.faint} />
+        </TouchableOpacity>
+      ) : null}
+
+      {user ? (
+        <>
+          <SectionLabel th={th} isAr={isAr} text={T.accountSecurity} />
+          <MenuGroup th={th}>
+            <InfoRow th={th} isAr={isAr} title={T.email} value={accountEmail} ltr />
+            <MenuRow th={th} isAr={isAr} icon="key-outline" title={T.forgotPassword} onPress={onPasswordReset} last />
+          </MenuGroup>
+
+          <SectionLabel th={th} isAr={isAr} text={T.syncDevices} />
+          <MenuGroup th={th}>
+            <MenuRow th={th} isAr={isAr} icon={syncState.icon} iconColor={syncState.color} title={T.syncStatus} value={syncState.text} />
+            <InfoRow th={th} isAr={isAr} title={T.lastSync} value={formatSyncTime(lastSyncedAt, isAr ? 'ar' : 'en')} />
+            <MenuRow th={th} isAr={isAr} icon="phone-portrait-outline" title={T.devices} subtitle={T.devicesSub} onPress={onDevices} />
+            <MenuRow th={th} isAr={isAr} icon="sync-outline" title={T.syncNow} subtitle={syncState.text} onPress={onSync} last />
+          </MenuGroup>
+
+          <SectionLabel th={th} isAr={isAr} text={T.dangerZone} />
+          <MenuGroup th={th}>
+            <MenuRow th={th} isAr={isAr} icon="log-out-outline" iconColor={th.exp} title={T.signOut} danger onPress={onSignOut} />
+            <MenuRow th={th} isAr={isAr} icon="trash-outline" iconColor={th.exp} title={T.deleteAccount} subtitle={T.deleteAccountSub} danger onPress={onDeleteAccount} last />
+          </MenuGroup>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function DevicesPage({ th, isAr, T, user, syncState, lastSyncedAt, onSignOutOthers, onSignOut }) {
+  const deviceName = Platform.OS === 'android' ? T.androidDevice : Platform.OS === 'ios' ? T.iosDevice : T.webDevice;
+  return (
+    <>
+      <SectionLabel th={th} isAr={isAr} text={T.thisDevice} />
+      <View style={[s.deviceCard, { backgroundColor: th.card, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+        <View style={[s.deviceIcon, { backgroundColor: th.primSoft }]}><Ionicons name={Platform.OS === 'web' ? 'laptop-outline' : 'phone-portrait-outline'} size={22} color={th.primary} /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={[s.deviceTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{deviceName}</Text>
+          <Text style={[s.deviceSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>MYFI · {Platform.OS}</Text>
+          {user ? <Text style={[s.deviceSub, { color: th.faint, textAlign: isAr ? 'right' : 'left' }]}>{T.lastSync}: {formatSyncTime(lastSyncedAt, isAr ? 'ar' : 'en')}</Text> : null}
+          <View style={[s.syncInline, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+            <View style={[s.liveDot, { backgroundColor: user ? th.inc : th.sub }]} />
+            <Text style={[s.syncInlineText, { color: user ? th.inc : th.sub }]}>{user ? T.connectedNow : T.localOnly}</Text>
+          </View>
+        </View>
+      </View>
+
+      <SectionLabel th={th} isAr={isAr} text={T.otherSessions} />
+      {user ? (
+        <MenuGroup th={th}>
+          <MenuRow th={th} isAr={isAr} icon="shield-outline" title={T.signOutOthers} subtitle={T.signOutOthersSub} danger onPress={onSignOutOthers} />
+          <MenuRow th={th} isAr={isAr} icon="log-out-outline" iconColor={th.exp} title={T.signOut} danger onPress={onSignOut} last />
+        </MenuGroup>
+      ) : (
+        <View style={[s.noticeCard, { backgroundColor: th.card, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+          <Ionicons name="cloud-offline-outline" size={20} color={th.sub} />
+          <Text style={[s.noticeText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.noCloudSession}</Text>
+        </View>
+      )}
+
+      <View style={[s.noticeCard, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row', marginTop: 14 }]}>
+        <Ionicons name={syncState.icon} size={18} color={syncState.color} />
+        <Text style={[s.noticeText, { color: syncState.color, textAlign: isAr ? 'right' : 'left' }]}>{syncState.text}</Text>
+      </View>
+    </>
+  );
+}
+
+function PreferencesPage({ th, isAr, T, cfg, onChoice }) {
+  const languageValue = cfg.lang === 'ar' ? T.arabic : T.english;
+  const themeValue = cfg.theme === 'dark' ? T.dark : T.light;
+  const languageNote = cfg.langMode === 'system' ? T.followsDevice : null;
+  const themeNote = cfg.themeMode === 'system' ? T.followsDevice : null;
+  const rotationValue = cfg.orientationMode === 'system'
+    ? T.useDeviceSetting
+    : cfg.orientationMode === 'auto' ? T.autoRotate : T.fixedPortrait;
+  const rotationNote = cfg.orientationMode === 'system' ? T.followsDevice : null;
+  return (
+    <>
+      <SectionLabel th={th} isAr={isAr} text={T.general} />
+      <MenuGroup th={th}>
+        <MenuRow th={th} isAr={isAr} icon="language-outline" title={T.language} subtitle={languageNote} value={languageValue} onPress={() => onChoice('language')} />
+        <MenuRow th={th} isAr={isAr} icon="color-palette-outline" title={T.appearance} subtitle={themeNote} value={themeValue} onPress={() => onChoice('theme')} />
+        <MenuRow th={th} isAr={isAr} icon="phone-portrait-outline" title={T.rotation} subtitle={rotationNote} value={rotationValue} onPress={() => onChoice('orientation')} last />
+      </MenuGroup>
+    </>
+  );
+}
+
+function FinancialPage({ th, isAr, T, cfg, modules, counts, tabs = [] }) {
+  const enabledCount = Object.values(modules || {}).filter(Boolean).length;
+  const profileLabel = cfg.profileType === 'business'
+    ? (isAr ? 'مشروع' : 'Business')
+    : cfg.profileType === 'personal_business'
+      ? (isAr ? 'مزدوج' : 'Dual')
+      : (isAr ? 'شخصي' : 'Personal');
+
+  return (
+    <>
+      <View style={[s.financialHero, { backgroundColor: th.card, borderColor: th.border }]}>
+        <View style={[s.financialHeroTop, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+          <View style={[s.largeIcon, { backgroundColor: th.primSoft }]}><Ionicons name="wallet-outline" size={24} color={th.primary} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.financialTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.financial}</Text>
+            <Text style={[s.financialSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
+              {isAr ? 'كل إعدادات المال في مكان واحد. افتح القسم الذي تحتاجه وعدّل خياراته مباشرة بدون التنقل بين صفحات متداخلة.' : 'All money settings live in one place. Expand the area you need and edit it directly without nested settings pages.'}
+            </Text>
+          </View>
+        </View>
+        <View style={[s.metricRow, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+          <MiniMetric th={th} label={isAr ? 'نوع الاستخدام' : 'Usage'} value={profileLabel} />
+          <MiniMetric th={th} label={T.wallets} value={String(counts.wallets)} />
+          <MiniMetric th={th} label={T.enabledModules} value={String(enabledCount)} />
+        </View>
+      </View>
+
+      <View style={s.financialInlineWrap}>
+        <LegacySettingsScreen tabs={tabs} embedded financialOnly financialSection="all" />
+      </View>
+    </>
+  );
+}
+
+function SupportPage({ th, isAr, T, onOpenGuide, onOpenContact, onOpenAccount, onOpenData, onOpenSecurity }) {
+  return (
+    <>
+      <View style={[s.supportHero, { backgroundColor: th.card, borderColor: th.border }]}>
+        <View style={[s.supportHeroIcon, { backgroundColor: th.primSoft }]}><Ionicons name="help-buoy-outline" size={28} color={th.primary} /></View>
+        <Text style={[s.supportHeroTitle, { color: th.text }]}>{T.helpCenter}</Text>
+        <Text style={[s.supportHeroText, { color: th.sub }]}>{isAr ? 'ابدأ من نوع المساعدة التي تحتاجها. كل خيار هنا يوصلك مباشرة إلى المكان الصحيح بدون قوائم داخل قوائم.' : 'Start with the kind of help you need. Every option takes you directly to the right place without menus inside menus.'}</Text>
+      </View>
+
+      <SectionLabel th={th} isAr={isAr} text={isAr ? 'المساعدة' : 'Help'} />
+      <MenuGroup th={th}>
+        <MenuRow th={th} isAr={isAr} icon="book-outline" title={T.guide} subtitle={T.guideProfessionalSub} onPress={onOpenGuide} />
+        <MenuRow th={th} isAr={isAr} icon="chatbubble-ellipses-outline" title={T.contactCenter} subtitle={T.contactCenterSub} onPress={onOpenContact} last />
+      </MenuGroup>
+
+      <SectionLabel th={th} isAr={isAr} text={isAr ? 'اختصارات مفيدة' : 'Useful shortcuts'} />
+      <MenuGroup th={th}>
+        <MenuRow th={th} isAr={isAr} icon="person-circle-outline" title={T.accountRecovery} subtitle={T.accountRecoverySub} onPress={onOpenAccount} />
+        <MenuRow th={th} isAr={isAr} icon="archive-outline" title={T.backupHelp} subtitle={T.backupHelpSub} onPress={onOpenData} />
+        <MenuRow th={th} isAr={isAr} icon="shield-checkmark-outline" title={T.securityHelp} subtitle={T.securityHelpSub} onPress={onOpenSecurity} last />
+      </MenuGroup>
+
+      <View style={[s.supportNotice, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+        <Ionicons name="lock-closed-outline" size={18} color={th.primary} />
+        <Text style={[s.supportNoticeText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'الدعم لا يحتاج كشف مبالغك أو سجل حركاتك. شارك معلومات التشخيص فقط إذا طُلبت.' : 'Support should not need your balances or transaction history. Share diagnostics only when requested.'}</Text>
+      </View>
+    </>
+  );
+}
+
+function GuidePage({ th, isAr, T, onOpenFinancial, onOpenAccount }) {
+  const [openGuide, setOpenGuide] = useState('start');
+  const guides = [
+    { key: 'start', icon: 'rocket-outline', title: T.gettingStarted, sub: T.gettingStartedSub, steps: isAr ? ['اختر الدولة والعملة.', 'أنشئ محفظتك الأساسية.', 'سجّل أول دخل أو مصروف.'] : ['Choose country and currency.', 'Create your main wallet.', 'Add your first income or expense.'] },
+    { key: 'daily', icon: 'receipt-outline', title: T.dailyMoney, sub: T.dailyMoneySub, steps: isAr ? ['استخدم الإجراءات المباشرة.', 'راجع السجل للتفاصيل.', 'صحح أو كرر الحركة عند الحاجة.'] : ['Use Direct actions.', 'Use History for detail.', 'Edit or duplicate when needed.'] },
+    { key: 'planning', icon: 'layers-outline', title: T.planningGuide, sub: T.planningGuideSub, steps: isAr ? ['أضف الدين أو هدف التوفير.', 'اربط الالتزام الشهري عند الحاجة.', 'راجع المتبقي والتقدم من المتابعات.'] : ['Add a debt or saving goal.', 'Link a monthly commitment when needed.', 'Review remaining amounts and progress in Trackers.'] },
+    { key: 'reports', icon: 'bar-chart-outline', title: T.reportsGuide, sub: T.reportsGuideSub, steps: isAr ? ['اختر الفترة أولاً.', 'ابدأ بالتدفق النقدي وصافي الدخل.', 'استخدم المقارنة بعد توفر أكثر من فترة.'] : ['Choose the period first.', 'Start with cash flow and net income.', 'Use comparison after multiple periods exist.'] },
+  ];
+  return (
+    <>
+      <View style={[s.guideHero, { backgroundColor: th.card, borderColor: th.border }]}>
+        <View style={[s.supportHeroIcon, { backgroundColor: th.primSoft }]}><Ionicons name="book-outline" size={27} color={th.primary} /></View>
+        <Text style={[s.supportHeroTitle, { color: th.text }]}>{T.guide}</Text>
+        <Text style={[s.supportHeroText, { color: th.sub }]}>{isAr ? 'مرجع مختصر حسب المهمة. افتح الموضوع الذي تحتاجه فقط.' : 'A concise reference by task. Expand only the topic you need.'}</Text>
+      </View>
+      <View style={s.guideAccordionList}>
+        {guides.map(item => {
+          const expanded = openGuide === item.key;
+          return (
+            <View key={item.key} style={[s.guideCard, { backgroundColor: th.card, borderColor: th.border }]}>
+              <TouchableOpacity
+                onPress={() => setOpenGuide(current => current === item.key ? null : item.key)}
+                activeOpacity={0.76}
+                style={[s.guideCardHead, { flexDirection: isAr ? 'row-reverse' : 'row' }]}
+              >
+                <View style={[s.largeIcon, { backgroundColor: th.primSoft }]}><Ionicons name={item.icon} size={20} color={th.primary} /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.guideCardTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{item.title}</Text>
+                  <Text style={[s.guideCardSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{item.sub}</Text>
+                </View>
+                <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={th.sub} />
+              </TouchableOpacity>
+              {expanded ? (
+                <>
+                  <View style={s.guideSteps}>{item.steps.map((step, i) => <View key={step} style={[s.guideStep, { flexDirection: isAr ? 'row-reverse' : 'row' }]}><View style={[s.guideStepNo, { backgroundColor: th.primSoft }]}><Text style={{ color: th.primary, ...weight('900'), fontSize: 10 }}>{i + 1}</Text></View><Text style={[s.guideStepText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{step}</Text></View>)}</View>
+                  {item.key === 'start' ? <TouchableOpacity onPress={onOpenFinancial} style={[s.guideLink, { backgroundColor: th.primSoft }]}><Text style={{ color: th.primary, ...weight('900') }}>{isAr ? 'فتح الإعداد المالي' : 'Open financial setup'}</Text></TouchableOpacity> : null}
+                </>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
+      <SectionLabel th={th} isAr={isAr} text={T.cloudGuide} />
+      <MenuGroup th={th}><MenuRow th={th} isAr={isAr} icon="cloud-outline" title={T.cloudGuide} subtitle={T.cloudGuideSub} onPress={onOpenAccount} last /></MenuGroup>
+    </>
+  );
+}
+
+function ContactPage({ th, isAr, T, user }) {
+  const supportEmail = process.env.EXPO_PUBLIC_MYFI_SUPPORT_EMAIL || '';
+  const supportUrl = process.env.EXPO_PUBLIC_MYFI_SUPPORT_URL || '';
+  const feedbackUrl = process.env.EXPO_PUBLIC_MYFI_FEEDBACK_URL || supportUrl;
+  const privacyUrl = process.env.EXPO_PUBLIC_MYFI_PRIVACY_URL || '';
+  const termsUrl = process.env.EXPO_PUBLIC_MYFI_TERMS_URL || '';
+  const instagramUrl = process.env.EXPO_PUBLIC_MYFI_INSTAGRAM_URL || '';
+  const facebookUrl = process.env.EXPO_PUBLIC_MYFI_FACEBOOK_URL || '';
+  const version = process.env.EXPO_PUBLIC_MYFI_VERSION || '1.0.0';
+  const platform = Platform.OS === 'ios' ? 'iOS' : Platform.OS === 'android' ? 'Android' : Platform.OS;
+  const mailUrl = supportEmail ? `mailto:${supportEmail}?subject=${encodeURIComponent('MYFI Support')}&body=${encodeURIComponent(`MYFI ${version} · ${platform} · ${user ? 'MYFI account connected' : 'No MYFI account'}`)}` : '';
+  return (
+    <>
+      <View style={[s.contactHero, { backgroundColor: th.card, borderColor: th.border }]}>
+        <View style={[s.supportHeroIcon, { backgroundColor: th.primSoft }]}><Ionicons name="headset-outline" size={28} color={th.primary} /></View>
+        <Text style={[s.supportHeroTitle, { color: th.text }]}>{T.contactCenter}</Text>
+        <Text style={[s.supportHeroText, { color: th.sub }]}>{isAr ? 'اختر القناة المناسبة. لا تُرسل نسخة احتياطية أو بيانات مالية إلا إذا كنت تعرف بالضبط لماذا تحتاجها.' : 'Choose the right channel. Do not send backups or financial data unless you know exactly why it is needed.'}</Text>
+      </View>
+      <SectionLabel th={th} isAr={isAr} text={isAr ? 'قنوات الدعم' : 'Support channels'} />
+      <MenuGroup th={th}>
+        <MenuRow th={th} isAr={isAr} icon="globe-outline" title={isAr ? 'مركز الدعم على الويب' : 'Web support center'} subtitle={supportUrl || T.contactSupportSub} onPress={() => openExternal(supportUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} />
+        <MenuRow th={th} isAr={isAr} icon="mail-outline" title={isAr ? 'البريد الإلكتروني' : 'Email support'} subtitle={supportEmail || T.contactSupportSub} onPress={() => openExternal(mailUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} />
+        <MenuRow th={th} isAr={isAr} icon="bulb-outline" title={T.productFeedback} subtitle={T.productFeedbackSub} onPress={() => openExternal(feedbackUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last />
+      </MenuGroup>
+      <SectionLabel th={th} isAr={isAr} text={T.supportDiagnostics} />
+      <View style={[s.diagnosticCard, { backgroundColor: th.card, borderColor: th.border }]}>
+        <DiagnosticRow th={th} isAr={isAr} label={T.versionLabel} value={version} />
+        <DiagnosticRow th={th} isAr={isAr} label={isAr ? 'المنصة' : 'Platform'} value={platform} />
+        <DiagnosticRow th={th} isAr={isAr} label={T.cloudAccount} value={user ? T.connected : T.notSignedIn} last />
+      </View>
+      {(privacyUrl || termsUrl) ? <><SectionLabel th={th} isAr={isAr} text={T.legal} /><MenuGroup th={th}>{privacyUrl ? <MenuRow th={th} isAr={isAr} icon="document-lock-outline" title={T.privacy} onPress={() => openExternal(privacyUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last={!termsUrl} /> : null}{termsUrl ? <MenuRow th={th} isAr={isAr} icon="document-text-outline" title={T.termsOfUse} onPress={() => openExternal(termsUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last /> : null}</MenuGroup></> : null}
+      {(instagramUrl || facebookUrl) ? <><SectionLabel th={th} isAr={isAr} text={isAr ? 'القنوات الرسمية' : 'Official channels'} /><MenuGroup th={th}>{instagramUrl ? <MenuRow th={th} isAr={isAr} icon="logo-instagram" title="Instagram" onPress={() => openExternal(instagramUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last={!facebookUrl} /> : null}{facebookUrl ? <MenuRow th={th} isAr={isAr} icon="logo-facebook" title="Facebook" onPress={() => openExternal(facebookUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last /> : null}</MenuGroup></> : null}
+    </>
+  );
+}
+
+function DiagnosticRow({ th, isAr, label, value, last = false }) {
+  return <View style={[s.diagnosticRow, { borderBottomColor: last ? 'transparent' : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}><Text style={[s.diagnosticLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{label}</Text><Text style={[s.diagnosticValue, { color: th.text }]}>{value}</Text></View>;
+}
+
+function AboutPage({ th, isAr, T }) {
+  const version = process.env.EXPO_PUBLIC_MYFI_VERSION || '1.0.0';
+  const privacyUrl = process.env.EXPO_PUBLIC_MYFI_PRIVACY_URL || '';
+  const termsUrl = process.env.EXPO_PUBLIC_MYFI_TERMS_URL || '';
+  const platform = Platform.OS === 'ios' ? 'iOS' : Platform.OS === 'android' ? 'Android' : Platform.OS;
+  return (
+    <>
+      <View style={[s.aboutHero, { backgroundColor: th.card, borderColor: th.border }]}>
+        <View style={[s.aboutLogo, { backgroundColor: th.primSoft }]}><Ionicons name="layers" size={32} color={th.primary} /></View>
+        <Text style={[s.aboutBrand, { color: th.text }]}>MYFI</Text>
+        <Text style={[s.aboutTagline, { color: th.sub }]}>{T.aboutTagline}</Text>
+        <View style={[s.versionPill, { backgroundColor: th.cardHigh }]}><Text style={[s.versionPillText, { color: th.sub }]}>{T.versionLabel} {version} · {platform}</Text></View>
+      </View>
+      <View style={[s.aboutStatement, { backgroundColor: th.card, borderColor: th.border }]}><Text style={[s.aboutStatementTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'لماذا MYFI؟' : 'Why MYFI?'}</Text><Text style={[s.aboutPurpose, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.aboutPurpose}</Text></View>
+      <SectionLabel th={th} isAr={isAr} text={isAr ? 'مبادئ المنتج' : 'Product principles'} />
+      <MenuGroup th={th}>
+        <MenuRow th={th} isAr={isAr} icon="phone-portrait-outline" title={T.localFirstPrinciple} subtitle={T.localFirstPrincipleSub} />
+        <MenuRow th={th} isAr={isAr} icon="cloud-outline" title={T.cloudPrinciple} subtitle={T.cloudPrincipleSub} />
+        <MenuRow th={th} isAr={isAr} icon="language-outline" title={T.bilingualPrinciple} subtitle={T.bilingualPrincipleSub} last />
+      </MenuGroup>
+      {(privacyUrl || termsUrl) ? <><SectionLabel th={th} isAr={isAr} text={T.legal} /><MenuGroup th={th}>{privacyUrl ? <MenuRow th={th} isAr={isAr} icon="document-lock-outline" title={T.privacy} subtitle={isAr ? 'كيف يتعامل MYFI مع بياناتك وخصوصيتك.' : 'How MYFI handles your data and privacy.'} onPress={() => openExternal(privacyUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last={!termsUrl} /> : null}{termsUrl ? <MenuRow th={th} isAr={isAr} icon="document-text-outline" title={T.termsOfUse} subtitle={isAr ? 'شروط استخدام التطبيق والخدمات المرتبطة.' : 'Terms for using the app and connected services.'} onPress={() => openExternal(termsUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last /> : null}</MenuGroup></> : null}
+      <Text style={[s.aboutFooter, { color: th.faint }]}>{isAr ? 'MYFI · إدارة مالية أوضح بدون تعقيد غير ضروري' : 'MYFI · Clearer money management without unnecessary complexity'}</Text>
+    </>
+  );
+}
+
+function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview, onArchive, onExport, onPickImport, onRestore, onClearImport, onReset, cfg, testDataBusy, onActivateTestTier, onExitTestData, dataHealth, onRefreshDataHealth, financialLedgerV7Cutover, financialMutationSync }) {
+  const activeTier = cfg?.demoMode ? String(cfg?.performanceTestTier || '') : '';
+  return (
+    <>
+      {__DEV__ ? (
+        <>
+          <SectionLabel th={th} isAr={isAr} text={isAr ? 'مختبر بيانات الأداء' : 'Performance data lab'} />
+          <View style={[s.testLabCard, { backgroundColor: th.card, borderColor: cfg?.demoMode ? th.warn : th.border }]}>
+            <View style={[s.testLabHead, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+              <View style={[s.testLabIcon, { backgroundColor: cfg?.demoMode ? th.warnBg : th.primSoft }]}>
+                <Ionicons name="flask-outline" size={20} color={cfg?.demoMode ? th.warn : th.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.testLabTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'بيانات ضخمة منفصلة للاختبار' : 'Isolated large test data'}</Text>
+                <Text style={[s.testLabSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'لا تختلط ببياناتك الحقيقية، لا تُرفع للسحابة، ويمكن حذفها بالكامل بعد انتهاء الاختبار.' : 'Never mixes with your real data, never syncs to cloud, and can be removed completely after testing.'}</Text>
+              </View>
+            </View>
+            <View style={[s.testTierGrid, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+              {PERFORMANCE_TEST_TIERS.map(tier => {
+                const active = activeTier === tier.id;
+                return (
+                  <TouchableOpacity
+                    key={tier.id}
+                    disabled={testDataBusy}
+                    onPress={() => onActivateTestTier(tier)}
+                    style={[s.testTierButton, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : th.border, opacity: testDataBusy ? 0.6 : 1 }]}
+                  >
+                    <Text style={[s.testTierCount, { color: active ? th.primary : th.text }]}>{Number(tier.transactions).toLocaleString('en-US')}</Text>
+                    <Text style={[s.testTierLabel, { color: th.sub }]}>{isAr ? tier.labelAr : tier.labelEn}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[s.testLabFoot, { color: th.faint, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'المستويات: 200 · 1,000 · 5,000 · 10,000 · 25,000 · 50,000 حركة. كل مستوى موزع على أكثر من سنة، وأقصاها 8 سنوات، وبأنماط ثابتة وليست عشوائية.' : 'Tiers: 200 · 1,000 · 5,000 · 10,000 · 25,000 · 50,000 transactions. Every tier spans more than one year, up to 8 years, and remains deterministic rather than random.'}</Text>
+            {cfg?.demoMode ? (
+              <TouchableOpacity disabled={testDataBusy} onPress={onExitTestData} style={[s.testExitButton, { backgroundColor: th.warnBg, borderColor: th.warn, opacity: testDataBusy ? 0.6 : 1 }]}>
+                <Ionicons name="return-down-back-outline" size={17} color={th.warn} />
+                <Text style={{ color: th.warn, ...weight('900') }}>{testDataBusy ? '…' : (isAr ? 'العودة إلى بياناتي الحقيقية' : 'Return to my real data')}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </>
+      ) : null}
+
+      <SectionLabel th={th} isAr={isAr} text={T.localData} />
+      <View style={[s.dataSummary, { backgroundColor: th.card, borderColor: th.border }]}>
+        <View style={[s.metricRow, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+          <MiniMetric th={th} label={T.transactions} value={String(cfg?.demoMode ? Number(cfg?.performanceTestTransactions || counts.transactions) : counts.transactions)} />
+          <MiniMetric th={th} label={T.wallets} value={String(counts.wallets)} />
+          <MiniMetric th={th} label={T.trackers} value={String(counts.trackers)} />
+        </View>
+      </View>
+      {!dataHealth?.ok ? (
+        <MenuGroup th={th}>
+          <MenuRow
+            th={th}
+            isAr={isAr}
+            icon="warning-outline"
+            iconColor={th.warn}
+            title={isAr ? 'تحتاج البيانات إلى فحص' : 'Data needs a check'}
+            subtitle={isAr ? 'أعد الفحص، وإذا استمرت الملاحظة احتفظ بنسخة احتياطية.' : 'Run the check again; keep a backup if the warning remains.'}
+            onPress={onRefreshDataHealth}
+            last
+          />
+        </MenuGroup>
+      ) : null}
+      {cfg?.demoMode ? (
+        <Text style={[s.testSafetyNote, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
+          {isAr
+            ? `نشط في الذاكرة الآن: ${Number(cfg?.performanceTestActiveTransactions || counts.transactions).toLocaleString('en-US')} · أرشيف SQLite: ${Number(cfg?.performanceTestArchivedTransactions || 0).toLocaleString('en-US')}`
+            : `Hot in memory now: ${Number(cfg?.performanceTestActiveTransactions || counts.transactions).toLocaleString('en-US')} · SQLite archive: ${Number(cfg?.performanceTestArchivedTransactions || 0).toLocaleString('en-US')}`}
+        </Text>
+      ) : null}
+
+      <SectionLabel th={th} isAr={isAr} text={T.backup} />
+      <MenuGroup th={th}>
+        <MenuRow th={th} isAr={isAr} icon="archive-outline" title={T.archive} subtitle={T.archiveSub} onPress={onArchive} last={!!cfg?.demoMode} />
+        <MenuRow th={th} isAr={isAr} icon="download-outline" title={T.exportBackup} subtitle={cfg?.demoMode ? (isAr ? 'متاح بعد العودة إلى بياناتك الحقيقية' : 'Available after returning to your real data') : T.exportBackupSub} onPress={cfg?.demoMode ? null : onExport} />
+        <MenuRow th={th} isAr={isAr} icon="cloud-upload-outline" title={T.importBackup} subtitle={cfg?.demoMode ? (isAr ? 'متاح بعد العودة إلى بياناتك الحقيقية' : 'Available after returning to your real data') : (isAr ? 'راجع النسخة ثم استعدها بأمان' : 'Review the backup, then restore it safely')} onPress={cfg?.demoMode ? null : onPickImport} last />
+      </MenuGroup>
+      {cfg?.demoMode ? <Text style={[s.testSafetyNote, { color: th.warn, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'التصدير والاستعادة معطلان أثناء بيانات الاختبار حتى لا تختلط ملفات الاختبار بنسخك الحقيقية.' : 'Export and restore are disabled while test data is active so test files cannot be confused with real backups.'}</Text> : null}
+
+      {importPackage ? (
+        <View style={[s.importCard, { backgroundColor: th.card, borderColor: importPreview?.valid ? th.primary : th.exp }]}>
+          <View style={[s.importHead, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+            <Ionicons name={importPreview?.valid ? 'checkmark-circle-outline' : 'alert-circle-outline'} size={20} color={importPreview?.valid ? th.primary : th.exp} />
+            <View style={{ flex: 1 }}>
+              <Text style={[s.importTitle, { color: importPreview?.valid ? th.primary : th.exp, textAlign: isAr ? 'right' : 'left' }]}>{importPreview?.valid ? T.backupReady : T.backupInvalid}</Text>
+              <Text style={[s.importFile, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]} numberOfLines={1}>{importPackage.name || 'MYFI backup'}</Text>
+            </View>
+          </View>
+          <View style={[s.editorActions, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+            <TouchableOpacity disabled={!importPreview?.valid || fileBusy} onPress={onRestore} style={[s.primaryAction, { backgroundColor: importPreview?.valid ? th.primary : th.cardHigh, opacity: importPreview?.valid ? 1 : 0.6 }]}><Text style={{ color: importPreview?.valid ? th.onPrimary : th.sub, ...weight('900') }}>{fileBusy ? '…' : (isAr ? 'استعادة النسخة الآن' : 'Restore backup now')}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={onClearImport} style={[s.secondaryAction, { backgroundColor: th.cardHigh }]}><Text style={{ color: th.text, ...weight('900') }}>{T.cancel}</Text></TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+
+      {!cfg?.demoMode ? (
+        <>
+          <SectionLabel th={th} isAr={isAr} text={isAr ? 'منطقة حساسة' : 'Sensitive area'} />
+          <MenuGroup th={th}>
+            <MenuRow th={th} isAr={isAr} icon="trash-outline" iconColor={th.exp} title={T.deleteLocal} subtitle={T.deleteLocalSub} danger onPress={onReset} last />
+          </MenuGroup>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function SecurityPage({ th, isAr, T, cfg, setCfg, onToggleBio }) {
+  const delay = Number(cfg.lockDelaySeconds ?? 300);
+  const delayLabel = delay === 0 ? T.immediately : delay === 60 ? T.oneMinute : delay === 900 ? T.fifteenMinutes : T.fiveMinutes;
+  return (
+    <>
+      <View style={[s.securityHero, { backgroundColor: th.card, borderColor: th.border }]}>
+        <View style={[s.largeIcon, { backgroundColor: th.primSoft }]}><Ionicons name="shield-checkmark-outline" size={26} color={th.primary} /></View>
+        <Text style={[s.securityHeroTitle, { color: th.text }]}>{T.securityTitle}</Text>
+        <Text style={[s.securityHeroSub, { color: th.sub }]}>{T.privacyNote}</Text>
+      </View>
+
+      <SectionLabel th={th} isAr={isAr} text={T.securityTitle} />
+      <MenuGroup th={th}>
+        <SwitchRow th={th} isAr={isAr} icon="eye-off-outline" title={isAr ? 'إخفاء الأرصدة في الرئيسية' : 'Hide Home balances'} subtitle={isAr ? 'تبقى الأرقام مخفية حتى تضغط إظهار.' : 'Balances stay hidden until you tap Show.'} value={!!cfg.homeBalancesHidden} onValueChange={value => setCfg({ homeBalancesHidden: value })} />
+        <SwitchRow th={th} isAr={isAr} icon="notifications-off-outline" title={isAr ? 'إخفاء تفاصيل الإشعارات' : 'Hide notification details'} subtitle={isAr ? 'يظهر تنبيه عام على شاشة القفل من دون مبالغ أو أسماء.' : 'Lock-screen alerts omit amounts and names.'} value={cfg.hideNotificationDetails !== false} onValueChange={value => setCfg({ hideNotificationDetails: value })} />
+        <SwitchRow th={th} isAr={isAr} icon="finger-print-outline" title={T.appLock} subtitle={T.appLockSub} value={!!cfg.bioLock} onValueChange={onToggleBio} last={!cfg.bioLock} />
+        {cfg.bioLock ? (
+          <View style={[s.lockOptions, { borderTopColor: th.border }]}>
+            <Text style={[s.lockLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.relock}</Text>
+            <View style={[s.delayWrap, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+              {[0, 60, 300, 900].map(value => {
+                const active = delay === value;
+                const label = value === 0 ? T.immediately : value === 60 ? T.oneMinute : value === 300 ? T.fiveMinutes : T.fifteenMinutes;
+                return (
+                  <TouchableOpacity key={value} onPress={() => setCfg({ lockDelaySeconds: value })} style={[s.delayChip, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : th.border }]}>
+                    <Text style={{ color: active ? th.primary : th.sub, fontSize: 11, ...weight('900') }}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[s.lockValue, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>{delayLabel}</Text>
+          </View>
+        ) : null}
+      </MenuGroup>
+    </>
+  );
+}
+
+function AuthModal({
+  visible, onClose, th, isAr, T, authMode, setAuthMode, loading,
+  nameDraft, setNameDraft, profileName,
+  email, setEmail, password, setPassword, passwordVisible, setPasswordVisible,
+  agreement, setAgreement, onSubmit, onReset,
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>
+          <View style={s.sheetHandleWrap}><View style={[s.sheetHandle, { backgroundColor: th.cardHigh }]} /></View>
+          <View style={[s.sheetTitleRow, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+            <View style={[s.sheetIcon, { backgroundColor: th.primSoft }]}><Ionicons name="person-circle-outline" size={20} color={th.primary} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.sheetTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.signInTitle}</Text>
+              <Text style={[s.sheetSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.signInSub}</Text>
+            </View>
+          </View>
+          <View style={[s.authTabs, { backgroundColor: th.cardHigh }]}>
+            {['signin', 'signup'].map(mode => {
+              const active = authMode === mode;
+              return <TouchableOpacity key={mode} onPress={() => setAuthMode(mode)} style={[s.authTab, { backgroundColor: active ? th.card : 'transparent' }]}><Text style={{ color: active ? th.primary : th.sub, ...weight('900') }}>{mode === 'signin' ? T.signIn : T.signUp}</Text></TouchableOpacity>;
+            })}
+          </View>
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 4 }}>
+            <Text style={[s.authContextText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
+              {authMode === 'signup' ? T.signUpProfileHint : T.signInProfileHint}
+            </Text>
+            {authMode === 'signup' && !profileName ? (
+              <TextInput value={nameDraft} onChangeText={setNameDraft} placeholder={T.namePlaceholder} placeholderTextColor={th.faint} style={[s.input, { backgroundColor: th.input, borderColor: th.border, color: th.text, textAlign: isAr ? 'right' : 'left' }]} />
+            ) : null}
+            <TextInput value={email} onChangeText={setEmail} placeholder={T.email} placeholderTextColor={th.faint} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} style={[s.input, { backgroundColor: th.input, borderColor: th.border, color: th.text, textAlign: 'left', writingDirection: 'ltr' }]} />
+            <View style={[s.passwordField, { backgroundColor: th.input, borderColor: th.border }]}>
+              <TextInput value={password} onChangeText={setPassword} placeholder={T.password} placeholderTextColor={th.faint} secureTextEntry={!passwordVisible} autoCapitalize="none" autoCorrect={false} style={[s.passwordInput, { color: th.text }]} />
+              <TouchableOpacity onPress={() => setPasswordVisible(!passwordVisible)} style={s.eyeButton}><Ionicons name={passwordVisible ? 'eye-off-outline' : 'eye-outline'} size={19} color={th.sub} /></TouchableOpacity>
+            </View>
+            {authMode === 'signup' ? (
+              <TouchableOpacity onPress={() => setAgreement(!agreement)} style={[s.termsRow, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+                <Ionicons name={agreement ? 'checkbox' : 'square-outline'} size={20} color={agreement ? th.primary : th.sub} />
+                <Text style={[s.termsText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.terms}</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity onPress={onSubmit} disabled={loading} style={[s.primaryWide, { backgroundColor: th.primary, opacity: loading ? 0.6 : 1 }]}><Text style={{ color: th.onPrimary, ...weight('900') }}>{loading ? '…' : authMode === 'signin' ? T.signIn : T.signUp}</Text></TouchableOpacity>
+            {authMode === 'signin' ? <TouchableOpacity onPress={onReset} disabled={loading} style={s.forgotBtn}><Text style={{ color: th.primary, ...weight('900') }}>{T.forgotPassword}</Text></TouchableOpacity> : null}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function BackupExportSheet({
+  visible,
+  step,
+  th,
+  isAr,
+  T,
+  delivery,
+  busy,
+  onClose,
+  onSelectDelivery,
+  onPlain,
+  onEncrypted,
+}) {
+  const isProtection = step === 'protection';
+  const saveMode = delivery === 'save';
+  const title = isProtection
+    ? T.protectBackup
+    : T.exportBackup;
+  const subtitle = isProtection
+    ? (isAr
+        ? 'اختر مستوى حماية الملف قبل إنشاء النسخة. الملف يبقى منطقي وقابل للاستعادة حتى لو تغيّر شكل قاعدة البيانات لاحقاً.'
+        : 'Choose how this file is protected before MYFI creates the backup. The logical format stays restorable across future database changes.')
+    : (isAr
+        ? 'احفظ نسخة ZIP باسم MYFI داخل الهاتف أو شاركها مع مكان آمن. بياناتك لا تُرسل لأي جهة أثناء الحفظ المحلي.'
+        : 'Save a MYFI ZIP backup on this phone or share it to a safe place. Local saving does not upload your data.');
+  const systemNote = isProtection && saveMode
+    ? (isAr
+        ? 'بعد هذه الخطوة سيطلب Android اختيار مجلد والسماح بالحفظ. هذه نافذة نظامية ولا يمكن تغيير شكلها.'
+        : 'Next, Android will ask you to choose a folder and allow access. That system screen cannot be styled by MYFI.')
+    : null;
+  const direction = isAr ? 'row-reverse' : 'row';
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[s.exportSheet, { backgroundColor: th.card, borderColor: th.border }]}>
+          <View style={s.sheetHandleWrap}><View style={[s.sheetHandle, { backgroundColor: th.border }]} /></View>
+          <View style={[s.exportHero, { backgroundColor: th.primSoft, borderColor: th.border }]}>
+            <View style={[s.exportHeroIcon, { backgroundColor: th.primary }]}>
+              <Ionicons name={isProtection ? 'shield-checkmark-outline' : 'folder-open-outline'} size={24} color={th.onPrimary} />
+            </View>
+            <Text style={[s.exportTitle, { color: th.text, textAlign: 'center' }]}>{title}</Text>
+            <Text style={[s.exportSub, { color: th.sub, textAlign: 'center' }]}>{subtitle}</Text>
+          </View>
+
+          {systemNote ? (
+            <View style={[s.exportNotice, { borderColor: th.border, backgroundColor: th.cardHigh, flexDirection: direction }]}>
+              <Ionicons name="phone-portrait-outline" size={18} color={th.primary} />
+              <Text style={[s.exportNoticeText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{systemNote}</Text>
+            </View>
+          ) : null}
+
+          {isProtection ? (
+            <View style={s.exportActions}>
+              <TouchableOpacity onPress={onEncrypted} disabled={busy} style={[s.exportOption, { borderColor: th.primary, backgroundColor: th.primSoft, flexDirection: direction, opacity: busy ? 0.6 : 1 }]}>
+                <Ionicons name="lock-closed-outline" size={20} color={th.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.exportOptionTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.encrypted}</Text>
+                  <Text style={[s.exportOptionSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'أفضل للملفات التي ستنقلها أو تحفظها خارج الهاتف.' : 'Best when you will move or store the file outside this phone.'}</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onPlain} disabled={busy} style={[s.exportOption, { borderColor: th.border, backgroundColor: th.cardHigh, flexDirection: direction, opacity: busy ? 0.6 : 1 }]}>
+                <Ionicons name="document-outline" size={20} color={th.sub} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.exportOptionTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.unencrypted}</Text>
+                  <Text style={[s.exportOptionSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'مناسب لاختبار سريع أو حفظ محلي داخل مجلد آمن.' : 'Fine for a quick test or local saving in a safe folder.'}</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={s.exportActions}>
+              <TouchableOpacity onPress={() => onSelectDelivery('save')} disabled={busy} style={[s.exportOption, { borderColor: th.primary, backgroundColor: th.primSoft, flexDirection: direction, opacity: busy ? 0.6 : 1 }]}>
+                <Ionicons name="phone-portrait-outline" size={20} color={th.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.exportOptionTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'حفظ في الهاتف' : 'Save to phone'}</Text>
+                  <Text style={[s.exportOptionSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'ينشئ ملف MYFI داخل مجلد تختاره أنت.' : 'Create the MYFI file in a folder you choose.'}</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => onSelectDelivery('share')} disabled={busy} style={[s.exportOption, { borderColor: th.border, backgroundColor: th.cardHigh, flexDirection: direction, opacity: busy ? 0.6 : 1 }]}>
+                <Ionicons name="share-social-outline" size={20} color={th.sub} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.exportOptionTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'مشاركة' : 'Share'}</Text>
+                  <Text style={[s.exportOptionSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'أرسل النسخة إلى تطبيق أو مساحة تخزين تختارها.' : 'Send the backup to an app or storage location you choose.'}</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <TouchableOpacity onPress={onClose} disabled={busy} style={[s.exportCancel, { borderColor: th.border }]}>
+            <Text style={{ color: th.sub, ...weight('900') }}>{T.cancel}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function PasswordModal({ visible, th, isAr, T, mode, value, setValue, busy, onClose, onSubmit }) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[s.passwordSheet, { backgroundColor: th.card, borderColor: th.border }]}>
+          <Text style={[s.sheetTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{mode === 'export' ? T.encrypted : T.importBackup}</Text>
+          <TextInput value={value} onChangeText={setValue} secureTextEntry placeholder={T.password} placeholderTextColor={th.faint} style={[s.input, { backgroundColor: th.input, borderColor: th.border, color: th.text, textAlign: 'left', writingDirection: 'ltr' }]} />
+          <TouchableOpacity onPress={onSubmit} disabled={busy} style={[s.primaryWide, { backgroundColor: th.primary, opacity: busy ? 0.6 : 1 }]}><Text style={{ color: th.onPrimary, ...weight('900') }}>{busy ? '…' : mode === 'export' ? T.exportBackup : T.chooseFile}</Text></TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function PageHeader({ th, isAr, title, onBack }) {
+  return (
+    <View style={[s.pageHeader, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+      <TouchableOpacity onPress={onBack} style={[s.backButton, { backgroundColor: th.cardHigh }]}><Ionicons name={isAr ? 'arrow-forward' : 'arrow-back'} size={20} color={th.text} /></TouchableOpacity>
+      <Text style={[s.pageTitle, { color: th.text, textAlign: 'center' }]} numberOfLines={1}>{title}</Text>
+      <View style={s.headerSpacer} />
     </View>
   );
 }
 
-function FormattedNumberField({ initialValue, onCommit, th, style }) {
-  const [value, setValue] = useState(() => formatNumberInput(String(initialValue || '')));
-
-  useEffect(() => {
-    setValue(formatNumberInput(String(initialValue || '')));
-  }, [initialValue]);
-
+function Avatar({ th, cfg, initial, size = 58 }) {
   return (
-    <TextInput
-      value={value}
-      onChangeText={(next) => setValue(formatNumberInput(next))}
-      onEndEditing={() => onCommit?.(parseNumberInput(value))}
-      keyboardType="numeric"
-      placeholder="0"
-      placeholderTextColor={th.sub}
-      style={style}
-    />
+    <View style={[s.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: th.primSoft }]}>
+      {cfg.avatarUri ? <Image source={{ uri: cfg.avatarUri }} style={{ width: size, height: size, borderRadius: size / 2 }} /> : <Text style={{ color: th.primary, fontSize: size * 0.32, ...weight('900') }}>{initial}</Text>}
+    </View>
+  );
+}
+
+function SectionLabel({ th, isAr, text }) {
+  return <Text style={[s.sectionLabel, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>{text}</Text>;
+}
+
+function MenuGroup({ th, children, style }) {
+  return <View style={[s.menuGroup, { backgroundColor: th.card, borderColor: th.border }, style]}>{children}</View>;
+}
+
+function MenuRow({ th, isAr, icon, iconColor, title, subtitle, value, onPress, danger = false, last = false }) {
+  const accent = iconColor || (danger ? th.exp : th.primary);
+  const body = (
+    <>
+      <View style={[s.rowIcon, { backgroundColor: danger ? th.expBg : th.primSoft }]}><Ionicons name={icon} size={18} color={accent} /></View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.rowTitle, { color: danger ? th.exp : th.text, textAlign: isAr ? 'right' : 'left' }]}>{title}</Text>
+        {subtitle ? <Text style={[s.rowSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]} numberOfLines={2}>{subtitle}</Text> : null}
+      </View>
+      {value ? <Text style={[s.rowValue, { color: th.sub, textAlign: isAr ? 'left' : 'right' }]} numberOfLines={1}>{value}</Text> : null}
+      {onPress ? <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={17} color={th.faint} /> : null}
+    </>
+  );
+  const rowStyle = [s.menuRow, { borderBottomColor: last ? 'transparent' : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }];
+  return onPress ? <TouchableOpacity onPress={onPress} activeOpacity={0.72} style={rowStyle}>{body}</TouchableOpacity> : <View style={rowStyle}>{body}</View>;
+}
+
+function SwitchRow({ th, isAr, icon, title, subtitle, value, onValueChange, last = false }) {
+  return (
+    <View style={[s.menuRow, { borderBottomColor: last ? 'transparent' : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+      <View style={[s.rowIcon, { backgroundColor: th.primSoft }]}><Ionicons name={icon} size={18} color={th.primary} /></View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.rowTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{title}</Text>
+        {subtitle ? <Text style={[s.rowSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]} numberOfLines={2}>{subtitle}</Text> : null}
+      </View>
+      <Switch value={!!value} onValueChange={onValueChange} trackColor={{ true: th.primary, false: th.cardHigh }} />
+    </View>
+  );
+}
+
+function InfoRow({ th, isAr, title, value, ltr = false, last = false }) {
+  return (
+    <View style={[s.infoRow, { borderBottomColor: last ? 'transparent' : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+      <Text style={[s.infoLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{title}</Text>
+      <Text numberOfLines={2} style={[s.infoValue, { color: th.text, textAlign: ltr ? 'left' : (isAr ? 'left' : 'right'), writingDirection: ltr ? 'ltr' : undefined }]}>{value}</Text>
+    </View>
+  );
+}
+
+function MiniMetric({ th, label, value }) {
+  return (
+    <View style={[s.metricBox, { backgroundColor: th.cardHigh }]}>
+      <Text style={[s.metricValue, { color: th.text }]}>{value}</Text>
+      <Text style={[s.metricLabel, { color: th.sub }]} numberOfLines={1}>{label}</Text>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  settingsHead: { marginBottom: 16, gap: 9 },
-  settingsTitle: { fontSize: 24, lineHeight: 31, ...weight('900') },
-  headerMeta: { alignItems: 'center', marginBottom: 18, gap: 12 },
-  profileBlock: { padding: 14, gap: 14 },
-  focusLabel: { fontSize: 14, lineHeight: 20, ...weight('900') },
-  profileChoiceList: { gap: 8 },
-  profileChoice: { minHeight: 52, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, paddingHorizontal: 11, paddingVertical: 9 },
-  profileChoiceLabel: { flex: 1, minWidth: 0, fontSize: 13, lineHeight: 19, ...weight('800') },
-  profileEffect: { fontSize: 11, lineHeight: 18, ...weight('700') },
-  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  radioInner: { width: 10, height: 10, borderRadius: 5 },
-  header: { alignItems: 'center', marginBottom: 18, gap: 12 },
-  title: { fontSize: TYPE.title, lineHeight: 31, ...weight('900') },
-  subtitle: { fontSize: 12, lineHeight: 17, ...weight('700'), marginTop: 2 },
-  statusPill: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 10 },
-  statusNote: { minHeight: 42, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
-  accountOverview: { minHeight: 72, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 10, marginBottom: 10, ...SHADOW.subtle },
-  accountOverviewAvatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' },
-  accountOverviewStatus: { width: 11, height: 11, borderRadius: 6, borderWidth: 2, position: 'absolute', bottom: -1, right: -1 },
-  accountCard: { borderRadius: RADIUS.lg, borderWidth: 1, padding: 12, gap: 10 },
-  accountCardHead: { alignItems: 'center', gap: 10 },
-  accountAvatar: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  avatarPicker: { minHeight: 72, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10 },
-  accountAvatarLarge: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  accountAvatarImage: { width: '100%', height: '100%' },
-  accountName: { fontSize: 15, lineHeight: 21, ...weight('900') },
-  accountEmail: { fontSize: 12, lineHeight: 17, ...weight('700'), marginTop: 2 },
-  accountSyncRow: { minHeight: 36, alignItems: 'center', gap: 8, borderRadius: RADIUS.md, paddingHorizontal: 10, paddingVertical: 8 },
-  accountIdentityGrid: { borderTopWidth: 1, paddingTop: 10, gap: 8 },
-  termsRow: { alignItems: 'center', gap: 8, paddingVertical: 6 },
-  section: { marginBottom: 10 },
-  sectionToggle: { minHeight: 52, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 14, marginBottom: 7, ...SHADOW.subtle },
-  sectionMark: { width: 4, height: 16, borderRadius: 4 },
-  sectionTitle: { flex: 1, fontSize: 13, lineHeight: 18, ...weight('900') },
-  group: { borderRadius: RADIUS.xl, borderWidth: 1, overflow: 'hidden', ...SHADOW.card },
-  row: { minHeight: 56, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, gap: 10, borderBottomWidth: 1 },
-  rowLabel: { flex: 1, fontSize: 14, lineHeight: 20, ...weight('800') },
-  trailing: { alignItems: 'center', gap: 8, flexShrink: 1 },
-  segmented: { flexDirection: 'row', borderRadius: RADIUS.md, padding: 4, gap: 3, flexShrink: 1, maxWidth: '100%' },
-  segmentBtn: { flex: 1, minHeight: 44, paddingHorizontal: 8, paddingVertical: 8, borderRadius: 12, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
-  expanded: { padding: 14, gap: 10, borderTopWidth: 1 },
-  expandedSeparated: { borderBottomWidth: 1 },
-  categoryRow: { borderRadius: RADIUS.md, padding: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  categoryInfo: { alignItems: 'center', gap: 8, flex: 1 },
-  categoryIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  categoryFlowBadge: { minHeight: 22, borderRadius: 11, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
-  categoryFlowPicker: { borderRadius: RADIUS.md, padding: 4, gap: 4, marginBottom: 10 },
-  categoryFlowOption: { flex: 1, minHeight: 42, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 },
-  categoryTools: { alignItems: 'center', gap: 5 },
-  reorderBtn: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  countryChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS.md, borderWidth: 1 },
-  moduleRow: { alignItems: 'center', justifyContent: 'space-between', gap: 10, borderRadius: RADIUS.md, paddingHorizontal: 11, paddingVertical: 9 },
-  moduleInfo: { alignItems: 'center', gap: 9, flex: 1 },
-  moduleIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  sheetGroupTitle: { fontSize: 12, lineHeight: 18, ...weight('900'), marginTop: 3 },
-  homeTools: { alignItems: 'center', gap: 4, flexShrink: 0 },
-  homeMoveBtn: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  infoLine: { alignItems: 'center', gap: 8, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10 },
-  importActions: { gap: 8 },
-  importActionBtn: { flex: 1, minHeight: 42, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 7 },
-  previewCard: { borderRadius: RADIUS.lg, borderWidth: 1, padding: 12, gap: 9 },
-  previewHead: { alignItems: 'center', gap: 8 },
-  previewGrid: { flexWrap: 'wrap', gap: 7 },
-  previewStat: { width: '31.5%', minHeight: 58, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, paddingVertical: 8 },
-  addPrompt: { padding: 13, borderTopWidth: 1 },
-  addPromptButton: { minHeight: 48, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10 },
-  addPromptIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  walletRow: { alignItems: 'center', gap: 10, minHeight: 62, paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: 1 },
-  detailLine: { alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 34 },
-  walletIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  input: { minHeight: 48, borderRadius: RADIUS.md, paddingHorizontal: 13, paddingVertical: 10, borderWidth: 1, fontSize: 14, lineHeight: 19, ...weight('700') },
-  passwordField: { minHeight: 48, borderRadius: RADIUS.md, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
-  passwordInput: { flex: 1, paddingHorizontal: 13, paddingVertical: 10, fontSize: 14, lineHeight: 19, ...weight('700') },
-  eyeButton: { width: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
-  textArea: { minHeight: 92, textAlignVertical: 'top' },
-  miniLabel: { fontSize: 12, lineHeight: 18, ...weight('900') },
-  iconRail: { gap: 8 },
-  choiceChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: RADIUS.md, borderWidth: 1 },
-  iconPick: { width: 40, height: 40, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  colorGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  colorPick: { width: 28, height: 28, borderRadius: 14, borderWidth: 2 },
-  primaryButton: { minHeight: 48, borderRadius: RADIUS.md, padding: 13, alignItems: 'center', justifyContent: 'center' },
-  secondaryButton: { minHeight: 48, borderRadius: RADIUS.md, padding: 13, alignItems: 'center', justifyContent: 'center' },
-  stepper: { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.md, paddingHorizontal: 4, paddingVertical: 3 },
-  stepButton: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+  scrollContent: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 96 },
+  financialInlineWrap: { marginTop: 14 },
+  supportHero: { borderRadius: 22, borderWidth: 1, paddingHorizontal: 18, paddingVertical: 22, alignItems: 'center' },
+  supportHeroIcon: { width: 62, height: 62, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  supportHeroTitle: { fontSize: 20, lineHeight: 28, ...weight('900'), marginTop: 12 },
+  supportHeroText: { fontSize: 11, lineHeight: 18, ...weight('700'), textAlign: 'center', maxWidth: 330, marginTop: 6 },
+  aboutHero: { borderRadius: 24, borderWidth: 1, paddingHorizontal: 18, paddingVertical: 24, alignItems: 'center' },
+  aboutLogo: { width: 68, height: 68, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  aboutBrand: { fontSize: 25, lineHeight: 34, ...weight('900'), marginTop: 11 },
+  aboutTagline: { fontSize: 11, lineHeight: 18, ...weight('700'), textAlign: 'center', maxWidth: 330, marginTop: 4 },
+  versionPill: { minHeight: 28, borderRadius: 14, paddingHorizontal: 11, alignItems: 'center', justifyContent: 'center', marginTop: 11 },
+  versionPillText: { fontSize: 10, lineHeight: 15, ...weight('900') },
+  aboutPurpose: { fontSize: 12, lineHeight: 20, ...weight('700'), marginTop: 14, paddingHorizontal: 4 },
+  rootHead: { marginBottom: 16 },
+  brandEyebrow: { fontSize: 12, lineHeight: 18, letterSpacing: 1.2, ...weight('900') },
+  rootTitle: { fontSize: 26, lineHeight: 35, ...weight('900'), marginTop: 2 },
+  pageHeader: { minHeight: 54, alignItems: 'center', gap: 11, marginBottom: 14 },
+  backButton: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  pageTitle: { flex: 1, fontSize: 22, lineHeight: 31, ...weight('900'), textAlign: 'center' },
+  headerSpacer: { width: 40 },
+  advancedMenuWrap: { paddingHorizontal: 16, paddingTop: 4 },
+  accountCard: { minHeight: 92, borderRadius: 20, borderWidth: 1, padding: 14, alignItems: 'center', gap: 12 },
+  avatar: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
+  accountCardName: { fontSize: 15, lineHeight: 21, ...weight('900') },
+  accountCardEmail: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 2 },
+  syncInline: { alignItems: 'center', gap: 5, marginTop: 5 },
+  syncInlineText: { fontSize: 10, lineHeight: 15, ...weight('900') },
+  sectionLabel: { fontSize: 12, lineHeight: 18, ...weight('900'), marginTop: 22, marginBottom: 7, paddingHorizontal: 4 },
+  menuGroup: { borderRadius: 18, borderWidth: 1, overflow: 'hidden' },
+  menuRow: { minHeight: 66, borderBottomWidth: 1, alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 10 },
+  rowIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  rowTitle: { fontSize: 13, lineHeight: 18, ...weight('900') },
+  rowSub: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  rowValue: { maxWidth: 115, fontSize: 11, lineHeight: 16, ...weight('800') },
+  version: { fontSize: 10, lineHeight: 16, textAlign: 'center', marginTop: 24 },
+  profileHero: { alignItems: 'center', paddingVertical: 8, marginBottom: 8 },
+  profileAvatarWrap: { position: 'relative' },
+  cameraButton: { width: 30, height: 30, borderRadius: 15, borderWidth: 3, alignItems: 'center', justifyContent: 'center', position: 'absolute', right: -2, bottom: -2 },
+  profileName: { fontSize: 20, lineHeight: 28, ...weight('900'), marginTop: 11 },
+  profileMeta: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 1, writingDirection: 'ltr' },
+  accountStatusPill: { minHeight: 28, borderRadius: 14, borderWidth: 1, paddingHorizontal: 10, marginTop: 8, alignItems: 'center', gap: 6 },
+  accountStatusDot: { width: 6, height: 6, borderRadius: 3 },
+  accountStatusText: { fontSize: 10, lineHeight: 14, ...weight('900') },
+  connectAccountCard: { minHeight: 78, borderRadius: 18, borderWidth: 1, paddingHorizontal: 13, paddingVertical: 12, alignItems: 'center', gap: 10, marginBottom: 4 },
+  connectAccountTitle: { fontSize: 13, lineHeight: 18, ...weight('900') },
+  connectAccountSub: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  profileId: { fontSize: 10, lineHeight: 15, ...weight('800'), marginTop: 1, writingDirection: 'ltr' },
+  editPill: { minHeight: 34, borderRadius: 17, paddingHorizontal: 12, marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  editorCard: { borderRadius: 18, borderWidth: 1, padding: 13, gap: 10, marginBottom: 2 },
+  input: { minHeight: 50, borderRadius: 13, borderWidth: 1, paddingHorizontal: 13, paddingVertical: 10, fontSize: 13, lineHeight: 19, ...weight('700') },
+  profileNameInput: { textAlign: 'center', fontSize: 15, ...weight('900') },
+  editorActions: { gap: 8 },
+  primaryAction: { flex: 1.35, minHeight: 44, borderRadius: 13, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+  secondaryAction: { flex: 1, minHeight: 44, borderRadius: 13, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+  photoActions: { gap: 8 },
+  textAction: { flex: 1, minHeight: 38, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  infoRow: { minHeight: 58, borderBottomWidth: 1, alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 14, paddingVertical: 10 },
+  infoLabel: { fontSize: 12, lineHeight: 18, ...weight('800'), flex: 0.8 },
+  infoValue: { fontSize: 12, lineHeight: 18, ...weight('900'), flex: 1.2 },
+  localCloudDivider: { marginTop: 14, borderRadius: 15, borderWidth: 1, padding: 12, alignItems: 'center', gap: 9 },
+  localCloudDividerText: { flex: 1, fontSize: 10, lineHeight: 17, ...weight('700') },
+  accountSectionNote: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 8, marginBottom: 16, paddingHorizontal: 4 },
+  cloudAccountCard: { borderRadius: 20, borderWidth: 1, padding: 14, gap: 12 },
+  cloudAccountHead: { alignItems: 'center', gap: 11 },
+  cloudAccountTitle: { fontSize: 14, lineHeight: 20, ...weight('900') },
+  cloudAccountEmail: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 2, textAlign: 'left', writingDirection: 'ltr' },
+  cloudAccountId: { fontSize: 9, lineHeight: 14, ...weight('700'), marginTop: 1, textAlign: 'left', writingDirection: 'ltr' },
+  cloudAccountNote: { fontSize: 10, lineHeight: 17, ...weight('700') },
+  cloudConnectButton: { minHeight: 46, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 12 },
+  cloudConnectButtonText: { fontSize: 12, lineHeight: 18, ...weight('900') },
+  deviceCard: { minHeight: 96, borderRadius: 18, borderWidth: 1, padding: 14, gap: 12, alignItems: 'center' },
+  deviceIcon: { width: 48, height: 48, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  deviceTitle: { fontSize: 14, lineHeight: 20, ...weight('900') },
+  deviceSub: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  liveDot: { width: 7, height: 7, borderRadius: 4 },
+  noticeCard: { borderRadius: 16, borderWidth: 1, padding: 13, gap: 9, alignItems: 'center' },
+  noticeText: { flex: 1, fontSize: 11, lineHeight: 18, ...weight('800') },
+  financialHero: { borderRadius: 20, borderWidth: 1, padding: 14, gap: 14 },
+  financialHeroTop: { alignItems: 'center', gap: 11 },
+  largeIcon: { width: 50, height: 50, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  financialTitle: { fontSize: 15, lineHeight: 21, ...weight('900') },
+  financialSub: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  metricRow: { gap: 8 },
+  metricBox: { flex: 1, minHeight: 66, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7 },
+  metricValue: { fontSize: 16, lineHeight: 23, ...weight('900') },
+  metricLabel: { fontSize: 9, lineHeight: 14, ...weight('800'), marginTop: 2, textAlign: 'center' },
+  testLabCard: { borderRadius: 20, borderWidth: 1, padding: 14, gap: 12 },
+  testLabHead: { alignItems: 'center', gap: 10 },
+  testLabIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  testLabTitle: { fontSize: 14, lineHeight: 20, ...weight('900') },
+  testLabSub: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  testTierGrid: { flexWrap: 'wrap', gap: 7 },
+  testTierButton: { minWidth: 88, flexGrow: 1, flexBasis: '30%', borderWidth: 1, borderRadius: 14, paddingHorizontal: 9, paddingVertical: 10, alignItems: 'center' },
+  testTierCount: { fontSize: 14, lineHeight: 19, ...weight('900') },
+  testTierLabel: { fontSize: 9, lineHeight: 14, ...weight('800'), marginTop: 1 },
+  testLabFoot: { fontSize: 9, lineHeight: 15, ...weight('700') },
+  testExitButton: { minHeight: 42, borderRadius: 13, borderWidth: 1, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 },
+  testSafetyNote: { fontSize: 10, lineHeight: 16, ...weight('800'), marginTop: 8, paddingHorizontal: 4 },
+  dataSummary: { borderRadius: 18, borderWidth: 1, padding: 12 },
+  importCard: { borderRadius: 18, borderWidth: 1, padding: 13, gap: 12, marginTop: 14 },
+  importHead: { gap: 9, alignItems: 'center' },
+  importTitle: { fontSize: 12, lineHeight: 18, ...weight('900') },
+  importFile: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  securityHero: { borderRadius: 20, borderWidth: 1, padding: 18, alignItems: 'center' },
+  securityHeroTitle: { fontSize: 17, lineHeight: 24, ...weight('900'), marginTop: 10, textAlign: 'center' },
+  securityHeroSub: { fontSize: 11, lineHeight: 18, ...weight('700'), marginTop: 5, textAlign: 'center', maxWidth: 310 },
+  lockOptions: { borderTopWidth: 1, padding: 13 },
+  lockLabel: { fontSize: 11, lineHeight: 17, ...weight('800'), marginBottom: 9 },
+  delayWrap: { flexWrap: 'wrap', gap: 7 },
+  delayChip: { minHeight: 36, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
+  lockValue: { fontSize: 10, lineHeight: 16, ...weight('900'), marginTop: 9 },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 12 },
-  sheet: { width: '100%', maxHeight: '88%', borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, padding: 14, gap: 10 },
-  sheetHeader: { alignItems: 'center', gap: 10, marginBottom: 2 },
-  sheetTitle: { flex: 1, fontSize: TYPE.title, lineHeight: 28, ...weight('900') },
-  sheetScroll: { gap: 10, paddingBottom: 2 },
-  pickerSearch: { minHeight: 46, alignItems: 'center', borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, marginBottom: 2 },
-  optionCard: { minHeight: 52, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10 },
-  systemChoice: { minHeight: 62, alignItems: 'center', gap: 10, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10 },
-  walletBalanceLine: { gap: 6, marginTop: 6 },
-  walletBalanceMetric: { flex: 1, minWidth: 0, borderRadius: RADIUS.md, paddingHorizontal: 7, paddingVertical: 5 },
-  walletBalanceLabel: { fontSize: 9, lineHeight: 13, ...weight('800'), textAlign: 'center' },
-  walletBalanceValue: { fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: 'center', marginTop: 1 },
+  sheet: { maxHeight: '86%', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, padding: 16, paddingBottom: 24, gap: 12 },
+  sheetHandleWrap: { alignItems: 'center', marginBottom: 2 },
+  sheetHandle: { width: 38, height: 4, borderRadius: 2 },
+  sheetTitleRow: { alignItems: 'center', gap: 10 },
+  sheetIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  sheetTitle: { fontSize: 17, lineHeight: 24, ...weight('900') },
+  sheetSub: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  authTabs: { minHeight: 46, borderRadius: 14, padding: 4, flexDirection: 'row', gap: 4 },
+  authTab: { flex: 1, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  passwordField: { minHeight: 50, borderRadius: 13, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
+  passwordInput: { flex: 1, paddingHorizontal: 13, paddingVertical: 10, fontSize: 13, lineHeight: 19, textAlign: 'left', writingDirection: 'ltr', ...weight('700') },
+  eyeButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  accountLinkNotice: { borderWidth: 1, borderRadius: 14, padding: 11, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  accountLinkName: { fontSize: 12, lineHeight: 17, ...weight('900'), marginBottom: 2 },
+  accountLinkHint: { fontSize: 10, lineHeight: 16, ...weight('700') },
+  authContextText: { fontSize: 10, lineHeight: 17, ...weight('700'), paddingHorizontal: 2, paddingVertical: 2 },
+  termsRow: { alignItems: 'center', gap: 8, paddingVertical: 3 },
+  termsText: { flex: 1, fontSize: 11, lineHeight: 17, ...weight('700') },
+  primaryWide: { minHeight: 48, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  forgotBtn: { minHeight: 40, alignItems: 'center', justifyContent: 'center' },
+  passwordSheet: { width: '100%', borderRadius: 22, borderWidth: 1, padding: 16, gap: 12, marginBottom: 24 },
+  exportSheet: { width: '100%', borderRadius: 24, borderWidth: 1, padding: 16, gap: 12, marginBottom: 24 },
+  exportHero: { borderRadius: 20, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 18, alignItems: 'center' },
+  exportHeroIcon: { width: 54, height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  exportTitle: { fontSize: 18, lineHeight: 25, ...weight('900'), marginTop: 10 },
+  exportSub: { fontSize: 11, lineHeight: 18, ...weight('700'), marginTop: 5, maxWidth: 330 },
+  exportNotice: { borderWidth: 1, borderRadius: 15, padding: 12, alignItems: 'center', gap: 9 },
+  exportNoticeText: { flex: 1, fontSize: 10, lineHeight: 16, ...weight('800') },
+  exportActions: { gap: 8 },
+  exportOption: { minHeight: 74, borderRadius: 16, borderWidth: 1, paddingHorizontal: 13, paddingVertical: 12, alignItems: 'center', gap: 10 },
+  exportOptionTitle: { fontSize: 13, lineHeight: 18, ...weight('900') },
+  exportOptionSub: { fontSize: 10, lineHeight: 15, ...weight('700'), marginTop: 2 },
+  exportCancel: { minHeight: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  supportNotice: { borderWidth: 1, borderRadius: RADIUS.lg, padding: 12, alignItems: 'flex-start', gap: 9, marginTop: 14 },
+  supportNoticeText: { flex: 1, fontSize: 11, lineHeight: 18, ...weight('700') },
+  guideHero: { borderWidth: 1, borderRadius: RADIUS.xl, padding: 18, alignItems: 'center', marginBottom: 18 },
+  guideCard: { borderWidth: 1, borderRadius: RADIUS.xl, padding: 14, marginBottom: 12 },
+  guideCardHead: { alignItems: 'center', gap: 10 },
+  guideCardTitle: { fontSize: 14, lineHeight: 20, ...weight('900') },
+  guideCardSub: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  guideSteps: { gap: 8, marginTop: 12 },
+  guideStep: { alignItems: 'center', gap: 9 },
+  guideStepNo: { width: 24, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  guideStepText: { flex: 1, fontSize: 11, lineHeight: 17, ...weight('700') },
+  guideLink: { minHeight: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginTop: 13 },
+  contactHero: { borderWidth: 1, borderRadius: RADIUS.xl, padding: 18, alignItems: 'center', marginBottom: 18 },
+  diagnosticCard: { borderWidth: 1, borderRadius: RADIUS.xl, overflow: 'hidden' },
+  diagnosticRow: { minHeight: 52, borderBottomWidth: 1, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  diagnosticLabel: { flex: 1, fontSize: 11, ...weight('800') },
+  diagnosticValue: { fontSize: 11, ...weight('900') },
+  aboutStatement: { borderWidth: 1, borderRadius: RADIUS.xl, padding: 15, marginBottom: 16 },
+  aboutStatementTitle: { fontSize: 14, lineHeight: 20, ...weight('900'), marginBottom: 6 },
+  aboutFooter: { textAlign: 'center', fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 18, marginBottom: 8 },
 
 });

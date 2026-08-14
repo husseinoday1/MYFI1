@@ -9,7 +9,7 @@ import { getSymbol } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
 import { buildFinancialSnapshot, getUpcomingRecurring, pct, today } from '../utils/calc';
 import AddTransModal from '../components/AddTransModal';
-import { filterByActiveScope, filterFeatureEntities, getModules, getTransactionDisplayAmount, transactionFeatureEnabled } from '../lib/modules';
+import { filterByActiveScope, filterFeatureEntities, filterTransactionsByEnabledFeatures, getActiveScope, getModules, getTransactionDisplayAmount } from '../lib/modules';
 import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel, normalizeWallets } from '../lib/wallets';
 import { formatCommitmentDate, formatCommitmentMonth, getUpcomingCommitments } from '../lib/commitments';
 import { MetricCard, SectionTitle, Touchable as TouchableOpacity } from '../components/AppPrimitives';
@@ -26,7 +26,8 @@ import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import WalletBalanceCard from '../components/WalletBalanceCard';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatMonthLabel } from '../lib/months';
-import { accountPublicId, deriveDisplayName } from '../lib/accountIdentity';
+import { deriveDisplayName } from '../lib/accountIdentity';
+import { getMonthTransactionsByKey, getRecentTransactions, getTransactionIndex } from '../lib/transactionIndex';
 const noop = () => {};
 
 const copy = (lang) => {
@@ -44,6 +45,7 @@ const copy = (lang) => {
     debtProgress: ar ? 'تقدّم سداد دين عليّ' : 'Debt repayment progress',
     paid: ar ? 'مسدّد' : 'Paid',
     saved: ar ? 'مدّخر' : 'Saved',
+    savingThisMonth: ar ? 'التوفير' : 'Savings',
     left: ar ? 'متبقي' : 'Left',
     noDebts: ar ? 'لا يوجد دين عليّ نشط' : 'No active debts',
     noGoals: ar ? 'لا توجد أهداف توفير نشطة' : 'No active saving goals',
@@ -58,6 +60,11 @@ const copy = (lang) => {
     recurringWord: ar ? 'متكرر' : 'Repeat',
     goalsWord: ar ? 'توفير' : 'Savings',
     markPaid: ar ? 'دفع' : 'Pay',
+    postpone: ar ? 'تأجيل' : 'Postpone',
+    postponeChoose: ar ? 'اختر مدة التأجيل' : 'Choose how long to postpone',
+    postponeDay: ar ? 'يوم واحد' : '1 day',
+    postpone3Days: ar ? '3 أيام' : '3 days',
+    postponeNextMonth: ar ? 'الشهر القادم' : 'Next month',
     reviewRecurring: ar ? 'راجعها قبل الإضافة' : 'Review before adding',
     dueToday: ar ? 'مستحقة اليوم' : 'Due today',
     overdue: ar ? 'متأخرة' : 'Overdue',
@@ -79,14 +86,12 @@ const copy = (lang) => {
     warning: ar ? 'انتبه، الصرف أو المستحقات تحتاج متابعة.' : 'Spending or tracked amounts need attention.',
     danger: ar ? 'المؤشر يقول إن نهاية الشهر قد تكون سالبة.' : 'The month-end forecast may go negative.',
     watch: ar ? 'سجل دخلك حتى تصبح القراءة أدق.' : 'Add income for a clearer reading.',
-    neutral: ar ? 'أضف بيانات أكثر حتى تظهر قراءة دقيقة.' : 'Add more data for a useful reading.',
+    neutral: ar ? 'أضف أول حركة لبدء القراءة المالية.' : 'Add your first entry to start the financial reading.',
     walletSummary: ar ? 'موزعة على' : 'Across',
     walletsWord: ar ? 'محافظ' : 'wallets',
     walletsTitle: ar ? 'المحافظ' : 'Wallets',
     defaultWallet: ar ? 'افتراضية' : 'Default',
     availableBalance: ar ? 'الرصيد المتاح' : 'Available balance',
-    physicalBalance: ar ? 'الرصيد الفعلي' : 'Physical balance',
-    reservedSavings: ar ? 'محجوز للتوفير' : 'Reserved for savings',
     hideDetails: ar ? 'إخفاء' : 'Hide',
     showDetails: ar ? 'إظهار' : 'Show',
     netMonth: ar ? 'صافي الشهر' : 'Month net',
@@ -128,7 +133,7 @@ export default function HomeScreen({
   onOpenTab = noop,
   onNotificationAction = noop,
 }) {
-  const { trans, debts, goals, wallets, commitments, cats, cfg, notif, user, setCfg, deleteTrans, deleteTransMany } = useStore();
+  const { trans, debts, goals, wallets, commitments, cats, cfg, notif, user, setCfg, editTrans, deleteTrans, deleteTransMany, deferCommitment } = useStore();
   const th  = TH[cfg.theme] || TH.dark;
   const L   = STR[cfg.lang]  || STR.ar;
   const C   = copy(cfg.lang);
@@ -138,18 +143,26 @@ export default function HomeScreen({
   const rowDir = rowDirFor(cfg.lang);
   const modules = getModules(cfg);
   const accountName = deriveDisplayName({ user, cfg }) || (isAr ? '\u062d\u0633\u0627\u0628 \u0645\u062d\u0644\u064a' : 'Local account');
-  const accountHandle = accountPublicId({ user, cfg });
   const accountInitial = (accountName || 'M').trim().charAt(0).toUpperCase();
-  const scopedTransAll = filterByActiveScope(trans, cfg);
-  const scopedTrans = scopedTransAll.filter(item => transactionFeatureEnabled(item, cfg));
-  const scopedWallets = filterByActiveScope(wallets, cfg);
+  const scopedTransAll = useMemo(
+    () => filterByActiveScope(trans, cfg),
+    [trans, cfg.activeScope, cfg.profileType],
+  );
+  const scopedTrans = useMemo(
+    () => filterTransactionsByEnabledFeatures(scopedTransAll, cfg),
+    [scopedTransAll, cfg.enabledModules],
+  );
+  const scopedWallets = useMemo(
+    () => filterByActiveScope(wallets, cfg),
+    [wallets, cfg.activeScope, cfg.profileType],
+  );
   const featureData = filterFeatureEntities({ debts, goals, commitments, cfg });
   const scopedDebts = featureData.debts;
   const scopedGoals = featureData.goals;
   const scopedCommitments = featureData.commitments;
   const homeCardsCfg = Array.isArray(cfg.homeCards) ? cfg.homeCards : [];
   const homeSectionsCfg = Array.isArray(cfg.homeSections) ? cfg.homeSections : [];
-  const recentLimit = 5;
+  const recentLimit = 3;
 
   const [showWalletDetails, setShowWalletDetails] = useState(false);
   const [editing,    setEditing]    = useState(null);
@@ -160,7 +173,6 @@ export default function HomeScreen({
   const [centerMode, setCenterMode] = useState(null);
   const [readNotificationKeys, setReadNotificationKeys] = useState([]);
   const [dismissedNotificationKeys, setDismissedNotificationKeys] = useState([]);
-
   const snapshot = useMemo(
     () => buildFinancialSnapshot({
       trans: scopedTransAll,
@@ -180,9 +192,10 @@ export default function HomeScreen({
     [commitments, cfg.activeScope, cfg.profileType, modules.commitments],
   );
   const recent = useMemo(
-    () => [...scopedTrans].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, recentLimit),
-    [trans, cfg.activeScope, cfg.profileType, recentLimit],
+    () => getRecentTransactions(scopedTrans, recentLimit),
+    [scopedTrans, recentLimit],
   );
+  const scopedTransactionIndex = useMemo(() => getTransactionIndex(scopedTrans), [scopedTrans]);
   const recentSelection = useMultiSelect(recent.map(item => item.id));
   const defaultWalletId = useMemo(
     () => getDefaultWalletId(scopedWallets.length ? scopedWallets : wallets, cfg.currency, cfg.defaultWalletId),
@@ -203,7 +216,7 @@ export default function HomeScreen({
   );
 
   const fmt = (n) => formatMoneyNumber(n, cfg.currency, cfg.lang);
-  const signed = (n) => `${n >= 0 ? '+' : '-'}${fmt(n)} ${sym}`;
+  const signed = (n) => Number(n || 0) === 0 ? `0 ${sym}` : `${n > 0 ? '+' : '-'}${fmt(n)} ${sym}`;
   const healthColor = snapshot.health === 'danger'
     ? th.exp
     : snapshot.health === 'warning' || snapshot.health === 'watch'
@@ -211,8 +224,6 @@ export default function HomeScreen({
       : th.inc;
   const canTransfer = walletRows.length > 1;
   const heroBalance = walletRows.reduce((sum, wallet) => sum + Number(wallet.availableBalance || 0), 0);
-  const physicalBalance = walletRows.reduce((sum, wallet) => sum + Number(wallet.balance || 0), 0);
-  const reservedSavings = walletRows.reduce((sum, wallet) => sum + Number(wallet.reservedBalance || 0), 0);
   const activeGoals = scopedGoals.filter(goal => goal.active !== false && Number(goal.target || 0) > 0);
   const totalSaved = activeGoals.reduce((sum, goal) => sum + Number(goal.cur || 0), 0);
   const goalsTarget = activeGoals.reduce((sum, goal) => sum + Number(goal.target || 0), 0);
@@ -230,11 +241,19 @@ export default function HomeScreen({
   ));
   const dueCommitmentTotal = dueCommitments
     .reduce((sum, item) => sum + Number(item.amt || 0), 0);
+  const currentMonthRows = getMonthTransactionsByKey(scopedTrans, currentMonthKey);
+  const monthSavingTotal = currentMonthRows
+    .filter(item => item.isGoalSaving)
+    .reduce((sum, item) => sum + Math.abs(Number(item.allocationAmount || item.amt || 0)), 0);
+  const hasCashFlowActivity = currentMonthRows.length > 0;
+  const hasMonthActivity = hasCashFlowActivity || monthSavingTotal > 0 || dueCommitmentTotal > 0;
+  const hasMeaningfulHomeData = hasMonthActivity
+    || activeGoals.length > 0
+    || walletRows.some(wallet => Math.abs(Number(wallet.balance || 0)) > 0 || Math.abs(Number(wallet.availableBalance || 0)) > 0);
   const attentionItems = useMemo(() => ([
     ...dueCommitments.map(item => ({ ...item, attentionType: 'commitment', sortDays: item.monthsUntil * 32 })),
     ...upcoming.filter(item => item.daysUntil <= 31).map(item => ({ ...item, attentionType: 'recurring', sortDays: item.daysUntil })),
   ]).sort((a, b) => a.sortDays - b.sortDays), [upcoming, dueCommitments]);
-  const attentionTotal = attentionItems.reduce((sum, item) => sum + Math.abs(Number(item.amt || 0)), 0);
   const hidden = cfg.homeBalancesHidden === true;
   const moneyText = (value) => (hidden ? C.hiddenAmount : value);
   const findCat = (catId) => cats.find(c => c.id === catId) || cats.find(c => c.id === 'other') || cats[0] || {};
@@ -247,7 +266,7 @@ export default function HomeScreen({
         ...item,
         icon: 'arrow-down-circle-outline',
         label: L.income,
-        value: `+${fmt(snapshot.month.inc)} ${sym}`,
+        value: Number(snapshot.month.inc || 0) === 0 ? `0 ${sym}` : `+${fmt(snapshot.month.inc)} ${sym}`,
         color: th.inc,
         onPress: () => onOpenTab('reports'),
       };
@@ -257,9 +276,19 @@ export default function HomeScreen({
         ...item,
         icon: 'arrow-up-circle-outline',
         label: L.expense,
-        value: `-${fmt(snapshot.month.exp)} ${sym}`,
+        value: Number(snapshot.month.exp || 0) === 0 ? `0 ${sym}` : `-${fmt(snapshot.month.exp)} ${sym}`,
         color: th.exp,
         onPress: () => onOpenTab('reports'),
+      };
+    }
+    if (item.key === 'saving') {
+      return {
+        ...item,
+        icon: 'flag-outline',
+        label: C.savingThisMonth,
+        value: `${fmt(monthSavingTotal)} ${sym}`,
+        color: th.primary,
+        onPress: () => onOpenTab('trackers'),
       };
     }
     if (item.key === 'net') {
@@ -307,9 +336,7 @@ export default function HomeScreen({
     [notificationItems],
   );
   const unreadNotificationCount = notificationKeys.filter(key => !readNotificationKeys.includes(key)).length;
-  const pendingSmartReviewCount = scopedTrans.filter(
-    item => item.smartSource && !item.smartReviewedAt,
-  ).length;
+  const pendingSmartReviewCount = scopedTransactionIndex.pendingSmartReviewCount;
   const notificationBadgeCount = unreadNotificationCount + pendingSmartReviewCount;
 
   useEffect(() => {
@@ -561,41 +588,6 @@ export default function HomeScreen({
     );
   };
 
-  const renderCommitmentRow = (item) => {
-    const cat = findCat(item.cat);
-    const wallet = findWallet(item.walletId);
-    const dueText = item.daysUntil < 0
-      ? `${C.overdue} ${Math.abs(item.daysUntil)} ${C.days}`
-      : item.daysUntil === 0
-        ? C.dueToday
-        : `${C.dueIn} ${item.daysUntil} ${C.days}`;
-    return (
-      <View
-        key={item.id}
-        style={[s.row, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}
-      >
-        <View style={[s.catDot, { backgroundColor: `${cat.color || th.primary}22`, borderColor: cat.color || th.primary }]}>
-          <Ionicons name="calendar-outline" size={18} color={cat.color || th.primary} />
-        </View>
-        <View style={{ flex: 1, marginHorizontal: 10 }}>
-          <Text style={{ color: th.text, ...weight('800'), fontSize: 14, textAlign: align }} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, textAlign: align }} numberOfLines={2}>
-            {dueText} · {item.dueISO}{modules.wallets ? ` · ${getWalletLabel(wallet, cfg.lang)}` : ''}
-          </Text>
-        </View>
-        <View style={{ alignItems: cfg.lang === 'ar' ? 'flex-start' : 'flex-end', gap: 6 }}>
-          <Text style={{ color: th.exp, ...weight('900'), fontSize: 14 }} numberOfLines={1}>
-            -{fmt(item.amt)} {sym}
-          </Text>
-          <TouchableOpacity onPress={() => onQuickCommitment(item.id)} style={[s.miniAction, { backgroundColor: th.primSoft }]}>
-            <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.markPaid}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
 
   const renderMoneyTile = ({ icon, label, value, color, bg, onPress }, width = '49%') => (
     <TouchableOpacity
@@ -616,7 +608,12 @@ export default function HomeScreen({
     </TouchableOpacity>
   );
 
-  const visibleHomeCards = homeCards.filter(item => item.visible !== false);
+  // If the user has a ledger, the configured Month summary stays visible even
+  // when the current month is still zero. Only a truly empty ledger uses the
+  // first-entry state. This keeps Home faithful to the user's Home settings.
+  const visibleHomeCards = scopedTrans.length > 0
+    ? homeCards.filter(item => item.visible !== false)
+    : [];
   const moneyTileWidth = (index) => (
     visibleHomeCards.length === 1 || (visibleHomeCards.length === 3 && index === 2)
       ? '100%'
@@ -624,7 +621,7 @@ export default function HomeScreen({
   );
   const topGoalRows = [...activeGoals]
     .sort((a, b) => (Number(b.cur || 0) / Math.max(1, Number(b.target || 0))) - (Number(a.cur || 0) / Math.max(1, Number(a.target || 0))))
-    .slice(0, 3);
+    .slice(0, 2);
   const orderedHomeSections = homeSectionsCfg
     .filter(item => (item.visible !== false || (item.key === 'attention' && attentionItems.length > 0)) && item.key !== 'hero')
     .filter(item => item.key !== 'wallets' || modules.wallets)
@@ -648,63 +645,169 @@ export default function HomeScreen({
         : `${C.dueIn} ${item.daysUntil} ${C.days}`;
   };
 
+  const postponeCommitmentFromHome = (item) => {
+    if (!item?.id) return;
+    Alert.alert(
+      C.postpone,
+      C.postponeChoose,
+      [
+        { text: C.postponeDay, onPress: () => deferCommitment?.(item.id, 'day') },
+        { text: C.postpone3Days, onPress: () => deferCommitment?.(item.id, 'three_days') },
+        { text: C.postponeNextMonth, onPress: () => deferCommitment?.(item.id, 'next_month') },
+        { text: isAr ? 'إلغاء' : 'Cancel', style: 'cancel' },
+      ],
+      { cancelable: true },
+    );
+  };
+
+  const stopRecurringFromHome = (item) => {
+    if (!item?.id) return;
+    Alert.alert(
+      isAr ? 'إيقاف التكرار؟' : 'Stop recurring?',
+      isAr
+        ? 'ستبقى الحركات السابقة في السجل، ولن يُنشأ هذا الدخل أو الصرف تلقائياً في الأشهر القادمة.'
+        : 'Past entries stay in History, and this income or expense will no longer repeat in future months.',
+      [
+        { text: isAr ? 'رجوع' : 'Back', style: 'cancel' },
+        {
+          text: isAr ? 'إيقاف التكرار' : 'Stop recurring',
+          style: 'destructive',
+          onPress: () => editTrans?.(item.id, { recurring: false }),
+        },
+      ],
+      { cancelable: true },
+    );
+  };
+
   const renderAttentionRow = (item) => {
     const isCommitment = item.attentionType === 'commitment';
     const wallet = isCommitment ? findWallet(item.walletId) : null;
-    const amount = Number(item.amt || 0);
-    const displayAmount = isCommitment ? -Math.abs(amount) : amount;
+    const amount = Math.abs(Number(item.amt || 0));
     const dueText = dueTextFor(item);
-    const tone = (isCommitment ? item.monthsUntil : item.daysUntil) < 0 ? th.exp : isCommitment ? th.warn : th.primary;
-    const typeLabel = isCommitment ? C.commitmentWord : C.recurringWord;
-    const Container = isCommitment ? View : TouchableOpacity;
-    const containerProps = isCommitment ? {} : { onPress: () => openRecurringDraft(item) };
-    return (
-      <Container
-        key={`${item.attentionType}-${item.id || item.recurringGroupId}`}
-        {...containerProps}
-        style={[s.row, { backgroundColor: th.card, borderColor: `${tone}55`, flexDirection: rowDir }]}
-      >
-        <View style={[s.catDot, { backgroundColor: `${tone}18`, borderColor: tone }]}>
-          <Ionicons name={isCommitment ? 'calendar-outline' : 'repeat-outline'} size={18} color={tone} />
-        </View>
-        <View style={{ flex: 1, marginHorizontal: 10 }}>
-          <View style={[s.titleRow, { flexDirection: rowDir }]}>
-            <Text style={{ color: th.text, ...weight('800'), fontSize: 14, textAlign: align, flex: 1 }} numberOfLines={1}>
-              {isCommitment ? item.name : item.title}
+    const overdue = (isCommitment ? item.monthsUntil : item.daysUntil) < 0;
+    const tone = overdue ? th.exp : isCommitment ? th.warn : th.primary;
+    const deferredLocked = isCommitment && item.isDeferred && item.actionable === false;
+
+    if (!isCommitment) {
+      const recurringAmountColor = Number(item.amt || 0) >= 0 ? th.inc : th.exp;
+      return (
+        <View
+          key={`${item.attentionType}-${item.id || item.recurringGroupId}`}
+          style={[importantS.card, { backgroundColor: th.cardHigh, borderColor: `${tone}44` }]}
+        >
+          <View style={[importantS.top, { flexDirection: rowDir }]}>
+            <View style={[importantS.icon, { backgroundColor: `${tone}16` }]}>
+              <Ionicons name="repeat-outline" size={16} color={tone} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: th.text, ...weight('900'), fontSize: 13, textAlign: align }} numberOfLines={1}>
+                {item.title}
+              </Text>
+              <Text style={{ color: th.sub, fontSize: 10, lineHeight: 15, textAlign: align, marginTop: 1 }} numberOfLines={1}>
+                {dueText} · {item.dueISO}
+              </Text>
+            </View>
+            <Text style={{ color: recurringAmountColor, ...weight('900'), fontSize: 13 }} numberOfLines={1}>
+              {Number(item.amt || 0) >= 0 ? '+' : '-'}{fmt(amount)} {sym}
             </Text>
-            <View style={[s.typePill, { backgroundColor: `${tone}16` }]}>
-              <Text style={{ color: tone, fontSize: 10, ...weight('900') }}>{typeLabel}</Text>
+          </View>
+          <View style={[importantS.actions, { flexDirection: rowDir }]}>
+            <TouchableOpacity
+              onPress={() => openRecurringDraft(item)}
+              style={[importantS.action, { backgroundColor: th.primary }]}
+            >
+              <Ionicons name="checkmark-circle-outline" size={14} color={th.onPrimary} />
+              <Text style={{ color: th.onPrimary, fontSize: 11, ...weight('900') }}>
+                {isAr ? 'تسجيل الآن' : 'Record now'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => stopRecurringFromHome(item)}
+              style={[importantS.action, { backgroundColor: th.expBg, borderColor: `${th.exp}55`, borderWidth: 1 }]}
+            >
+              <Ionicons name="stop-circle-outline" size={14} color={th.exp} />
+              <Text style={{ color: th.exp, fontSize: 11, ...weight('900') }}>
+                {isAr ? 'إيقاف التكرار' : 'Stop recurring'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View
+        key={`commitment-${item.id}`}
+        style={[importantS.card, { backgroundColor: th.cardHigh, borderColor: `${tone}44` }]}
+      >
+        {/* STAGE3_FINAL_IMPORTANT_DECISION */}
+        {/* STAGE4_COMPACT_IMPORTANT_DECISION */}
+        <View style={[importantS.top, { flexDirection: rowDir }]}>
+          <View style={[importantS.icon, { backgroundColor: `${tone}16` }]}>
+            <Ionicons name={deferredLocked ? 'time-outline' : 'calendar-outline'} size={15} color={tone} />
+          </View>
+
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ color: th.text, fontSize: 13, lineHeight: 18, ...weight('900'), textAlign: align }} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={{ color: th.sub, fontSize: 10, lineHeight: 15, ...weight('700'), textAlign: align, marginTop: 1 }} numberOfLines={1}>
+              {dueText}{modules.wallets ? ` · ${getWalletLabel(wallet, cfg.lang)}` : ''}
+            </Text>
+          </View>
+
+          <View style={importantS.amountBlock}>
+            <Text style={{ color: th.exp, fontSize: 13, lineHeight: 18, ...weight('900'), textAlign: 'center' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+              {moneyText(`-${fmt(amount)} ${sym}`)}
+            </Text>
+            <View style={[importantS.statePill, { backgroundColor: `${tone}14` }]}>
+              <Text style={{ color: tone, fontSize: 9, lineHeight: 12, ...weight('900') }} numberOfLines={1}>
+                {deferredLocked ? (isAr ? 'مؤجل' : 'Deferred') : overdue ? C.overdue : C.commitmentWord}
+              </Text>
             </View>
           </View>
-          <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, textAlign: align }} numberOfLines={2}>
-            {dueText}{isCommitment ? '' : ` - ${item.dueISO}`}{isCommitment && modules.wallets ? ` - ${getWalletLabel(wallet, cfg.lang)}` : ''}
-          </Text>
         </View>
-        <View style={{ alignItems: cfg.lang === 'ar' ? 'flex-start' : 'flex-end', gap: 6 }}>
-          <Text style={{ color: displayAmount >= 0 ? th.inc : th.exp, ...weight('900'), fontSize: 14 }} numberOfLines={1}>
-            {moneyText(`${displayAmount >= 0 ? '+' : '-'}${fmt(Math.abs(displayAmount))} ${sym}`)}
-          </Text>
-          {isCommitment ? (
-            <TouchableOpacity onPress={() => onQuickCommitment(item.id)} style={[s.miniAction, { backgroundColor: th.primSoft }]}>
-              <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.markPaid}</Text>
+
+        {deferredLocked ? (
+          <View style={[importantS.deferred, { backgroundColor: th.warnBg, flexDirection: rowDir }]}>
+            <Ionicons name="time-outline" size={13} color={th.warn} />
+            <Text style={{ flex: 1, color: th.warn, fontSize: 10, lineHeight: 15, ...weight('900'), textAlign: align }} numberOfLines={1}>
+              {dueText}
+            </Text>
+          </View>
+        ) : item.actionable !== false ? (
+          <View style={[importantS.actions, { flexDirection: rowDir }]}>
+            <TouchableOpacity
+              onPress={() => onQuickCommitment(item.id)}
+              style={[importantS.action, { backgroundColor: th.primary }]}
+            >
+              <Ionicons name="checkmark-circle-outline" size={14} color={th.onPrimary} />
+              <Text style={{ color: th.onPrimary, fontSize: 11, ...weight('900') }}>{C.markPaid}</Text>
             </TouchableOpacity>
-          ) : null}
-        </View>
-      </Container>
+
+            <TouchableOpacity
+              onPress={() => postponeCommitmentFromHome(item)}
+              style={[importantS.action, { backgroundColor: th.warnBg, borderColor: `${th.warn}55`, borderWidth: 1 }]}
+            >
+              <Ionicons name="time-outline" size={14} color={th.warn} />
+              <Text style={{ color: th.warn, fontSize: 11, ...weight('900') }}>{C.postpone}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </View>
     );
   };
 
   const renderAttentionSection = () => (
-    <View style={[s.attentionPanel, { backgroundColor: th.card, borderColor: th.border }]}>
-      <View style={[s.attentionHeader, { flexDirection: rowDir }]}>
+    <View style={[s.attentionPanel, importantS.panel, { backgroundColor: th.card, borderColor: th.border }]}>
+      <View style={[s.attentionHeader, importantS.header, { flexDirection: rowDir }]}>
         <View style={[s.attentionHeaderTitle, { flexDirection: rowDir }]}>
-          <View style={[s.attentionHeaderIcon, { backgroundColor: th.warnBg }]}>
+          <View style={[s.attentionHeaderIcon, importantS.headerIcon, { backgroundColor: th.warnBg }]}>
             <Ionicons name="alert-circle-outline" size={18} color={th.warn} />
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: align }}>{C.attention}</Text>
-            <Text style={{ color: th.sub, fontSize: 10, lineHeight: 15, ...weight('700'), textAlign: align }}>{C.attentionSubtitle}</Text>
-          </View>
+          <Text style={{ color: th.text, fontSize: 14, ...weight('900'), textAlign: align, flex: 1 }}>
+            {C.attention}
+          </Text>
         </View>
         {attentionItems.length ? (
           <View style={[s.attentionCount, { backgroundColor: th.warnBg }]}>
@@ -712,65 +815,83 @@ export default function HomeScreen({
           </View>
         ) : null}
       </View>
+
       {attentionItems.length === 0 ? (
-        <View style={[s.clearPanel, { borderColor: th.border, backgroundColor: th.cardHigh }]}>
-          <Ionicons name="checkmark-circle-outline" size={20} color={th.inc} />
+        <View style={[s.clearPanel, importantS.clearPanel, { borderColor: th.border, backgroundColor: th.cardHigh }]}>
+          <Ionicons name="checkmark-circle-outline" size={19} color={th.inc} />
           <Text style={{ color: th.inc, fontSize: 13, ...weight('900') }}>{C.allClear}</Text>
         </View>
       ) : (
-        <>
-          <View style={[s.attentionSummary, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}>
-            <Text style={{ color: th.sub, fontSize: 12, ...weight('900'), textAlign: align, flex: 1 }}>
-              {attentionItems.length} {C.attention}
-            </Text>
-            <Text style={{ color: th.warn, fontSize: 13, ...weight('900') }}>
-              {moneyText(`${fmt(attentionTotal)} ${sym}`)}
-            </Text>
-          </View>
+        <View style={importantS.items}>
           {attentionItems.slice(0, 4).map(renderAttentionRow)}
-        </>
+        </View>
       )}
     </View>
   );
 
   const renderGoalsSection = () => {
     if (!activeGoals.length) return (
-      <View style={{ marginTop: 4 }}>
-        <SectionTitle th={th} lang={cfg.lang}>{C.goalsWord}</SectionTitle>
-        <View style={[s.clearPanel, { borderColor: th.border, backgroundColor: th.card }]}>
-          <Ionicons name="flag-outline" size={20} color={th.sub} />
-          <Text style={{ color: th.sub, fontSize: 13, ...weight('900') }}>{C.noActiveGoals}</Text>
+      <View style={[s.savingPanel, { backgroundColor: th.card, borderColor: th.border }]}>
+        <View style={[s.savingHeader, { flexDirection: rowDir }]}>
+          <View style={[s.savingHeaderIcon, { backgroundColor: th.primSoft }]}>
+            <Ionicons name="flag-outline" size={17} color={th.primary} />
+          </View>
+          <Text style={[s.savingTitle, { color: th.text, textAlign: align }]}>{C.savingThisMonth}</Text>
+        </View>
+        <View style={[s.savingEmpty, { backgroundColor: th.cardHigh }]}>
+          <Text style={{ color: th.sub, fontSize: 12, ...weight('800'), textAlign: 'center' }}>{C.noActiveGoals}</Text>
         </View>
       </View>
     );
+
     return (
-      <View style={{ marginTop: 4 }}>
-        <SectionTitle th={th} lang={cfg.lang}>{C.goalsWord}</SectionTitle>
-        <View style={[s.goalPanel, { backgroundColor: th.card, borderColor: th.border }]}>
-          <View style={[s.goalHead, { flexDirection: rowDir }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: th.sub, fontSize: 12, ...weight('900'), textAlign: align }}>{C.saved}</Text>
-              <Text style={{ color: th.text, fontSize: 16, ...weight('900'), marginTop: 3, textAlign: align }}>
-                {moneyText(`${fmt(totalSaved)} / ${fmt(goalsTarget)} ${sym}`)}
-              </Text>
-            </View>
-            <Text style={{ color: th.inc, fontSize: 17, ...weight('900') }}>{hidden ? C.hiddenAmount : `${goalsProgress}%`}</Text>
+      <View style={[s.savingPanel, { backgroundColor: th.card, borderColor: th.border }]}>
+        <View style={[s.savingHeader, { flexDirection: rowDir }]}>
+          <View style={[s.savingHeaderIcon, { backgroundColor: th.primSoft }]}>
+            <Ionicons name="flag-outline" size={17} color={th.primary} />
           </View>
-          {renderProgress(goalsProgress, th.inc)}
+          <Text style={[s.savingTitle, { color: th.text, textAlign: align }]}>{C.savingThisMonth}</Text>
+          <View style={[s.savingCount, { backgroundColor: th.primSoft }]}>
+            <Text style={{ color: th.primary, fontSize: 10, ...weight('900') }}>{activeGoals.length}</Text>
+          </View>
+        </View>
+
+        <View style={[s.savingSummary, { flexDirection: rowDir }]}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[s.savingSummaryLabel, { color: th.sub, textAlign: align }]}>{C.saved}</Text>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.72}
+              style={[s.savingSummaryValue, { color: th.text, textAlign: align }]}
+            >
+              {moneyText(`${fmt(totalSaved)} / ${fmt(goalsTarget)} ${sym}`)}
+            </Text>
+          </View>
+          <Text style={[s.savingPercent, { color: th.primary }]}>{hidden ? C.hiddenAmount : `${goalsProgress}%`}</Text>
+        </View>
+        {renderProgress(goalsProgress, th.primary)}
+
+        <View style={s.savingGoalList}>
           {topGoalRows.map((goal, index) => {
             const progress = pct(goal.cur, goal.target, { cap: true });
             return (
               <View
                 key={goal.id}
-                style={[s.goalRow, { borderTopColor: th.border, flexDirection: rowDir, marginTop: index === 0 ? 10 : 0 }]}
+                style={[
+                  s.savingGoalRow,
+                  {
+                    borderTopColor: th.border,
+                    flexDirection: rowDir,
+                    borderTopWidth: index === 0 ? 0 : 1,
+                  },
+                ]}
               >
-                <Ionicons name="flag-outline" size={16} color={th.inc} />
-                <Text style={{ color: th.text, fontSize: 13, ...weight('800'), flex: 1, textAlign: align }} numberOfLines={1}>
-                  {goal.name}
-                </Text>
-                <Text style={{ color: th.sub, fontSize: 12, ...weight('900') }}>
-                  {hidden ? C.hiddenAmount : `${progress}%`}
-                </Text>
+                <View style={[s.savingGoalDot, { backgroundColor: th.primSoft }]}>
+                  <Ionicons name="flag-outline" size={13} color={th.primary} />
+                </View>
+                <Text style={[s.savingGoalName, { color: th.text, textAlign: align }]} numberOfLines={1}>{goal.name}</Text>
+                <Text style={[s.savingGoalProgress, { color: th.sub }]}>{hidden ? C.hiddenAmount : `${progress}%`}</Text>
               </View>
             );
           })}
@@ -796,7 +917,7 @@ export default function HomeScreen({
               transactions={scopedTransAll}
               cfg={cfg}
               showWallets
-              onSelectWallet={(id) => { setCfg({ defaultWalletId: id }); setShowWalletDetails(false); }}
+              onSelectWallet={(id) => { setCfg({ defaultWalletId: id }); }}
               title={cfg.lang === 'ar' ? 'اختيار المحفظة الافتراضية' : 'Choose default wallet'}
               style={{ marginBottom: 0 }}
             />
@@ -830,14 +951,24 @@ export default function HomeScreen({
           <Text style={{ color: th.sub, fontSize: 12, textAlign: 'center', marginTop: 6 }}>
             {C.emptyBody}
           </Text>
+          <View style={[s.emptyActions, { flexDirection: rowDir }]}>
+            <TouchableOpacity onPress={onAddIncome} style={[s.emptyAction, { backgroundColor: th.primSoft, borderColor: `${th.primary}44` }]}>
+              <Ionicons name="arrow-down-outline" size={15} color={th.primary} />
+              <Text style={{ color: th.primary, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة دخل' : 'Add income'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onAddExpense} style={[s.emptyAction, { backgroundColor: th.primary, borderColor: th.primary }]}>
+              <Ionicons name="arrow-up-outline" size={15} color={th.onPrimary} />
+              <Text style={{ color: th.onPrimary, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة مصروف' : 'Add expense'}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       ) : recent.map(renderRow)}
     </View>
   );
 
   const renderHomeSection = (item) => {
-    if (item.key === 'attention') return <React.Fragment key={item.key}>{renderAttentionSection()}</React.Fragment>;
-    if (item.key === 'goals') return <React.Fragment key={item.key}>{renderGoalsSection()}</React.Fragment>;
+    if (item.key === 'attention') return attentionItems.length ? <React.Fragment key={item.key}>{renderAttentionSection()}</React.Fragment> : null;
+    if (item.key === 'goals') return activeGoals.length ? <React.Fragment key={item.key}>{renderGoalsSection()}</React.Fragment> : null;
     if (item.key === 'recentTransactions') return <React.Fragment key={item.key}>{renderRecentSection()}</React.Fragment>;
     return null;
   };
@@ -872,24 +1003,17 @@ export default function HomeScreen({
             <Ionicons name="layers" size={22} color={th.primary} />
             <Text style={[s.brandTitle, { color: th.primary }]}>MYFI</Text>
           </View>
-          <View style={[s.headerActions, { flexDirection: rowDir }]}>
-            <TouchableOpacity
-              onPress={() => setCenterMode('profile')}
-              style={[s.profilePill, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}
-              accessibilityRole="button"
-              accessibilityLabel={isAr ? '\u0641\u062a\u062d \u0627\u0644\u062d\u0633\u0627\u0628' : 'Open account'}
-            >
-              <View style={[s.profileAvatar, { backgroundColor: th.primSoft }]}>
-                {cfg.avatarUri ? <Image source={{ uri: cfg.avatarUri }} style={s.profileAvatarImage} /> : <Text style={{ color: th.primary, fontSize: 13, ...weight('900') }}>{accountInitial}</Text>}
-                {user ? <View style={[s.profileStatus, { backgroundColor: th.inc, borderColor: th.card }]} /> : null}
-              </View>
-              <View style={s.profileTextBlock}>
-                <Text numberOfLines={1} style={[s.profileName, { color: th.text, textAlign: align }]}>{accountName}</Text>
-                <Text numberOfLines={1} style={[s.profileHandle, { color: th.faint, textAlign: align, writingDirection: 'ltr' }]}>{accountHandle}</Text>
-              </View>
-              <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={14} color={th.faint} />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            onPress={() => setCenterMode('profile')}
+            style={[s.profileButton, { backgroundColor: th.card, borderColor: th.border }]}
+            accessibilityRole="button"
+            accessibilityLabel={isAr ? '\u0641\u062a\u062d \u0627\u0644\u062d\u0633\u0627\u0628' : 'Open account'}
+          >
+            <View style={[s.profileAvatar, { backgroundColor: th.primSoft }]}>
+              {cfg.avatarUri ? <Image source={{ uri: cfg.avatarUri }} style={s.profileAvatarImage} /> : <Text style={{ color: th.primary, fontSize: 13, ...weight('900') }}>{accountInitial}</Text>}
+              {user ? <View style={[s.profileStatus, { backgroundColor: th.inc, borderColor: th.card }]} /> : null}
+            </View>
+          </TouchableOpacity>
         </View>
 
         {isHomeSectionVisible('hero') ? (
@@ -911,7 +1035,7 @@ export default function HomeScreen({
               <View style={[s.healthPill, { backgroundColor: `${healthColor}22` }]}>
                 <Ionicons name="pulse-outline" size={14} color={healthColor} />
                 <Text style={{ color: healthColor, fontSize: 12, ...weight('800') }}>
-                  {snapshot.health === 'danger' ? '!' : snapshot.health === 'safe' ? 'OK' : '...'}
+                  {snapshot.health === 'danger' ? '!' : snapshot.health === 'safe' ? 'OK' : snapshot.health === 'neutral' ? '—' : '...'}
                 </Text>
               </View>
             </View>
@@ -919,16 +1043,6 @@ export default function HomeScreen({
           <Text style={[s.healthText, { color: healthColor, textAlign: align }]}>
             {C[snapshot.health] || C.neutral}
           </Text>
-          <View style={[s.heroFacts, { flexDirection: rowDir, borderTopColor: th.border }]}>
-            <View style={s.heroFact}>
-              <Text style={{ color: th.sub, fontSize: 11, ...weight('800') }}>{C.physicalBalance}</Text>
-              <Text style={{ color: th.text, fontSize: 14, ...weight('900'), marginTop: 3 }}>{moneyText(`${fmt(physicalBalance)} ${sym}`)}</Text>
-            </View>
-            <View style={s.heroFact}>
-              <Text style={{ color: th.sub, fontSize: 11, ...weight('800') }}>{C.reservedSavings}</Text>
-              <Text style={{ color: reservedSavings > 0 ? th.warn : th.text, fontSize: 14, ...weight('900'), marginTop: 3 }}>{moneyText(`${fmt(reservedSavings)} ${sym}`)}</Text>
-            </View>
-          </View>
           {modules.wallets && walletRows.length > 0 ? (
             <TouchableOpacity
               onPress={() => setShowWalletDetails(prev => !prev)}
@@ -948,27 +1062,12 @@ export default function HomeScreen({
 
         {renderWalletPanel()}
 
-        {cfg.entryMode === 'quick' ? (
-          <View style={[s.quickEntry, { backgroundColor: th.card, borderColor: th.border }]}>
-            <Text style={[s.quickEntryTitle, { color: th.sub, textAlign: align }]}>{C.quickActions}</Text>
-            <View style={[s.quickEntryRow, { flexDirection: rowDir }]}>
-              {[
-                { key: 'expense', label: isAr ? 'مصروف' : 'Expense', icon: 'arrow-down-outline', color: th.exp, onPress: onAddExpense },
-                { key: 'income', label: isAr ? 'دخل' : 'Income', icon: 'arrow-up-outline', color: th.inc, onPress: onAddIncome },
-                modules.wallets && canTransfer
-                  ? { key: 'transfer', label: isAr ? 'تحويل' : 'Transfer', icon: 'swap-horizontal-outline', color: th.primary, onPress: onTransfer }
-                  : null,
-                { key: 'smart', label: C.smartEntry, icon: 'sparkles-outline', color: th.warn, onPress: onSmartEntry },
-              ].filter(Boolean).map(action => (
-                <TouchableOpacity key={action.key} onPress={action.onPress} style={s.quickEntryAction}>
-                  <View style={[s.quickEntryIcon, { backgroundColor: `${action.color}18`, borderColor: `${action.color}44` }]}>
-                    <Ionicons name={action.icon} size={18} color={action.color} />
-                  </View>
-                  <Text numberOfLines={1} adjustsFontSizeToFit style={[s.quickEntryLabel, { color: th.text }]}>
-                    {action.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+        {!hasMeaningfulHomeData ? (
+          <View style={[s.starterNote, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}>
+            <View style={[s.starterNoteIcon, { backgroundColor: th.primSoft }]}><Ionicons name="add-circle-outline" size={18} color={th.primary} /></View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[s.starterNoteTitle, { color: th.text, textAlign: align }]}>{isAr ? 'ابدأ بحركة واحدة' : 'Start with one entry'}</Text>
+              <Text style={[s.starterNoteBody, { color: th.sub, textAlign: align }]}>{isAr ? 'سجّل دخلاً أو مصروفاً، وبعدها تظهر مؤشرات الشهر والتقارير تلقائياً.' : 'Add income or an expense; monthly metrics and reports will appear automatically.'}</Text>
             </View>
           </View>
         ) : null}
@@ -992,6 +1091,31 @@ export default function HomeScreen({
           </View>
         </View>
         ) : null}
+        {cfg.entryMode === 'quick' ? (
+          <View style={[s.quickEntry, { backgroundColor: th.card, borderColor: th.border }]}>
+            <Text style={[s.quickEntryTitle, { color: th.sub, textAlign: align }]}>{C.quickActions}</Text>
+            <View style={[s.quickEntryRow, { flexDirection: rowDir }]}>
+              {[
+                { key: 'expense', label: isAr ? 'مصروف' : 'Expense', icon: 'arrow-down-outline', color: th.exp, onPress: onAddExpense },
+                { key: 'income', label: isAr ? 'دخل' : 'Income', icon: 'arrow-up-outline', color: th.inc, onPress: onAddIncome },
+                modules.wallets && canTransfer
+                  ? { key: 'transfer', label: isAr ? 'تحويل' : 'Transfer', icon: 'swap-horizontal-outline', color: th.primary, onPress: onTransfer }
+                  : null,
+                { key: 'smart', label: C.smartEntry, icon: 'sparkles-outline', color: th.warn, onPress: onSmartEntry },
+              ].filter(Boolean).map(action => (
+                <TouchableOpacity key={action.key} onPress={action.onPress} style={[s.quickEntryAction, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                  <View style={[s.quickEntryIcon, { backgroundColor: `${action.color}18`, borderColor: `${action.color}44` }]}>
+                    <Ionicons name={action.icon} size={18} color={action.color} />
+                  </View>
+                  <Text numberOfLines={1} adjustsFontSizeToFit style={[s.quickEntryLabel, { color: th.text }]}>
+                    {action.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         {orderedHomeSections.map(renderHomeSection)}
       </ScrollView>
 
@@ -1026,26 +1150,26 @@ export default function HomeScreen({
 }
 
 const s = StyleSheet.create({
-  topBar:       { alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
+  topBar:       { alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   topBarSpacer: { width: 42 },
-  notifyBtn:    { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center', ...SHADOW.card },
+  notifyBtn:    { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   notifyBadge:  { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, position: 'absolute', top: -4, right: -4 },
   brandLockup:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerActions: { alignItems: 'center', gap: 5, flexShrink: 1 },
+
   headerIconBtn: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  profilePill:   { minHeight: 50, maxWidth: 158, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 7, paddingHorizontal: 7, paddingVertical: 6, ...SHADOW.subtle },
+  profileButton: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   profileAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' },
   profileAvatarImage: { width: '100%', height: '100%', borderRadius: 16 },
   walletPopupOverlay: { flex: 1, justifyContent: 'flex-end' },
-  walletPopup: { maxHeight: '72%', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, padding: 14, paddingBottom: 22 },
+  walletPopup: { maxHeight: '78%', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, padding: 16, paddingBottom: 24 },
   walletPopupHead: { alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10 },
   walletPopupTitle: { flex: 1, fontSize: 16, lineHeight: 22, ...weight('900') },
   profileStatus: { width: 9, height: 9, borderRadius: 5, borderWidth: 2, position: 'absolute', bottom: -1, right: -1 },
-  profileTextBlock:{ flex: 1, minWidth: 0 },
-  profileName: { fontSize: 12, lineHeight: 16, ...weight('900') },
-  profileHandle: { fontSize: 9, lineHeight: 12, ...weight('800'), marginTop: 1 },
+
+
+
   brandTitle:   { fontSize: 23, lineHeight: 28, ...weight('900'), letterSpacing: 0 },
-  hero:         { borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 9, ...SHADOW.card },
+  hero:         { borderRadius: 18, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 10 },
   heroTop:      { alignItems: 'flex-start', gap: 8 },
   heroLabel:    { fontSize: TYPE.meta, lineHeight: 17, ...weight('900') },
   heroAmount:   { fontSize: 27, lineHeight: 32, ...weight('900'), marginTop: 2 },
@@ -1053,15 +1177,14 @@ const s = StyleSheet.create({
   heroIconBtn:  { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   healthPill:   { minWidth: 54, height: 28, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 3 },
   healthText:   { fontSize: 12, marginTop: 5, lineHeight: 18, ...weight('700'), opacity: 0.94 },
-  heroFacts:    { borderTopWidth: 1, marginTop: 7, paddingTop: 7, alignItems: 'center' },
-  heroFact:     { flex: 1, alignItems: 'center' },
+  heroFact:     { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 54, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   factDivider:  { width: 1, height: 30 },
-  quickEntry:   { borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingTop: 11, paddingBottom: 10, marginBottom: 10 },
+  quickEntry:   { borderRadius: 18, borderWidth: 1, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 10, marginBottom: 10 },
   quickEntryTitle:{ fontSize: 12, lineHeight: 17, ...weight('800'), marginBottom: 7 },
-  quickEntryRow: { alignItems: 'flex-start', justifyContent: 'space-between' },
-  quickEntryAction:{ width: '24%', minHeight: 68, alignItems: 'center', justifyContent: 'center', gap: 6 },
-  quickEntryIcon:{ width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  quickEntryLabel:{ fontSize: 12, lineHeight: 17, ...weight('800'), textAlign: 'center', maxWidth: '100%' },
+  quickEntryRow: { alignItems: 'stretch', justifyContent: 'space-between', gap: 7 },
+  quickEntryAction:{ flex: 1, flexBasis: 0, minWidth: 0, minHeight: 64, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 3 },
+  quickEntryIcon:{ width: 32, height: 32, borderRadius: 10, borderWidth: 0, alignItems: 'center', justifyContent: 'center' },
+  quickEntryLabel:{ fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: 'center', maxWidth: '100%' },
   walletSummary:{ alignItems: 'center', gap: 8, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8, marginTop: 10 },
   monthMetricsBlock:{ marginBottom: 8 },
   monthMetricsHead:{ alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 2 },
@@ -1095,11 +1218,22 @@ const s = StyleSheet.create({
   attentionHeaderTitle:{ flex: 1, alignItems: 'center', gap: 8 },
   attentionHeaderIcon:{ width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   attentionCount:{ minWidth: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7 },
-  attentionSummary:{ alignItems: 'center', justifyContent: 'space-between', borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 7 },
   clearPanel:   { minHeight: 48, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginBottom: 9 },
-  goalPanel:    { borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 10 },
-  goalHead:     { alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  goalRow:      { minHeight: 36, borderTopWidth: 1, alignItems: 'center', gap: 8, paddingTop: 8 },
+  savingPanel:  { borderRadius: 16, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 9, marginTop: 4, marginBottom: 10 },
+  savingHeader: { minHeight: 32, alignItems: 'center', gap: 8, marginBottom: 7 },
+  savingHeaderIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  savingTitle:  { flex: 1, fontSize: 13, lineHeight: 18, ...weight('900') },
+  savingCount:  { minWidth: 25, height: 25, borderRadius: 13, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  savingSummary:{ alignItems: 'center', gap: 10, paddingHorizontal: 2, marginBottom: 7 },
+  savingSummaryLabel:{ fontSize: 10, lineHeight: 14, ...weight('800') },
+  savingSummaryValue:{ fontSize: 14, lineHeight: 20, ...weight('900'), marginTop: 1 },
+  savingPercent:{ fontSize: 16, lineHeight: 21, ...weight('900'), flexShrink: 0 },
+  savingGoalList:{ marginTop: 7 },
+  savingGoalRow:{ minHeight: 34, alignItems: 'center', gap: 7, paddingHorizontal: 2, paddingVertical: 6 },
+  savingGoalDot:{ width: 26, height: 26, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  savingGoalName:{ flex: 1, minWidth: 0, fontSize: 12, lineHeight: 17, ...weight('800') },
+  savingGoalProgress:{ fontSize: 11, lineHeight: 16, ...weight('900') },
+  savingEmpty:{ minHeight: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   sectionTitle: { fontSize: 12, ...weight('900'), marginBottom: 8, marginTop: 4 },
   row:          { minHeight: 58, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: RADIUS.lg, borderWidth: 1, marginBottom: 6, gap: 8 },
   rowShell:     { width: '100%', alignItems: 'center', gap: 8 },
@@ -1117,5 +1251,28 @@ const s = StyleSheet.create({
   transactionTagLine: { alignSelf: 'flex-start', minHeight: 20, alignItems: 'center', gap: 4, borderRadius: RADIUS.sm, marginBottom: 2 },
   catDot:       { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   empty:        { alignItems: 'center', padding: 24, borderWidth: 1, borderRadius: RADIUS.xl, borderStyle: 'dashed', backgroundColor: 'rgba(255,255,255,0.02)' },
-  miniAction:   { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
+  emptyActions: { width: '100%', gap: 8, marginTop: 14 },
+  emptyAction:  { flex: 1, minHeight: 40, borderRadius: 13, paddingHorizontal: 10, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  starterNote: { borderWidth: 1, borderRadius: RADIUS.lg, paddingHorizontal: 12, paddingVertical: 11, alignItems: 'center', gap: 10, marginBottom: 12 },
+  starterNoteIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  starterNoteTitle: { fontSize: 12, lineHeight: 17, ...weight('900') },
+  starterNoteBody: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 2 },
+});
+
+// STAGE3_IMPORTANT_VISUAL_FINAL
+const importantS = StyleSheet.create({
+  panel: { borderRadius: 16, padding: 8, marginTop: 4, marginBottom: 8 },
+  header: { minHeight: 32, marginBottom: 6 },
+  headerIcon: { width: 28, height: 28, borderRadius: 9 },
+  items: { gap: 6 },
+  card: { borderRadius: 14, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 7 },
+  recurringCard: { minHeight: 54, borderRadius: 13, borderWidth: 1, alignItems: 'center', gap: 8, paddingHorizontal: 9, paddingVertical: 7 },
+  top: { alignItems: 'center', gap: 7 },
+  icon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  amountBlock: { width: 90, minWidth: 82, maxWidth: '31%', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  statePill: { minHeight: 18, borderRadius: 9, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2 },
+  actions: { width: '100%', gap: 6, marginTop: 6 },
+  action: { flex: 1, flexBasis: 0, minWidth: 0, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5 },
+  deferred: { minHeight: 28, borderRadius: 9, alignItems: 'center', gap: 5, paddingHorizontal: 8, marginTop: 6 },
+  clearPanel: { minHeight: 42, marginBottom: 0 },
 });

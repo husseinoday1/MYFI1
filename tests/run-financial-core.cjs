@@ -8,6 +8,8 @@ const asyncStorage = {
   getItem: async key => memory.has(key) ? memory.get(key) : null,
   setItem: async (key, value) => { memory.set(key, value); },
   removeItem: async key => { memory.delete(key); },
+  multiSet: async pairs => pairs.forEach(([key, value]) => memory.set(key, value)),
+  multiGet: async keys => keys.map(key => [key, memory.has(key) ? memory.get(key) : null]),
   multiRemove: async keys => keys.forEach(key => memory.delete(key)),
 };
 const cloudBuilder = {
@@ -20,6 +22,16 @@ const originalLoad = Module._load;
 Module._load = function load(request, parent, isMain) {
   if (request === '@react-native-async-storage/async-storage') return asyncStorage;
   if (request === 'expo-sqlite/kv-store') return asyncStorage;
+  // Financial-core Node tests exercise the web compatibility path. Keep the
+  // native Expo SQLite package out of Node's ESM resolver; native SQLite has a
+  // separate integration gate and must never be claimed by this test.
+  if (request === 'expo-sqlite') {
+    return {
+      openDatabaseAsync: async () => {
+        throw new Error('expo_sqlite_native_not_available_in_node_gate');
+      },
+    };
+  }
   if (request === 'react-native') return { Platform: { OS: 'web' } };
   if (request === 'expo-secure-store') {
     return {

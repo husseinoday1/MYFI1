@@ -128,13 +128,18 @@ export const archivedWalletMovement = (trans = [], wallets = [], defaultWalletId
   const movement = new Map((wallets || []).map(wallet => [wallet.id, 0]));
   trans.forEach(tx => {
     if (tx.kind === 'transfer') {
-      const amount = Math.abs(Number(tx.transferAmount || 0));
-      if (movement.has(tx.fromWalletId)) movement.set(tx.fromWalletId, movement.get(tx.fromWalletId) - amount);
-      if (movement.has(tx.toWalletId)) movement.set(tx.toWalletId, movement.get(tx.toWalletId) + amount);
+      const fromAmount = Math.abs(Number(tx.transferFromAmount ?? tx.transferAmount ?? 0));
+      const toAmount = Math.abs(Number(tx.transferToAmount ?? tx.transferAmount ?? 0));
+      const feeAmount = Math.abs(Number(tx.feeAmount || 0));
+      if (movement.has(tx.fromWalletId)) movement.set(tx.fromWalletId, movement.get(tx.fromWalletId) - fromAmount - feeAmount);
+      if (movement.has(tx.toWalletId)) movement.set(tx.toWalletId, movement.get(tx.toWalletId) + toAmount);
       return;
     }
     const walletId = tx.walletId || defaultWalletId;
-    if (movement.has(walletId)) movement.set(walletId, movement.get(walletId) + Number(tx.amt || 0));
+    const nativeAmount = Object.prototype.hasOwnProperty.call(tx || {}, 'walletAmount')
+      ? Number(tx.walletAmount || 0)
+      : Number(tx.amt || 0);
+    if (movement.has(walletId)) movement.set(walletId, movement.get(walletId) + nativeAmount);
   });
   return movement;
 };

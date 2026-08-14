@@ -1,6 +1,6 @@
 import * as ScreenOrientation from 'expo-screen-orientation';
 
-export const ORIENTATION_MODES = ['system', 'portrait', 'landscape'];
+export const ORIENTATION_MODES = ['system', 'auto', 'portrait', 'landscape'];
 
 export const normalizeOrientationMode = (mode) =>
   ORIENTATION_MODES.includes(mode) ? mode : 'system';
@@ -18,6 +18,13 @@ export async function applyOrientationMode(mode = 'system') {
   if (next === 'landscape') {
     await ScreenOrientation.lockAsync(
       ScreenOrientation.OrientationLock.LANDSCAPE
+    );
+    return;
+  }
+
+  if (next === 'auto') {
+    await ScreenOrientation.lockAsync(
+      ScreenOrientation.OrientationLock.ALL
     );
     return;
   }

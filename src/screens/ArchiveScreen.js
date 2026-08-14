@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
@@ -15,17 +15,19 @@ import AddTransModal from '../components/AddTransModal';
 import ActionMenu from '../components/ActionMenu';
 import { describeSmartSource } from '../lib/smartEntry';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
-import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
+import { exportMyfiPackage, pickMyfiPackage, saveMyfiPackageToDevice, shareMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
+import { getColdArchiveNamespace, listColdArchiveYears, loadColdArchiveYear } from '../lib/localArchiveRepository';
 import { filterByActiveScope, getActiveScope, getTransactionDisplayAmount, transactionFeatureEnabled } from '../lib/modules';
 import { getTransactionTagMeta } from '../lib/transactionTags';
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatMonthLabel } from '../lib/months';
+import { PRODUCT_FILE_PREFIX, PRODUCT_NAME } from '../lib/productIdentity';
 
 export default function ArchiveScreen() {
   const {
     trans, cats, wallets, cfg, deleteTrans, deleteTransMany,
-    buildYearArchive, commitYearArchive,
+    buildYearArchive, commitYearArchive, workspaceNamespace,
   } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
@@ -41,6 +43,8 @@ export default function ArchiveScreen() {
   const [archivePasswordMode, setArchivePasswordMode] = useState(null);
   const [archivePassword, setArchivePassword] = useState('');
   const [pendingArchiveYear, setPendingArchiveYear] = useState(null);
+  const [localArchives, setLocalArchives] = useState([]);
+  const [archiveSection, setArchiveSection] = useState('timeline');
   const now = new Date();
   const align = isAr ? 'right' : 'left';
   const rowDir = isAr ? 'row-reverse' : 'row';
@@ -52,6 +56,42 @@ export default function ArchiveScreen() {
   const displayWallets = loadedArchive?.payload?.data?.wallets || wallets;
   const readOnly = !!loadedArchive;
   const activeArchiveScope = getActiveScope(cfg);
+  const coldArchiveNamespace = getColdArchiveNamespace(workspaceNamespace || 'guest', cfg);
+
+  const refreshLocalArchives = async () => {
+    try {
+      const rows = await listColdArchiveYears(coldArchiveNamespace);
+      setLocalArchives(rows);
+    } catch (error) {
+      console.warn('[ARCHIVE] local list', error);
+      setLocalArchives([]);
+    }
+  };
+
+  useEffect(() => {
+    refreshLocalArchives();
+  }, [coldArchiveNamespace]);
+
+  const openLocalArchive = async item => {
+    if (!item || fileBusy) return;
+    setFileBusy(true);
+    try {
+      const local = await loadColdArchiveYear({
+        namespace: coldArchiveNamespace,
+        year: item.year,
+        scope: item.scope,
+      });
+      if (!local) throw new Error(isAr ? 'تعذر قراءة الأرشيف المحلي.' : 'Could not read the local archive.');
+      setLoadedArchive(local);
+      setArchiveSection('timeline');
+      setExpanded(null);
+      setSearch('');
+    } catch (error) {
+      Alert.alert('', error?.message || (isAr ? 'تعذر فتح الأرشيف المحلي' : 'Could not open local archive'));
+    } finally {
+      setFileBusy(false);
+    }
+  };
 
   const copy = {
     search: isAr ? 'بحث في الأرشيف...' : 'Search archive...',
@@ -118,9 +158,37 @@ export default function ArchiveScreen() {
       .map(item => item.dateISO ? new Date(`${item.dateISO}T12:00:00`).getFullYear() : null)
       .filter(year => Number.isInteger(year) && year < now.getFullYear()),
   )].sort((a, b) => b - a), [displayTrans, now]);
+  const scopedLocalArchives = useMemo(
+    () => localArchives.filter(item => (
+      activeArchiveScope === 'all' || item.scope === activeArchiveScope || item.scope === 'all'
+    )),
+    [localArchives, activeArchiveScope],
+  );
+  const archivedSummaries = useMemo(
+    () => (cfg.archiveSummaries || []).filter(item => (
+      activeArchiveScope === 'all' || (item.scope || 'personal') === activeArchiveScope
+    )),
+    [cfg.archiveSummaries, activeArchiveScope],
+  );
+  const savedYearCards = useMemo(() => {
+    const merged = new Map();
+    archivedSummaries.forEach(item => {
+      const key = `${item.scope || 'personal'}:${item.year}`;
+      merged.set(key, { ...item, scope: item.scope || 'personal', local: null });
+    });
+    scopedLocalArchives.forEach(item => {
+      const key = `${item.scope || 'personal'}:${item.year}`;
+      merged.set(key, { ...(merged.get(key) || {}), ...item, local: item });
+    });
+    return [...merged.values()].sort((a, b) => Number(b.year) - Number(a.year));
+  }, [archivedSummaries, scopedLocalArchives]);
+  const eligibleYearDetails = useMemo(() => eligibleYears.map(year => {
+    const rows = displayTrans.filter(item => item.dateISO?.startsWith(`${year}-`));
+    return { year, count: rows.length, stats: calcStats(rows) };
+  }), [eligibleYears, displayTrans]);
 
   const exportCsv = () => {
-    shareCsv({ trans: displayTrans, cats: displayCats, wallets: displayWallets, cfg, name: 'myfi_archive' });
+    shareCsv({ trans: displayTrans, cats: displayCats, wallets: displayWallets, cfg, name: `${PRODUCT_FILE_PREFIX}_archive` });
   };
 
   const openArchiveFile = async () => {
@@ -134,6 +202,7 @@ export default function ArchiveScreen() {
         setArchivePasswordMode('import');
       } else if (picked) {
         setLoadedArchive(picked);
+        setArchiveSection('timeline');
         setExpanded(null);
         setSearch('');
       }
@@ -144,37 +213,88 @@ export default function ArchiveScreen() {
     }
   };
 
+  const confirmArchiveCommit = (year, checksum) => {
+    Alert.alert(
+      isAr ? `تأكيد أرشفة ${year}` : `Confirm ${year} archive`,
+      isAr
+        ? 'تم إنشاء ملف الأرشيف. بعد التأكد من حفظه يمكنك إخراج هذه السنة من البيانات النشطة؛ ستبقى التفاصيل داخل الأرشيف المحلي أيضاً.'
+        : 'The archive package is ready. After confirming it was saved, the year can leave active storage; details also remain in the local cold archive.',
+      [
+        { text: isAr ? 'ليس الآن' : 'Not now', style: 'cancel' },
+        {
+          text: isAr ? 'تم الحفظ، أرشف الآن' : 'Saved, archive now',
+          onPress: async () => {
+            setFileBusy(true);
+            try {
+              const ok = await commitYearArchive(year, checksum, activeArchiveScope);
+              if (ok) await refreshLocalArchives();
+              Alert.alert('', ok
+                ? (isAr ? 'تمت الأرشفة بنجاح وحُفظت التفاصيل محلياً.' : 'Archive completed and details were kept locally.')
+                : (isAr ? 'تعذرت الأرشفة ولم تُحذف البيانات النشطة.' : 'Archive failed; active data was not removed.'));
+            } finally {
+              setFileBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const chooseArchiveDelivery = (year, exported) => {
+    Alert.alert(
+      isAr ? 'حفظ ملف الأرشيف' : 'Save archive file',
+      isAr ? 'اختر حفظ الملف مباشرة في مجلد على الهاتف أو مشاركته لتطبيق آخر.' : 'Save the file directly to a phone folder or share it to another app.',
+      [
+        {
+          text: isAr ? 'حفظ في الهاتف' : 'Save to phone',
+          onPress: async () => {
+            setFileBusy(true);
+            try {
+              const result = await saveMyfiPackageToDevice({ ...exported, kind: 'year_archive' });
+              if (result?.saved) confirmArchiveCommit(year, exported.checksum);
+            } catch (error) {
+              Alert.alert('', error?.message || (isAr ? 'تعذر حفظ الملف على الهاتف.' : 'Could not save the file to the phone.'));
+            } finally {
+              setFileBusy(false);
+            }
+          },
+        },
+        {
+          text: isAr ? 'مشاركة' : 'Share',
+          onPress: async () => {
+            setFileBusy(true);
+            try {
+              await shareMyfiPackage({ uri: exported.uri, kind: 'year_archive' });
+              confirmArchiveCommit(year, exported.checksum);
+            } catch (error) {
+              Alert.alert('', error?.message || (isAr ? 'تعذرت مشاركة الملف.' : 'Could not share the file.'));
+            } finally {
+              setFileBusy(false);
+            }
+          },
+        },
+        { text: isAr ? 'لاحقاً' : 'Later', style: 'cancel' },
+      ],
+    );
+  };
+
   const performArchiveYear = async (year, password = '') => {
     if (fileBusy) return;
     const data = buildYearArchive(year);
     if (!data) return;
     setFileBusy(true);
+    // Let the busy state paint before PBKDF2/compression work begins.
+    await new Promise(resolve => setTimeout(resolve, 40));
     try {
       const exported = await exportMyfiPackage({
         kind: 'year_archive',
         data,
         year,
-        label: 'MYFI',
+        label: PRODUCT_NAME,
         password,
+        delivery: 'none',
       });
-      Alert.alert(
-        isAr ? `تأكيد أرشفة ${year}` : `Confirm ${year} archive`,
-        isAr
-          ? 'بعد التأكد من حفظ ملف ZIP، يمكن إخراج حركات هذه السنة من ذاكرة التطبيق. ستبقى الملخصات والأرصدة صحيحة.'
-          : 'After confirming the ZIP file was saved, the year can be removed from active storage. Summaries and balances remain correct.',
-        [
-          { text: isAr ? 'ليس الآن' : 'Not now', style: 'cancel' },
-          {
-            text: isAr ? 'تم الحفظ، أرشف الآن' : 'Saved, archive now',
-            onPress: async () => {
-              const ok = await commitYearArchive(year, exported.checksum, activeArchiveScope);
-              Alert.alert('', ok
-                ? (isAr ? 'تمت الأرشفة بنجاح' : 'Archive completed')
-                : (isAr ? 'تعذرت الأرشفة' : 'Archive failed'));
-            },
-          },
-        ],
-      );
+      chooseArchiveDelivery(year, exported);
     } catch (error) {
       Alert.alert(isAr ? 'تعذر إنشاء الأرشيف' : 'Could not create archive', error?.message || '');
     } finally {
@@ -225,6 +345,7 @@ export default function ArchiveScreen() {
       try {
         const unlocked = await unlockMyfiPackage(lockedPackage, archivePassword, 'year_archive');
         setLoadedArchive(unlocked);
+        setArchiveSection('timeline');
         setLockedPackage(null);
         setArchivePasswordMode(null);
         setArchivePassword('');
@@ -272,7 +393,65 @@ export default function ArchiveScreen() {
 
   const renderHeader = () => (
     <View>
-      <View style={[s.fileActions, { flexDirection: rowDir }]}>
+      <View style={[s.archiveHero, { backgroundColor: th.card, borderColor: th.border }]}>
+        <View style={[s.heroHead, { flexDirection: rowDir }]}>
+          <View style={[s.heroIcon, { backgroundColor: th.primSoft }]}>
+            <Ionicons name={readOnly ? 'folder-open-outline' : 'archive-outline'} size={23} color={th.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.heroTitle, { color: th.text, textAlign: align }]}>
+              {readOnly
+                ? (isAr ? `أرشيف ${loadedArchive?.payload?.year || loadedArchive?.payload?.data?.cfg?.archiveYear || ''}` : `Archive ${loadedArchive?.payload?.year || loadedArchive?.payload?.data?.cfg?.archiveYear || ''}`)
+                : (isAr ? 'مركز الأرشيف' : 'Archive center')}
+            </Text>
+            <Text style={[s.heroBody, { color: th.sub, textAlign: align }]}>
+              {readOnly
+                ? (isAr ? 'عرض آمن للقراءة فقط؛ بياناتك النشطة لم تتغير.' : 'Safe read-only view; active data is unchanged.')
+                : (isAr ? 'تصفّح السجل، افتح السنوات المحفوظة، أو انقل سنة مكتملة بأمان.' : 'Browse history, open saved years, or safely move a completed year.')}
+            </Text>
+          </View>
+        </View>
+        {!readOnly ? (
+          <View style={[s.heroMetrics, { flexDirection: rowDir, borderTopColor: th.border }]}>
+            {[
+              { value: months.length, label: isAr ? 'شهر في السجل' : 'months' },
+              { value: scopedLocalArchives.length, label: isAr ? 'سنة محفوظة' : 'saved years' },
+              { value: eligibleYears.length, label: isAr ? 'جاهزة للأرشفة' : 'ready' },
+            ].map(item => (
+              <View key={item.label} style={s.heroMetric}>
+                <Text style={[s.heroMetricValue, { color: th.text }]}>{item.value}</Text>
+                <Text style={[s.heroMetricLabel, { color: th.sub }]} numberOfLines={1} adjustsFontSizeToFit>{item.label}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </View>
+
+      {!readOnly ? (
+        <View style={[s.archiveTabs, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
+          {[
+            { id: 'timeline', label: isAr ? 'السجل' : 'History', icon: 'time-outline' },
+            { id: 'saved', label: isAr ? 'المحفوظ' : 'Saved', icon: 'folder-open-outline' },
+            { id: 'manage', label: isAr ? 'أرشفة سنة' : 'Archive year', icon: 'archive-outline' },
+          ].map(item => {
+            const active = archiveSection === item.id;
+            return (
+              <TouchableOpacity
+                key={item.id}
+                onPress={() => { setArchiveSection(item.id); setSearch(''); selection.cancel(); }}
+                style={[s.archiveTab, { backgroundColor: active ? th.primary : 'transparent' }]}
+              >
+                <Ionicons name={item.icon} size={15} color={active ? th.onPrimary : th.sub} />
+                <Text style={[s.archiveTabText, { color: active ? th.onPrimary : th.sub }]} numberOfLines={1} adjustsFontSizeToFit>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {(archiveSection === 'saved' || readOnly) ? <View style={[s.fileActions, { flexDirection: rowDir }]}>
         <TouchableOpacity
           onPress={openArchiveFile}
           disabled={fileBusy}
@@ -292,57 +471,106 @@ export default function ArchiveScreen() {
             <Text style={{ color: th.exp, fontSize: 12, ...weight('900') }}>{isAr ? 'إغلاق الملف' : 'Close file'}</Text>
           </TouchableOpacity>
         ) : null}
-      </View>
+      </View> : null}
 
       {readOnly ? (
         <View style={[s.loadedBanner, { backgroundColor: th.primSoft, borderColor: th.primary }]}>
           <Text style={{ color: th.primary, fontSize: 12, ...weight('900'), textAlign: align }}>
-            {isAr ? `ملف أرشيف للقراءة فقط: ${loadedArchive?.name || ''}` : `Read-only archive: ${loadedArchive?.name || ''}`}
+            {isAr
+              ? `${loadedArchive?.localArchive ? 'أرشيف محلي' : 'ملف أرشيف'} للقراءة فقط: ${loadedArchive?.name || ''}`
+              : `Read-only ${loadedArchive?.localArchive ? 'local archive' : 'archive file'}: ${loadedArchive?.name || ''}`}
           </Text>
         </View>
-      ) : eligibleYears.length ? (
+      ) : (
+        <>
+          {archiveSection === 'saved' && savedYearCards.length ? (
+            <View style={[s.archiveYears, { backgroundColor: th.card, borderColor: th.border }]}>
+              <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: align }}>
+                {isAr ? 'السنوات المحفوظة' : 'Saved years'}
+              </Text>
+              <Text style={{ color: th.sub, fontSize: 11, lineHeight: 18, marginTop: 3, textAlign: align }}>
+                {isAr ? 'كل سنة تظهر مرة واحدة؛ علامة الجهاز تعني أن تفاصيلها متاحة للفتح.' : 'Each year appears once; the device badge means its details can be opened.'}
+              </Text>
+              {savedYearCards.map(item => (
+                <TouchableOpacity
+                  key={`saved:${item.scope}:${item.year}`}
+                  onPress={() => { if (item.local) openLocalArchive(item.local); }}
+                  disabled={!item.local || fileBusy}
+                  style={[s.savedYearRow, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}
+                >
+                  <View style={[s.yearCardIcon, { backgroundColor: item.local ? th.primSoft : th.input }]}>
+                    <Ionicons name={item.local ? 'phone-portrait-outline' : 'document-text-outline'} size={19} color={item.local ? th.primary : th.sub} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: th.text, fontSize: 16, ...weight('900'), textAlign: align }}>{item.year}</Text>
+                    <Text style={{ color: th.sub, fontSize: 11, marginTop: 2, textAlign: align }}>
+                      {Number(item.count || 0)} {isAr ? 'حركة' : 'entries'} · {isAr ? 'الصافي' : 'net'} {Number(item.net || 0) >= 0 ? '+' : '-'}{fmt(item.net)} {sym}
+                    </Text>
+                  </View>
+                  <Text style={{ color: item.local ? th.primary : th.sub, fontSize: 11, ...weight('900') }}>
+                    {item.local ? (isAr ? 'فتح' : 'Open') : (isAr ? 'ملخص فقط' : 'Summary only')}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : null}
+          {archiveSection === 'manage' ? (
+            <View style={[s.safetyCard, { backgroundColor: th.primSoft, borderColor: `${th.primary}44`, flexDirection: rowDir }]}>
+              <Ionicons name="shield-checkmark-outline" size={20} color={th.primary} />
+              <Text style={{ color: th.primary, fontSize: 12, lineHeight: 19, ...weight('800'), flex: 1, textAlign: align }}>
+                {isAr ? 'تُحفظ السنة أولاً داخل SQLite وتُفحص، ثم تُزال من السجل النشط. السنة الحالية لا يمكن أرشفتها.' : 'The year is stored and verified in SQLite before leaving active history. The current year cannot be archived.'}
+              </Text>
+            </View>
+          ) : null}
+          {archiveSection === 'manage' && eligibleYearDetails.length ? (
         <View style={[s.archiveYears, { backgroundColor: th.card, borderColor: th.border }]}>
           <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: align }}>
             {isAr ? 'أرشفة سنة مكتملة' : 'Archive a completed year'}
           </Text>
           <View style={[s.yearRail, { flexDirection: rowDir }]}>
-            {eligibleYears.map(year => (
+            {eligibleYearDetails.map(item => (
               <TouchableOpacity
-                key={year}
-                onPress={() => archiveYear(year)}
+                key={item.year}
+                onPress={() => archiveYear(item.year)}
                 disabled={fileBusy}
-                style={[s.yearBtn, { backgroundColor: th.primSoft, borderColor: th.primary }]}
+                style={[s.yearCard, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}
               >
-                <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{year}</Text>
+                <View style={[s.yearCardIcon, { backgroundColor: th.primSoft }]}>
+                  <Ionicons name="archive-outline" size={20} color={th.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: th.text, fontSize: 16, ...weight('900'), textAlign: align }}>{item.year}</Text>
+                  <Text style={{ color: th.sub, fontSize: 11, marginTop: 2, textAlign: align }}>
+                    {item.count} {isAr ? 'حركة' : 'entries'} · {isAr ? 'الصافي' : 'net'} {item.stats.bal >= 0 ? '+' : '-'}{fmt(item.stats.bal)} {sym}
+                  </Text>
+                </View>
+                <View style={[s.archiveNowBtn, { backgroundColor: th.primary }]}>
+                  <Text style={{ color: th.onPrimary, fontSize: 11, ...weight('900') }}>{isAr ? 'أرشفة' : 'Archive'}</Text>
+                </View>
               </TouchableOpacity>
             ))}
           </View>
         </View>
-      ) : null}
-      {!readOnly && (cfg.archiveSummaries || []).filter(item => (
-        activeArchiveScope === 'all'
-        || (item.scope || 'personal') === activeArchiveScope
-      )).length ? (
-        <View style={[s.archiveYears, { backgroundColor: th.card, borderColor: th.border }]}>
-          <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: align }}>
-            {isAr ? 'سنوات مؤرشفة خارج الجهاز' : 'Years archived externally'}
-          </Text>
-          {(cfg.archiveSummaries || []).filter(item => (
-            activeArchiveScope === 'all'
-            || (item.scope || 'personal') === activeArchiveScope
-          )).map(item => (
-            <View key={`${item.year}:${item.scope || 'personal'}`} style={[s.summaryRow, { flexDirection: rowDir, borderTopColor: th.border }]}>
-              <Text style={{ color: th.text, fontSize: 12, ...weight('900') }}>{item.year}</Text>
-              <Text style={{ color: th.sub, fontSize: 12 }}>{item.count} {isAr ? 'حركة' : 'entries'}</Text>
-              <Text style={{ color: Number(item.net || 0) >= 0 ? th.inc : th.exp, fontSize: 12, ...weight('900') }}>
-                {Number(item.net || 0) >= 0 ? '+' : '-'}{fmt(item.net)} {sym}
-              </Text>
-            </View>
-          ))}
+          ) : null}
+        </>
+      )}
+      {!readOnly && archiveSection === 'saved' && !savedYearCards.length ? (
+        <View style={[s.sectionEmpty, { backgroundColor: th.card, borderColor: th.border }]}>
+          <Ionicons name="folder-open-outline" size={30} color={th.faint} />
+          <Text style={[s.sectionEmptyTitle, { color: th.text }]}>{isAr ? 'لا توجد سنوات محفوظة بعد' : 'No saved years yet'}</Text>
+          <Text style={[s.sectionEmptyBody, { color: th.sub }]}>{isAr ? 'عند أرشفة سنة مكتملة ستظهر هنا ويمكن فتح تفاصيلها لاحقاً.' : 'Completed years will appear here after archiving and remain available to open later.'}</Text>
         </View>
       ) : null}
 
-      {!readOnly ? <MultiSelectBar
+      {!readOnly && archiveSection === 'manage' && !eligibleYearDetails.length ? (
+        <View style={[s.sectionEmpty, { backgroundColor: th.card, borderColor: th.border }]}>
+          <Ionicons name="checkmark-circle-outline" size={32} color={th.inc} />
+          <Text style={[s.sectionEmptyTitle, { color: th.text }]}>{isAr ? 'لا توجد سنة مكتملة للأرشفة' : 'No completed year to archive'}</Text>
+          <Text style={[s.sectionEmptyBody, { color: th.sub }]}>{isAr ? 'ستظهر هنا السنوات السابقة التي تحتوي على حركات نشطة.' : 'Previous years with active transactions will appear here.'}</Text>
+        </View>
+      ) : null}
+
+      {!readOnly && archiveSection === 'timeline' ? <MultiSelectBar
         th={th}
         lang={cfg.lang}
         active={selection.selecting}
@@ -354,7 +582,7 @@ export default function ArchiveScreen() {
         onDelete={confirmDeleteSelected}
         onCancel={selection.cancel}
       /> : null}
-      <View style={[s.searchBox, { backgroundColor: th.input, borderColor: search ? th.primary : th.border, flexDirection: rowDir }]}>
+      {(readOnly || archiveSection === 'timeline') ? <View style={[s.searchBox, { backgroundColor: th.input, borderColor: search ? th.primary : th.border, flexDirection: rowDir }]}>
         <Ionicons name="search" size={16} color={th.sub} />
         <TextInput
           value={search}
@@ -368,9 +596,9 @@ export default function ArchiveScreen() {
             <Ionicons name="backspace-outline" size={16} color={th.sub} />
           </TouchableOpacity>
         )}
-      </View>
+      </View> : null}
 
-      {!readOnly && months.length > 0 && (
+      {!readOnly && archiveSection === 'timeline' && months.length > 0 && (
         <View style={[s.card, { backgroundColor: th.primSoft, borderColor: `${th.primary}33`, marginBottom: 12 }]}>
           <Text style={[s.label, { color: th.primary, textAlign: align }]}>{L.yearNetSoFar} - {now.getFullYear()}</Text>
           <View style={[s.actionLine, { flexDirection: rowDir }]}>
@@ -514,7 +742,7 @@ export default function ArchiveScreen() {
             {[...m.trans].sort((a, b) => (b.ts || 0) - (a.ts || 0)).map(renderTransaction)}
 
             <TouchableOpacity
-              onPress={() => generateMonthPDF({ ...m, name, inc: stats.inc, exp: stats.exp, net: stats.bal }, displayCats, { currency: cfg.currency, lang: cfg.lang, name: cfg.name || 'MYFI' })}
+              onPress={() => generateMonthPDF({ ...m, name, inc: stats.inc, exp: stats.exp, net: stats.bal }, displayCats, { currency: cfg.currency, lang: cfg.lang, name: cfg.name || PRODUCT_NAME })}
               style={[s.pdfBtn, { backgroundColor: th.primSoft, flexDirection: rowDir }]}
             >
               <Ionicons name="share-outline" size={15} color={th.primary} />
@@ -531,18 +759,20 @@ export default function ArchiveScreen() {
       <FlatList
         style={{ flex: 1, backgroundColor: th.bg }}
         contentContainerStyle={{ padding: 16, paddingBottom: 42 }}
-        data={filteredMonths}
+        data={(readOnly || archiveSection === 'timeline') ? filteredMonths : []}
         keyExtractor={item => item.key}
         renderItem={renderMonth}
-        ListHeaderComponent={renderHeader}
-        ListEmptyComponent={
+        // Keep a stable native View as the header root. Passing the freshly
+        // created render function here remounts TextInput on every keystroke.
+        ListHeaderComponent={renderHeader()}
+        ListEmptyComponent={(readOnly || archiveSection === 'timeline') ? (
           <View style={[s.empty, { borderColor: th.border }]}>
             <Ionicons name="archive-outline" size={34} color={th.faint} />
             <Text style={{ color: th.sub, textAlign: 'center', marginTop: 8, ...weight('900') }}>
               {search ? copy.noResults : L.noData}
             </Text>
           </View>
-        }
+        ) : null}
         keyboardShouldPersistTaps="handled"
       />
       <AddTransModal visible={!!editing} onClose={() => setEditing(null)} editData={editing} />
@@ -587,13 +817,33 @@ export default function ArchiveScreen() {
 }
 
 const s = StyleSheet.create({
+  archiveHero: { borderRadius: 20, borderWidth: 0.5, padding: 15, marginBottom: 12 },
+  heroHead: { alignItems: 'center', gap: 11 },
+  heroIcon: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  heroTitle: { fontSize: 18, lineHeight: 24, ...weight('900') },
+  heroBody: { fontSize: 12, lineHeight: 19, marginTop: 2, ...weight('700') },
+  heroMetrics: { marginTop: 13, paddingTop: 12, borderTopWidth: 0.5, gap: 6 },
+  heroMetric: { flex: 1, minWidth: 0, alignItems: 'center' },
+  heroMetricValue: { fontSize: 17, lineHeight: 22, ...weight('900') },
+  heroMetricLabel: { fontSize: 10, lineHeight: 15, ...weight('800'), textAlign: 'center' },
+  archiveTabs: { minHeight: 48, borderRadius: 15, padding: 4, gap: 4, marginBottom: 12 },
+  archiveTab: { flex: 1, minWidth: 0, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5, paddingHorizontal: 5 },
+  archiveTabText: { fontSize: 11, lineHeight: 16, ...weight('900') },
   fileActions: { gap: 8, marginBottom: 10, flexWrap: 'wrap' },
   fileBtn: { minHeight: 40, borderRadius: 12, borderWidth: 0.5, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', gap: 7 },
   loadedBanner: { borderRadius: 12, borderWidth: 0.5, padding: 11, marginBottom: 10 },
   archiveYears: { borderRadius: 14, borderWidth: 0.5, padding: 12, marginBottom: 10 },
   yearRail: { gap: 8, flexWrap: 'wrap', marginTop: 10 },
   yearBtn: { minWidth: 68, minHeight: 36, borderRadius: 10, borderWidth: 0.5, alignItems: 'center', justifyContent: 'center' },
+  yearCard: { width: '100%', minHeight: 68, borderRadius: 14, borderWidth: 0.5, padding: 10, alignItems: 'center', gap: 10 },
+  savedYearRow: { minHeight: 70, borderRadius: 14, borderWidth: 0.5, padding: 10, alignItems: 'center', gap: 10, marginTop: 9 },
+  yearCardIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  archiveNowBtn: { minWidth: 62, minHeight: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   summaryRow: { minHeight: 38, borderTopWidth: 0.5, alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 8, paddingTop: 8 },
+  safetyCard: { borderRadius: 14, borderWidth: 0.5, padding: 12, alignItems: 'flex-start', gap: 9, marginBottom: 10 },
+  sectionEmpty: { minHeight: 170, borderRadius: 16, borderWidth: 0.5, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', padding: 20, marginBottom: 10 },
+  sectionEmptyTitle: { fontSize: 14, lineHeight: 20, ...weight('900'), textAlign: 'center', marginTop: 8 },
+  sectionEmptyBody: { fontSize: 12, lineHeight: 19, ...weight('700'), textAlign: 'center', marginTop: 4, maxWidth: 330 },
   card: { borderRadius: 16, padding: 14, borderWidth: 0.5 },
   label: { fontSize: 12, ...weight('900') },
   searchBox: { alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, borderWidth: 0.5, marginBottom: 12 },

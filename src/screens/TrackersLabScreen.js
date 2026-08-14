@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View, Text, TextInput, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
@@ -6,7 +6,7 @@ import { TH } from '../lib/theme';
 import { getSymbol } from '../lib/constants';
 import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { isISODate, pct, today } from '../utils/calc';
-import { commitmentDueISO, formatCommitmentDate, formatCommitmentMonth, monthKey, monthsBetween } from '../lib/commitments';
+import { commitmentDueISO, formatCommitmentDate, formatCommitmentMonth, monthKey } from '../lib/commitments';
 import { RADIUS, SHADOW, TYPE, weight } from '../lib/tokens';
 import DateField from '../components/DateField';
 import ActionMenu from '../components/ActionMenu';
@@ -59,11 +59,14 @@ const copy = (lang) => {
     paused: ar ? 'متوقف' : 'Paused',
     paidMonth: ar ? 'تم الدفع هذا الشهر' : 'Paid this month',
     plan: ar ? 'التزام مرتبط' : 'Linked commitment',
-    planDue: ar ? 'شهر الالتزام' : 'Commitment month',
+    planDue: ar ? 'تاريخ الدفع' : 'Payment date',
     planAmount: ar ? 'مبلغ الالتزام' : 'Commitment amount',
     status: ar ? 'الحالة' : 'Status',
     progress: ar ? 'الإنجاز' : 'Progress',
     dueThisMonth: ar ? 'مستحق هذا الشهر' : 'Due this month',
+    dueToday: ar ? 'مستحق اليوم' : 'Due today',
+    overdueDate: ar ? 'متأخر منذ' : 'Overdue since',
+    dueDate: ar ? 'موعد الدفع' : 'Payment date',
     overdueMonth: ar ? 'متأخر من شهر' : 'Overdue from',
     dueMonth: ar ? 'موعده شهر' : 'Due in',
     noPlan: ar ? 'لا يوجد التزام مرتبط' : 'No linked commitment',
@@ -101,6 +104,10 @@ const copy = (lang) => {
     noRepayments: ar ? 'لا يوجد سداد مسجل' : 'No repayments yet',
     noCollections: ar ? 'لا يوجد تحصيل مسجل' : 'No collections yet',
     noSavings: ar ? 'لا يوجد توفير مسجل' : 'No savings yet',
+    commitmentHistory: ar ? 'سجل دفعات الالتزام' : 'Commitment payment history',
+    noCommitmentPayments: ar ? 'لا توجد دفعات مسجلة لهذا الالتزام' : 'No commitment payments yet',
+    paymentMonth: ar ? 'شهر الاستحقاق' : 'Due month',
+    paymentDate: ar ? 'تاريخ الدفع' : 'Payment date',
     name: ar ? 'الاسم' : 'Name',
     amount: ar ? 'المبلغ' : 'Amount',
     date: ar ? 'التاريخ' : 'Date',
@@ -159,7 +166,6 @@ export default function TrackersLabScreen({
     return true;
   });
   const [filter, setFilter] = useState('all');
-  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [openId, setOpenId] = useState(null);
   const [expandedPaymentHistoryId, setExpandedPaymentHistoryId] = useState(null);
   const [editTrackerDraft, setEditTrackerDraft] = useState(null);
@@ -269,7 +275,18 @@ export default function TrackersLabScreen({
           plan: null,
           source: item,
           archived: !!item.archivedAt,
-          history: [],
+          history: paymentRows
+            .map(tx => ({
+              id: tx.id,
+              amt: Math.abs(Number(tx.amt || 0)),
+              date: tx.dateISO || tx.date || null,
+              cycleMonth: tx.commitmentMonth
+                || String(tx.dateISO || tx.date || '').slice(0, 7)
+                || null,
+              walletId: tx.walletId || item.walletId || null,
+              ts: Number(tx.ts || 0),
+            }))
+            .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || b.ts - a.ts),
         };
       }) : [];
 
@@ -342,7 +359,6 @@ export default function TrackersLabScreen({
           ? 'receivable'
           : 'owed';
     setFilter(nextKind);
-    setFilterMenuOpen(false);
     setOpenId(focusRequest.id
       ? `${nextKind === 'saving' ? 'saving' : nextKind === 'monthly' ? 'monthly' : 'amount'}:${focusRequest.id}`
       : null);
@@ -387,35 +403,35 @@ export default function TrackersLabScreen({
     if (!commitment) return null;
     const dueISO = commitmentDueISO(commitment);
     const todayDate = new Date(`${today()}T12:00:00`);
-    const monthsUntil = monthsBetween(todayDate, dueISO);
     const dueDate = new Date(`${dueISO}T12:00:00`);
     const daysUntil = Math.ceil((dueDate - todayDate) / 86400000);
     const dueMonthLabel = formatCommitmentMonth(dueISO, cfg.lang);
-    const deferredDateLabel = formatCommitmentDate(dueISO, cfg.lang);
+    const dueDateLabel = formatCommitmentDate(dueISO, cfg.lang);
+    const deferredDateLabel = dueDateLabel;
     const deferredActive = !!commitment.deferredUntilISO && daysUntil > 0;
     const paidThisCycle = paidThisMonth || commitment.lastPaidMonth === monthKey(todayDate);
     const amount = Number(commitment.amt || 0);
     const oneTimeDone = commitment.repeatMonthly === false && !!commitment.lastPaidMonth;
 
     if (oneTimeDone) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, paidThisCycle: true, active: false, label: T.done, color: th.inc, bg: th.incBg };
+      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle: true, active: false, label: T.done, color: th.inc, bg: th.incBg };
     }
     if (commitment.active === false) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, paidThisCycle, active: false, label: T.paused, color: th.sub, bg: th.cardHigh };
+      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: false, label: T.paused, color: th.sub, bg: th.cardHigh };
     }
     if (paidThisCycle) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, paidThisCycle, active: true, label: T.paidMonth, color: th.inc, bg: th.incBg };
+      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: T.paidMonth, color: th.inc, bg: th.incBg };
     }
     if (deferredActive) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, paidThisCycle, active: true, label: `${T.deferredUntil}: ${deferredDateLabel}`, color: commitmentColor, bg: commitmentBg, deferredUntilISO: commitment.deferredUntilISO, deferredDateLabel };
+      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: `${T.deferredUntil}: ${deferredDateLabel}`, color: commitmentColor, bg: commitmentBg, deferredUntilISO: commitment.deferredUntilISO, deferredDateLabel };
     }
-    if (monthsUntil < 0) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, paidThisCycle, active: true, label: `${T.overdueMonth} ${dueMonthLabel}`, color: th.exp, bg: th.expBg };
+    if (daysUntil < 0) {
+      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: `${T.overdueDate} ${dueDateLabel}`, color: th.exp, bg: th.expBg };
     }
-    if (monthsUntil === 0) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, paidThisCycle, active: true, label: T.dueThisMonth, color: commitmentColor, bg: commitmentBg };
+    if (daysUntil === 0) {
+      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: T.dueToday, color: commitmentColor, bg: commitmentBg };
     }
-    return { id: commitment.id, amount, dueISO, dueMonthLabel, paidThisCycle, active: true, label: `${T.dueMonth} ${dueMonthLabel}`, color: th.primary, bg: th.primSoft };
+    return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: `${T.dueDate}: ${dueDateLabel}`, color: th.primary, bg: th.primSoft };
   };
 
   const openTrackerEdit = (item) => {
@@ -457,7 +473,7 @@ export default function TrackersLabScreen({
     if (draft.kind === 'saving') {
       await editGoal?.(draft.sourceId, { name, target: amount, createdAt: draft.date });
     } else if (draft.kind === 'monthly') {
-      await editCommitment?.(draft.sourceId, { name, amt: amount, firstDueISO: monthStartISO(draft.date) });
+      await editCommitment?.(draft.sourceId, { name, amt: amount, firstDueISO: draft.date });
     } else {
       await editDebt?.(draft.sourceId, { name, total: amount, createdAt: draft.date });
     }
@@ -691,6 +707,9 @@ export default function TrackersLabScreen({
       ) : null}
       {cfg.entryMode === 'quick' ? (
         <View style={[s.trackerQuickEntry, { backgroundColor: th.card, borderColor: th.border }]}>
+          <Text style={[s.trackerQuickEntryTitle, { color: th.sub, textAlign: align }]}>
+            {isAr ? 'إجراءات مباشرة' : 'Direct actions'}
+          </Text>
           <View style={[s.trackerQuickEntryRow, { flexDirection: rowDir }]}>
             {[
               modules.debtsOwed
@@ -706,7 +725,11 @@ export default function TrackersLabScreen({
                 ? { key: 'commitment', label: T.monthly, icon: 'calendar-outline', color: commitmentColor, onPress: () => onNewTracker?.({ trackerType: 'commitment' }) }
                 : null,
             ].filter(Boolean).map(action => (
-              <TouchableOpacity key={action.key} onPress={action.onPress} style={s.trackerQuickEntryAction}>
+              <TouchableOpacity
+                key={action.key}
+                onPress={action.onPress}
+                style={[s.trackerQuickEntryAction, { backgroundColor: th.cardHigh, borderColor: th.border }]}
+              >
                 <View style={[s.trackerQuickEntryIcon, { backgroundColor: `${action.color}18`, borderColor: `${action.color}44` }]}>
                   <Ionicons name={action.icon} size={18} color={action.color} />
                 </View>
@@ -719,41 +742,41 @@ export default function TrackersLabScreen({
         </View>
       ) : null}
       <View style={s.filterBlock}>
-        <TouchableOpacity
-          onPress={() => setFilterMenuOpen(current => !current)}
-          style={[s.filterSelect, { backgroundColor: th.card, borderColor: filterMenuOpen ? th.primary : th.border, flexDirection: rowDir }]}
-          accessibilityRole="button"
-          accessibilityState={{ expanded: filterMenuOpen }}
+        <Text style={[s.filterRailTitle, { color: th.sub, textAlign: align }]}>
+          {isAr ? 'نوع المتابعة' : 'Tracker type'}
+        </Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={[s.filterRail, { flexDirection: rowDir }]}
         >
-          <Ionicons name="funnel-outline" size={18} color={th.primary} />
-          <View style={{ flex: 1 }}>
-            <Text style={[s.filterSelectLabel, { color: th.sub, textAlign: align }]}>{isAr ? 'نوع المتابعة' : 'Tracker type'}</Text>
-            <Text style={[s.filterSelectValue, { color: th.text, textAlign: align }]}>
-              {filters.find(item => item.key === filter)?.label || T.all} · {filters.find(item => item.key === filter)?.count || 0}
-            </Text>
-          </View>
-          <Ionicons name={filterMenuOpen ? 'chevron-up' : 'chevron-down'} size={17} color={th.faint} />
-        </TouchableOpacity>
-        {filterMenuOpen ? (
-          <View style={[s.filterOptions, { backgroundColor: th.input, borderColor: th.border }]}>
-            {filters.map(item => {
-              const active = filter === item.key;
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  onPress={() => { setFilter(item.key); setFilterMenuOpen(false); setOpenId(null); }}
-                  style={[s.filterOption, { backgroundColor: active ? th.primSoft : 'transparent', flexDirection: rowDir }]}
-                >
-                  <Ionicons name={active ? 'checkmark-circle' : 'ellipse-outline'} size={17} color={active ? th.primary : th.sub} />
-                  <Text style={{ color: active ? th.primary : th.text, flex: 1, fontSize: 13, ...weight(active ? '900' : '700'), textAlign: align }}>
-                    {item.label}
-                  </Text>
-                  <Text style={{ color: active ? th.primary : th.sub, fontSize: 12, ...weight('900') }}>{item.count}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ) : null}
+          {filters.map(item => {
+            const active = filter === item.key;
+            return (
+              <TouchableOpacity
+                key={item.key}
+                onPress={() => { setFilter(item.key); setOpenId(null); }}
+                style={[
+                  s.filterChip,
+                  {
+                    backgroundColor: active ? th.primSoft : th.card,
+                    borderColor: active ? th.primary : th.border,
+                    flexDirection: rowDir,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={[s.filterChipText, { color: active ? th.primary : th.text }]}>
+                  {item.label}
+                </Text>
+                <View style={[s.filterCount, { backgroundColor: active ? th.card : th.cardHigh }]}>
+                  <Text style={[s.filterCountText, { color: active ? th.primary : th.sub }]}>{item.count}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
 
       <MultiSelectBar
@@ -787,13 +810,6 @@ export default function TrackersLabScreen({
         const managedPlanId = item.kind === 'monthly' ? item.sourceId : plan?.id;
         const managedPlanActive = plan?.active !== false;
         const movement = movementLabels(item.kind);
-        const kindLabel = item.kind === 'owed'
-          ? T.owed
-          : item.kind === 'receivable'
-            ? T.receivable
-            : item.kind === 'saving'
-              ? T.saving
-              : T.monthly;
         const amountLabel = item.kind === 'monthly' ? T.planAmount : T.remaining;
         const progressValue = Math.min(100, Math.max(0, Number(item.progress || 0)));
         return (
@@ -807,6 +823,7 @@ export default function TrackersLabScreen({
               },
             ]}
           >
+            <View style={[s.cardAccent, { backgroundColor: item.color }]} />
             <View style={[s.cardHead, { flexDirection: rowDir }]}>
               <TouchableOpacity
                 onPress={() => (
@@ -825,9 +842,6 @@ export default function TrackersLabScreen({
                   <View style={s.cardContent}>
                     <Text style={{ color: th.text, fontSize: 15, lineHeight: 21, ...weight('900'), textAlign: align }} numberOfLines={1}>
                       {item.title}
-                    </Text>
-                    <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, ...weight('800'), textAlign: align, marginTop: 2 }}>
-                      {kindLabel}
                     </Text>
                     <View style={[s.trackerMetaRow, { flexDirection: rowDir }]}>
                       <View style={[s.trackerStateChip, { backgroundColor: `${item.color}18` }]}>
@@ -878,7 +892,7 @@ export default function TrackersLabScreen({
               onLongPress={() => selection.toggle(item.id)}
               activeOpacity={0.82}
             >
-              <View style={[s.amountSummary, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}>
+              <View style={[s.amountSummary, { backgroundColor: 'transparent', borderTopColor: th.border, flexDirection: rowDir }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, ...weight('800'), textAlign: align }}>
                     {amountLabel}
@@ -887,21 +901,19 @@ export default function TrackersLabScreen({
                     {money(primaryAmount)} {sym}
                   </Text>
                 </View>
-                <View style={[s.statusPill, { backgroundColor: th.cardHigh, borderColor: `${item.color}55` }]}>
-                  <Text style={{ color: item.color, fontSize: 11, lineHeight: 16, ...weight('900') }}>
-                    {statusLabel(item.status, item)}
+                {/* STAGE3_FINAL_SIDE_METRIC */}
+                <View style={[s.metricSide, { backgroundColor: `${item.color}12` }]}>
+                  <Text style={{ color: th.sub, fontSize: 10, lineHeight: 14, ...weight('800'), textAlign: 'center' }}>
+                    {item.kind === 'monthly' ? T.next : T.progress}
+                  </Text>
+                  <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: item.color, fontSize: 12, lineHeight: 17, ...weight('900'), textAlign: 'center', marginTop: 2 }}>
+                    {item.kind === 'monthly' ? (item.date || '-') : `${Math.round(progressValue)}%`}
                   </Text>
                 </View>
               </View>
 
               {item.kind === 'monthly' ? (
                 <>
-                  <View style={[s.monthlyBrief, { flexDirection: rowDir }]}>
-                    <Ionicons name="calendar-outline" size={14} color={commitmentColor} />
-                    <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, ...weight('800'), textAlign: align, flex: 1 }}>
-                      {T.next}: {item.date || '-'}
-                    </Text>
-                  </View>
                   {item.paidThisMonth ? (
                     <View style={[s.paidNotice, { backgroundColor: th.incBg, borderColor: `${th.inc}55`, flexDirection: rowDir }]}>
                       <Ionicons name="checkmark-circle" size={16} color={th.inc} />
@@ -917,7 +929,6 @@ export default function TrackersLabScreen({
                     <Text style={{ color: th.sub, fontSize: 11, ...weight('800') }}>
                       {doneLabel}: {money(item.doneValue)} {sym} / {money(item.total)} {sym}
                     </Text>
-                    <Text style={{ color: item.color, fontSize: 11, ...weight('900') }}>{Math.round(progressValue)}%</Text>
                   </View>
                   <View style={[s.progressTrack, { backgroundColor: th.cardHigh }]}>
                     <View style={[s.progressFill, { backgroundColor: item.color, width: `${progressValue}%` }]} />
@@ -948,6 +959,7 @@ export default function TrackersLabScreen({
 
             {open ? (
               <View style={[s.details, { borderTopColor: th.border }]}>
+
                 {item.kind !== 'monthly' ? (
                   <View style={[s.detailGrid, { flexDirection: rowDir }]}>
                     <DetailTile th={th} lang={cfg.lang} label={T.total} value={`${money(item.total)} ${sym}`} />
@@ -994,7 +1006,7 @@ export default function TrackersLabScreen({
                       </View>
                       <View style={[s.planFactCard, { backgroundColor: th.card }]}>
                         <Text style={[s.planFactLabel, { color: th.sub, textAlign: align }]}>{T.planDue}</Text>
-                        <Text style={[s.planFactValue, { color: th.text, textAlign: align }]}>{plan.dueMonthLabel}</Text>
+                        <Text style={[s.planFactValue, { color: th.text, textAlign: align }]}>{plan.dueDateLabel}</Text>
                       </View>
                     </View>
                   </View>
@@ -1048,6 +1060,71 @@ export default function TrackersLabScreen({
                     ) : null}
                   </View>
                 ) : null}
+
+
+
+                {/* STAGE3_FINAL_COMMITMENT_HISTORY */}
+                {item.kind === 'monthly' ? (
+                  <View style={[s.historyBox, { borderColor: th.border, backgroundColor: th.cardHigh }]}>
+                    <TouchableOpacity
+                      onPress={() => setExpandedPaymentHistoryId(historyOpen ? null : item.id)}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: historyOpen }}
+                      style={[s.historyToggle, { flexDirection: rowDir }]}
+                    >
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[s.historyTitle, { color: th.text, textAlign: align }]} numberOfLines={1}>
+                          {T.commitmentHistory}
+                        </Text>
+                        <Text style={{ color: th.sub, fontSize: 11, lineHeight: 16, ...weight('800'), textAlign: align }}>
+                          {historyOpen ? T.hideHistory : T.showHistory}
+                        </Text>
+                      </View>
+                      <View style={[s.historyCountBadge, { backgroundColor: th.card, borderColor: th.border }]}>
+                        <Text style={{ color: th.text, fontSize: 11, lineHeight: 16, ...weight('900') }}>
+                          {(item.history || []).length}
+                        </Text>
+                      </View>
+                      <Ionicons name={historyOpen ? 'chevron-up' : 'chevron-down'} size={18} color={th.sub} />
+                    </TouchableOpacity>
+
+                    {historyOpen && !(item.history || []).length ? (
+                      <Text style={{ color: th.sub, fontSize: 12, lineHeight: 17, ...weight('800'), textAlign: align }}>
+                        {T.noCommitmentPayments}
+                      </Text>
+                    ) : null}
+
+                    {historyOpen ? (item.history || []).map(payment => {
+                      const cycleISO = payment.cycleMonth
+                        ? `${payment.cycleMonth}-01`
+                        : (payment.date || today());
+                      return (
+                        <View
+                          key={payment.id}
+                          style={[s.commitmentHistoryRow, { borderTopColor: th.border, flexDirection: rowDir }]}
+                        >
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={{ color: th.text, fontSize: 13, lineHeight: 18, ...weight('900'), textAlign: align }}>
+                              {money(payment.amt)} {sym}
+                            </Text>
+                            <Text style={{ color: th.sub, fontSize: 11, lineHeight: 17, ...weight('800'), textAlign: align, marginTop: 2 }}>
+                              {T.paymentMonth}: {formatCommitmentMonth(cycleISO, cfg.lang)}
+                            </Text>
+                          </View>
+                          <View style={{ minWidth: 104, alignItems: isAr ? 'flex-start' : 'flex-end' }}>
+                            <Text style={{ color: th.faint, fontSize: 10, lineHeight: 15, ...weight('800') }}>
+                              {T.paymentDate}
+                            </Text>
+                            <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: commitmentColor, fontSize: 11, lineHeight: 17, ...weight('900'), marginTop: 2 }}>
+                              {payment.date ? formatCommitmentDate(payment.date, cfg.lang) : '-'}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    }) : null}
+                  </View>
+                ) : null}
+
                 {item.kind !== 'monthly' ? (
                   <View style={[s.historyBox, { borderColor: th.border, backgroundColor: th.cardHigh }]}>
                     <TouchableOpacity
@@ -1188,7 +1265,6 @@ export default function TrackersLabScreen({
             lang={cfg.lang}
             monthNameStyle={cfg.monthNameStyle}
             label={editTrackerDraft?.kind === 'monthly' ? T.planDue : T.date}
-            monthOnly={editTrackerDraft?.kind === 'monthly'}
             style={{ marginBottom: 2 }}
           />
           <View style={[s.modalButtons, { flexDirection: rowDir }]}>
@@ -1262,60 +1338,65 @@ function DetailTile({ th, lang, label, value, tone }) {
 
 function SummaryTile({ th, lang, item, value }) {
   const align = textAlignFor(lang);
+  const rowDir = rowDirFor(lang);
   return (
-    <View style={[s.summaryTile, { backgroundColor: th.card, borderColor: th.border }]}>
+    <View style={[s.summaryTile, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}>
       <View style={[s.summaryIcon, { backgroundColor: item.bg }]}>
         <Ionicons name={item.icon} size={16} color={item.color} />
       </View>
-      <Text numberOfLines={1} adjustsFontSizeToFit style={[s.summaryLabel, { color: th.sub, textAlign: align }]}>
-        {item.label}
-      </Text>
-      <Text numberOfLines={1} adjustsFontSizeToFit style={[s.summaryValue, { color: item.color, textAlign: align }]}>
-        {value}
-      </Text>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={1} adjustsFontSizeToFit style={[s.summaryLabel, { color: th.sub, textAlign: align }]}>
+          {item.label}
+        </Text>
+        <Text numberOfLines={1} adjustsFontSizeToFit style={[s.summaryValue, { color: item.color, textAlign: align }]}>
+          {value}
+        </Text>
+      </View>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  trackerQuickEntry: { borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
-  trackerQuickEntryRow: { alignItems: 'flex-start', justifyContent: 'space-between' },
-  trackerQuickEntryAction: { width: '24%', minHeight: 68, alignItems: 'center', justifyContent: 'center', gap: 6 },
-  trackerQuickEntryIcon: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  trackerQuickEntryLabel: { fontSize: 12, lineHeight: 17, ...weight('800'), textAlign: 'center', maxWidth: '100%' },
-  summaryGrid: { flexWrap: 'wrap', gap: 8, marginBottom: 10 },
-  summaryTile: { width: '48.5%', minHeight: 68, borderRadius: RADIUS.md, borderWidth: 1, padding: 8, justifyContent: 'center', ...SHADOW.card },
-  summaryIcon: { width: 26, height: 26, borderRadius: 9, alignItems: 'center', justifyContent: 'center', marginBottom: 5 },
-  summaryLabel: { fontSize: 11, lineHeight: 15, ...weight('800') },
-  summaryValue: { fontSize: 14, lineHeight: 19, marginTop: 2, ...weight('900') },
+  trackerQuickEntry: { borderRadius: 18, borderWidth: 1, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 10, marginBottom: 10 },
+  trackerQuickEntryTitle: { fontSize: 12, lineHeight: 17, ...weight('800'), marginBottom: 7 },
+  trackerQuickEntryRow: { alignItems: 'stretch', justifyContent: 'space-between', gap: 7 },
+  trackerQuickEntryAction: { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 64, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 3 },
+  trackerQuickEntryIcon: { width: 32, height: 32, borderRadius: 10, borderWidth: 0, alignItems: 'center', justifyContent: 'center' },
+  trackerQuickEntryLabel: { fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: 'center', maxWidth: '100%' },
+  summaryGrid: { flexWrap: 'wrap', gap: 7, marginBottom: 9 },
+  summaryTile: { width: '48.5%', minHeight: 60, borderRadius: 14, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center', gap: 8 },
+  summaryIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  summaryLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
+  summaryValue: { fontSize: 13, lineHeight: 18, marginTop: 1, ...weight('900') },
   filterBlock: { marginBottom: 10 },
-  filterSelect: { minHeight: 58, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8, alignItems: 'center', gap: 9 },
-  filterSelectLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
-  filterSelectValue: { fontSize: 13, lineHeight: 19, ...weight('900'), marginTop: 1 },
-  filterOptions: { borderWidth: 1, borderRadius: RADIUS.md, marginTop: 5, padding: 4 },
-  filterOption: { minHeight: 42, alignItems: 'center', gap: 8, borderRadius: RADIUS.sm, paddingHorizontal: 9, paddingVertical: 6 },
+  filterRailTitle: { fontSize: 10, lineHeight: 14, ...weight('800'), marginBottom: 6 },
+  filterRail: { gap: 6, paddingHorizontal: 1, paddingBottom: 2 },
+  filterChip: { minHeight: 38, borderRadius: 19, borderWidth: 1, alignItems: 'center', gap: 6, paddingHorizontal: 10 },
+  filterChipText: { fontSize: 11, lineHeight: 16, ...weight('900') },
+  filterCount: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  filterCountText: { fontSize: 9, lineHeight: 12, ...weight('900') },
   empty: { minHeight: 180, borderRadius: RADIUS.xl, borderWidth: 1, alignItems: 'center', justifyContent: 'center', padding: 18 },
-  card: { borderRadius: RADIUS.md, borderWidth: 1, padding: 11, marginBottom: 8, ...SHADOW.card },
-  cardHead: { alignItems: 'center', gap: 8, marginBottom: 7 },
+  card: { borderRadius: 18, borderWidth: 1, padding: 0, marginBottom: 10, overflow: 'hidden' },
+  cardAccent: { height: 4, width: '100%' },
+  cardHead: { alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 11, paddingBottom: 10 },
   cardTapZone: { flex: 1, gap: 6 },
   cardTitleBand: { alignItems: 'center', gap: 8 },
   cardContent: { flex: 1 },
-  cardIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  cardIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   trackerMetaRow: { alignItems: 'center', gap: 7, marginTop: 6 },
   trackerStateChip: { minHeight: 22, borderRadius: 11, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 4 },
-  amountSummary: { minHeight: 66, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8, alignItems: 'center', gap: 8 },
-  statusPill: { minHeight: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-  monthlyBrief: { minHeight: 28, alignItems: 'center', gap: 6, paddingHorizontal: 3, paddingTop: 5 },
-  paidNotice: { minHeight: 34, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', gap: 7, paddingHorizontal: 10, marginTop: 6 },
-  completionNotice: { minHeight: 42, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', gap: 7, paddingHorizontal: 10, marginTop: 8 },
-  progressBlock: { paddingTop: 6, paddingHorizontal: 2 },
+  amountSummary: { minHeight: 68, borderTopWidth: 1, paddingHorizontal: 12, paddingVertical: 9, alignItems: 'center', gap: 10 },
+  metricSide: { width: 94, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7 },
+  paidNotice: { minHeight: 34, borderRadius: 12, borderWidth: 1, alignItems: 'center', gap: 7, paddingHorizontal: 10, marginHorizontal: 12, marginTop: 8 },
+  completionNotice: { minHeight: 42, borderRadius: 12, borderWidth: 1, alignItems: 'center', gap: 7, paddingHorizontal: 10, marginHorizontal: 12, marginTop: 8 },
+  progressBlock: { paddingTop: 8, paddingHorizontal: 12, paddingBottom: 10 },
   progressMeta: { justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 4 },
   progressTrack: { height: 6, borderRadius: 999, overflow: 'hidden' },
   progressFill: { height: 6, borderRadius: 999 },
   cardTools: { gap: 6, alignItems: 'center' },
-  paymentActionBtn: { minHeight: 44, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 11, paddingHorizontal: 14 },
+  paymentActionBtn: { minHeight: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', gap: 7, marginHorizontal: 12, marginTop: 8, marginBottom: 12, paddingHorizontal: 14 },
   paymentActionText: { color: '#fff', fontSize: 13, lineHeight: 18, ...weight('900') },
-  details: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, gap: 8 },
+  details: { marginHorizontal: 12, paddingTop: 11, paddingBottom: 12, borderTopWidth: 1, gap: 8 },
   detailGrid: { flexWrap: 'wrap', gap: 8 },
   detailTile: { width: '48.5%', minHeight: 56, borderRadius: RADIUS.md, paddingHorizontal: 10, paddingVertical: 9, justifyContent: 'center' },
   detailLine: { alignItems: 'center', justifyContent: 'space-between', gap: 12 },
@@ -1338,10 +1419,11 @@ const s = StyleSheet.create({
   manageRow: { gap: 8 },
   manageBtn: { flex: 1, minHeight: 40, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: 8 },
   actionBtn: { minHeight: 44, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
-  historyBox: { borderRadius: RADIUS.lg, borderWidth: 1, padding: 10, gap: 6 },
-  historyToggle: { minHeight: 46, alignItems: 'center', gap: 9 },
+  historyBox: { borderRadius: 14, borderWidth: 1, padding: 10, gap: 6 },
+  historyToggle: { minHeight: 48, alignItems: 'center', gap: 9 },
   historyCountBadge: { minWidth: 30, height: 30, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7 },
   historyTitle: { fontSize: 12, lineHeight: 17, ...weight('900') },
+  commitmentHistoryRow: { minHeight: 60, borderTopWidth: 1, paddingVertical: 9, alignItems: 'center', gap: 10 },
   historyRow: { alignItems: 'center', gap: 8, borderTopWidth: 1, paddingTop: 8, marginTop: 4 },
   historyIconBtn: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 12 },

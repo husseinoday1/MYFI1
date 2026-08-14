@@ -1,9 +1,10 @@
-import { daysInMonth, isISODate, normalizeDate, today } from '../utils/calc';
+import { asDate, daysInMonth, isISODate, normalizeDate, today } from './dateCore';
 
 const clampDay = (value) => {
   const n = Math.round(Math.abs(Number(value) || 1));
   return Math.max(1, Math.min(31, n));
 };
+
 
 const dayFromISO = (value) => {
   const safe = normalizeDate(value);
@@ -111,12 +112,13 @@ const applyDeferredDue = (baseDueISO, commitment = {}) => {
 };
 
 export const commitmentDueISO = (commitment = {}, date = new Date()) => {
+  const safeDate = asDate(date);
   const firstDueISO = commitment.firstDueISO ? normalizeDate(commitment.firstDueISO) : null;
   if (commitment.repeatMonthly === false && firstDueISO) return applyDeferredDue(firstDueISO, commitment);
-  const cycleMonth = commitmentCycleMonth(commitment, date);
+  const cycleMonth = commitmentCycleMonth(commitment, safeDate);
   const [yearValue, monthValue] = cycleMonth.split('-').map(Number);
-  const year = yearValue || date.getFullYear();
-  const month = Math.max(0, (monthValue || date.getMonth() + 1) - 1);
+  const year = yearValue || safeDate.getFullYear();
+  const month = Math.max(0, (monthValue || safeDate.getMonth() + 1) - 1);
   const day = Math.min(clampDay(commitment.day), daysInMonth(month, year));
   const baseDueISO = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   const deferredUntilISO = isISODate(commitment.deferredUntilISO)
@@ -127,8 +129,9 @@ export const commitmentDueISO = (commitment = {}, date = new Date()) => {
 };
 
 export const deferredCommitmentDueISO = (commitment = {}, option = 'day', date = new Date()) => {
-  const dueISO = commitmentDueISO(commitment, date);
-  const todayISO = dateToISO(date);
+  const safeDate = asDate(date);
+  const dueISO = commitmentDueISO(commitment, safeDate);
+  const todayISO = dateToISO(safeDate);
   const anchorISO = dueISO < todayISO ? todayISO : dueISO;
   if (option === 'day') return addDaysISO(anchorISO, 1);
   if (option === 'three_days') return addDaysISO(anchorISO, 3);
@@ -137,22 +140,23 @@ export const deferredCommitmentDueISO = (commitment = {}, option = 'day', date =
   return nextISO;
 };
 
-export const getUpcomingCommitments = (items = [], date = new Date()) =>
-  normalizeCommitments(items)
+export const getUpcomingCommitments = (items = [], date = new Date()) => {
+  const safeDate = asDate(date);
+  return normalizeCommitments(items)
     .filter(item => item.active && item.amt > 0)
     .map(item => {
       if (!item.repeatMonthly && item.lastPaidMonth) return null;
-      const dueISO = commitmentDueISO(item, date);
+      const dueISO = commitmentDueISO(item, safeDate);
       const dueDate = new Date(`${dueISO}T12:00:00`);
       const key = monthKey(dueISO);
-      const monthsUntil = monthsBetween(date, dueISO);
-      const daysUntil = Math.ceil((dueDate - date) / 86400000);
+      const monthsUntil = monthsBetween(safeDate, dueISO);
+      const daysUntil = Math.ceil((dueDate - safeDate) / 86400000);
       const isDeferred = isISODate(item.deferredUntilISO) && item.deferredUntilISO === dueISO;
       return {
         ...item,
         dueISO,
         dueMonth: key,
-        cycleMonth: commitmentCycleMonth(item, date),
+        cycleMonth: commitmentCycleMonth(item, safeDate),
         paidThisMonth: item.lastPaidMonth === key,
         monthsUntil,
         daysUntil,
@@ -164,3 +168,4 @@ export const getUpcomingCommitments = (items = [], date = new Date()) =>
     .filter(Boolean)
     .filter(item => !item.paidThisMonth)
     .sort((a, b) => a.monthsUntil - b.monthsUntil || a.dueISO.localeCompare(b.dueISO));
+};

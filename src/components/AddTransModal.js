@@ -3,6 +3,7 @@ import { View, Text, Modal, TextInput, ScrollView, Alert, Pressable, StyleSheet,
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import * as Crypto from 'expo-crypto';
 import {
   AudioModule,
   RecordingPresets,
@@ -20,7 +21,9 @@ import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel, sortWal
 import { Touchable as TouchableOpacity } from './AppPrimitives';
 import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 import DateField from './DateField';
+import SmartImageViewerModal from './SmartImageViewerModal';
 import { analyzeSmartEntry, buildSmartSourceMeta, describeSmartSource } from '../lib/smartEntry';
+import { resolveSmartCaptureDraft, smartCaptureReasonMessage } from '../lib/smartCapture';
 import { suggestCategoryFromHistory } from '../lib/localIntelligence';
 import { CATEGORY_FLOWS, categorySupportsFlow, getCategoriesForFlow, getDefaultCategoryId } from '../lib/categories';
 import { rowDirFor, textAlignFor } from '../lib/layout';
@@ -56,12 +59,16 @@ const buildUploadHeaders = async (endpoint) => {
   return headers;
 };
 
-const uploadMediaText = async (uri, endpoint, fallbackName, mimeType) => {
-  if (!endpoint || !uri) return '';
+const uploadMediaAnalysis = async (uri, endpoint, fallbackName, mimeType, context = {}) => {
+  if (!endpoint || !uri) return { text: '', analysis: null };
   const form = new FormData();
   form.append('file', { uri, name: fallbackName, type: mimeType });
+  if (context.today) form.append('today', String(context.today));
+  if (context.currency) form.append('currency', String(context.currency));
+  if (context.lang) form.append('lang', String(context.lang));
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
+  const timeout = setTimeout(() => controller.abort(), 45000);
   let response;
   try {
     response = await fetch(endpoint, {
@@ -76,6 +83,7 @@ const uploadMediaText = async (uri, endpoint, fallbackName, mimeType) => {
   } finally {
     clearTimeout(timeout);
   }
+
   if (!response.ok) {
     let message = '';
     let code = '';
@@ -86,8 +94,14 @@ const uploadMediaText = async (uri, endpoint, fallbackName, mimeType) => {
     } catch {}
     throw createUploadError(response.status, message, code);
   }
+
   const data = await response.json();
-  return String(data.text || data.transcript || data.result || '').trim();
+  return {
+    text: String(data.text || data.transcript || data.result || '').trim(),
+    analysis: data.analysis && typeof data.analysis === 'object' ? data.analysis : null,
+    provider: data.provider || null,
+    model: data.model || null,
+  };
 };
 
 const analysisErrorMessage = ({ lang, kind, endpoint, error }) => {
@@ -133,10 +147,10 @@ export default function AddTransModal({
   initialMode = 'exp', initialDebtId = null, initialGoalId = null, initialCommitmentId = null,
   draftData = null, focusedEntry = false,
 }) {
-  const { addTrans, addTransfer, editTrans, deleteTrans, payDebt, saveGoal, payCommitment, debts, goals, commitments, wallets, cats, cfg, trans } = useStore();
+  const { addTrans, addTransfer, editTrans, deleteTrans, undoLastTransactionDelete, payDebt, saveGoal, payCommitment, debts, goals, commitments, wallets, cats, cfg, trans } = useStore();
   const th  = TH[cfg.theme] || TH.dark;
   const L   = STR[cfg.lang]  || STR.ar;
-  const sym = getSymbol(cfg.currency);
+  const sym = getSymbol(cfg.currency); // base/reporting currency symbol
   const insets = useSafeAreaInsets();
   const modules = getModules(cfg);
   const scopedWallets = filterByActiveScope(wallets, cfg);
@@ -203,11 +217,16 @@ export default function AddTransModal({
   const [walletId,  setWalletId]  = useState(defaultWalletId);
   const [fromWalletId, setFromWalletId] = useState(firstTransferWallet?.id || defaultWalletId);
   const [toWalletId, setToWalletId] = useState(secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
+  const [exchangeRate, setExchangeRate] = useState('');
+  const [transferToAmount, setTransferToAmount] = useState('');
+  const [transferFeeAmount, setTransferFeeAmount] = useState('');
   const transferTargetWallets = eligibleTransferWallets.filter(wallet => wallet.id !== fromWalletId);
   const canTransfer = modules.wallets && eligibleTransferWallets.length > 1;
   const [smartOpen, setSmartOpen] = useState(false);
   const [smartMode, setSmartMode] = useState('image');
   const [receiptImageUri, setReceiptImageUri] = useState(null);
+  const [smartExtractedText, setSmartExtractedText] = useState('');
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
   const [voiceUri, setVoiceUri] = useState(null);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [smartSource, setSmartSource] = useState(null);
@@ -223,6 +242,8 @@ export default function AddTransModal({
   const mountedRef = useRef(true);
   const recordingTimerRef = useRef(null);
   const recordingOperationRef = useRef(0);
+  const saveInFlightRef = useRef(false);
+  const entryIdempotencyKeyRef = useRef(null);
 
   const clearRecordingTimer = () => {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
@@ -239,9 +260,14 @@ export default function AddTransModal({
     setWalletId(defaultWalletId);
     setFromWalletId(firstTransferWallet?.id || defaultWalletId);
     setToWalletId(secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
+    setExchangeRate('');
+    setTransferToAmount('');
+    setTransferFeeAmount('');
     setSmartOpen(false);
     setSmartMode('image');
     setReceiptImageUri(null);
+    setSmartExtractedText('');
+    setImageViewerOpen(false);
     setVoiceUri(null);
     setMediaBusy(false);
     setSmartSource(null);
@@ -253,6 +279,8 @@ export default function AddTransModal({
     setVoiceRecording(false);
     setVoiceError('');
     setExpandedPicker(null);
+    saveInFlightRef.current = false;
+    entryIdempotencyKeyRef.current = null;
   };
 
   useEffect(() => {
@@ -260,7 +288,7 @@ export default function AddTransModal({
     if (editData) {
       const editType = editData.kind === 'transfer' ? 'transfer' : (editData.amt > 0 ? 'inc' : 'exp');
       setType(editType);
-      setAmt(Math.abs(editData.kind === 'transfer' ? editData.transferAmount : editData.amt).toString());
+      setAmt(Math.abs(editData.kind === 'transfer' ? (editData.transferFromAmount ?? editData.transferAmount) : (editData.walletAmount ?? editData.amt)).toString());
       setTitle(editData.title || '');
       setCat(editData.cat || 'other');
       setCategoryTouched(true);
@@ -270,6 +298,9 @@ export default function AddTransModal({
       setWalletId(editData.walletId || defaultWalletId);
       setFromWalletId(editData.fromWalletId || defaultWalletId);
       setToWalletId(editData.toWalletId || secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
+      setExchangeRate(String(editData.transferRate ?? editData.exchangeRate ?? ''));
+      setTransferToAmount(editData.kind === 'transfer' && Number(editData.transferToAmount) > 0 ? String(editData.transferToAmount) : '');
+      setTransferFeeAmount(editData.kind === 'transfer' && Number(editData.feeAmount) > 0 ? String(editData.feeAmount) : '');
       setSmartSource(editData.smartSource || null);
       setExpandedPicker(null);
     } else if (draftData?.smartMode) {
@@ -277,20 +308,46 @@ export default function AddTransModal({
       setAmt(''); setTitle(''); setCat('other'); setNote(''); setRecurring(false); setDateISO(today());
       setCategoryTouched(false);
       setWalletId(defaultWalletId);
+      setExchangeRate('');
+      setTransferToAmount('');
+      setTransferFeeAmount('');
       setSmartMode(draftData.smartMode === 'voice' ? 'voice' : 'image');
       setSmartOpen(true);
       setSmartSource(null);
       setExpandedPicker(null);
     } else if (draftData) {
-      setType(draftData.amt > 0 ? 'inc' : 'exp');
-      setAmt(Math.abs(draftData.amt).toString());
+      const draftMode = normalizeEntryMode(
+        draftData.mode
+        || (draftData.kind === 'transfer' ? 'transfer' : (Number(draftData.amt || 0) >= 0 ? 'inc' : 'exp')),
+      );
+      const draftAmount = Math.abs(Number(
+        draftData.amount
+        ?? draftData.transferFromAmount
+        ?? draftData.transferAmount
+        ?? draftData.walletAmount
+        ?? draftData.allocationAmount
+        ?? draftData.amt
+        ?? 0
+      ));
+      setType(draftMode);
+      setAmt(draftAmount > 0 ? String(draftAmount) : '');
       setTitle(draftData.title || '');
       setCat(draftData.cat || 'other');
       setCategoryTouched(true);
       setNote(draftData.note || '');
-      setRecurring(draftData.recurring !== false);
+      // Repeating a movement creates a new reviewed draft. Never silently copy
+      // its automatic recurrence flag into the new movement.
+      setRecurring(false);
       setDateISO(draftData.dateISO || today());
-      setWalletId(draftData.walletId || defaultWalletId);
+      setSelDebt(draftData.debtId || availableDebts[0]?.id || null);
+      setSelGoal(draftData.goalId || availableGoals[0]?.id || null);
+      setSelCommitment(draftData.commitmentId || availableCommitments[0]?.id || null);
+      setFromWalletId(draftData.fromWalletId || firstTransferWallet?.id || defaultWalletId);
+      setToWalletId(draftData.toWalletId || secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
+      setExchangeRate(String(draftData.transferRate ?? draftData.exchangeRate ?? ''));
+      setTransferToAmount(Number(draftData.transferToAmount) > 0 ? String(draftData.transferToAmount) : '');
+      setTransferFeeAmount(Number(draftData.feeAmount) > 0 ? String(draftData.feeAmount) : '');
+      setWalletId(draftMode === 'commitment' ? defaultWalletId : (draftData.walletId || defaultWalletId));
       setSmartSource(draftData.smartSource || null);
       setExpandedPicker(null);
     } else {
@@ -305,7 +362,7 @@ export default function AddTransModal({
       setSelCommitment(defaultCommitment?.id || null);
       setAmt(''); setTitle(''); setCat('other'); setNote(''); setRecurring(false); setDateISO(today());
       setCategoryTouched(false);
-      setWalletId(launchingCommitment ? (defaultCommitment?.walletId || defaultWalletId) : defaultWalletId);
+      setWalletId(defaultWalletId);
       setFromWalletId(firstTransferWallet?.id || defaultWalletId);
       setToWalletId(secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
       setSmartSource(null);
@@ -348,36 +405,66 @@ export default function AddTransModal({
     onClose();
   };
 
-  const applySmartDraft = (value) => {
-    const draft = analyzeSmartEntry({
+  const applySmartDraft = (value, analysis = null, mode = 'text') => {
+    const resolved = resolveSmartCaptureDraft({
       text: value,
+      analysis,
       cats,
       history: useStore.getState().trans,
       wallets: walletList,
       lang: cfg.lang,
+      currency: cfg.currency,
     });
-    if (!draft || !draft.amount) return false;
+    if (!resolved.ok || !resolved.draft?.amount) return resolved;
+
+    const draft = resolved.draft;
+
+    if (draft.type === 'transfer' && draft.fromWalletId && draft.toWalletId) {
+      setType('transfer');
+      setAmt(String(draft.amount));
+      setFromWalletId(draft.fromWalletId);
+      setToWalletId(draft.toWalletId);
+      if (draft.dateISO) setDateISO(draft.dateISO);
+      if (draft.title) setTitle(draft.title);
+      return resolved;
+    }
+
     const draftFlow = draft.type === 'inc' ? CATEGORY_FLOWS.INCOME : CATEGORY_FLOWS.EXPENSE;
     const draftCat = cats.find(item => item.id === draft.catId);
-    setType(draft.type);
+    setType(draft.type === 'inc' ? 'inc' : 'exp');
     setAmt(String(draft.amount));
     setCat(draftCat && categorySupportsFlow(draftCat, draftFlow)
       ? draft.catId
       : getDefaultCategoryId(cats, draftFlow));
     setCategoryTouched(false);
-    setTitle(draft.title);
+    if (draft.title) setTitle(draft.title);
     if (draft.walletId) setWalletId(draft.walletId);
     if (draft.dateISO) setDateISO(draft.dateISO);
-    return true;
+
+    if (draft.currencyMismatch) {
+      Alert.alert('', smartCaptureReasonMessage('currency_mismatch', cfg.lang));
+    }
+
+    return resolved;
   };
 
-  const applyAnalyzedText = ({ value, mode, automated = true }) => {
+  const applyAnalyzedText = ({ value, mode, automated = true, analysis = null }) => {
     const text = String(value || '').trim();
-    if (!applySmartDraft(text)) return false;
+    const resolved = applySmartDraft(text, analysis, mode);
+    if (!resolved?.ok) return resolved || { ok: false, reason: 'amount_unclear' };
+
     setSmartMode(mode);
-    setSmartSource(buildSmartSourceMeta({ mode, text, automated }));
-    setSmartOpen(false);
-    return true;
+    setSmartExtractedText(mode === 'voice' ? text : '');
+    setSmartSource(buildSmartSourceMeta({
+      mode,
+      text,
+      automated,
+      reviewedInline: true,
+      reviewRequired: false,
+      analysis,
+    }));
+    setSmartOpen(true);
+    return resolved;
   };
 
   const extractReceiptText = async (uri, mode, mimeType = 'image/jpeg') => {
@@ -385,13 +472,25 @@ export default function AddTransModal({
     setMediaBusy(true);
     try {
       const extension = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
-      const text = await uploadMediaText(uri, OCR_ENDPOINT, `receipt.${extension}`, mimeType);
-      if (!text) throw new Error('EMPTY_ANALYSIS');
-      if (!applyAnalyzedText({ value: text, mode, automated: true })) {
-        setSmartOpen(false);
-        Alert.alert('', cfg.lang === 'ar'
-          ? 'تمت قراءة الصورة، لكن لم يظهر مبلغ واضح. أدخل المبلغ يدوياً.'
-          : 'The image was read, but no clear amount was found. Enter the amount manually.');
+      const result = await uploadMediaAnalysis(
+        uri,
+        OCR_ENDPOINT,
+        `financial-source.${extension}`,
+        mimeType,
+        { today: today(), currency: cfg.currency, lang: cfg.lang },
+      );
+      if (!result.text && !result.analysis) throw new Error('EMPTY_ANALYSIS');
+
+      const resolved = applyAnalyzedText({
+        value: result.text,
+        analysis: result.analysis,
+        mode,
+        automated: true,
+      });
+
+      if (!resolved?.ok) {
+        setSmartOpen(true);
+        Alert.alert('', smartCaptureReasonMessage(resolved?.reason || 'amount_unclear', cfg.lang));
       }
     } catch (error) {
       const imageMessage = analysisErrorMessage({ lang: cfg.lang, kind: 'image', endpoint: OCR_ENDPOINT, error });
@@ -418,6 +517,7 @@ export default function AddTransModal({
     const asset = result.assets[0];
     const uri = asset.uri;
     const mode = source === 'camera' ? 'camera' : 'image';
+    setSmartExtractedText('');
     setReceiptImageUri(uri);
     setSmartMode(mode);
     setSmartOpen(true);
@@ -449,14 +549,28 @@ export default function AddTransModal({
     setMediaBusy(true);
     setVoiceError('');
     try {
-      const text = await uploadMediaText(uri, TRANSCRIBE_ENDPOINT, 'voice.m4a', 'audio/mp4');
-      if (!text) throw new Error('EMPTY_ANALYSIS');
-      if (!applyAnalyzedText({ value: text, mode: 'voice', automated: true })) {
+      const result = await uploadMediaAnalysis(
+        uri,
+        TRANSCRIBE_ENDPOINT,
+        'voice.m4a',
+        'audio/mp4',
+        { today: today(), currency: cfg.currency, lang: cfg.lang },
+      );
+      const text = String(result.text || '').trim();
+      if (!text && !result.analysis) throw new Error('EMPTY_ANALYSIS');
+
+      setSmartExtractedText(text);
+      const resolved = applyAnalyzedText({
+        value: text,
+        analysis: result.analysis,
+        mode: 'voice',
+        automated: true,
+      });
+
+      if (!resolved?.ok) {
         setNote(current => current || text);
-        setSmartOpen(false);
-        Alert.alert('', cfg.lang === 'ar'
-          ? 'تم فهم التسجيل، لكن لم يظهر مبلغ واضح. أدخل المبلغ يدوياً.'
-          : 'The recording was understood, but no clear amount was found. Enter the amount manually.');
+        setSmartOpen(true);
+        Alert.alert('', smartCaptureReasonMessage(resolved?.reason || 'amount_unclear', cfg.lang));
       }
     } catch (error) {
       setVoiceError(analysisErrorMessage({ lang: cfg.lang, kind: 'voice', endpoint: TRANSCRIBE_ENDPOINT, error }));
@@ -504,6 +618,7 @@ export default function AddTransModal({
         return;
       }
       setVoiceUri(null);
+      setSmartExtractedText('');
       setSmartMode('voice');
       setSmartOpen(true);
       await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
@@ -550,6 +665,15 @@ export default function AddTransModal({
     }
     const n = cleanNumber(amt);
     if (type !== 'transfer' && !walletId) return;
+    const selectedWallet = type !== 'transfer' ? wallets.find(item => item.id === walletId) : null;
+    const selectedWalletCurrency = String(selectedWallet?.currency || cfg.currency || 'IQD').toUpperCase();
+    const baseCurrency = String(cfg.currency || 'IQD').toUpperCase();
+    if (type !== 'transfer' && selectedWalletCurrency !== baseCurrency && !(cleanNumber(exchangeRate) > 0)) {
+      Alert.alert('', cfg.lang === 'ar'
+        ? `اكتب سعر الصرف التاريخي: 1 ${selectedWalletCurrency} = كم ${baseCurrency}.`
+        : `Enter the historical exchange rate: 1 ${selectedWalletCurrency} = how many ${baseCurrency}.`);
+      return;
+    }
     if (type !== 'commitment' && !(n > 0)) {
       Alert.alert('', cfg.lang === 'ar' ? 'اكتب مبلغاً صحيحاً أكبر من صفر' : 'Enter a valid amount greater than zero');
       return;
@@ -560,12 +684,26 @@ export default function AddTransModal({
       const sourceWallet = eligibleTransferWallets.find(wallet => wallet.id === fromWalletId);
       const targetWallet = eligibleTransferWallets.find(wallet => wallet.id === toWalletId);
       if (!sourceWallet || !targetWallet) return;
+      const sourceCurrency = String(sourceWallet.currency || cfg.currency).toUpperCase();
+      const targetCurrency = String(targetWallet.currency || cfg.currency).toUpperCase();
+      const crossCurrency = sourceCurrency !== targetCurrency;
+      const targetAmount = crossCurrency ? cleanNumber(transferToAmount) : Math.abs(n);
+      if (crossCurrency && !(targetAmount > 0)) {
+        Alert.alert('', cfg.lang === 'ar' ? 'اكتب المبلغ الذي سيصل إلى المحفظة المستلمة.' : 'Enter the amount that will arrive in the destination wallet.');
+        return;
+      }
+      const transferRate = crossCurrency ? targetAmount / Math.abs(n) : 1;
       let saved = false;
       if (editData) {
         saved = await editTrans(editData.id, {
           kind: 'transfer',
           amt: 0,
           transferAmount: Math.abs(n),
+          transferFromAmount: Math.abs(n),
+          transferToAmount: targetAmount,
+          transferRate,
+          exchangeRate: transferRate,
+          feeAmount: Math.max(0, cleanNumber(transferFeeAmount)),
           fromWalletId,
           toWalletId,
           scope: sourceWallet.scope,
@@ -576,15 +714,13 @@ export default function AddTransModal({
           transactionTag: 'transfer',
         });
       } else {
-        saved = await addTransfer({ fromWalletId, toWalletId, amount: n, dateISO, note });
+        saved = await addTransfer({
+          fromWalletId, toWalletId, amount: n, toAmount: targetAmount,
+          exchangeRate: transferRate, feeAmount: Math.max(0, cleanNumber(transferFeeAmount)), dateISO, note,
+        });
       }
       if (!saved) {
-        Alert.alert(
-          '',
-          cfg.lang === 'ar'
-            ? 'الرصيد المتاح في محفظة المصدر غير كافٍ لهذا التحويل.'
-            : 'The source wallet does not have enough available balance for this transfer.',
-        );
+        Alert.alert('', cfg.lang === 'ar' ? 'تعذر تسجيل التحويل. راجع المحافظ والمبالغ.' : 'Could not record the transfer. Check the wallets and amounts.');
         return;
       }
       handleClose();
@@ -593,10 +729,10 @@ export default function AddTransModal({
 
     if (type === 'debt') {
       if (!selDebt) return;
-      const applied = await payDebt(selDebt, n, dateISO, walletId);
+      const applied = await payDebt(selDebt, n, dateISO, walletId, { exchangeRate: cleanNumber(exchangeRate) || undefined });
       if (!applied) {
         Alert.alert('', cfg.lang === 'ar'
-          ? 'تعذّر تسجيل الدفعة — تأكد أن رصيد المحفظة المتاح كافٍ وأن الدين لم يُسدد بالكامل.'
+          ? 'تعذّر تسجيل الدفعة — تأكد أن الدين لم يُسدد بالكامل وأن البيانات صحيحة.'
           : 'Could not record the payment — check the wallet\u2019s available balance and that the debt is not already fully paid.');
         return;
       }
@@ -605,10 +741,10 @@ export default function AddTransModal({
     }
     if (type === 'goal') {
       if (!selGoal) return;
-      const applied = await saveGoal(selGoal, n, dateISO, walletId);
+      const applied = await saveGoal(selGoal, n, dateISO, walletId, { exchangeRate: cleanNumber(exchangeRate) || undefined });
       if (!applied) {
         Alert.alert('', cfg.lang === 'ar'
-          ? 'تعذّر تسجيل التوفير — تأكد أن رصيد المحفظة المتاح كافٍ وأن الهدف لم يكتمل بالفعل.'
+          ? 'تعذّر تسجيل التوفير — تأكد أن الهدف لم يكتمل بالفعل وأن البيانات صحيحة.'
           : 'Could not record the saving — check the wallet\u2019s available balance and that the goal is not already complete.');
         return;
       }
@@ -617,12 +753,12 @@ export default function AddTransModal({
     }
     if (type === 'commitment') {
       if (!selCommitment) return;
-      const result = await payCommitment(selCommitment, dateISO, walletId);
+      const result = await payCommitment(selCommitment, dateISO, walletId, null, { exchangeRate: cleanNumber(exchangeRate) || undefined });
       if (!result?.ok) {
-        if (result?.reason === 'linked_unavailable' || result?.reason === 'insufficient_balance') {
+        if (result?.reason === 'linked_unavailable') {
           Alert.alert('', cfg.lang === 'ar'
-            ? 'الدين أو الهدف المرتبط بهذا الالتزام مكتمل بالفعل أو رصيد المحفظة غير كافٍ. الغِ الربط أو أوقف الالتزام من شاشة تعديله.'
-            : 'The linked debt or goal is already complete, or the wallet balance is insufficient. Unlink it or pause this commitment.');
+            ? 'الدين أو الهدف المرتبط بهذا الالتزام مكتمل بالفعل. الغِ الربط أو أوقف الالتزام من شاشة تعديله.'
+            : 'The linked debt or goal is already complete. Unlink it or pause this commitment.');
         }
         return;
       }
@@ -636,22 +772,38 @@ export default function AddTransModal({
     }
 
     const finalTitle = title.trim() || defaultTitle;
+    const effectiveSmartSource = smartSource || editData?.smartSource || null;
+    const confirmsSmartReview = !!effectiveSmartSource && (
+      editData?.__smartReviewMode
+      || effectiveSmartSource.reviewedInline === true
+    );
     const payload = {
       title: finalTitle,
       amt:   type === 'exp' ? -Math.abs(n) : Math.abs(n),
       cat: categorySupportsFlow(cats.find(item => item.id === cat), entryFlow) ? cat : defaultEntryCat,
       note, recurring, dateISO, walletId,
+      exchangeRate: cleanNumber(exchangeRate) || undefined,
       recurringGroupId: draftData?.recurringGroupId,
-      smartSource: smartSource || editData?.smartSource || null,
-      ...(editData?.__smartReviewMode && (smartSource || editData?.smartSource)
-        ? { smartReviewedAt: new Date().toISOString() }
-        : {}),
+      smartSource: effectiveSmartSource,
+      ...(!editData ? {
+        idempotencyKey: entryIdempotencyKeyRef.current || (
+          entryIdempotencyKeyRef.current = `quick-entry:${Crypto.randomUUID()}`
+        ),
+      } : {}),
+      ...(confirmsSmartReview ? { smartReviewedAt: new Date().toISOString() } : {}),
     };
-    const saved = editData ? await editTrans(editData.id, payload) : await addTrans(payload);
+    if (saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
+    let saved = false;
+    try {
+      saved = editData ? await editTrans(editData.id, payload) : await addTrans(payload);
+    } finally {
+      saveInFlightRef.current = false;
+    }
     if (!saved) {
       Alert.alert('', cfg.lang === 'ar'
-        ? 'الرصيد المتاح في هذه المحفظة غير كافٍ لتسجيل هذه الحركة.'
-        : 'This wallet does not have enough available balance for this entry.');
+        ? 'تعذر حفظ الحركة. راجع المبلغ والمحفظة والبيانات المدخلة.'
+        : 'Could not save the entry. Check the amount, wallet, and entered data.');
       return;
     }
     handleClose();
@@ -661,8 +813,18 @@ export default function AddTransModal({
     Alert.alert(L.delete, L.confirmDel, [
       { text: L.no, style: 'cancel' },
       { text: L.yes, style: 'destructive', onPress: async () => {
-        await deleteTrans(editData.id);
+        const deleted = await deleteTrans(editData.id);
         handleClose();
+        if (deleted) {
+          Alert.alert(
+            cfg.lang === 'ar' ? 'تم حذف الحركة' : 'Entry deleted',
+            cfg.lang === 'ar' ? 'يمكنك التراجع عن آخر حذف.' : 'You can undo the last deletion.',
+            [
+              { text: cfg.lang === 'ar' ? 'إغلاق' : 'Close', style: 'cancel' },
+              { text: cfg.lang === 'ar' ? 'تراجع' : 'Undo', onPress: () => undoLastTransactionDelete?.() },
+            ],
+          );
+        }
       }},
     ]);
   };
@@ -741,9 +903,25 @@ export default function AddTransModal({
     imageReady: cfg.lang === 'ar' ? '\u062a\u0645 \u0627\u062e\u062a\u064a\u0627\u0631 \u0627\u0644\u0635\u0648\u0631\u0629' : 'Image selected',
     voiceReady: cfg.lang === 'ar' ? '\u062a\u0645 \u062a\u0633\u062c\u064a\u0644 \u0627\u0644\u0635\u0648\u062a' : 'Voice recorded',
     quota: cfg.lang === 'ar' ? '\u0625\u062f\u062e\u0627\u0644 \u0630\u0643\u064a \u00b7 \u0635\u0648\u0631\u0629 \u0623\u0648 \u0635\u0648\u062a' : 'Smart entry · image or voice',
+    extractedText: cfg.lang === 'ar' ? 'النص المحول من الصوت' : 'Voice transcript',
+    sourceReviewHint: cfg.lang === 'ar' ? 'قارن المصدر الأصلي بالبيانات أدناه قبل الحفظ.' : 'Compare the original source with the fields below before saving.',
+    viewImage: cfg.lang === 'ar' ? 'عرض الصورة' : 'View image',
+    changeImage: cfg.lang === 'ar' ? 'تغيير الصورة' : 'Change image',
   };
   const isMoneyEntry = type === 'exp' || type === 'inc';
   const isTrackerPayment = ['debt', 'goal', 'commitment'].includes(type) && !isEdit;
+  const selectedEntryWallet = walletList.find(wallet => wallet.id === walletId) || walletList[0] || null;
+  const selectedFromWallet = eligibleTransferWallets.find(wallet => wallet.id === fromWalletId) || null;
+  const selectedToWallet = eligibleTransferWallets.find(wallet => wallet.id === toWalletId) || null;
+  const entryCurrency = String(selectedEntryWallet?.currency || cfg.currency).toUpperCase();
+  const fromCurrency = String(selectedFromWallet?.currency || cfg.currency).toUpperCase();
+  const toCurrency = String(selectedToWallet?.currency || cfg.currency).toUpperCase();
+  const entrySym = getSymbol(entryCurrency);
+  const fromSym = getSymbol(fromCurrency);
+  const toSym = getSymbol(toCurrency);
+  const transferCrossCurrency = type === 'transfer' && fromCurrency !== toCurrency;
+  const needsEntryExchangeRate = entryCurrency !== String(cfg.currency || '').toUpperCase() && (isMoneyEntry || isTrackerPayment);
+  const amountSymbol = type === 'transfer' ? fromSym : isMoneyEntry ? entrySym : sym;
   const entryFlow = type === 'inc' ? CATEGORY_FLOWS.INCOME : CATEGORY_FLOWS.EXPENSE;
   const entryCategories = isMoneyEntry ? getCategoriesForFlow(cats, entryFlow) : cats;
   const defaultEntryCat = getDefaultCategoryId(cats, entryFlow);
@@ -753,6 +931,14 @@ export default function AddTransModal({
     if (type === 'inc') return cfg.lang === 'ar' ? `دخل - ${catLabel || 'عام'}` : `Income - ${catLabel || 'General'}`;
     return cfg.lang === 'ar' ? `مصروف - ${catLabel || 'عام'}` : `Expense - ${catLabel || 'General'}`;
   })();
+  useEffect(() => {
+    if (!visible || !needsEntryExchangeRate) return;
+    const current = cleanNumber(exchangeRate);
+    if (current > 0) return;
+    const walletRate = Number(selectedEntryWallet?.valuationRate || 0);
+    if (walletRate > 0) setExchangeRate(String(walletRate));
+  }, [visible, walletId, entryCurrency, cfg.currency, needsEntryExchangeRate]);
+
   useEffect(() => {
     if (!visible || !isMoneyEntry) return;
     const activeCat = cats.find(item => item.id === cat);
@@ -815,7 +1001,7 @@ export default function AddTransModal({
     return {
       value: wallet.id,
       label: getWalletLabel(wallet, cfg.lang),
-      detail: row ? `${cfg.lang === 'ar' ? 'متاح' : 'Available'} ${Math.round(Number(row.availableBalance || 0)).toLocaleString()} ${sym}` : wallet.currency || cfg.currency,
+      detail: row ? `${cfg.lang === 'ar' ? 'متاح' : 'Available'} ${Number(row.availableBalance || 0).toLocaleString()} ${getSymbol(wallet.currency || cfg.currency)}` : wallet.currency || cfg.currency,
       icon: 'wallet-outline',
     };
   });
@@ -825,7 +1011,7 @@ export default function AddTransModal({
     return {
       value: wallet.id,
       label: getWalletLabel(wallet, cfg.lang),
-      detail: row ? `${cfg.lang === 'ar' ? 'متاح' : 'Available'} ${Math.round(Number(row.availableBalance || 0)).toLocaleString()} ${sym}` : wallet.currency || cfg.currency,
+      detail: row ? `${cfg.lang === 'ar' ? 'متاح' : 'Available'} ${Number(row.availableBalance || 0).toLocaleString()} ${getSymbol(wallet.currency || cfg.currency)}` : wallet.currency || cfg.currency,
       icon: 'wallet-outline',
     };
   });
@@ -952,9 +1138,39 @@ export default function AddTransModal({
                 ) : mediaBusy ? (
                   <Text style={[s.smartStatusText, { color: th.primary, textAlign: align }]}>{smartLabels.processing}</Text>
                 ) : receiptImageUri && ['receipt', 'camera', 'image'].includes(smartMode) ? (
-                  <View style={[s.mediaPreview, { backgroundColor: th.card, flexDirection: rowDir, marginTop: 8 }]}>
-                    <Image source={{ uri: receiptImageUri }} style={s.receiptThumb} />
-                    <Text style={{ color: th.sub, fontSize: 12, ...weight('800'), flex: 1, textAlign: align }}>{smartLabels.imageReady}</Text>
+                  <View style={[s.mediaPreview, { backgroundColor: th.card, marginTop: 8 }]}>
+                    <TouchableOpacity
+                      onPress={() => setImageViewerOpen(true)}
+                      style={[s.mediaPreviewHead, { flexDirection: rowDir }]}
+                      accessibilityRole="button"
+                    >
+                      <Image source={{ uri: receiptImageUri }} style={s.receiptThumb} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={{ color: th.text, fontSize: 12, ...weight('900'), textAlign: align }}>
+                          {smartLabels.imageReady}
+                        </Text>
+                        <Text style={{ color: th.sub, fontSize: 10, lineHeight: 15, ...weight('700'), textAlign: align, marginTop: 2 }}>
+                          {smartLabels.sourceReviewHint}
+                        </Text>
+                      </View>
+                      <Ionicons name="expand-outline" size={19} color={th.primary} />
+                    </TouchableOpacity>
+                    <View style={[s.mediaActionRow, { flexDirection: rowDir }]}>
+                      <TouchableOpacity
+                        onPress={() => setImageViewerOpen(true)}
+                        style={[s.mediaActionBtn, { backgroundColor: th.primSoft, borderColor: `${th.primary}45`, flexDirection: rowDir }]}
+                      >
+                        <Ionicons name="scan-outline" size={15} color={th.primary} />
+                        <Text style={[s.mediaActionText, { color: th.primary }]}>{smartLabels.viewImage}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={chooseReceiptSource}
+                        style={[s.mediaActionBtn, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}
+                      >
+                        <Ionicons name="images-outline" size={15} color={th.sub} />
+                        <Text style={[s.mediaActionText, { color: th.sub }]}>{smartLabels.changeImage}</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 ) : voiceUri && smartMode === 'voice' ? (
                   <View style={[s.mediaPreview, { backgroundColor: th.card, flexDirection: rowDir, marginTop: 8 }]}>
@@ -964,6 +1180,27 @@ export default function AddTransModal({
                 ) : null}
                 {!!voiceError && smartMode === 'voice' ? (
                   <Text style={[s.smartErrorText, { color: th.exp, textAlign: align }]}>{voiceError}</Text>
+                ) : null}
+
+                {smartMode === 'voice' && !!smartExtractedText ? (
+                  <View style={[s.extractedTextCard, { backgroundColor: th.card, borderColor: th.border }]}>
+                    <View style={[s.extractedTextHead, { flexDirection: rowDir }]}>
+                      <Ionicons
+                        name={smartMode === 'voice' ? 'chatbubble-ellipses-outline' : 'document-text-outline'}
+                        size={16}
+                        color={th.primary}
+                      />
+                      <Text style={[s.extractedTextTitle, { color: th.text, textAlign: align }]}>
+                        {smartLabels.extractedText}
+                      </Text>
+                    </View>
+                    <Text
+                      selectable
+                      style={[s.extractedTextBody, { color: th.sub, textAlign: align }]}
+                    >
+                      {smartExtractedText}
+                    </Text>
+                  </View>
                 ) : null}
               </View>
             ) : null}
@@ -1059,7 +1296,7 @@ export default function AddTransModal({
                   onChange: (value, option) => {
                     setSelCommitment(value);
                     const commitment = availableCommitments.find(item => item.id === option?.value);
-                    setWalletId(commitment?.walletId || defaultWalletId);
+                    setWalletId(defaultWalletId);
                   },
                 })}
               </View>
@@ -1073,7 +1310,7 @@ export default function AddTransModal({
                     value={amt}
                     onChangeText={(value) => setAmt(formatNumberInput(value))}
                     keyboardType="numeric"
-                    placeholder={`0 ${sym}`}
+                    placeholder={`0 ${amountSymbol}`}
                     placeholderTextColor={th.faint}
                     style={[s.amountInput, { color: type === 'inc' ? th.inc : type === 'exp' ? th.exp : th.text, textAlign: align }]}
                   />
@@ -1129,6 +1366,7 @@ export default function AddTransModal({
                     setFromWalletId(value);
                     const nextTarget = eligibleTransferWallets.find(candidate => candidate.id !== value);
                     setToWalletId(nextTarget?.id || value);
+                    setTransferToAmount('');
                   },
                 })}
                 {renderSelectField({
@@ -1138,8 +1376,66 @@ export default function AddTransModal({
                   options: transferToOptions,
                   icon: 'arrow-down-outline',
                   tone: th.inc,
-                  onChange: setToWalletId,
+                  onChange: (value) => { setToWalletId(value); setTransferToAmount(''); },
                 })}
+              </View>
+            ) : null}
+
+            {type === 'transfer' && transferCrossCurrency ? (
+              <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
+                  {cfg.lang === 'ar' ? `المبلغ المستلم (${toCurrency})` : `Received amount (${toCurrency})`}
+                </Text>
+                <TextInput
+                  value={transferToAmount}
+                  onChangeText={(value) => setTransferToAmount(formatNumberInput(value))}
+                  keyboardType="decimal-pad"
+                  placeholder={`0 ${toSym}`}
+                  placeholderTextColor={th.faint}
+                  style={[s.inlineInput, { color: th.text, textAlign: align }]}
+                />
+                {cleanNumber(amt) > 0 && cleanNumber(transferToAmount) > 0 ? (
+                  <Text style={[s.selectDetail, { color: th.sub, textAlign: align, marginTop: 4 }]}>
+                    {`1 ${fromCurrency} = ${(cleanNumber(transferToAmount) / cleanNumber(amt)).toLocaleString()} ${toCurrency}`}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
+            {type === 'transfer' ? (
+              <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
+                  {cfg.lang === 'ar' ? `رسوم التحويل (${fromCurrency}) · اختيارية` : `Transfer fee (${fromCurrency}) · optional`}
+                </Text>
+                <TextInput
+                  value={transferFeeAmount}
+                  onChangeText={(value) => setTransferFeeAmount(formatNumberInput(value))}
+                  keyboardType="decimal-pad"
+                  placeholder={`0 ${fromSym}`}
+                  placeholderTextColor={th.faint}
+                  style={[s.inlineInput, { color: th.text, textAlign: align }]}
+                />
+                {cleanNumber(transferFeeAmount) > 0 ? (
+                  <Text style={[s.selectDetail, { color: th.sub, textAlign: align, marginTop: 4 }]}>
+                    {cfg.lang === 'ar' ? 'تُخصم الرسوم من المحفظة المرسلة وتُحتسب كمصروف في التقارير.' : 'The fee is deducted from the source wallet and counted as an expense in reports.'}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
+            {needsEntryExchangeRate ? (
+              <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
+                  {cfg.lang === 'ar' ? `سعر الصرف · 1 ${entryCurrency} = ؟ ${cfg.currency}` : `Exchange rate · 1 ${entryCurrency} = ? ${cfg.currency}`}
+                </Text>
+                <TextInput
+                  value={exchangeRate}
+                  onChangeText={(value) => setExchangeRate(formatNumberInput(value))}
+                  keyboardType="decimal-pad"
+                  placeholder={String(selectedEntryWallet?.valuationRate || '')}
+                  placeholderTextColor={th.faint}
+                  style={[s.inlineInput, { color: th.text, textAlign: align }]}
+                />
               </View>
             ) : null}
 
@@ -1196,17 +1492,6 @@ export default function AddTransModal({
 
             {type === 'commitment' ? (
               <>
-              <View style={[s.lockedPick, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
-                <Ionicons name="cash-outline" size={16} color={th.primary} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: th.text, ...weight('900'), fontSize: 13 }}>
-                    {cfg.lang === 'ar' ? 'المبلغ المسجل لهذا الالتزام' : 'Saved amount for this commitment'}
-                  </Text>
-                  <Text style={{ color: th.sub, fontSize: 12 }}>
-                    {Math.round(Number(selectedCommitment?.amt || 0)).toLocaleString()} {sym}
-                  </Text>
-                </View>
-              </View>
               <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
                 {isTrackerPayment && modules.wallets && walletList.length > 0 ? renderSelectField({
                   id: 'tracker-wallet',
@@ -1366,6 +1651,14 @@ export default function AddTransModal({
           </View>
         </View>
       </Modal>
+
+      <SmartImageViewerModal
+        visible={imageViewerOpen}
+        uri={receiptImageUri}
+        onClose={() => setImageViewerOpen(false)}
+        th={th}
+        lang={cfg.lang}
+      />
     </Modal>
   );
 }
@@ -1385,9 +1678,9 @@ const s = StyleSheet.create({
   entryField: { borderRadius: 13, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8 },
   amountField:{ paddingVertical: 9 },
   sectionBlock:{ marginBottom: 8 },
-  twoColumnRow:{ alignItems: 'stretch', gap: 8, marginBottom: 1 },
-  selectFieldBlock:{ flex: 1, minWidth: 0, marginBottom: 7 },
-  selectField:{ minHeight: 64, alignItems: 'center', gap: 8, borderRadius: 13, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7 },
+  twoColumnRow:{ width: '100%', alignItems: 'stretch', gap: 8, marginBottom: 1 },
+  selectFieldBlock: { flex: 1, flexBasis: 0, minWidth: 0, height: 64, marginBottom: 7 },
+  selectField: { minHeight: 64, height: 64, alignItems: 'center', gap: 8, borderRadius: 13, borderWidth: 0.5, paddingHorizontal: 10, paddingVertical: 6 },
   selectLabel:{ fontSize: 10, lineHeight: 14, ...weight('800') },
   selectValue:{ fontSize: 12, lineHeight: 18, ...weight('900'), marginTop: 1 },
   selectDetail:{ fontSize: 9, lineHeight: 13, ...weight('700'), marginTop: 1 },
@@ -1405,9 +1698,9 @@ const s = StyleSheet.create({
   input:      { minHeight: 42, borderRadius: 8, paddingHorizontal: 11, paddingVertical: 8, borderWidth: 0.5, marginBottom: 6, fontSize: 13, lineHeight: 18, ...weight('700') },
   inlineInput:{ minHeight: 30, paddingVertical: 0, paddingHorizontal: 0, fontSize: 14, lineHeight: 19, ...weight('800') },
   amountInput:{ minHeight: 44, paddingHorizontal: 0, paddingVertical: 0, fontSize: 30, lineHeight: 38, ...weight('900') },
-  dateRepeatRow:{ alignItems: 'stretch', gap: 8, marginBottom: 2 },
-  dateButton:{ minHeight: 64, paddingHorizontal: 10 },
-  repeatField:{ minHeight: 64, borderRadius: 13, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  dateRepeatRow:{ width: '100%', alignItems: 'stretch', gap: 8, marginBottom: 2 },
+  dateButton: { minHeight: 64, height: 64, borderRadius: 13, borderWidth: 0.5, paddingHorizontal: 10, paddingVertical: 6 },
+  repeatField: { minHeight: 64, height: 64, borderRadius: 13, borderWidth: 0.5, paddingHorizontal: 10, alignItems: 'center', gap: 8 },
   repeatValue:{ fontSize: 12, lineHeight: 18, ...weight('900') },
   smartBox:   { borderWidth: 1, borderStyle: 'dashed', borderRadius: 12, padding: 9, marginBottom: 8, gap: 9 },
   smartActionGrid:{ alignItems: 'stretch', gap: 7 },
@@ -1416,7 +1709,15 @@ const s = StyleSheet.create({
   smartErrorText:{ width: '100%', fontSize: 12, lineHeight: 18, ...weight('800'), marginTop: 2 },
   smartSourceNote:{ minHeight: 40, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
   mediaPreview:{ width: '100%', alignItems: 'center', gap: 8, borderRadius: 12, padding: 8, marginTop: 2 },
-  receiptThumb:{ width: 44, height: 44, borderRadius: 10 },
+  receiptThumb:{ width: 58, height: 58, borderRadius: 11 },
+  mediaPreviewHead:{ width: '100%', alignItems: 'center', gap: 9 },
+  mediaActionRow:{ width: '100%', gap: 7, marginTop: 7 },
+  mediaActionBtn:{ flex: 1, minHeight: 36, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 8 },
+  mediaActionText:{ fontSize: 10, lineHeight: 15, ...weight('900') },
+  extractedTextCard:{ width: '100%', borderRadius: RADIUS.md, borderWidth: 1, padding: 10, marginTop: 2 },
+  extractedTextHead:{ alignItems: 'center', gap: 7, marginBottom: 6 },
+  extractedTextTitle:{ flex: 1, fontSize: 11, lineHeight: 16, ...weight('900') },
+  extractedTextBody:{ fontSize: 11, lineHeight: 19, ...weight('700') },
   stickyFooter: {
     borderTopWidth: 1,
     paddingHorizontal: 12,

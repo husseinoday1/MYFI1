@@ -1,8 +1,14 @@
-﻿import { today, normalizeDate } from '../../utils/calc';
-import { canSpendFromWallet, getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
+import { today, normalizeDate } from '../../utils/calc';
+import { canSpendFromWallet, getDefaultWalletId, getWalletBalances, normalizeWallets } from '../../lib/wallets';
 import { commitmentCycleMonth, deferredCommitmentDueISO, monthKey, normalizeCommitments } from '../../lib/commitments';
 import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
+import { buildCurrencyFields, buildCurrencyFieldsFromBaseAmount } from '../../lib/financialCoreV2';
 import { financialDataCount, syncCommitmentPaidMonth, uid } from '../domain';
+import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
+import {
+  commitEntityChangesV7,
+  commitFinancialTransactionV7,
+} from '../../lib/financialLedgerV7Repository';
 const localNumber = value => {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -83,7 +89,7 @@ export const createManagementSlice = (set, get) => ({
   setCats: async (cats) => {
     set({ cats });
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
   },
 
   addCommitment: async (item) => {
@@ -104,9 +110,19 @@ export const createManagementSlice = (set, get) => ({
       createdAt: today(),
     }], defaultWalletId)[0];
     if (!next || !next.amt) return false;
+    try {
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        changes: [{ entityType: 'commitment', id: next.id, payload: next }],
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_commitment_create_failed') });
+      return false;
+    }
     set(s => ({ commitments: [next, ...normalizeCommitments(s.commitments, defaultWalletId)] }));
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
     return true;
   },
 
@@ -120,7 +136,7 @@ export const createManagementSlice = (set, get) => ({
       )),
     }));
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
   },
 
   deferCommitment: async (id, option = 'day') => {
@@ -137,7 +153,7 @@ export const createManagementSlice = (set, get) => ({
       )),
     }));
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
     return true;
   },
 
@@ -151,7 +167,7 @@ export const createManagementSlice = (set, get) => ({
       )),
     }));
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
     return true;
   },
 
@@ -177,7 +193,7 @@ export const createManagementSlice = (set, get) => ({
         .filter(Boolean),
     }));
     await get().saveLocal({ force: true });
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
   },
 
   archiveTracker: async (kind, sourceId) => {
@@ -205,7 +221,7 @@ export const createManagementSlice = (set, get) => ({
       };
     });
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
     return true;
   },
 
@@ -234,7 +250,7 @@ export const createManagementSlice = (set, get) => ({
       };
     });
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
     return true;
   },
 
@@ -258,7 +274,7 @@ export const createManagementSlice = (set, get) => ({
       }),
     }));
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
     return true;
   },
 
@@ -304,16 +320,16 @@ export const createManagementSlice = (set, get) => ({
       };
     });
     await get().saveLocal({ force: true });
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
     return true;
   },
 
-  payCommitment: async (id, dateISO = today(), walletId = null, cycleMonth = null) => {
+  payCommitment: async (id, dateISO = today(), walletId = null, cycleMonth = null, meta = {}) => {
     const entryDate = normalizeDate(dateISO);
     const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
     const commitment = normalizeCommitments(get().commitments, defaultWalletId).find(item => item.id === id);
     if (!commitment || !commitment.active || !commitment.amt) return { ok: false, reason: 'not_found' };
-    const paymentWalletId = walletId || commitment.walletId || defaultWalletId;
+    const paymentWalletId = walletId || defaultWalletId || commitment.walletId;
     const paidMonth = cycleMonth || commitmentCycleMonth(commitment, new Date(`${entryDate}T12:00:00`));
     if (commitment.lastPaidMonth === paidMonth) return { ok: false, reason: 'already_paid' };
     const linkedType = commitment.linkedType || 'none';
@@ -335,6 +351,7 @@ export const createManagementSlice = (set, get) => ({
     }
     const requestedAmount = Math.abs(Number(commitment.amt) || 0);
     const linkedMeta = {
+      ...meta,
       title: commitment.name,
       cat: commitment.cat || 'other',
       scope: normalizeScope(commitment.scope, getEntryScope(get().cfg)),
@@ -345,6 +362,17 @@ export const createManagementSlice = (set, get) => ({
       commitmentLinkedId: linkedId,
       transactionTag: 'commitment',
     };
+    const paidCommitment = normalizeCommitments([{
+      ...commitment,
+      linkedId,
+      lastPaidMonth: paidMonth,
+      deferredUntilISO: null,
+      deferredCycleMonth: null,
+      active: commitment.repeatMonthly === false ? false : commitment.active,
+    }], defaultWalletId)[0];
+    linkedMeta.financialEntityChanges = [{
+      entityType: 'commitment', id, payload: paidCommitment,
+    }];
     if ((linkedType === 'debt' || linkedType === 'receivable') && linkedId) {
       const applied = await get().payDebt(linkedId, commitment.amt, entryDate, paymentWalletId, linkedMeta);
       if (!applied) return { ok: false, reason: 'linked_unavailable' };
@@ -354,7 +382,7 @@ export const createManagementSlice = (set, get) => ({
         )),
       }));
       await get().saveLocal();
-      await get().syncCloud();
+      get().scheduleCloudSync?.('management_change');
       return { ok: true, partial: applied < requestedAmount - 0.0001, appliedAmount: applied, requestedAmount };
     }
     if (linkedType === 'goal' && linkedId) {
@@ -366,80 +394,249 @@ export const createManagementSlice = (set, get) => ({
         )),
       }));
       await get().saveLocal();
-      await get().syncCloud();
+      get().scheduleCloudSync?.('management_change');
       return { ok: true, partial: applied < requestedAmount - 0.0001, appliedAmount: applied, requestedAmount };
     }
+    const currencyFields = buildCurrencyFieldsFromBaseAmount({
+      baseAmount: -requestedAmount,
+      walletId: paymentWalletId,
+      wallets: get().wallets,
+      baseCurrency: get().cfg.currency,
+      exchangeRate: meta.exchangeRate,
+    });
     const spendCheck = canSpendFromWallet({
       wallets: get().wallets,
       trans: get().trans,
       currency: get().cfg.currency,
       defaultWalletId: get().cfg.defaultWalletId,
       walletId: paymentWalletId,
-      amount: requestedAmount,
+      amount: Math.abs(Number(currencyFields.walletAmount || 0)),
     });
-    if (!spendCheck.ok) {
-      return { ok: false, reason: 'insufficient_balance', availableBalance: spendCheck.availableBalance };
+    const paymentTx = {
+      id: uid(),
+      title: commitment.name,
+      amt: -requestedAmount,
+      ...currencyFields,
+      balanceWarning: !!spendCheck.warning,
+      cat: commitment.cat || 'other',
+      walletId: paymentWalletId,
+      dateISO: entryDate,
+      ts: Date.now(),
+      scope: normalizeScope(commitment.scope, getEntryScope(get().cfg)),
+      flowType: FLOW_TYPES.COMMITMENT_PAYMENT,
+      transactionTag: 'commitment',
+      isCommitmentPayment: true,
+      commitmentId: id,
+      commitmentMonth: paidMonth,
+      rateDate: entryDate,
+      rateSource: currencyFields.walletCurrency === get().cfg.currency ? 'same_currency' : 'user_entered',
+      idempotencyKey: `commitment-payment:${id}:${paidMonth}`,
+    };
+    try {
+      const committed = await commitFinancialTransactionV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        transaction: paymentTx,
+        wallets: get().wallets,
+        baseCurrency: get().cfg.currency,
+        entityChanges: [{ entityType: 'commitment', id, payload: paidCommitment }],
+      });
+      if (committed.supported && !committed.ok) return { ok: false, reason: 'sqlite_commit_failed' };
+      if (committed.ok) {
+        paymentTx.id = committed.transactionId;
+        paymentTx.storageEngineVersion = 7;
+        paymentTx.sqliteCommittedAt = committed.committedAt || new Date().toISOString();
+      }
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_commitment_payment_failed') });
+      return { ok: false, reason: 'sqlite_commit_failed' };
     }
     set(s => ({
       commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
         item.id === id ? { ...item, lastPaidMonth: paidMonth, deferredUntilISO: null, deferredCycleMonth: null, active: item.repeatMonthly === false ? false : item.active } : item
       )),
-      trans: [
-        {
-          id: uid(),
-          title: commitment.name,
-          amt: -Math.abs(Number(commitment.amt) || 0),
-          cat: commitment.cat || 'other',
-          walletId: paymentWalletId,
-          dateISO: entryDate,
-          ts: Date.now(),
-          scope: normalizeScope(commitment.scope, getEntryScope(get().cfg)),
-          flowType: FLOW_TYPES.COMMITMENT_PAYMENT,
-          transactionTag: 'commitment',
-          isCommitmentPayment: true,
-          commitmentId: id,
-          commitmentMonth: paidMonth,
-        },
-        ...s.trans,
-      ],
+      trans: [paymentTx, ...s.trans],
     }));
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
     return { ok: true, partial: false, appliedAmount: requestedAmount, requestedAmount };
   },
 
   addWallet: async (wallet) => {
     const cfg = get().cfg;
+    const walletCurrency = String(wallet.currency || cfg.currency || 'IQD').toUpperCase();
+    const valuationRate = Number(wallet.valuationRate || 1);
+    const safeRate = Number.isFinite(valuationRate) && valuationRate > 0 ? valuationRate : 1;
+    const openingBalance = Number(wallet.openingBalance || 0);
     const next = {
       id: uid(),
       name: wallet.name?.trim() || 'محفظة',
       nameEn: wallet.nameEn?.trim() || wallet.name?.trim() || 'Wallet',
       type: wallet.type || 'cash',
-      currency: cfg.currency,
+      currency: walletCurrency,
+      valuationRate: walletCurrency === cfg.currency ? 1 : safeRate,
+      // New wallets use a ledger opening entry instead of a mutable magic balance.
+      // Existing wallets remain in legacy mode until an explicit migration is performed.
+      openingBalance: 0,
+      openingBaseBalance: 0,
+      openingBalanceMode: 'ledger',
       scope: normalizeScope(wallet.scope, getEntryScope(cfg)),
-      openingBalance: Number(wallet.openingBalance || 0),
     };
-    set(s => ({ wallets: [...normalizeWallets(s.wallets, cfg.currency), next] }));
+    const openingFields = buildCurrencyFields({
+      amount: openingBalance,
+      walletId: next.id,
+      wallets: [next],
+      baseCurrency: cfg.currency,
+      exchangeRate: walletCurrency === cfg.currency ? 1 : safeRate,
+    });
+    const openingTx = openingBalance === 0 ? null : {
+      id: uid(),
+      title: cfg.lang === 'ar' ? 'رصيد افتتاحي' : 'Opening balance',
+      amt: openingFields.baseAmount,
+      ...openingFields,
+      walletId: next.id,
+      cat: 'other',
+      dateISO: today(),
+      ts: Date.now(),
+      scope: next.scope,
+      flowType: FLOW_TYPES.OPENING_BALANCE,
+      transactionTag: 'opening_balance',
+      isOpeningBalance: true,
+      note: '',
+      rateDate: today(),
+      rateSource: walletCurrency === cfg.currency ? 'same_currency' : 'wallet_valuation',
+      idempotencyKey: `opening-balance:${next.id}`,
+    };
+    try {
+      const namespace = getLedgerNamespace(get().workspaceNamespace, cfg);
+      const entityChanges = [{ entityType: 'wallet', id: next.id, payload: next }];
+      const committed = openingTx
+        ? await commitFinancialTransactionV7({
+            namespace, transaction: openingTx, wallets: [next], baseCurrency: cfg.currency, entityChanges,
+          })
+        : await commitEntityChangesV7({ namespace, changes: entityChanges });
+      if (committed.supported && !committed.ok) return false;
+      if (openingTx && committed.ok) {
+        openingTx.id = committed.transactionId;
+        openingTx.storageEngineVersion = 7;
+        openingTx.sqliteCommittedAt = committed.committedAt || new Date().toISOString();
+      }
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_wallet_create_failed') });
+      return false;
+    }
+    set(s => ({
+      wallets: [...normalizeWallets(s.wallets, cfg.currency), next],
+      trans: openingTx ? [openingTx, ...s.trans] : s.trans,
+    }));
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('wallet_add');
+    return next;
+  },
+
+  reconcileWalletBalance: async (id, actualBalance, dateISO = today(), note = '') => {
+    const cfg = get().cfg;
+    const wallets = normalizeWallets(get().wallets, cfg.currency);
+    const wallet = wallets.find(item => item.id === id);
+    const actual = Number(actualBalance);
+    if (!wallet || !Number.isFinite(actual)) return { ok: false, reason: 'invalid_balance' };
+    const current = getWalletBalances(wallets, get().trans, cfg.currency, cfg.defaultWalletId)
+      .find(item => item.id === id);
+    if (!current) return { ok: false, reason: 'wallet_not_found' };
+    const difference = actual - Number(current.balance || 0);
+    const epsilon = 1 / (10 ** 3);
+    if (Math.abs(difference) < epsilon) return { ok: true, noChange: true, difference: 0 };
+    const rate = wallet.currency === cfg.currency ? 1 : Number(wallet.valuationRate || 1);
+    const fields = buildCurrencyFields({
+      amount: difference,
+      walletId: id,
+      wallets,
+      baseCurrency: cfg.currency,
+      exchangeRate: rate,
+      walletCurrency: wallet.currency,
+    });
+    const tx = {
+      id: uid(),
+      title: cfg.lang === 'ar' ? 'تسوية رصيد' : 'Balance adjustment',
+      amt: fields.baseAmount,
+      ...fields,
+      walletId: id,
+      cat: 'other',
+      dateISO: normalizeDate(dateISO),
+      ts: Date.now(),
+      scope: normalizeScope(wallet.scope, getEntryScope(cfg)),
+      flowType: FLOW_TYPES.BALANCE_ADJUSTMENT,
+      transactionTag: 'balance_adjustment',
+      isBalanceAdjustment: true,
+      note: String(note || '').trim(),
+      reconciliationFrom: Number(current.balance || 0),
+      reconciliationTo: actual,
+      rateDate: normalizeDate(dateISO),
+      rateSource: wallet.currency === cfg.currency ? 'same_currency' : 'wallet_valuation',
+      idempotencyKey: `balance-adjustment:${uid()}`,
+    };
+    try {
+      const committed = await commitFinancialTransactionV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, cfg),
+        transaction: tx,
+        wallets,
+        baseCurrency: cfg.currency,
+      });
+      if (committed.supported && !committed.ok) return { ok: false, reason: 'sqlite_commit_failed' };
+      if (committed.ok) {
+        tx.id = committed.transactionId;
+        tx.storageEngineVersion = 7;
+        tx.sqliteCommittedAt = committed.committedAt || new Date().toISOString();
+      }
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_reconciliation_failed') });
+      return { ok: false, reason: 'sqlite_commit_failed' };
+    }
+    set(state => ({ trans: [tx, ...state.trans] }));
+    await get().saveLocal();
+    get().scheduleCloudSync?.('wallet_reconciliation');
+    return { ok: true, difference, transactionId: tx.id };
   },
 
   editWallet: async (id, patch) => {
-    const { currency: _ignoredCurrency, ...safePatch } = patch || {};
+    const current = normalizeWallets(get().wallets, get().cfg.currency).find(wallet => wallet.id === id);
+    if (!current) return false;
+    const requestedCurrency = String(patch?.currency || current.currency || get().cfg.currency).toUpperCase();
+    const hasHistory = get().trans.some(tx => tx.walletId === id || tx.fromWalletId === id || tx.toWalletId === id);
+    if (hasHistory && requestedCurrency !== current.currency) return false;
+    const valuationRate = Number(patch?.valuationRate ?? current.valuationRate ?? 1);
+    const safeRate = Number.isFinite(valuationRate) && valuationRate > 0 ? valuationRate : 1;
     set(s => ({
-      wallets: normalizeWallets(s.wallets, s.cfg.currency).map(wallet => (
-        wallet.id === id
-          ? { ...wallet, ...safePatch, currency: s.cfg.currency, openingBalance: Number(safePatch.openingBalance ?? wallet.openingBalance ?? 0) }
-          : wallet
-      )),
+      wallets: normalizeWallets(s.wallets, s.cfg.currency).map(wallet => {
+        if (wallet.id !== id) return wallet;
+        const ledgerOpening = wallet.openingBalanceMode === 'ledger';
+        const openingBalance = ledgerOpening
+          ? Number(wallet.openingBalance || 0)
+          : Number(patch?.openingBalance ?? wallet.openingBalance ?? 0);
+        return {
+          ...wallet,
+          ...(patch || {}),
+          currency: requestedCurrency,
+          valuationRate: requestedCurrency === s.cfg.currency ? 1 : safeRate,
+          openingBalance,
+          openingBalanceMode: ledgerOpening ? 'ledger' : 'legacy',
+          openingBaseBalance: ledgerOpening
+            ? Number(wallet.openingBaseBalance || 0)
+            : requestedCurrency === s.cfg.currency
+              ? openingBalance
+              : Number(patch?.openingBaseBalance ?? openingBalance * safeRate),
+        };
+      }),
     }));
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('wallet_edit');
+    return true;
   },
 
   deleteWallet: async (id) => {
     const normalized = normalizeWallets(get().wallets, get().cfg.currency);
     if (normalized.length <= 1 || !normalized.some(wallet => wallet.id === id)) return false;
+    const hasHistory = get().trans.some(tx => tx.walletId === id || tx.fromWalletId === id || tx.toWalletId === id);
+    if (hasHistory) return false;
     const fallback = normalized.find(wallet => wallet.id !== id && wallet.id === get().cfg.defaultWalletId)
       || normalized.find(wallet => wallet.id !== id)
       || normalized[0];
@@ -458,7 +655,7 @@ export const createManagementSlice = (set, get) => ({
       commitments: s.commitments.map(item => item.walletId === id ? { ...item, walletId: fallback.id } : item),
     }));
     await get().saveLocal({ force: financialDataCount(get()) === 0 });
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
     return true;
   },
 
@@ -466,6 +663,8 @@ export const createManagementSlice = (set, get) => ({
     const normalized = normalizeWallets(get().wallets, get().cfg.currency);
     const selected = new Set((Array.isArray(ids) ? ids : []).filter(id => normalized.some(wallet => wallet.id === id)));
     if (!selected.size || selected.size >= normalized.length) return false;
+    const hasHistory = get().trans.some(tx => selected.has(tx.walletId) || selected.has(tx.fromWalletId) || selected.has(tx.toWalletId));
+    if (hasHistory) return false;
     const remaining = normalized.filter(wallet => !selected.has(wallet.id));
     const fallback = remaining.find(wallet => wallet.id === get().cfg.defaultWalletId) || remaining[0];
     set(s => ({
@@ -487,14 +686,14 @@ export const createManagementSlice = (set, get) => ({
       )),
     }));
     await get().saveLocal({ force: financialDataCount(get()) === 0 });
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
     return true;
   },
 
   setTransCatToOther: async (catId) => {
     set(s => ({ trans: s.trans.map(t => t.cat === catId ? { ...t, cat: 'other' } : t) }));
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
   },
 
   deleteCategoriesMany: async (ids = []) => {
@@ -503,15 +702,22 @@ export const createManagementSlice = (set, get) => ({
     set(s => {
       const categoryBudgets = { ...(s.cfg.categoryBudgets || {}) };
       selected.forEach(id => delete categoryBudgets[id]);
+      const categoryBudgetsByMonth = Object.fromEntries(
+        Object.entries(s.cfg.categoryBudgetsByMonth || {}).map(([month, map]) => {
+          const nextMap = { ...(map || {}) };
+          selected.forEach(id => delete nextMap[id]);
+          return [month, nextMap];
+        }).filter(([, map]) => Object.keys(map).length > 0),
+      );
       return {
         cats: s.cats.filter(cat => !selected.has(cat.id)),
         trans: s.trans.map(item => selected.has(item.cat) ? { ...item, cat: 'other' } : item),
         commitments: s.commitments.map(item => selected.has(item.cat) ? { ...item, cat: 'other' } : item),
-        cfg: { ...s.cfg, categoryBudgets },
+        cfg: { ...s.cfg, categoryBudgets, categoryBudgetsByMonth },
       };
     });
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('management_change');
     return true;
   },
 });

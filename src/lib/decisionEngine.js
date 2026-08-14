@@ -5,6 +5,7 @@ import { getDefaultWalletId, getWalletAvailableBalances } from './wallets';
 import { filterByActiveScope, filterFeatureEntities, getModules } from './modules';
 import { getBudgetRows } from './budgets';
 import { daysSinceISO } from './trackerLifecycle';
+import { getTransactionIndex } from './transactionIndex';
 
 const money = (value) => Math.abs(Math.round(Number(value) || 0)).toLocaleString();
 
@@ -47,18 +48,24 @@ export const buildDecisionItems = ({
   const sourceGoals = goals;
   trans = filterByActiveScope(trans, cfg);
   wallets = filterByActiveScope(wallets, cfg);
+  const transactionIndex = getTransactionIndex(trans);
+  const analysisMonthKeys = transactionIndex.monthKeys.slice(-7);
+  const analysisTrans = analysisMonthKeys.flatMap(key => transactionIndex.byMonth.get(key) || []);
   const featureData = filterFeatureEntities({ debts, goals, commitments, cfg });
   debts = featureData.debts;
   goals = featureData.goals;
   commitments = featureData.commitments;
   const lang = cfg.lang || 'ar';
   const ar = lang === 'ar';
+  // Notifications only need the current month plus historical baseline months
+  // for forecasting/intelligence. Wallet balance still uses the full ledger
+  // below, but we avoid repeatedly running every analytic pass across 50k rows.
   const snapshot = buildFinancialSnapshot({
-    trans, debts, goals, cats, wallets, commitments,
+    trans: analysisTrans, debts, goals, cats, wallets: [], commitments,
     currency: cfg.currency,
     defaultWalletId: cfg.defaultWalletId,
   }, date);
-  const intelligence = buildLeakInsights(trans, cats, date);
+  const intelligence = buildLeakInsights(analysisTrans, cats, date);
   const walletBalance = currentWalletBalance({ trans, wallets, cfg, snapshot });
   const commitmentOn = notif.commitment?.on !== false;
   const items = [];
@@ -100,7 +107,7 @@ export const buildDecisionItems = ({
     });
   }
   if (modules.budgets) {
-    const budgetRows = getBudgetRows(trans, cats, cfg.categoryBudgets, date);
+    const budgetRows = getBudgetRows(analysisTrans, cats, cfg.categoryBudgetsByMonth || cfg.categoryBudgets, date, cfg.categoryBudgets);
     const urgentBudget = budgetRows.find(row => row.status === 'over');
     if (urgentBudget) {
       const label = categoryLabel(urgentBudget.cat, ar);

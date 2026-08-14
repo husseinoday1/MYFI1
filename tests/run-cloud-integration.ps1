@@ -73,7 +73,10 @@ try {
   $env:MYFI_TEST_IMAGE_FILE = $imagePath
   $env:MYFI_TEST_AUDIO_FILE = $audioPath
   & $NodePath (Join-Path $PSScriptRoot 'run-cloud-integration.cjs')
-  $testExitCode = $LASTEXITCODE
+  $snapshotExitCode = $LASTEXITCODE
+  & $NodePath (Join-Path $PSScriptRoot 'run-financial-mutation-sync-e2e.cjs')
+  $mutationExitCode = $LASTEXITCODE
+  $testExitCode = if ($snapshotExitCode -eq 0 -and $mutationExitCode -eq 0) { 0 } else { 1 }
 }
 finally {
   if ($userId -and $serviceKey) {

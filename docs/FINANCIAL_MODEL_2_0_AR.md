@@ -1,5 +1,7 @@
 # MYFI Financial Model 2.0
 
+> حالة القرار: معتمد للتنفيذ ابتداءً من 2026-08-14. الأقسام الخاصة بـMoney وTransaction/Postings وSQLite Cutover أدناه هي المرجع الملزم. واجهة المستخدم تبقى بسيطة؛ هذا النموذج Internal Engine وليس واجهة محاسبية.
+
 ## 1. الغرض
 
 هذه الوثيقة هي المرجع المالي والمعماري للميزات القادمة في MYFI. أي تعديل جديد يجب أن يرتبط بهدف، ونموذج بيانات، وقاعدة مالية، واختبارات، ثم واجهة.
@@ -54,6 +56,10 @@
 10. الحذف المالي يترك أثراً قابلاً للتدقيق عند الحاجة.
 11. البيانات الشخصية خاصة افتراضياً.
 12. المشاركة لا تمنح إلا الصلاحية المحددة صراحة.
+13. كل مبلغ مخزّن هو Integer Minor Units؛ يمنع تخزين المال في `REAL` أو Float.
+14. `Transaction` رأس للعملية ولا يحمل مبلغاً مالياً وحيداً؛ الأثر المالي موجود فقط في `Posting`.
+15. العملية المالية وآثارها وروابطها وOutbox تُكتب داخل SQLite transaction واحدة.
+16. لا يُعلن SQLite كمصدر حقيقة قبل نجاح Shadow Migration ومقارنات Parity كاملة.
 
 ## 4. الكيانات الأساسية
 
@@ -97,34 +103,112 @@ FinancialAccount
 - workspaceId
 - name
 - type: cash | bank | debit_card | credit_card | e_wallet | savings
-- currency
-- openingBalance
+- currencyCode
 - status
 - scope
+- createdAt / updatedAt / archivedAt
 ```
+
+الرصيد الافتتاحي لا يبقى رقماً خاصاً داخل الحساب؛ يُرحّل إلى `opening_balance` Transaction مع Posting حتى يصبح كل رصيد قابلاً للتفسير والتدقيق.
 
 ### 4.3 دفتر الحركات
 
 ```text
-Transaction
+Currency
+- code
+- minorUnitExponent
+- enabled
+
+ExchangeRate
+- id
+- baseCurrencyCode
+- quoteCurrencyCode
+- numerator
+- denominator
+- rateDate
+- source
+- capturedAt
+
+FinancialTransaction
 - id
 - workspaceId
-- flowType
-- amount
-- currency
-- accountId
+- kind
+- status: posted | voided
 - dateISO
+- occurredAt
 - categoryId
 - title
 - note
 - sourceType
 - sourceId
+- idempotencyKey
 - deviceId
 - revision
+- createdAt
+- updatedAt
 - deletedAt
+
+Posting
+- id
+- transactionId
+- accountId
+- bucket: physical | reserved
+- role: principal | source | destination | fee | allocation | release | opening
+- amountMinor
+- currencyCode
+- exchangeRateId
+- createdAt
 ```
 
-الأنواع الأساسية هي: `income`, `expense`, `transfer`, `debt_payment`, `debt_collection`, `goal_allocation`, `commitment_payment`.
+هذا Multi-leg Ledger وليس نظام محاسبة يظهر للمستخدم. لا نفرض على المستخدم قيوداً أو حسابات مقابلة. الأنواع الأساسية هي: `opening_balance`, `income`, `expense`, `transfer`, `debt_payment`, `debt_collection`, `goal_allocation`, `goal_release`, `commitment_payment`.
+
+مثال واجهة المستخدم:
+
+```text
+تحويل 100 دولار إلى 131,000 دينار
+```
+
+والتمثيل الداخلي:
+
+```text
+FinancialTransaction(kind=transfer)
+├─ Posting(source,      physical, -10000 USD minor, Wallet USD)
+├─ Posting(destination, physical, +131000 IQD minor, Wallet IQD)
+└─ Posting(fee,         physical, -100 USD minor, Wallet USD)  # عند وجود رسم 1 USD
+```
+
+قواعد المبالغ والعملات:
+
+- أمثلة Minor Units: `IQD exponent=0`, `USD exponent=2`, `KWD exponent=3`.
+- `amountMinor` و`numerator` و`denominator` أعداد صحيحة فقط، وتبقى ضمن حدود SQLite signed 64-bit وJavaScript safe integer عند عبور طبقة التطبيق.
+- لا يُعاد حساب مبلغ جهة التحويل من Float. مبلغا المصدر والوجهة اللذان وافق عليهما المستخدم هما الحقيقة.
+- سعر التحويل Metadata تاريخي قابل للتدقيق، ويرتبط بـ`rateDate` و`source` مثل `user_entered`, `manual`, `provider:<name>`, أو `migration`.
+- التحويل بين Minor Units يتم بنسبة كسرية وبقاعدة rounding واحدة: nearest minor unit, halves away from zero.
+- كل Posting يحمل نفس عملة الحساب المرتبط به، وإلا تُرفض العملية قبل الكتابة.
+- لا يدخل `transfer` في الدخل أو المصروف. الرسم فقط يدخل كمصروف عند إعداد التقارير.
+
+صيغة التحويل الحتمية عند الحاجة إلى اشتقاق مبلغ:
+
+```text
+targetMinor = round(
+  sourceMinor × numerator × 10^targetExponent
+  ÷ (denominator × 10^sourceExponent)
+)
+```
+
+يحفظ `numerator/denominator` نسبة العملات بوحداتها الرئيسية. في التحويل الذي أدخل المستخدم طرفيه، تُشتق النسبة من الطرفين للحفظ والتفسير فقط ولا تستبدل أي Posting.
+
+قواعد الرصيد:
+
+```text
+Physical Balance = SUM(postings.amountMinor WHERE bucket = physical)
+Reserved Balance = SUM(postings.amountMinor WHERE bucket = reserved)
+Available Balance = Physical Balance - Reserved Balance
+```
+
+تخصيص الهدف يضيف Posting موجباً إلى `reserved` ولا يغيّر `physical`. تحرير الهدف يضيف Posting سالباً إلى `reserved`. الدفعات المرتبطة بالدين أو الالتزام تملك أثراً مالياً واحداً فقط، وتُربط بالكيان بدلاً من إنشاء أثر مكرر.
+
+الـTransaction المنشورة لا تُمحى بصمت. الحذف المنطقي يضع `deletedAt`/tombstone ويخرج Postings من الرصيد الفعال، مع Outbox mutation قابلة للمزامنة والتدقيق.
 
 ### 4.4 الحركات المتكررة
 
@@ -136,7 +220,8 @@ RecurringTemplate
 - workspaceId
 - title
 - type: income | expense
-- amount
+- amountMinor
+- currencyCode
 - categoryId
 - accountId
 - recurrence: monthly
@@ -163,7 +248,8 @@ CommitmentTemplate
 - id
 - workspaceId
 - name
-- amount
+- amountMinor
+- currencyCode
 - categoryId
 - accountId
 - recurrence: monthly
@@ -199,24 +285,22 @@ Debt
 - id
 - workspaceId
 - direction: owed | receivable
-- principal
-- paidAmount
-- remainingAmount
+- currencyCode
+- principalMinor
 - status
 
 DebtPayment
 - id
 - debtId
 - transactionId
-- amount
-- dateISO
+- appliedAmountMinor
 
 Goal
 - id
 - workspaceId
 - name
-- targetAmount
-- savedAmount
+- currencyCode
+- targetAmountMinor
 - targetDate
 - status
 
@@ -225,14 +309,15 @@ GoalAllocation
 - goalId
 - accountId
 - transactionId
-- amount
-- dateISO
+- amountMinor
 - releasedAt
 ```
 
+`paidAmount`, `remainingAmount` و`savedAmount` قيم مشتقة من الروابط وPostings الفعالة، وليست مصادر حقيقة مستقلة قابلة للتباعد.
+
 الدين ليس التزاماً، والالتزام قد يكون خطة دفع للدين. الحركة هي الأثر المالي الفعلي.
 
-### 4.3 دورة حياة الدين والهدف
+### 4.7 دورة حياة الدين والهدف
 
 القياس يكون على مستوى الدين أو الهدف بالكامل، وليس على مستوى عدد الأيام:
 
@@ -268,23 +353,29 @@ getUpcomingOccurrences(cycleMonth)
 getForecast(period)
 ```
 
-يجب أن تدعم الدوال `asOf` حتى لا يظهر رصيد اليوم عند استعراض شهر تاريخي.
+يجب أن تدعم الدوال `asOf` حتى لا يظهر رصيد اليوم عند استعراض شهر تاريخي. القراءة النهائية تكون من SQLite/Postings عبر Repository واحد؛ Zustand يحمل View State ونتائج Queries فقط ولا يصبح نسخة مالية موازية.
 
 الدفع المرتبط يجب أن يكون ذرياً:
 
 ```text
-طلب الدفع
+طلب UI مع idempotencyKey
 ↓
-التحقق من المبلغ والرصيد والارتباط
+BEGIN IMMEDIATE
 ↓
-إنشاء Transaction
+التحقق من العملة والحساب والروابط والمبلغ
 ↓
-تحديث Debt أو Goal أو CommitmentOccurrence
+إنشاء FinancialTransaction + Postings
 ↓
-إعادة حساب الأرصدة
+إنشاء/تحديث الرابط Debt أو Goal أو CommitmentOccurrence
 ↓
-إضافة التعديل إلى Outbox
+إضافة Outbox mutation داخل المعاملة نفسها
+↓
+COMMIT
+↓
+إعادة DTO محسوب إلى View State ثم UI
 ```
+
+إذا فشل أي جزء يحدث `ROLLBACK` ولا تظهر الحركة في الواجهة ولا يوجد Outbox يتيم. لا يوجد مسار `Vault-first` في العمليات التي تم تحويلها إلى Vertical Slice.
 
 ## 6. الغرف والمشاركة الانتقائية
 
@@ -401,7 +492,7 @@ View State
 ↓
 Financial Engine
 ↓
-Local Store
+SQLite Source of Truth
 ↓
 Outbox / Sync Engine
 ↓
@@ -410,6 +501,26 @@ Supabase with RLS
 
 كل سجل مهم يحتاج `id`, `createdAt`, `updatedAt`, `deletedAt`, `revision`, و`deviceId`.
 
+```text
+OutboxMutation
+- sequenceId
+- mutationId (globally unique)
+- workspaceId
+- entityType
+- entityId
+- operation: upsert | delete | void
+- entityRevision
+- payloadVersion
+- payload
+- createdAt
+- attempts
+- nextAttemptAt
+- acknowledgedAt
+- lastError
+```
+
+`mutationId` و`idempotencyKey` يمنعان تكرار العملية بعد timeout أو إعادة تشغيل التطبيق. لا يُحذف Outbox row قبل acknowledgement واضح، وأي mutation ولدت مع Transaction تُحفظ في نفس SQLite commit.
+
 الحساب الشخصي والغرفة لهما سياسات وصول منفصلة:
 
 - المستخدم يقرأ بياناته الشخصية فقط.
@@ -417,41 +528,113 @@ Supabase with RLS
 - العميل لا يكتب سجل التدقيق مباشرة.
 - دمج الأجهزة يعتمد على التعديلات لا Snapshot كامل.
 
+Snapshot Sync الحالي يبقى Compatibility/Fallback أثناء التطوير، ولا يُلغى حتى ينجح Outbox Sync على جهازين فعليين في حالات Online وOffline والتعارض وإعادة المحاولة. بعد Cutover لا يجوز للـSnapshot fallback أن يمسح SQLite أو يعيد بناءها تلقائياً؛ الاسترجاع منه عملية Recovery صريحة ومتحققة فقط.
+
 ## 8. خارطة التنفيذ
 
-### المرحلة 0: الثبات المالي
+### المرحلة 0: Baseline وTest Gate
 
-القواعد، الأرصدة، الروابط، حالات انتهاء الدين والهدف، إيقاف الالتزامات المرتبطة، البيانات المكررة، التقارير التاريخية، واختبارات جهازين Offline.
+Snapshot قابل للتحقق، جرد الاختبارات، وتصنيف النتائج إلى Parse وStatic وRuntime وNative وCloud وDevice، مع إظهار `SKIPPED` وعدم تسميته نجاحاً.
 
-### المرحلة 1: Financial Core 2.0
+### المرحلة 1: Final Financial Model
 
-Financial Engine، الحسابات، `CommitmentOccurrence`، `RecurringOccurrence`، وربط الديون والأهداف بالحركات.
+Minor Units، Transaction/Postings، العملات، Historical Exchange Rate، `rateDate/source`، قواعد الروابط، وOutbox atomicity.
 
-### المرحلة 2: UX والإدخال
+### المرحلة 2: SQLite Vertical Slices
 
-الإدخال السريع، اختيار الشهر، التأجيل اليومي أو الشهري، Draft، وRTL.
+Expense أولاً عبر `SQLite → linked effects → outbox → commit → UI`، ثم Income، Transfer، Debt، Saving، Commitment. لا تُحوّل عملية جديدة إلى Vault-first.
 
-### المرحلة 3: التقارير والتوقع
+### المرحلة 3: Shadow Migration ثم Cutover
 
-Cash Flow، Net Worth، الالتزامات الشهرية، Debt Exposure، الأرصدة التاريخية، وForecast.
+استيراد Vault والـCold Archive القديم إلى النموذج الموحد، ثم مقارنة العدد والأرصدة حسب المحفظة والعملة والإجماليات الشهرية والروابط والـchecksums. أي اختلاف يمنع Cutover. بعد النجاح فقط تتوقف إعادة بناء SQLite من Vault عند التشغيل.
 
-### المرحلة 4: Sync وRecovery
+### المرحلة 4: Read Paths
 
-Local database، Outbox، حل التعارض، إدارة الأجهزة، النسخ الاحتياطي، والاستعادة.
+History ثم Home ثم Reports ثم Intelligence ثم Export تقرأ من Financial Engine/SQLite، مع Parity tests لكل انتقال.
 
-### المرحلة 5: Rooms
+### المرحلة 5: Sync Outbox
 
-دعوات البريد، الأعضاء والصلاحيات، Share to Room، RoomProjection، إلغاء المشاركة، وسداد المصروفات المشتركة.
+مزامنة mutation-level، retries وidempotency وtombstones واختبار جهازين. Snapshot Sync يبقى fallback مؤقتاً حتى نجاح الاختبار الفعلي.
 
-### المرحلة 6: AI والتجاري
+### المرحلة 6: Archive وBackup وAccount Lifecycle
 
-Insights حتمية، Smart Entry المتقدم، Financial Copilot، السيناريوهات، والخطط المدفوعة.
+ترحيل Cold Archive القديم والتحقق منه قبل اعتباره Legacy. Backup منطقي Versioned ومشفّر، Account deletion/logout/reset بدون فقدان بيانات محلية.
 
-### المرحلة 7: الإصدار الرسمي على Android
+### المرحلة 7: الميزات المالية وUX
+
+Budget V2، Recurring/Occurrences، Data Health، ثم تحسينات UX وRTL بعد استقرار المحرك.
+
+### المرحلة 8: Rooms وAI والتجاري
+
+الغرف والمشاركة والذكاء المالي توسعات فوق مصدر الحقيقة المستقر ولا تسبق Cutover.
+
+### المرحلة 9: الإصدار الرسمي على Android
 
 إغلاق بوابات المنتج وAndroid والتوقيع والخصوصية والاختبار وصفحة المتجر والتشغيل كما هو موضح في [معايير الإصدار الرسمي](./ANDROID_RELEASE_READINESS_AR.md). لا يُعد رفع APK تجريبي إصداراً رسمياً؛ الإصدار الرسمي يحتاج `AAB` إنتاجي، Play App Signing، مراجعة Google Play، اختباراً مناسباً لنوع حساب المطور، وإطلاقاً تدريجياً مع مراقبة.
 
-## 9. عقد تنفيذ أي ميزة
+## 9. Shadow Migration وSource of Truth Cutover
+
+الانتقال لا يكتب فوق بيانات Vault ولا يحذف Cold Archive. كل تشغيل Migration يملك `migrationRunId`, `sourceSnapshotChecksum`, `targetSchemaVersion`, الحالة، ونتيجة المقارنة.
+
+```text
+Vault active snapshot ─┐
+Cold Archive years ────┼─> Normalizer ─> SQLite shadow namespace ─> Reconciliation
+Legacy metadata ───────┘                                         │
+                                                                  ├─ mismatch: BLOCK
+                                                                  └─ exact parity: eligible
+```
+
+المقارنات الملزمة:
+
+- عدد العمليات المنطقية، مع عدم مساواة Transaction count بعدد Postings.
+- Physical وReserved وAvailable لكل محفظة ولكل عملة.
+- الدخل والمصروف والرسوم وصافي التدفق لكل شهر ولكل عملة.
+- عدد وروابط Debt/Goal/Commitment ودفعاتها وتخصيصاتها.
+- أقدم وأحدث تاريخ، وعدد السجلات المحذوفة والمؤرشفة.
+- Canonical checksums مرتبة بمفاتيح ثابتة وليست JSON بترتيب عشوائي.
+
+Cutover marker لا يُكتب إلا بعد نجاح جميع المقارنات وتخزين تقرير النتيجة. فشل أو انقطاع Migration قابل لإعادة التشغيل idempotently ولا يغير مصدر الحقيقة الحالي.
+
+بعد Cutover:
+
+- SQLite هي المصدر الوحيد للكتابة والقراءة المالية.
+- Zustand لا يُستخدم لإعادة بناء SQLite عند التشغيل.
+- Vault يصبح Compatibility export/fallback مؤقتاً، لا مصدر كتابة أول.
+- rollback يغيّر مؤشر المصدر فقط إذا كانت النسخة المقصودة كاملة ومتحققة؛ لا يخلط كتابات المصدرين.
+
+### Cold Archive القديم
+
+يُقرأ كل عام قديم ويُحوّل إلى نفس `FinancialTransaction/Postings` مع `archivedAt`, سنة المصدر، وchecksum الحزمة القديمة. يبقى الأرشيف القديم دون حذف حتى نجاح counts، balances، monthly totals، links وchecksums، ثم يوصف `Legacy Read-only`. الإزالة اللاحقة قرار مستقل بعد نسخة Backup واختبار Restore.
+
+## 10. Backup وRestore
+
+الصيغة الأساسية Logical Versioned Format وليست نسخة ملف SQLite فقط:
+
+```text
+manifest
+├─ format: MYFI_LOGICAL_BACKUP
+├─ formatVersion
+├─ schemaVersion
+├─ exportedAt / appVersion
+├─ baseCurrency
+├─ sections + recordCounts
+└─ checksums
+
+financialData
+├─ accounts
+├─ transactions
+├─ postings
+├─ links / debts / goals / commitments / occurrences
+├─ currencies / exchangeRates
+├─ budgets
+└─ archiveMetadata
+```
+
+تُبنى الـchecksums على Canonical serialization، ثم تُضغط الحزمة وتُشفّر. Restore يعمل إلى Staging namespace، يتحقق من schema والترابط والعدّ والchecksums، ثم يبدّلها ذرياً. Outbox pending لا يُعاد تشغيله من Backup بشكل أعمى حتى لا تتكرر مزامنة قديمة؛ يُنشأ Sync bootstrap جديد بعد الاستعادة.
+
+نسخة SQLite الخام مسموحة كطبقة Recovery إضافية مرتبطة بإصدار Schema وتطبيق محدد، لكنها ليست Backup portable الوحيد ولا تستبدل الصيغة المنطقية.
+
+## 11. عقد تنفيذ أي ميزة
 
 ```text
 Requirement
@@ -477,7 +660,7 @@ Release gate: AAB / Play Console / Privacy / Testing / Monitoring
 
 لا تعتبر الميزة مكتملة إذا نجحت الواجهة وفشلت التقارير أو المزامنة أو المشاركة.
 
-## 10. معايير القبول
+## 12. معايير القبول
 
 - لا يوجد مصدران مختلفان لحساب الرصيد.
 - لا يخلط تأجيل أغسطس بالتزام سبتمبر.
@@ -491,8 +674,12 @@ Release gate: AAB / Play Console / Privacy / Testing / Monitoring
 - يستطيع مالك البيانات إلغاء المشاركة فوراً.
 - تتطابق الرئيسية والتقارير وPDF في الأرقام.
 - تعمل المسارات الأساسية بالعربية والإنجليزية على Android وiPhone.
+- لا يوجد مبلغ مالي جديد مخزّن كـ`REAL`.
+- كل cross-currency operation تحتفظ بـ`rateDate/source` ومبالغ Postings الأصلية.
+- لا يحدث Cutover إذا اختلف أي count أو balance أو monthly total أو link أو checksum.
+- Cold Archive القديم وSnapshot Sync لا يُلغيان قبل نجاح بدائلهما والتحقق منها.
 
-## 11. قرارات الغرف المؤجلة
+## 13. قرارات الغرف المؤجلة
 
 - هل يسمح `editor` بتعديل المصروف المشترك أم الإضافة فقط؟
 - هل التسوية بين الأعضاء التزام أم تحويل؟

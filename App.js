@@ -1,3 +1,4 @@
+// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Appearance, BackHandler, I18nManager, Image, Linking, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -8,7 +9,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useStore } from './src/store/useStore';
 import { TH } from './src/lib/theme';
 import { STR } from './src/lib/strings';
-import { STORAGE, getSymbol } from './src/lib/constants';
+import { STORAGE, detectSystemLang, getSymbol } from './src/lib/constants';
+import { clearVaultSnapshot } from './src/lib/secureVault';
 import { supabase } from './src/lib/supabase';
 import { authenticate } from './src/lib/biometric';
 import { checkDecisionAlerts } from './src/lib/notifications';
@@ -37,6 +39,9 @@ import { handleAuthCallback } from './src/lib/authCallback';
 import { normalizeWallets } from './src/lib/wallets';
 
 const FORCE_ONBOARDING = process.env.EXPO_PUBLIC_FORCE_ONBOARDING === '1';
+const FRESH_TEST_MODE = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
+const FRESH_TEST_NAMESPACE = 'fresh-test-new-user';
+const INTERNAL_DEMO_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_INTERNAL_DEMO === '1';
 
 const BASE_TABS = [
   { key: 'home', icon: 'home-outline', labelKey: 'home' },
@@ -114,8 +119,10 @@ function AppRoot() {
     restoreLastMergeRollback,
     syncConflict,
     resolveSyncConflict,
+    exitDemoMode,
   } = useStore();
   const [tab, setTab] = useState('home');
+  const [settingsResetSignal, setSettingsResetSignal] = useState(0);
   const [showAdd, setShowAdd] = useState(false);
   const [addPreset, setAddPreset] = useState({ mode: 'exp', debtId: null, goalId: null, commitmentId: null, focused: false });
   const [addDraft, setAddDraft] = useState(null);
@@ -144,7 +151,12 @@ function AppRoot() {
     const applyTheme = ({ colorScheme } = {}) => {
       const currentTheme = useStore.getState().cfg.theme;
       const theme = resolveSystemTheme(colorScheme || Appearance.getColorScheme(), currentTheme);
-      if (theme !== useStore.getState().cfg.theme) useStore.getState().setCfg({ theme });
+      if (theme !== useStore.getState().cfg.theme) {
+        // This is derived device state, not a financial mutation. Updating it
+        // directly avoids a full ledger/vault write whenever Android changes
+        // light/dark mode while Expo is open.
+        useStore.setState(state => ({ cfg: { ...state.cfg, theme } }));
+      }
     };
     applyTheme({ colorScheme: systemColorScheme });
     const appearanceSub = Appearance.addChangeListener(applyTheme);
@@ -158,7 +170,31 @@ function AppRoot() {
   }, [cfg.themeMode, systemColorScheme]);
 
   useEffect(() => {
-    applyOrientationMode(cfg.orientationMode || 'system').catch(() => {});
+    if (cfg.langMode !== 'system') return undefined;
+    const applyLanguage = () => {
+      const language = detectSystemLang();
+      if (language !== useStore.getState().cfg.lang) {
+        useStore.setState(state => ({ cfg: { ...state.cfg, lang: language } }));
+      }
+    };
+    applyLanguage();
+    const appStateSub = AppState.addEventListener('change', state => {
+      if (state === 'active') applyLanguage();
+    });
+    return () => appStateSub.remove();
+  }, [cfg.langMode]);
+
+  useEffect(() => {
+    const orientationMode = ['system', 'auto', 'portrait'].includes(cfg.orientationMode)
+      ? cfg.orientationMode
+      : 'system';
+    const apply = () => applyOrientationMode(orientationMode).catch(() => {});
+    apply();
+    if (orientationMode !== 'system') return undefined;
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') apply();
+    });
+    return () => subscription.remove();
   }, [cfg.orientationMode]);
 
   useEffect(() => {
@@ -212,11 +248,21 @@ function AppRoot() {
 
   useEffect(() => {
     (async () => {
+      if (FRESH_TEST_MODE) {
+        await clearVaultSnapshot(FRESH_TEST_NAMESPACE);
+        await loadLocal(FRESH_TEST_NAMESPACE, { allowLegacy: false });
+        setShowOnboard(true);
+        setReady(true);
+        return;
+      }
+
       await loadLocal();
       const completed = await AsyncStorage.getItem(STORAGE.ONBOARD);
       setShowOnboard(FORCE_ONBOARDING || completed !== 'true');
       setReady(true);
     })();
+
+    if (FRESH_TEST_MODE) return undefined;
 
     supabase.auth.getSession()
       .then(({ data }) => {
@@ -232,6 +278,7 @@ function AppRoot() {
   }, [loadLocal, setUser]);
 
   useEffect(() => {
+    if (FRESH_TEST_MODE) return undefined;
     let active = true;
     const processUrl = async (url) => {
       if (!url || handledAuthUrls.current.has(url)) return;
@@ -487,6 +534,16 @@ function AppRoot() {
     setTab(prev => (prev === 'home' ? preferredTab : prev));
   }, [ready, preferredTab]);
 
+  useEffect(() => {
+    // Legacy internal demo data must never leak into a normal build. The
+    // development-only performance lab is intentionally different: when the
+    // user activates it, it must remain active until they explicitly return
+    // to their real workspace.
+    if (!ready || INTERNAL_DEMO_ENABLED || !cfg.demoMode) return;
+    if (__DEV__ && cfg.performanceTestMode === true) return;
+    Promise.resolve(exitDemoMode?.()).catch(() => {});
+  }, [ready, cfg.demoMode, cfg.performanceTestMode, exitDemoMode]);
+
   const finishOnboard = async () => {
     await AsyncStorage.setItem(STORAGE.ONBOARD, 'true');
     setShowOnboard(false);
@@ -694,7 +751,7 @@ function AppRoot() {
       />
     ),
     reports: <ReportsScreen />,
-    settings: <SettingsScreen onOpenArchive={() => setArchiveOpen(true)} tabs={visibleTabs} />,
+    settings: <SettingsScreen onOpenArchive={() => setArchiveOpen(true)} tabs={visibleTabs} resetSignal={settingsResetSignal} />,
   };
 
   return (
@@ -702,7 +759,7 @@ function AppRoot() {
       <StatusBar style={statusStyle(th)} />
 
       <View style={{ flex: 1 }}>
-        {cfg.demoMode ? (
+        {INTERNAL_DEMO_ENABLED && cfg.demoMode ? (
           <View style={[s.demoBanner, { backgroundColor: th.warnBg, borderColor: th.warn }]}>
             <Ionicons name="flask-outline" size={14} color={th.warn} />
             <Text style={{ color: th.warn, fontSize: 11, fontWeight: '900' }}>
@@ -730,7 +787,14 @@ function AppRoot() {
             return (
               <PressableScale
                 key={item.key}
-                onPress={() => setTab(item.key)}
+                onPress={() => {
+                  if (item.key === 'settings') {
+                    setSettingsResetSignal(value => value + 1);
+                    setTab('settings');
+                    return;
+                  }
+                  setTab(item.key);
+                }}
                 style={s.tabBtn}
                 haptic="selection"
                 scale={0.95}

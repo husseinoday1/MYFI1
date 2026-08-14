@@ -18,12 +18,18 @@
     "test:backfill": "node tests/backfill-normalized.test.cjs",
     "test:ui": "node tests/ui-contract.test.cjs",
     "test:database": "npm run test:db-schema && npm run test:backfill && npm run test:logic",
+    "test:gate": "node tests/run-quality-gate.cjs",
+    "test:gate:static": "node tests/run-quality-gate.cjs --group=static",
+    "test:gate:runtime": "node tests/run-quality-gate.cjs --group=runtime",
+    "test:gate:cloud": "node tests/run-quality-gate.cjs --include-cloud",
+    "test:gate:android": "node tests/run-quality-gate.cjs --include-android",
     "backfill:normalized": "node tools/backfill-normalized.cjs",
     "test:cloud": "node tests/run-cloud-integration.cjs",
+    "test:sync:two-client": "node tests/run-financial-mutation-sync-e2e.cjs",
     "test:cloud:managed": "powershell -ExecutionPolicy Bypass -File tests/run-cloud-integration.ps1",
     "verify:android": "expo export --platform android --output-dir dist-android-verify --clear",
-    "build:apk": "eas build --platform android --profile preview",
-    "build:aab": "eas build --platform android --profile production"
+    "build:apk": "node -r ./tools/node-userinfo-fallback.cjs ./node_modules/eas-cli/bin/run build --platform android --profile preview",
+    "build:aab": "node -r ./tools/node-userinfo-fallback.cjs ./node_modules/eas-cli/bin/run build --platform android --profile production"
   },
   "dependencies": {
     "@expo-google-fonts/cairo": "^0.4.2",

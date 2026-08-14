@@ -16,6 +16,9 @@ const parseISO = (value) => {
 const shiftMonth = (date, delta) =>
   new Date(date.getFullYear(), date.getMonth() + delta, 1, 12, 0, 0);
 
+const YEAR_PAGE_SIZE = 12;
+const yearPageStartFor = (year) => Number(year) - 5;
+
 const AR_DAYS = ['سبت', 'أحد', 'اثن', 'ثلا', 'أرب', 'خمي', 'جمع'];
 const EN_DAYS = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
@@ -26,15 +29,18 @@ const copy = (lang) => {
     close: ar ? 'إغلاق' : 'Close',
     previousMonth: ar ? 'الشهر السابق' : 'Previous month',
     nextMonth: ar ? 'الشهر التالي' : 'Next month',
+    chooseYear: ar ? 'اختر السنة' : 'Choose year',
+    previousYears: ar ? 'السنوات السابقة' : 'Previous years',
+    nextYears: ar ? 'السنوات التالية' : 'Next years',
     anyDate: ar ? 'أي تاريخ' : 'Any date',
     clear: ar ? 'مسح التاريخ' : 'Clear date',
   };
 };
 
-const formatDate = (value, lang) => {
+const formatDate = (value, lang, monthNameStyle = 'system') => {
   const date = parseISO(value);
   try {
-    return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-IQ' : 'en-US', {
+    return new Intl.DateTimeFormat(monthNameStyle === 'system' ? undefined : (lang === 'ar' ? 'ar-IQ' : 'en-US'), {
       weekday: 'short',
       day: 'numeric',
       month: 'short',
@@ -73,12 +79,14 @@ export default function DateField({
   allowEmpty = false,
   monthOnly = false,
   labelInside = false,
-  monthNameStyle = 'numeric',
+  monthNameStyle = 'system',
 }) {
   const [open, setOpen] = useState(false);
   const currentValue = isISODate(value) ? value : today();
   const selectedDate = parseISO(currentValue);
   const [viewDate, setViewDate] = useState(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1, 12, 0, 0));
+  const [pickerView, setPickerView] = useState('calendar');
+  const [yearPageStart, setYearPageStart] = useState(yearPageStartFor(selectedDate.getFullYear()));
   const T = useMemo(() => copy(lang), [lang]);
   const isAr = lang === 'ar';
   const rowDir = isAr ? 'row-reverse' : 'row';
@@ -90,12 +98,28 @@ export default function DateField({
     month,
     label: monthNames({ style: monthNameStyle, length: 'long' })[month],
   })), [monthNameStyle]);
+  const yearOptions = useMemo(
+    () => Array.from({ length: YEAR_PAGE_SIZE }, (_, index) => yearPageStart + index),
+    [yearPageStart],
+  );
   const todayISO = today();
 
   const openPicker = () => {
     const date = parseISO(currentValue);
     setViewDate(new Date(date.getFullYear(), date.getMonth(), 1, 12, 0, 0));
+    setYearPageStart(yearPageStartFor(date.getFullYear()));
+    setPickerView('calendar');
     setOpen(true);
+  };
+
+  const openYearPicker = () => {
+    setYearPageStart(yearPageStartFor(viewDate.getFullYear()));
+    setPickerView('year');
+  };
+
+  const chooseYear = (year) => {
+    setViewDate(prev => new Date(year, prev.getMonth(), 1, 12, 0, 0));
+    setPickerView('calendar');
   };
 
   const chooseDate = (iso) => {
@@ -125,7 +149,7 @@ export default function DateField({
             <Text style={[s.inlineLabel, { color: th.sub, textAlign: align }]}>{label}</Text>
           ) : null}
           <Text style={[s.buttonText, { color: th.text, textAlign: align }, textStyle]} numberOfLines={1} adjustsFontSizeToFit>
-            {isISODate(value) ? (monthOnly ? formatMonthLabel(selectedDate.getFullYear(), selectedDate.getMonth(), { style: monthNameStyle, length: 'long' }) : formatDate(currentValue, lang)) : T.anyDate}
+            {isISODate(value) ? (monthOnly ? formatMonthLabel(selectedDate.getFullYear(), selectedDate.getMonth(), { style: monthNameStyle, length: 'long' }) : formatDate(currentValue, lang, monthNameStyle)) : T.anyDate}
           </Text>
           {labelInside ? <Text style={[s.inlineDetail, { color: th.sub, textAlign: align }]}>{' '}</Text> : null}
         </View>
@@ -147,7 +171,53 @@ export default function DateField({
               <Text style={[s.sheetTitle, { color: th.text, textAlign: align }]}>{label || T.pickDate}</Text>
             </View>
 
-            {monthOnly ? (
+            {pickerView === 'year' ? (
+              <>
+                <View style={[s.monthHead, { flexDirection: rowDir }]}>
+                  <TouchableOpacity
+                    onPress={() => setYearPageStart(prev => prev - YEAR_PAGE_SIZE)}
+                    accessibilityLabel={T.previousYears}
+                    style={[s.monthBtn, { backgroundColor: th.input }]}
+                  >
+                    <Ionicons name={isAr ? 'chevron-forward' : 'chevron-back'} size={18} color={th.text} />
+                  </TouchableOpacity>
+                  <Text style={[s.monthTitle, { color: th.text }]}>
+                    {yearPageStart} – {yearPageStart + YEAR_PAGE_SIZE - 1}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setYearPageStart(prev => prev + YEAR_PAGE_SIZE)}
+                    accessibilityLabel={T.nextYears}
+                    style={[s.monthBtn, { backgroundColor: th.input }]}
+                  >
+                    <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={18} color={th.text} />
+                  </TouchableOpacity>
+                </View>
+                <Text style={[s.yearHint, { color: th.sub, textAlign: align }]}>{T.chooseYear}</Text>
+                <View style={s.yearGrid}>
+                  {yearOptions.map(year => {
+                    const active = viewDate.getFullYear() === year;
+                    const current = new Date().getFullYear() === year;
+                    return (
+                      <TouchableOpacity
+                        key={year}
+                        onPress={() => chooseYear(year)}
+                        style={[
+                          s.yearCell,
+                          {
+                            backgroundColor: active ? th.primary : current ? th.primSoft : th.input,
+                            borderColor: active || current ? th.primary : th.border,
+                          },
+                        ]}
+                      >
+                        <Text style={[s.yearCellText, { color: active ? th.onPrimary : current ? th.primary : th.text }]}>
+                          {year}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            ) : monthOnly ? (
               <>
                 <View style={[s.monthHead, { flexDirection: rowDir }]}>
                   <TouchableOpacity
@@ -157,7 +227,14 @@ export default function DateField({
                   >
                     <Ionicons name={isAr ? 'chevron-forward' : 'chevron-back'} size={18} color={th.text} />
                   </TouchableOpacity>
-                  <Text style={[s.monthTitle, { color: th.text }]}>{viewDate.getFullYear()}</Text>
+                  <TouchableOpacity
+                    onPress={openYearPicker}
+                    accessibilityLabel={T.chooseYear}
+                    style={[s.yearTitleButton, { backgroundColor: th.input, borderColor: th.border }]}
+                  >
+                    <Text style={[s.monthTitle, { color: th.text }]}>{viewDate.getFullYear()}</Text>
+                    <Ionicons name="chevron-down" size={15} color={th.primary} />
+                  </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => setViewDate(prev => new Date(prev.getFullYear() + 1, 0, 1, 12, 0, 0))}
                     accessibilityLabel={T.nextMonth}
@@ -200,9 +277,16 @@ export default function DateField({
                   >
                     <Ionicons name={isAr ? 'chevron-forward' : 'chevron-back'} size={18} color={th.text} />
                   </TouchableOpacity>
-                  <Text style={[s.monthTitle, { color: th.text }]}>
-                    {monthName} {viewDate.getFullYear()}
-                  </Text>
+                  <TouchableOpacity
+                    onPress={openYearPicker}
+                    accessibilityLabel={T.chooseYear}
+                    style={[s.yearTitleButton, { backgroundColor: th.input, borderColor: th.border }]}
+                  >
+                    <Text style={[s.monthTitle, { color: th.text }]}>
+                      {monthName} {viewDate.getFullYear()}
+                    </Text>
+                    <Ionicons name="chevron-down" size={15} color={th.primary} />
+                  </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => setViewDate(prev => shiftMonth(prev, 1))}
                     accessibilityLabel={T.nextMonth}
@@ -254,17 +338,17 @@ export default function DateField({
 const s = StyleSheet.create({
   label: { fontSize: TYPE.meta, lineHeight: 17, ...weight('900'), marginBottom: 8 },
   inlineLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
-  inlineDetail: { fontSize: 9, lineHeight: 13, ...weight('700'), marginTop: 1 },
+  inlineDetail: { fontSize: 9, lineHeight: 12, ...weight('700'), marginTop: 1 },
   button: {
     minHeight: 46,
-    borderRadius: RADIUS.md,
+    borderRadius: 13,
     borderWidth: 0.5,
     paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
-  buttonText: { fontSize: TYPE.meta, lineHeight: 18, ...weight('900') },
+  buttonText: { fontSize: 13, lineHeight: 18, ...weight('900') },
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -286,6 +370,11 @@ const s = StyleSheet.create({
   monthHead: { alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   monthBtn: { width: 38, height: 38, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center' },
   monthTitle: { flex: 1, textAlign: 'center', fontSize: 16, lineHeight: 23, ...weight('900') },
+  yearTitleButton: { flex: 1, minHeight: 38, borderRadius: RADIUS.md, borderWidth: 0.5, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  yearHint: { fontSize: TYPE.meta, lineHeight: 18, ...weight('800') },
+  yearGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  yearCell: { width: '22%', minHeight: 48, flexGrow: 1, borderRadius: RADIUS.md, borderWidth: 0.5, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  yearCellText: { fontSize: TYPE.body, lineHeight: 21, ...weight('900'), textAlign: 'center' },
   weekRow: { flexDirection: 'row', gap: 4 },
   weekDay: { flex: 1, textAlign: 'center', fontSize: 12, lineHeight: 17, ...weight('900') },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },

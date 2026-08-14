@@ -7,13 +7,14 @@ const repo = path.resolve(process.argv[2] || '.');
 const read = rel => fs.readFileSync(path.join(repo, rel), 'utf8');
 
 const history = read('src/screens/HistoryScreen.js');
-assert(history.includes('const HistoryListHeader ='), 'History header must be a stable component type');
-assert(history.includes('ListHeaderComponent={('), 'History must pass an element instead of a render function');
-assert(!history.includes('ListHeaderComponent={renderHeader}'), 'Old remounting History header must be removed');
+assert(history.includes('const HistoryControls ='), 'History controls must be a stable component type');
+assert(history.includes('<HistoryControls'), 'History must render stable controls outside the virtualized list');
+assert(history.includes('<SectionList'), 'History must use a sectioned virtualized list');
+assert(!history.includes('ListHeaderComponent={renderHeader}'), 'Old remounting History header must stay removed');
 
 const addModal = read('src/components/AddTransModal.js');
 assert(addModal.includes("const launchingCommitment = cleanInitialMode === 'commitment' || !!initialCommitmentId;"), 'Default wallet launch guard missing');
-assert(addModal.includes('setWalletId(launchingCommitment ? (defaultCommitment?.walletId || defaultWalletId) : defaultWalletId);'), 'Ordinary entries must start on default wallet');
+assert(addModal.includes('setWalletId(defaultWalletId);'), 'New entries, including commitment payments, must start on the current default wallet');
 
 const trackers = read('src/screens/TrackersLabScreen.js');
 assert(trackers.includes("{ key: 'ended', label: T.ended"), 'Ended tracker filter missing');
@@ -44,17 +45,22 @@ assert(txSlice.includes('force: financialDataCount(get()) === 0'), 'Deleting the
 
 const dataSlice = read('src/store/slices/dataSlice.js');
 assert(dataSlice.includes('clearVaultSnapshot(targetNamespace)'), 'Reset must clear encrypted vault and backups for current and guest namespaces');
+assert(dataSlice.includes('clearVaultSnapshot(syncBaseNamespace(targetNamespace))'), 'Reset must clear stale sync-base snapshots');
 assert(dataSlice.includes('GUEST_NAMESPACE'), 'Signed-in reset must also clear stale guest workspace data');
 assert(dataSlice.includes('MYFI_INTENTIONAL_RESET_V1'), 'Intentional-reset tombstone missing');
+assert(dataSlice.includes('stripPerformanceCfg'), 'Reset must remove performance/demo flags from the clean workspace');
 assert(dataSlice.includes('resetAll verification failed'), 'Post-reset verification missing');
 assert(dataSlice.includes('financialDataCount(snapshot?.data || snapshot)'), 'Reset must re-read the vault and verify no financial data survived');
+assert(dataSlice.includes('financial_v7_reset_cutover_failed'), 'Reset must rebuild and verify the empty SQLite V7 cutover immediately');
 
 const syncSlice = read('src/store/slices/useSyncSlice.js');
 assert(syncSlice.includes('legacyRecoveryDisabled'), 'Legacy recovery tombstone enforcement missing');
 assert(syncSlice.includes('const allowLegacyRecovery = allowLegacy && !resetMarker?.legacyRecoveryDisabled;'), 'Intentional empty snapshots must suppress legacy recovery via reset tombstone');
+assert(syncSlice.includes('const demoSnapshot = resetMarker?.legacyRecoveryDisabled'), 'Intentional reset must suppress stale performance snapshots before local hydrate');
 assert(syncSlice.includes('pendingCloudSync'), 'Pending cloud reset enforcement missing');
 assert(syncSlice.includes('financialDataCount(get()) === 0'), 'Cloud must respect explicit empty reset');
-assert(syncSlice.includes('for (let attempt = 0; attempt < 2; attempt += 1)'), 'Empty reset cloud conflicts must receive one automatic revision-aware retry');
+assert(syncSlice.includes('supersededByReset'), 'Older queued sync operations must not overwrite a newer reset');
+assert(syncSlice.includes('SYNC_MAX_ATTEMPTS = 4') && syncSlice.includes('attempt < SYNC_MAX_ATTEMPTS'), 'Cloud conflicts must use the bounded revision-aware retry policy');
 
 const vault = read('src/lib/secureVault.js');
 assert(vault.includes("LEGACY_PREVIOUS_SUFFIX = ':previous'"), 'Legacy previous snapshot cleanup missing');

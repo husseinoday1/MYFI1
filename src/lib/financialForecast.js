@@ -1,5 +1,7 @@
 import { FLOW_TYPES, isExpenseFlow } from './modules';
 import { commitmentDueISO } from './commitments';
+import { asDate } from './dateCore';
+import { getTransactionIndex } from './transactionIndex';
 
 const asAmount = (value) => {
   const n = Math.abs(Number(value || 0));
@@ -44,7 +46,7 @@ const amountMatches = (left, right) => {
 };
 
 export const monthKeyForDate = (date = new Date()) => {
-  const d = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+  const d = asDate(date);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
@@ -132,19 +134,11 @@ export const weightedHistoricalVariableSpend = (
   { categoryId = null, limit = 6, decay = 0.7 } = {},
 ) => {
   const currentKey = monthKeyForDate(date);
-  const months = new Map();
-
-  (Array.isArray(trans) ? trans : []).forEach(tx => {
-    const key = String(tx?.dateISO || '').slice(0, 7);
-    if (!/^\d{4}-\d{2}$/.test(key) || key >= currentKey) return;
-    const list = months.get(key) || [];
-    list.push(tx);
-    months.set(key, list);
-  });
-
-  const baselineMonths = [...months.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .slice(-Math.max(1, limit));
+  const index = getTransactionIndex(trans);
+  const baselineMonths = index.monthKeys
+    .filter(key => key < currentKey)
+    .slice(-Math.max(1, limit))
+    .map(key => [key, index.byMonth.get(key) || []]);
 
   const count = baselineMonths.length;
   let weighted = 0;

@@ -12,6 +12,14 @@ import {
   uid,
 } from '../domain';
 import { debtLifecycle, goalLifecycle, reopenCompletionCommitments } from '../../lib/trackerLifecycle';
+import { buildCurrencyFields, buildCurrencyFieldsFromBaseAmount, buildTransferCurrencyFields } from '../../lib/financialCoreV2';
+import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
+import {
+  commitExpenseToFinancialLedgerV7,
+  commitFinancialTransactionV7,
+  replaceFinancialTransactionV7,
+  voidFinancialTransactionsV7,
+} from '../../lib/financialLedgerV7Repository';
 
 export const createTransactionSlice = (set, get) => ({
   addTrans: async (t) => {
@@ -22,6 +30,28 @@ export const createTransactionSlice = (set, get) => ({
     const defaultTitle = Number(t.amt || 0) >= 0
       ? (get().cfg.lang === 'ar' ? `دخل - ${catLabel || 'عام'}` : `Income - ${catLabel || 'General'}`)
       : (get().cfg.lang === 'ar' ? `مصروف - ${catLabel || 'عام'}` : `Expense - ${catLabel || 'General'}`);
+    const walletId = t.walletId || defaultWalletId;
+    const selectedWallet = get().wallets.find(item => item.id === walletId) || null;
+    const selectedWalletCurrency = String(selectedWallet?.currency || get().cfg.currency || 'IQD').toUpperCase();
+    const baseCurrency = String(get().cfg.currency || 'IQD').toUpperCase();
+    const explicitRate = Number(t.exchangeRate);
+    const walletRate = Number(selectedWallet?.valuationRate);
+    const resolvedExchangeRate = selectedWalletCurrency === baseCurrency
+      ? 1
+      : Number.isFinite(explicitRate) && explicitRate > 0
+        ? explicitRate
+        : Number.isFinite(walletRate) && walletRate > 0
+          ? walletRate
+          : null;
+    if (selectedWalletCurrency !== baseCurrency && !resolvedExchangeRate) return false;
+    const currencyFields = buildCurrencyFields({
+      amount: Number(t.walletAmount ?? t.amt ?? 0),
+      walletId,
+      wallets: get().wallets,
+      baseCurrency: get().cfg.currency,
+      exchangeRate: resolvedExchangeRate || 1,
+      walletCurrency: t.walletCurrency || t.currencyCode,
+    });
     const tx = {
       ...t,
       id,
@@ -29,25 +59,69 @@ export const createTransactionSlice = (set, get) => ({
       flowType: t.flowType || (Number(t.amt || 0) >= 0 ? FLOW_TYPES.INCOME : FLOW_TYPES.EXPENSE),
       transactionTag: inferTransactionTag(t),
       title: String(t.title || '').trim() || defaultTitle,
-      walletId: t.walletId || defaultWalletId,
+      walletId,
+      ...currencyFields,
+      rateDate: t.rateDate || t.dateISO || today(),
+      rateSource: t.rateSource || (
+        selectedWalletCurrency === baseCurrency
+          ? 'same_currency'
+          : Number.isFinite(explicitRate) && explicitRate > 0
+            ? 'user_entered'
+            : 'wallet_valuation'
+      ),
+      idempotencyKey: t.idempotencyKey || `expense-or-income:${id}`,
+      // amt remains the base/reporting value for compatibility with existing reports.
+      amt: currencyFields.baseAmount,
       recurringGroupId: t.recurring ? (t.recurringGroupId || t.id || id) : t.recurringGroupId,
       ts: Date.now(),
       dateISO: t.dateISO || today(),
     };
-    if (Number(tx.amt || 0) < 0) {
+    if (Number(currencyFields.walletAmount || 0) < 0) {
       const spendCheck = canSpendFromWallet({
         wallets: get().wallets,
         trans: get().trans,
         currency: get().cfg.currency,
         defaultWalletId: get().cfg.defaultWalletId,
         walletId: tx.walletId,
-        amount: Math.abs(tx.amt),
+        amount: Math.abs(currencyFields.walletAmount),
       });
-      if (!spendCheck.ok) return false;
+      tx.balanceWarning = !!spendCheck.warning;
     }
-    set(s => ({ trans: [tx, ...s.trans] }));
-    await get().saveLocal();
-    await get().syncCloud();
+    let v7Commit = null;
+    if (tx.kind !== 'transfer') {
+      try {
+        const commitArgs = {
+          namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+          transaction: tx,
+          baseCurrency: get().cfg.currency,
+        };
+        v7Commit = tx.flowType === FLOW_TYPES.EXPENSE
+          ? await commitExpenseToFinancialLedgerV7({ ...commitArgs, wallet: selectedWallet })
+          : await commitFinancialTransactionV7({ ...commitArgs, wallets: [selectedWallet].filter(Boolean) });
+        if (v7Commit.supported && !v7Commit.ok) return false;
+        if (v7Commit.ok) {
+          tx.id = v7Commit.transactionId;
+          tx.storageEngineVersion = 7;
+          tx.sqliteCommittedAt = v7Commit.committedAt || new Date().toISOString();
+        }
+      } catch (error) {
+        set({ ledgerError: String(error?.message || 'financial_v7_transaction_commit_failed') });
+        return false;
+      }
+    }
+    set(s => ({
+      trans: [tx, ...s.trans],
+      ...(v7Commit?.ok ? { financialLedgerV7Ready: true, ledgerError: null } : {}),
+    }));
+    try {
+      await get().saveLocal();
+    } catch (error) {
+      if (!v7Commit?.ok) throw error;
+      // SQLite already committed the financial truth. A compatibility Vault
+      // failure must be retried, never used to roll back or hide the expense.
+      set({ dirty: true, ledgerError: 'compatibility_snapshot_retry_required' });
+    }
+    get().scheduleCloudSync?.('transaction_change');
     return true;
 
   },
@@ -59,24 +133,29 @@ export const createTransactionSlice = (set, get) => ({
       return get().addTransfer({
         fromWalletId: current.fromWalletId,
         toWalletId: current.toWalletId,
-        amount: current.transferAmount,
+        amount: current.transferFromAmount ?? current.transferAmount,
+        toAmount: current.transferToAmount,
+        exchangeRate: current.transferRate ?? current.exchangeRate,
+        feeAmount: current.feeAmount || 0,
         dateISO: today(),
         note: current.note || '',
       });
     }
-    await get().addTrans({
+    return get().addTrans({
       title: current.title,
-      amt: current.amt,
+      amt: current.walletAmount ?? current.amt,
+      walletAmount: current.walletAmount ?? current.amt,
+      walletCurrency: current.walletCurrency ?? current.currencyCode,
+      exchangeRate: current.exchangeRate,
       cat: current.cat,
       walletId: current.walletId,
       note: current.note || '',
       scope: current.scope,
       dateISO: today(),
     });
-    return true;
   },
 
-  addTransfer: async ({ fromWalletId, toWalletId, amount, dateISO = today(), note = '' }) => {
+  addTransfer: async ({ fromWalletId, toWalletId, amount, toAmount = null, exchangeRate = null, feeAmount = 0, dateISO = today(), note = '' }) => {
     const n = Number(amount);
     const normalizedWallets = normalizeWallets(get().wallets, get().cfg.currency);
     const walletIds = new Set(normalizedWallets.map(wallet => wallet.id));
@@ -88,37 +167,73 @@ export const createTransactionSlice = (set, get) => ({
       get().cfg.currency,
       get().cfg.defaultWalletId,
     ).find(wallet => wallet.id === fromWalletId)?.availableBalance;
-    if (!Number.isFinite(sourceBalance) || n > sourceBalance + 0.0001) return false;
+    const fields = buildTransferCurrencyFields({
+      fromWalletId,
+      toWalletId,
+      fromAmount: n,
+      toAmount,
+      wallets: normalizedWallets,
+      baseCurrency: get().cfg.currency,
+      exchangeRate,
+      feeAmount,
+    });
     const fromWallet = normalizedWallets.find(wallet => wallet.id === fromWalletId);
     const toWallet = normalizedWallets.find(wallet => wallet.id === toWalletId);
     const entryDate = normalizeDate(dateISO);
     const sourceScope = normalizeScope(fromWallet?.scope, getEntryScope(get().cfg));
     const targetScope = normalizeScope(toWallet?.scope, getEntryScope(get().cfg));
+    const tx = {
+      id: uid(),
+      title: 'تحويل بين المحافظ',
+      amt: 0,
+      cat: 'other',
+      kind: 'transfer',
+      flowType: FLOW_TYPES.TRANSFER,
+      transactionTag: 'transfer',
+      scope: sourceScope,
+      fromScope: sourceScope,
+      toScope: targetScope,
+      transferAmount: fields.transferFromAmount,
+      ...fields,
+      fromWalletId,
+      toWalletId,
+      note,
+      dateISO: entryDate,
+      ts: Date.now(),
+      rateDate: entryDate,
+      rateSource: fromWallet?.currency === toWallet?.currency ? 'same_currency' : 'user_entered',
+      idempotencyKey: `transfer:${uid()}`,
+      balanceWarning: !Number.isFinite(sourceBalance) || (fields.transferFromAmount + fields.feeAmount) > sourceBalance + 0.0001,
+    };
+    let v7Commit = null;
+    try {
+      v7Commit = await commitFinancialTransactionV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        transaction: tx,
+        wallets: [fromWallet, toWallet].filter(Boolean),
+        baseCurrency: get().cfg.currency,
+      });
+      if (v7Commit.supported && !v7Commit.ok) return false;
+      if (v7Commit.ok) {
+        tx.id = v7Commit.transactionId;
+        tx.storageEngineVersion = 7;
+        tx.sqliteCommittedAt = v7Commit.committedAt || new Date().toISOString();
+      }
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_transfer_commit_failed') });
+      return false;
+    }
     set(s => ({
-      trans: [
-        {
-          id: uid(),
-          title: 'تحويل بين المحافظ',
-          amt: 0,
-          cat: 'other',
-          kind: 'transfer',
-          flowType: FLOW_TYPES.TRANSFER,
-          transactionTag: 'transfer',
-          scope: sourceScope,
-          fromScope: sourceScope,
-          toScope: targetScope,
-          transferAmount: n,
-          fromWalletId,
-          toWalletId,
-          note,
-          dateISO: entryDate,
-          ts: Date.now(),
-        },
-        ...s.trans,
-      ],
+      trans: [tx, ...s.trans],
+      ...(v7Commit?.ok ? { financialLedgerV7Ready: true, ledgerError: null } : {}),
     }));
-    await get().saveLocal();
-    await get().syncCloud();
+    try {
+      await get().saveLocal();
+    } catch (error) {
+      if (!v7Commit?.ok) throw error;
+      set({ dirty: true, ledgerError: 'compatibility_snapshot_retry_required' });
+    }
+    get().scheduleCloudSync?.('transaction_transfer');
     return true;
   },
 
@@ -142,8 +257,20 @@ export const createTransactionSlice = (set, get) => ({
         get().cfg.currency,
         get().cfg.defaultWalletId,
       ).find(wallet => wallet.id === fromWalletId)?.availableBalance;
-      if (!Number.isFinite(sourceBalance) || transferAmount > sourceBalance + 0.0001) return false;
-      safePatch.transferAmount = transferAmount;
+      const transferFields = buildTransferCurrencyFields({
+        fromWalletId,
+        toWalletId,
+        fromAmount: transferAmount,
+        toAmount: safePatch.transferToAmount ?? current.transferToAmount,
+        wallets: normalizedWallets,
+        baseCurrency: get().cfg.currency,
+        exchangeRate: safePatch.transferRate ?? safePatch.exchangeRate ?? current.transferRate ?? current.exchangeRate,
+        feeAmount: safePatch.feeAmount ?? current.feeAmount ?? 0,
+      });
+      Object.assign(safePatch, transferFields, {
+        transferAmount: transferFields.transferFromAmount,
+        balanceWarning: !Number.isFinite(sourceBalance) || (transferFields.transferFromAmount + transferFields.feeAmount) > sourceBalance + 0.0001,
+      });
       safePatch.scope = sourceScope;
       safePatch.fromScope = safePatch.scope;
       safePatch.toScope = targetScope;
@@ -173,21 +300,222 @@ export const createTransactionSlice = (set, get) => ({
       ? (current.isDebtPayment ? debtSign * linkedAbsAmt : current.isGoalSaving ? 0 : (Number(safePatch.amt) < 0 ? -linkedAbsAmt : linkedAbsAmt))
       : current.amt;
     const nextWalletId = safePatch.walletId || current.walletId || getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
-    if (Number(nextAmt || 0) < 0) {
-      const spendCheck = canSpendFromWallet({
-        wallets: get().wallets,
-        trans: get().trans,
-        currency: get().cfg.currency,
-        defaultWalletId: get().cfg.defaultWalletId,
-        walletId: nextWalletId,
-        amount: Math.abs(nextAmt),
-        excludeTransactionId: id,
-      });
-      if (!spendCheck.ok) return false;
+    if (current.kind !== 'transfer' && safePatch.kind !== 'transfer') {
+      if (current.isGoalSaving) {
+        const allocationBaseAmount = hasAmt
+          ? linkedAbsAmt
+          : Math.abs(Number(current.allocationAmount || 0));
+        const allocationFields = buildCurrencyFieldsFromBaseAmount({
+          baseAmount: allocationBaseAmount,
+          walletId: nextWalletId,
+          wallets: get().wallets,
+          baseCurrency: get().cfg.currency,
+          exchangeRate: safePatch.exchangeRate ?? current.exchangeRate ?? 1,
+          walletCurrency: safePatch.walletCurrency ?? current.walletCurrency ?? current.currencyCode,
+        });
+        Object.assign(safePatch, {
+          walletId: nextWalletId,
+          amt: 0,
+          walletAmount: 0,
+          walletAmountMinor: 0,
+          baseAmount: 0,
+          baseAmountMinor: 0,
+          allocationAmount: allocationBaseAmount,
+          allocationBaseAmountMinor: Math.abs(Number(allocationFields.baseAmountMinor || 0)),
+          allocationWalletAmount: Math.abs(Number(allocationFields.walletAmount || 0)),
+          allocationWalletAmountMinor: Math.abs(Number(allocationFields.walletAmountMinor || 0)),
+          walletCurrency: allocationFields.walletCurrency,
+          currencyCode: allocationFields.currencyCode,
+          baseCurrencyCode: allocationFields.baseCurrencyCode,
+          exchangeRate: allocationFields.exchangeRate,
+        });
+        const spendCheck = canSpendFromWallet({
+          wallets: get().wallets,
+          trans: get().trans,
+          currency: get().cfg.currency,
+          defaultWalletId: get().cfg.defaultWalletId,
+          walletId: nextWalletId,
+          amount: Math.abs(Number(allocationFields.walletAmount || 0)),
+          excludeTransactionId: id,
+        });
+        safePatch.balanceWarning = !!spendCheck.warning;
+      } else if (current.isDebtPayment) {
+        const paymentBaseAmount = hasAmt ? debtSign * linkedAbsAmt : Number(current.baseAmount ?? current.amt ?? 0);
+        const paymentFields = buildCurrencyFieldsFromBaseAmount({
+          baseAmount: paymentBaseAmount,
+          walletId: nextWalletId,
+          wallets: get().wallets,
+          baseCurrency: get().cfg.currency,
+          exchangeRate: safePatch.exchangeRate ?? current.exchangeRate ?? 1,
+          walletCurrency: safePatch.walletCurrency ?? current.walletCurrency ?? current.currencyCode,
+        });
+        Object.assign(safePatch, paymentFields, { walletId: nextWalletId, amt: paymentFields.baseAmount });
+        if (Number(paymentFields.walletAmount || 0) < 0) {
+          const spendCheck = canSpendFromWallet({
+            wallets: get().wallets,
+            trans: get().trans,
+            currency: get().cfg.currency,
+            defaultWalletId: get().cfg.defaultWalletId,
+            walletId: nextWalletId,
+            amount: Math.abs(paymentFields.walletAmount),
+            excludeTransactionId: id,
+          });
+          safePatch.balanceWarning = !!spendCheck.warning;
+        }
+      } else {
+        const currentNativeAmount = Object.prototype.hasOwnProperty.call(current, 'walletAmount') ? Number(current.walletAmount || 0) : Number(current.amt || 0);
+        const requestedNativeAmount = hasAmt
+          ? (Number(safePatch.walletAmount ?? safePatch.amt) < 0 ? -linkedAbsAmt : linkedAbsAmt)
+          : currentNativeAmount;
+        const currencyFields = buildCurrencyFields({
+          amount: requestedNativeAmount,
+          walletId: nextWalletId,
+          wallets: get().wallets,
+          baseCurrency: get().cfg.currency,
+          exchangeRate: safePatch.exchangeRate ?? current.exchangeRate ?? 1,
+          walletCurrency: safePatch.walletCurrency ?? current.walletCurrency ?? current.currencyCode,
+        });
+        Object.assign(safePatch, currencyFields);
+        safePatch.amt = currencyFields.baseAmount;
+        if (Number(currencyFields.walletAmount || 0) < 0) {
+          const spendCheck = canSpendFromWallet({
+            wallets: get().wallets,
+            trans: get().trans,
+            currency: get().cfg.currency,
+            defaultWalletId: get().cfg.defaultWalletId,
+            walletId: nextWalletId,
+            amount: Math.abs(currencyFields.walletAmount),
+            excludeTransactionId: id,
+          });
+          safePatch.balanceWarning = !!spendCheck.warning;
+        }
+      }
     }
     const nextCommitmentMonth = current.isCommitmentPayment && safePatch.dateISO
       ? monthKey(safePatch.dateISO)
       : current.commitmentMonth;
+
+    const nextTransaction = current.isDebtPayment || current.isGoalSaving
+      ? {
+          ...current, ...safePatch, amt: nextAmt,
+          ...(current.isGoalSaving && hasAmt ? { allocationAmount: linkedAbsAmt } : {}),
+          ...(current.isCommitmentPayment ? { commitmentMonth: nextCommitmentMonth } : {}),
+        }
+      : current.isCommitmentPayment
+        ? {
+            ...current, ...safePatch,
+            amt: hasAmt ? -Math.abs(Number(safePatch.amt) || 0) : current.amt,
+            commitmentMonth: nextCommitmentMonth,
+          }
+        : { ...current, ...safePatch };
+    nextTransaction.revision = Math.max(1, Number(current.revision || 1) + 1);
+    nextTransaction.updatedAt = new Date().toISOString();
+    nextTransaction.rateDate = nextTransaction.rateDate || nextTransaction.dateISO || today();
+    nextTransaction.rateSource = nextTransaction.rateSource || 'edit_preserved';
+    nextTransaction.idempotencyKey = `transaction-update:${id}:revision:${nextTransaction.revision}`;
+    const previewDebts = current.isDebtPayment
+      ? get().debts.map(d => {
+          if (d.id !== current.debtId) return d;
+          const payments = (d.payments || []).map(p => p.id === current.paymentId ? {
+            ...p,
+            ...(hasAmt ? {
+              amt: Math.abs(nextAmt),
+              walletId: nextWalletId,
+              walletAmount: Math.abs(Number(safePatch.walletAmount ?? p.walletAmount ?? 0)),
+              walletCurrency: safePatch.walletCurrency || p.walletCurrency,
+              exchangeRate: safePatch.exchangeRate || p.exchangeRate,
+            } : {}),
+            ...(patch.dateISO ? { date: patch.dateISO } : {}),
+          } : p);
+          const paid = debtPaidTotal(d, payments);
+          const next = { ...d, payments, paid };
+          return { ...next, ...debtLifecycle(next, paid, patch.dateISO || today()) };
+        })
+      : current.isDebtOrigin
+        ? get().debts.map(d => d.id === current.debtId ? {
+            ...d, ...(patch.dateISO ? { createdAt: patch.dateISO } : {}),
+            ...(hasAmt ? { total: Math.abs(nextAmt) } : {}),
+          } : d)
+        : get().debts;
+    const previewGoals = current.isGoalSaving
+      ? get().goals.map(g => {
+          if (g.id !== current.goalId) return g;
+          const savings = (g.savings || []).map(sv => sv.id === current.savingId ? {
+            ...sv,
+            ...(hasAmt ? {
+              amt: linkedAbsAmt,
+              walletId: nextWalletId,
+              walletAmount: Math.abs(Number(safePatch.allocationWalletAmount ?? sv.walletAmount ?? 0)),
+              walletCurrency: safePatch.walletCurrency || sv.walletCurrency,
+              exchangeRate: safePatch.exchangeRate || sv.exchangeRate,
+            } : {}),
+            ...(patch.dateISO ? { date: patch.dateISO } : {}),
+          } : sv);
+          const cur = Math.min(goalSavedTotal(g, savings), g.target);
+          const next = { ...g, savings, cur };
+          return { ...next, ...goalLifecycle(next, cur, patch.dateISO || today()) };
+        })
+      : get().goals;
+    const previewTransactions = get().trans.map(item => item.id === id ? nextTransaction : item);
+    let previewCommitments = current.isCommitmentPayment
+      ? syncCommitmentPaidMonth(get().commitments, previewTransactions, current.commitmentId)
+      : get().commitments;
+    const previewDebtAfter = current.isDebtPayment ? previewDebts.find(item => item.id === current.debtId) : null;
+    const previewGoalAfter = current.isGoalSaving ? previewGoals.find(item => item.id === current.goalId) : null;
+    if (linkedDebt?.status !== 'settled' && previewDebtAfter?.status === 'settled') {
+      const linkedType = linkedDebt.direction === 'receivable' ? 'receivable' : 'debt';
+      previewCommitments = previewCommitments.map(item => (
+        item.linkedType === linkedType && item.linkedId === current.debtId
+          ? { ...item, active: false, endedAt: patch.dateISO || today(), endReason: 'debt_settled' }
+          : item
+      ));
+    }
+    if (linkedGoal?.status !== 'settled' && previewGoalAfter?.status === 'settled') {
+      previewCommitments = previewCommitments.map(item => (
+        item.linkedType === 'goal' && item.linkedId === current.goalId
+          ? { ...item, active: false, endedAt: patch.dateISO || today(), endReason: 'goal_completed' }
+          : item
+      ));
+    }
+    previewCommitments = reopenCompletionCommitments(previewCommitments, [
+      ...(linkedDebt?.status === 'settled' && previewDebtAfter?.status === 'active'
+        ? [{ linkedType: linkedDebt.direction === 'receivable' ? 'receivable' : 'debt', linkedId: current.debtId, endReason: 'debt_settled' }]
+        : []),
+      ...(linkedGoal?.status === 'settled' && previewGoalAfter?.status === 'active'
+        ? [{ linkedType: 'goal', linkedId: current.goalId, endReason: 'goal_completed' }]
+        : []),
+    ]);
+    const existingCommitments = new Map(get().commitments.map(item => [item.id, item]));
+    const changedCommitments = previewCommitments.filter(item => (
+      JSON.stringify(existingCommitments.get(item.id) || null) !== JSON.stringify(item)
+    ));
+    const entityChanges = [
+      ...(current.debtId ? previewDebts.filter(item => item.id === current.debtId).map(payload => ({ entityType: 'debt', id: payload.id, payload })) : []),
+      ...(current.goalId ? previewGoals.filter(item => item.id === current.goalId).map(payload => ({ entityType: 'goal', id: payload.id, payload })) : []),
+      ...changedCommitments.map(payload => ({ entityType: 'commitment', id: payload.id, payload })),
+    ];
+    try {
+      const committed = await replaceFinancialTransactionV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        transaction: nextTransaction,
+        wallets: get().wallets,
+        baseCurrency: get().cfg.currency,
+        entityChanges,
+      });
+      if (committed.supported && !committed.ok) return false;
+      if (committed.ok) nextTransaction.sqliteCommittedAt = committed.committedAt || nextTransaction.updatedAt;
+      Object.assign(safePatch, {
+        revision: nextTransaction.revision,
+        updatedAt: nextTransaction.updatedAt,
+        rateDate: nextTransaction.rateDate,
+        rateSource: nextTransaction.rateSource,
+        idempotencyKey: nextTransaction.idempotencyKey,
+        ...(nextTransaction.sqliteCommittedAt ? { sqliteCommittedAt: nextTransaction.sqliteCommittedAt, storageEngineVersion: 7 } : {}),
+      });
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_transaction_update_failed') });
+      return false;
+    }
 
     set(s => {
       const trans = s.trans.map(t => {
@@ -216,41 +544,9 @@ export const createTransactionSlice = (set, get) => ({
       });
       return {
         trans,
-        debts: current.isDebtPayment
-        ? s.debts.map(d => {
-            if (d.id !== current.debtId) return d;
-            const payments = (d.payments || []).map(p => (
-              p.id === current.paymentId
-                ? { ...p, ...(hasAmt ? { amt: Math.abs(nextAmt) } : {}), ...(patch.dateISO ? { date: patch.dateISO } : {}) }
-                : p
-            ));
-            const paid = debtPaidTotal(d, payments);
-            const next = { ...d, payments, paid };
-            return { ...next, ...debtLifecycle(next, paid, patch.dateISO || today()) };
-          })
-        : current.isDebtOrigin
-          ? s.debts.map(d => d.id === current.debtId ? {
-              ...d,
-              ...(patch.dateISO ? { createdAt: patch.dateISO } : {}),
-              ...(hasAmt ? { total: Math.abs(nextAmt) } : {}),
-            } : d)
-          : s.debts,
-      goals: current.isGoalSaving
-        ? s.goals.map(g => {
-            if (g.id !== current.goalId) return g;
-            const savings = (g.savings || []).map(sv => (
-              sv.id === current.savingId
-                ? { ...sv, ...(hasAmt ? { amt: Math.abs(nextAmt) } : {}), ...(patch.dateISO ? { date: patch.dateISO } : {}) }
-                : sv
-            ));
-            const cur = Math.min(goalSavedTotal(g, savings), g.target);
-            const next = { ...g, savings, cur };
-            return { ...next, ...goalLifecycle(next, cur, patch.dateISO || today()) };
-          })
-        : s.goals,
-        commitments: current.isCommitmentPayment
-          ? syncCommitmentPaidMonth(s.commitments, trans, current.commitmentId)
-          : s.commitments,
+        debts: previewDebts,
+        goals: previewGoals,
+        commitments: previewCommitments,
       };
     });
     if (current.isDebtPayment || current.isGoalSaving) {
@@ -263,113 +559,212 @@ export const createTransactionSlice = (set, get) => ({
           : undefined;
       set(s => ({
         trans: s.trans.map(item => item.id === id ? { ...item, completionNotice } : item),
-        commitments: reopenCompletionCommitments(s.commitments, [
-          ...(linkedDebt?.status === 'settled' && linkedDebtAfter?.status === 'active'
-            ? [{ linkedType: linkedDebt.direction === 'receivable' ? 'receivable' : 'debt', linkedId: current.debtId, endReason: 'debt_settled' }]
-            : []),
-          ...(linkedGoal?.status === 'settled' && linkedGoalAfter?.status === 'active'
-            ? [{ linkedType: 'goal', linkedId: current.goalId, endReason: 'goal_completed' }]
-            : []),
-        ]),
       }));
     }
     await get().saveLocal();
-    await get().syncCloud();
+    get().scheduleCloudSync?.('transaction_change');
     return true;
   },
 
   deleteTrans: async (id) => {
     const t = get().trans.find(x => x.id === id);
+    if (!t) return false;
     const linkedDebtBefore = t?.isDebtPayment ? get().debts.find(item => item.id === t.debtId) : null;
     const linkedGoalBefore = t?.isGoalSaving ? get().goals.find(item => item.id === t.goalId) : null;
-    set(s => {
-      const trans = s.trans.filter(x => x.id !== id);
-      return {
-        trans,
-        debts: (t && t.isDebtPayment)
-        ? s.debts.map(d => {
-            if (d.id !== t.debtId) return d;
-            const payments = (d.payments || []).filter(p => p.id !== t.paymentId);
-            const paid = debtPaidTotal(d, payments);
-            const next = { ...d, payments, paid };
-            return { ...next, ...debtLifecycle(next, paid, today()) };
-          })
-        : (t && t.isDebtOrigin)
-          ? s.debts.map(d => d.id === t.debtId ? { ...d, originMode: 'previous', originTransactionId: null } : d)
-          : s.debts,
-      goals: (t && t.isGoalSaving)
-        ? s.goals.map(g => {
-            if (g.id !== t.goalId) return g;
-            const savings = (g.savings || []).filter(sv => sv.id !== t.savingId);
-            const cur = goalSavedTotal(g, savings);
-            const next = { ...g, savings, cur: Math.min(cur, g.target) };
-            return { ...next, ...goalLifecycle(next, next.cur, today()) };
-          })
-        : s.goals,
-        commitments: reopenCompletionCommitments(
-          (t && t.isCommitmentPayment)
-            ? syncCommitmentPaidMonth(s.commitments, trans, t.commitmentId)
-            : s.commitments,
-          [
-            ...(linkedDebtBefore?.status === 'settled'
-              ? [{ linkedType: linkedDebtBefore.direction === 'receivable' ? 'receivable' : 'debt', linkedId: t.debtId, endReason: 'debt_settled' }]
-              : []),
-            ...(linkedGoalBefore?.status === 'settled'
-              ? [{ linkedType: 'goal', linkedId: t.goalId, endReason: 'goal_completed' }]
-              : []),
-          ],
-        ),
-      };
-    });
+    const trans = get().trans.filter(item => item.id !== id);
+    const debts = t.isDebtPayment
+      ? get().debts.map(debt => {
+          if (debt.id !== t.debtId) return debt;
+          const payments = (debt.payments || []).filter(payment => payment.id !== t.paymentId);
+          const paid = debtPaidTotal(debt, payments);
+          const next = { ...debt, payments, paid };
+          return { ...next, ...debtLifecycle(next, paid, today()) };
+        })
+      : t.isDebtOrigin
+        ? get().debts.map(debt => debt.id === t.debtId
+          ? { ...debt, originMode: 'previous', originTransactionId: null }
+          : debt)
+        : get().debts;
+    const goals = t.isGoalSaving
+      ? get().goals.map(goal => {
+          if (goal.id !== t.goalId) return goal;
+          const savings = (goal.savings || []).filter(saving => saving.id !== t.savingId);
+          const cur = Math.min(goalSavedTotal(goal, savings), goal.target);
+          const next = { ...goal, savings, cur };
+          return { ...next, ...goalLifecycle(next, cur, today()) };
+        })
+      : get().goals;
+    let commitments = t.isCommitmentPayment
+      ? syncCommitmentPaidMonth(get().commitments, trans, t.commitmentId)
+      : get().commitments;
+    commitments = reopenCompletionCommitments(commitments, [
+      ...(linkedDebtBefore?.status === 'settled'
+        ? [{ linkedType: linkedDebtBefore.direction === 'receivable' ? 'receivable' : 'debt', linkedId: t.debtId, endReason: 'debt_settled' }]
+        : []),
+      ...(linkedGoalBefore?.status === 'settled'
+        ? [{ linkedType: 'goal', linkedId: t.goalId, endReason: 'goal_completed' }]
+        : []),
+    ]);
+    const oldCommitments = new Map(get().commitments.map(item => [item.id, item]));
+    const entityChanges = [
+      ...(t.debtId ? debts.filter(item => item.id === t.debtId).map(payload => ({ entityType: 'debt', id: payload.id, payload })) : []),
+      ...(t.goalId ? goals.filter(item => item.id === t.goalId).map(payload => ({ entityType: 'goal', id: payload.id, payload })) : []),
+      ...commitments.filter(item => JSON.stringify(oldCommitments.get(item.id) || null) !== JSON.stringify(item))
+        .map(payload => ({ entityType: 'commitment', id: payload.id, payload })),
+    ];
+    try {
+      const committed = await voidFinancialTransactionsV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        transactionIds: [id],
+        entityChanges,
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_transaction_void_failed') });
+      return false;
+    }
+    set({ trans, debts, goals, commitments, lastDeletedTransaction: { ...t } });
     await get().saveLocal({ force: financialDataCount(get()) === 0 });
-    await get().syncCloud();
+    get().scheduleCloudSync?.('transaction_change');
+    return !!t;
+  },
+
+  undoLastTransactionDelete: async () => {
+    const t = get().lastDeletedTransaction;
+    if (!t?.id || get().trans.some(item => item.id === t.id)) return false;
+    let debts = get().debts;
+    let goals = get().goals;
+    if (t.isDebtPayment && t.debtId && t.paymentId) {
+      debts = debts.map(debt => {
+        if (debt.id !== t.debtId || (debt.payments || []).some(payment => payment.id === t.paymentId)) return debt;
+        const payment = {
+          id: t.paymentId, amt: Math.abs(Number(t.baseAmount ?? t.amt ?? 0)),
+          date: normalizeDate(t.dateISO), ts: Number(t.ts || Date.now()),
+          walletId: t.walletId, walletAmount: Math.abs(Number(t.walletAmount ?? t.amt ?? 0)),
+          walletCurrency: t.walletCurrency, exchangeRate: t.exchangeRate,
+        };
+        const payments = [...(debt.payments || []), payment];
+        const paid = debtPaidTotal(debt, payments);
+        const next = { ...debt, payments, paid };
+        return { ...next, ...debtLifecycle(next, paid, t.dateISO || today()) };
+      });
+    }
+    if (t.isGoalSaving && t.goalId && t.savingId) {
+      goals = goals.map(goal => {
+        if (goal.id !== t.goalId || (goal.savings || []).some(saving => saving.id === t.savingId)) return goal;
+        const saving = {
+          id: t.savingId, amt: Math.abs(Number(t.allocationAmount || 0)),
+          date: normalizeDate(t.dateISO), ts: Number(t.ts || Date.now()),
+          walletId: t.walletId, walletAmount: Math.abs(Number(t.allocationWalletAmount || 0)),
+          walletCurrency: t.walletCurrency, exchangeRate: t.exchangeRate,
+        };
+        const savings = [...(goal.savings || []), saving];
+        const cur = Math.min(goalSavedTotal(goal, savings), goal.target);
+        const next = { ...goal, savings, cur };
+        return { ...next, ...goalLifecycle(next, cur, t.dateISO || today()) };
+      });
+    }
+    if (t.isDebtOrigin && t.debtId) {
+      debts = debts.map(debt => debt.id === t.debtId ? {
+        ...debt,
+        originMode: t.flowType === FLOW_TYPES.DEBT_PROCEEDS ? 'received' : 'lent',
+        originTransactionId: t.id,
+      } : debt);
+    }
+    const restored = {
+      ...t,
+      status: 'posted', deletedAt: null,
+      revision: Math.max(2, Number(t.revision || 1) + 2),
+      updatedAt: new Date().toISOString(),
+    };
+    restored.idempotencyKey = `transaction-restore:${restored.id}:revision:${restored.revision}`;
+    const trans = [restored, ...get().trans];
+    const commitments = t.isCommitmentPayment
+      ? syncCommitmentPaidMonth(get().commitments, trans, t.commitmentId)
+      : get().commitments;
+    const entityChanges = [
+      ...(t.debtId ? debts.filter(item => item.id === t.debtId).map(payload => ({ entityType: 'debt', id: payload.id, payload })) : []),
+      ...(t.goalId ? goals.filter(item => item.id === t.goalId).map(payload => ({ entityType: 'goal', id: payload.id, payload })) : []),
+      ...(t.commitmentId ? commitments.filter(item => item.id === t.commitmentId).map(payload => ({ entityType: 'commitment', id: payload.id, payload })) : []),
+    ];
+    try {
+      const committed = await replaceFinancialTransactionV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        transaction: restored,
+        wallets: get().wallets,
+        baseCurrency: get().cfg.currency,
+        entityChanges,
+      });
+      if (committed.supported && !committed.ok) return false;
+      if (committed.ok) restored.sqliteCommittedAt = committed.committedAt || restored.updatedAt;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_transaction_restore_failed') });
+      return false;
+    }
+    set({ trans, debts, goals, commitments, lastDeletedTransaction: null });
+    await get().saveLocal();
+    get().scheduleCloudSync?.('transaction_restore');
+    return true;
   },
 
   deleteTransMany: async (ids = []) => {
     const selected = new Set((Array.isArray(ids) ? ids : []).filter(Boolean));
     if (!selected.size) return false;
-    set(s => {
-      const removed = s.trans.filter(item => selected.has(item.id));
-      const debtPayments = new Set(
-        removed
-          .filter(item => item.isDebtPayment)
-          .map(item => `${item.debtId}:${item.paymentId}`),
-      );
-      const goalSavings = new Set(
-        removed
-          .filter(item => item.isGoalSaving)
-          .map(item => `${item.goalId}:${item.savingId}`),
-      );
-      const trans = s.trans.filter(item => !selected.has(item.id));
-      const debts = s.debts.map(debt => {
-        const payments = (debt.payments || []).filter(payment => !debtPayments.has(`${debt.id}:${payment.id}`));
-        return payments.length === (debt.payments || []).length
-          ? debt
-          : (() => {
-              const paid = debtPaidTotal(debt, payments);
-              const next = { ...debt, payments, paid };
-              return { ...next, ...debtLifecycle(next, paid, today()) };
-            })();
-      });
-      const goals = s.goals.map(goal => {
-        const savings = (goal.savings || []).filter(saving => !goalSavings.has(`${goal.id}:${saving.id}`));
-        return savings.length === (goal.savings || []).length
-          ? goal
-          : (() => {
-              const cur = Math.min(goalSavedTotal(goal, savings), goal.target);
-              const next = { ...goal, savings, cur };
-              return { ...next, ...goalLifecycle(next, cur, today()) };
-            })();
-      });
-      return {
-        trans,
-        debts,
-        goals,
-        commitments: syncCommitmentPaidMonth(s.commitments, trans),
-      };
+    const removed = get().trans.filter(item => selected.has(item.id));
+    const debtPayments = new Set(removed.filter(item => item.isDebtPayment).map(item => `${item.debtId}:${item.paymentId}`));
+    const goalSavings = new Set(removed.filter(item => item.isGoalSaving).map(item => `${item.goalId}:${item.savingId}`));
+    const trans = get().trans.filter(item => !selected.has(item.id));
+    const debts = get().debts.map(debt => {
+      const payments = (debt.payments || []).filter(payment => !debtPayments.has(`${debt.id}:${payment.id}`));
+      if (payments.length === (debt.payments || []).length) return debt;
+      const paid = debtPaidTotal(debt, payments);
+      const next = { ...debt, payments, paid };
+      return { ...next, ...debtLifecycle(next, paid, today()) };
     });
+    const goals = get().goals.map(goal => {
+      const savings = (goal.savings || []).filter(saving => !goalSavings.has(`${goal.id}:${saving.id}`));
+      if (savings.length === (goal.savings || []).length) return goal;
+      const cur = Math.min(goalSavedTotal(goal, savings), goal.target);
+      const next = { ...goal, savings, cur };
+      return { ...next, ...goalLifecycle(next, cur, today()) };
+    });
+    let commitments = syncCommitmentPaidMonth(get().commitments, trans);
+    const beforeDebts = new Map(get().debts.map(item => [item.id, item]));
+    const beforeGoals = new Map(get().goals.map(item => [item.id, item]));
+    const reopenLinks = [
+      ...debts.filter(item => beforeDebts.get(item.id)?.status === 'settled' && item.status === 'active')
+        .map(item => ({
+          linkedType: item.direction === 'receivable' ? 'receivable' : 'debt',
+          linkedId: item.id,
+          endReason: 'debt_settled',
+        })),
+      ...goals.filter(item => beforeGoals.get(item.id)?.status === 'settled' && item.status === 'active')
+        .map(item => ({ linkedType: 'goal', linkedId: item.id, endReason: 'goal_completed' })),
+    ];
+    commitments = reopenCompletionCommitments(commitments, reopenLinks);
+    const affectedDebtIds = new Set(removed.filter(item => item.debtId).map(item => item.debtId));
+    const affectedGoalIds = new Set(removed.filter(item => item.goalId).map(item => item.goalId));
+    const beforeCommitments = new Map(get().commitments.map(item => [item.id, item]));
+    const entityChanges = [
+      ...debts.filter(item => affectedDebtIds.has(item.id)).map(payload => ({ entityType: 'debt', id: payload.id, payload })),
+      ...goals.filter(item => affectedGoalIds.has(item.id)).map(payload => ({ entityType: 'goal', id: payload.id, payload })),
+      ...commitments.filter(item => JSON.stringify(beforeCommitments.get(item.id) || null) !== JSON.stringify(item))
+        .map(payload => ({ entityType: 'commitment', id: payload.id, payload })),
+    ];
+    try {
+      const committed = await voidFinancialTransactionsV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        transactionIds: [...selected],
+        entityChanges,
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_bulk_void_failed') });
+      return false;
+    }
+    set({ trans, debts, goals, commitments });
     await get().saveLocal({ force: financialDataCount(get()) === 0 });
-    await get().syncCloud();
+    get().scheduleCloudSync?.('transaction_change');
     return true;
   },
 });

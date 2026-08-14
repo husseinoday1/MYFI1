@@ -1,5 +1,8 @@
-﻿import { getTransactionDisplayAmount, isExpenseFlow, isIncomeFlow } from '../lib/modules';
-import { getWalletBalances } from '../lib/wallets';
+import { getTransactionDisplayAmount, isExpenseFlow, isIncomeFlow } from '../lib/modules';
+import { getWalletBalances, walletAmountToBase } from '../lib/wallets';
+import { asDate, daysInMonth, isISODate, normalizeDate, today } from '../lib/dateCore';
+import { getMonthTransactions, getTransactionIndex, getTransactionsThroughDate } from '../lib/transactionIndex';
+export { daysInMonth, isISODate, normalizeDate, today } from '../lib/dateCore';
 import {
   adaptiveVariableProjection,
   fixedExpenseSpent,
@@ -13,22 +16,32 @@ const toNumber = (value) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+
 export const money = (value) => Math.round(toNumber(value) * 1000) / 1000;
 
 export const sum = (items = [], pick = (x) => x) =>
   items.reduce((total, item) => total + toNumber(pick(item)), 0);
 
+const statsCache = new WeakMap();
+
 export const calcStats = (trans = []) => {
-  const inc = sum(trans.filter(isIncomeFlow), t => Math.abs(toNumber(t.amt)));
-  const exp = sum(trans.filter(isExpenseFlow), t => Math.abs(toNumber(t.amt)));
-  return { inc, exp, bal: inc - exp };
+  const source = Array.isArray(trans) ? trans : [];
+  const cached = statsCache.get(source);
+  if (cached) return cached;
+  const indexed = getTransactionIndex(source).stats;
+  const value = { inc: indexed.inc, exp: indexed.exp, bal: indexed.bal };
+  statsCache.set(source, value);
+  return value;
 };
 
 export const calcCashFlow = (trans = []) => {
   let inflow = 0;
   let outflow = 0;
   trans.forEach(tx => {
-    if (tx?.kind === 'transfer') return;
+    if (tx?.kind === 'transfer') {
+      outflow += Math.abs(toNumber(tx?.feeBaseAmount));
+      return;
+    }
     // Moving money into a saving goal reserves cash; it is not a physical outflow.
     if (tx?.isGoalSaving || tx?.flowType === 'goal_allocation') return;
     const amount = toNumber(getTransactionDisplayAmount(tx));
@@ -42,12 +55,7 @@ export const calcCashFlow = (trans = []) => {
   };
 };
 
-export const byMonth = (trans = [], m, y) =>
-  trans.filter(t => {
-    if (!t.dateISO) return false;
-    const d = new Date(`${t.dateISO}T12:00:00`);
-    return d.getMonth() === m && d.getFullYear() === y;
-  });
+export const byMonth = (trans = [], m, y) => getMonthTransactions(trans, y, m);
 
 const dateOfTransaction = (item = {}) => {
   const date = new Date(`${item?.dateISO || ''}T12:00:00`);
@@ -61,8 +69,15 @@ export const currentStats = (trans = []) => {
 
 export const catSpend = (trans = [], cats = []) => {
   const m = {};
-  trans.filter(isExpenseFlow).forEach(t => {
-    m[t.cat] = (m[t.cat] || 0) + Math.abs(toNumber(t.amt));
+  trans.forEach(t => {
+    if (t?.kind === 'transfer') {
+      const fee = Math.abs(toNumber(t?.feeBaseAmount));
+      if (fee) m.other = (m.other || 0) + fee;
+      return;
+    }
+    if (!isExpenseFlow(t)) return;
+    const amount = Math.abs(toNumber(t?.baseAmount ?? t?.amt));
+    m[t.cat] = (m[t.cat] || 0) + amount;
   });
   return cats.filter(c => m[c.id]).map(c => ({ ...c, spent: m[c.id] }));
 };
@@ -73,22 +88,6 @@ export const pct = (a, b, { cap = false } = {}) => {
   return cap ? Math.min(value, 100) : value;
 };
 
-export const today = () => {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-};
-
-export const isISODate = (value) => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return false;
-  const d = new Date(`${value}T12:00:00`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
-};
-
-export const normalizeDate = (value, fallback = today()) =>
-  isISODate(value) ? value : fallback;
-
-export const daysInMonth = (mo, yr) => new Date(yr, mo + 1, 0).getDate();
-
 export const prevMonth = () => {
   const now = new Date();
   return {
@@ -98,11 +97,12 @@ export const prevMonth = () => {
 };
 
 export const monthlyForecast = (trans = [], date = new Date(), commitments = []) => {
-  const mo  = date.getMonth();
-  const yr  = date.getFullYear();
-  const day = Math.max(1, date.getDate());
+  const safeDate = asDate(date);
+  const mo  = safeDate.getMonth();
+  const yr  = safeDate.getFullYear();
+  const day = Math.max(1, safeDate.getDate());
   const dim = daysInMonth(mo, yr);
-  const currentMonthKey = monthKeyForDate(date);
+  const currentMonthKey = monthKeyForDate(safeDate);
   const mt  = byMonth(trans, mo, yr);
   const { inc: income, exp: spent } = calcStats(mt);
 
@@ -112,7 +112,7 @@ export const monthlyForecast = (trans = [], date = new Date(), commitments = [])
   const remainingCommitmentAmount = sum(remainingCommitments, c => Math.abs(toNumber(c.amt)));
   const fixedExpected = fixedSpentSoFar + remainingCommitmentAmount;
 
-  const historicalVariable = weightedHistoricalVariableSpend(trans, date, commitments, { limit: 6, decay: 0.7 });
+  const historicalVariable = weightedHistoricalVariableSpend(trans, safeDate, commitments, { limit: 6, decay: 0.7 });
   const variableForecast = adaptiveVariableProjection({
     currentSpent: variableSpentSoFar,
     historicalSpent: historicalVariable.value,
@@ -162,8 +162,9 @@ export const monthlyForecast = (trans = [], date = new Date(), commitments = [])
 };
 
 export const buildChartData = (trans, openingBalance = 0, date = new Date()) => {
-  const mo  = date.getMonth();
-  const yr  = date.getFullYear();
+  const safeDate = asDate(date);
+  const mo  = safeDate.getMonth();
+  const yr  = safeDate.getFullYear();
   const dim = daysInMonth(mo, yr);
   const mt  = byMonth(trans, mo, yr);
   let running = toNumber(openingBalance);
@@ -179,8 +180,9 @@ export const recurringKey = (t = {}) =>
   t.recurringGroupId || `${t.title || ''}|${t.cat || ''}|${toNumber(t.amt)}`;
 
 export const getUpcomingRecurring = (trans = [], date = new Date()) => {
-  const mo = date.getMonth();
-  const yr = date.getFullYear();
+  const safeDate = asDate(date);
+  const mo = safeDate.getMonth();
+  const yr = safeDate.getFullYear();
   const dim = daysInMonth(mo, yr);
   const currentMonthKeys = new Set();
   const groups = new Map();
@@ -213,7 +215,7 @@ export const getUpcomingRecurring = (trans = [], date = new Date()) => {
         expectedDay,
         dueISO,
         dateISO: dueISO,
-        daysUntil: Math.ceil((dueDate - date) / 86400000),
+        daysUntil: Math.ceil((dueDate - safeDate) / 86400000),
       };
     })
     .sort((a, b) => a.daysUntil - b.daysUntil);
@@ -293,7 +295,7 @@ const getWalletHistoricalAvailableBalances = (
     if (!reserved.has(walletId)) return;
     reserved.set(
       walletId,
-      reserved.get(walletId) + Math.abs(toNumber(tx.allocationAmount ?? tx.amt ?? 0)),
+      reserved.get(walletId) + Math.abs(toNumber(tx.allocationWalletAmount ?? tx.allocationAmount ?? tx.amt ?? 0)),
     );
   });
 
@@ -373,28 +375,27 @@ export const buildFinancialSnapshot = ({
   commitments = [],
   currency = 'IQD',
   defaultWalletId = null,
+  summaryOverride = null,
 } = {}, date = new Date()) => {
-  const monthTrans = byMonth(trans, date.getMonth(), date.getFullYear());
-  const all = calcStats(trans);
-  const month = calcStats(monthTrans);
+  const safeDate = asDate(date);
+  const monthTrans = byMonth(trans, safeDate.getMonth(), safeDate.getFullYear());
+  const all = summaryOverride?.all || calcStats(trans);
+  const month = summaryOverride?.month || calcStats(monthTrans);
   const cashFlow = calcCashFlow(monthTrans);
-  const forecast = monthlyForecast(trans, date, commitments);
-  const asOfISO = financialSnapshotAsOfISO(date);
+  const forecast = monthlyForecast(trans, safeDate, commitments);
+  const asOfISO = financialSnapshotAsOfISO(safeDate);
   const debtsInfo = debtSummaryAsOf(debts, 'owed', asOfISO);
   const receivablesInfo = debtSummaryAsOf(debts, 'receivable', asOfISO);
   const goalsInfo = goalSummary(goals);
-  const snapshotTrans = (Array.isArray(trans) ? trans : []).filter(tx => {
-    const iso = String(tx?.dateISO || '');
-    return !iso || iso <= asOfISO;
-  });
+  const snapshotTrans = getTransactionsThroughDate(trans, asOfISO);
   const walletBalances = wallets.length
     ? getWalletHistoricalAvailableBalances(wallets, snapshotTrans, goals, currency, defaultWalletId, asOfISO)
     : [];
   const cashBalance = wallets.length
-    ? sum(walletBalances, wallet => wallet.balance)
+    ? sum(walletBalances, wallet => walletAmountToBase(wallet, wallet.balance, currency))
     : sum(snapshotTrans, tx => tx.kind === 'transfer' ? 0 : tx.amt);
   const reservedSavings = wallets.length
-    ? sum(walletBalances, wallet => wallet.reservedBalance)
+    ? sum(walletBalances, wallet => walletAmountToBase(wallet, wallet.reservedBalance, currency))
     : goalsInfo.saved;
   const availableCash = cashBalance - reservedSavings;
   const netWorth = cashBalance - debtsInfo.remaining + receivablesInfo.remaining;
@@ -435,14 +436,17 @@ export const buildFinancialReport = ({
   currency = 'IQD',
   defaultWalletId = null,
   scope = 'month',
+  summaryOverride = null,
+  periodStatsOverride = null,
 } = {}, date = new Date()) => {
+  const safeDate = asDate(date);
   const source = Array.isArray(trans) ? trans : [];
   const periodTrans = scope === 'month'
-    ? byMonth(source, date.getMonth(), date.getFullYear())
+    ? byMonth(source, safeDate.getMonth(), safeDate.getFullYear())
     : scope === 'year'
       ? source.filter(item => {
           const rowDate = dateOfTransaction(item);
-          return rowDate?.getFullYear() === date.getFullYear();
+          return rowDate?.getFullYear() === safeDate.getFullYear();
         })
       : source;
   const snapshot = buildFinancialSnapshot({
@@ -454,11 +458,12 @@ export const buildFinancialReport = ({
     commitments,
     currency,
     defaultWalletId,
-  }, date);
+    summaryOverride,
+  }, safeDate);
   return {
     ...snapshot,
     periodTrans,
-    stats: calcStats(periodTrans),
+    stats: periodStatsOverride || calcStats(periodTrans),
     periodCashFlow: calcCashFlow(periodTrans),
   };
 };

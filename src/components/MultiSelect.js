@@ -5,8 +5,13 @@ import { Touchable as TouchableOpacity } from './AppPrimitives';
 import { RADIUS, SHADOW, weight } from '../lib/tokens';
 
 export function useMultiSelect(availableIds = []) {
-  const idKey = JSON.stringify([...new Set((availableIds || []).filter(Boolean))]);
-  const ids = useMemo(() => JSON.parse(idKey), [idKey]);
+  // Large ledgers can expose tens of thousands of IDs. Serializing the entire
+  // list on every render becomes a visible UI stall, so callers pass a stable
+  // memoized array and we deduplicate it only when that array changes.
+  const ids = useMemo(
+    () => [...new Set((availableIds || []).filter(Boolean))],
+    [availableIds],
+  );
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
 

@@ -28,10 +28,16 @@ or through its parent record.
 
 ## Financial model
 
-Amounts use `numeric(20,4)` and every wallet and financial record stores a currency code.
-Transactions keep their signed amount, while transfers, goal allocations, debt payments,
-and commitment payments preserve their links to the source record. Deletion is represented
-by `deleted_at` or `archived_at` where a historical record must remain auditable.
+The existing normalized Supabase compatibility schema uses `numeric(20,4)`. It is not the
+final Financial Core storage contract. The approved local V7 model stores money as integer
+minor units and separates transaction headers from postings. The future mutation-level cloud
+schema must preserve those exact minor units and posting legs instead of round-tripping them
+through floating-point values. See `FINANCIAL_MODEL_2_0_AR.md` and
+`SQLITE_FINANCIAL_CORE_V7_DESIGN_AR.md`.
+
+Transfers, goal allocations, debt payments, and commitment payments preserve explicit links
+to the source record. Deletion is represented by `deleted_at` or a void/tombstone where a
+historical record must remain auditable.
 Wallet transfers may cross personal and business scopes; source and destination scopes are
 stored separately so both scoped views receive the correct side of the movement.
 Workspace UI preferences remain in `workspaces.app_settings`; financial records do not.
@@ -49,11 +55,20 @@ This preserves layout and module choices without returning to a single financial
 
 ## Current implementation
 
-The repository now includes an idempotent staging backfill CLI and a read-only normalized
-repository. `off` is the default mode. `preview` permits an explicit comparison, while
-`shadow` runs the comparison after a successful legacy cloud load. Neither mode replaces
-the live snapshot or writes from the mobile client.
+The local financial engine is implemented as SQLite V7. It commits transaction headers,
+postings, tracker links, entity changes, historical exchange rates, and an outbox in one
+database transaction. A separate shadow namespace imports active Vault data and every cold
+archive year; SQLite becomes the local source of truth only after exact reconciliation of
+counts, balances, monthly totals, links, and canonical checksums. Vault and the V6 ledger
+remain temporary compatibility and recovery adapters rather than local read authorities.
 
-The next gated step is to run the backfill against a staging Supabase project, archive a
-passing reconciliation report, and test the shadow result on representative accounts.
-Normalized writes remain disabled until those checks pass.
+Home, History, Reports, exports, archive operations, backup/restore, and account lifecycle
+now use the V7 projection after cutover. Logical Backup V10 is the portable primary format;
+it contains versioned financial data, currencies/rates, budgets, archive metadata, and
+checksums before compression and encryption.
+
+Mutation-level cloud sync is implemented locally through `ledger_outbox_v2`,
+`ledger_inbox_v2`, ordered cursors, and `financial_mutations_v1`. The existing JSON snapshot
+sync deliberately remains a fallback. Deploying the migration in staging and passing a
+two-device authenticated test are still required before snapshot retirement or a production
+cloud-sync claim.

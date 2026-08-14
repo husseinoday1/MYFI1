@@ -1,4 +1,4 @@
-﻿const assert = require('node:assert/strict');
+const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -40,18 +40,26 @@ jsFiles(srcRoot).forEach(file => {
 });
 
 const settings = fs.readFileSync(path.join(srcRoot, 'screens', 'SettingsScreen.js'), 'utf8');
+const legacySettings = fs.readFileSync(path.join(srcRoot, 'screens', 'SettingsLegacyScreen.js'), 'utf8');
 assert.equal(settings.includes('identityPanel'), false, 'Duplicate account identity panel must stay out of settings');
 assert.equal(settings.includes('statusPanel'), false, 'Account/data/security summary panel must stay out of settings');
-assert(settings.includes('accountDisplayName'), 'Settings account row must show the signed-in user identity');
-assert(settings.includes('accountCard'), 'Settings must show a signed-in account card with email and sync state');
+assert(settings.includes('function RootSettings') && settings.includes('function AccountPage'), 'Settings must separate the index from the Account detail screen');
+assert(settings.includes('function DevicesPage') && settings.includes('function DataPage') && settings.includes('function SecurityPage'), 'Devices, Data & Storage, and Security must be dedicated settings pages');
+assert(settings.includes('MenuGroup') && settings.includes('MenuRow'), 'Settings must use grouped list navigation instead of dense all-in-one cards');
+assert(settings.includes("supabase.auth.signOut({ scope: 'local' })"), 'Sign out must remain local to the current device');
+assert(settings.includes("supabase.auth.signOut({ scope: 'others' })"), 'Devices must support revoking other cloud sessions');
+assert.equal(settings.includes('checkSupabaseHealth'), false, 'Account sign-in and password recovery must not be blocked by a preflight health gate');
 ['forecastAlert', 'budgetAlert', 'recurringAlert', 'unusualSpendAlert', 'goalProgressAlert'].forEach(key => {
   assert.equal(settings.includes(`label={T.${key}}`), false, `Report insights must not be exposed as notification switches: ${key}`);
 });
 
 const addModal = fs.readFileSync(path.join(srcRoot, 'components', 'AddTransModal.js'), 'utf8');
-const newItemModal = fs.readFileSync(path.join(srcRoot, 'components', 'NewItemModal.js'), 'utf8');
+const newItemModal = fs.readFileSync(path.join(srcRoot, 'components', 'NewItemModal.js'), 'utf8').replace(/\r\n?/g, '\n');
 const notificationCenter = fs.readFileSync(path.join(srcRoot, 'components', 'NotificationCenterModal.js'), 'utf8');
 const walletBalanceCard = fs.readFileSync(path.join(srcRoot, 'components', 'WalletBalanceCard.js'), 'utf8');
+const homeCenter = fs.readFileSync(path.join(srcRoot, 'components', 'HomeCenterModal.js'), 'utf8');
+const demoData = fs.readFileSync(path.join(srcRoot, 'store', 'demoData.js'), 'utf8');
+const monthsLib = fs.readFileSync(path.join(srcRoot, 'lib', 'months.js'), 'utf8');
 assert(addModal.includes('style={StyleSheet.absoluteFill} onPress={handleClose}'), 'Transaction modal must dismiss from an independent backdrop');
 assert(newItemModal.includes('style={StyleSheet.absoluteFill} onPress={handleClose}'), 'Tracker modal must dismiss from an independent backdrop');
 jsFiles(srcRoot).forEach(file => {
@@ -89,9 +97,9 @@ assert.equal(addModal.includes('onNewTracker'), false, 'Transaction entry must n
 assert.equal(addModal.includes('renderTrackerCreateAction'), false, 'Transaction entry must keep tracker creation out of money entry');
 assert.equal(addModal.includes('trackerEntryPanel'), false, 'Transaction entry must not show tracker add panels');
 assert(addModal.includes("{selected?.detail || ' '}"), 'Select fields must reserve a detail line so category and wallet cards stay symmetric');
-assert(addModal.includes('selectField:{ minHeight: 64'), 'Wallet and category select cards must share a fixed visual height');
-assert(addModal.includes('dateButton:{ minHeight: 64'), 'Date field must match the larger select card height');
-assert(addModal.includes('repeatField:{ minHeight: 64'), 'Monthly repeat field must match the larger select card height');
+assert(/selectField\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64/.test(addModal), 'Wallet and category select cards must share an exact fixed visual height');
+assert(/dateButton\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64/.test(addModal), 'Date field must match the select card exact height');
+assert(/repeatField\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64/.test(addModal), 'Monthly repeat field must match the select card exact height');
 assert(addModal.includes('labelInside'), 'Date fields in the transaction modal must keep labels inside matching field cards');
 assert.equal(addModal.includes('`${categoryFlowHint} ·'), false, 'Category select details must not repeat the income/expense category label below the selected category');
 assert.equal(/detail:\s*categoryFlowHint/.test(addModal), false, 'Category select details must not duplicate the field label under every category');
@@ -104,15 +112,15 @@ assert.equal(addModal.includes('setShowMore'), false, 'Transaction entry must no
 assert(addModal.includes("maxHeight: focusedEntry ? '76%' : '82%'"), 'Transaction modal must stay short enough for one-handed entry');
 assert(addModal.includes('accessibilityState={{ checked: recurring }}'), 'Monthly recurrence must be directly available in transaction entry');
 assert.equal(settings.includes("{ key: 'recurring', label:"), false, 'Monthly recurrence must remain a core entry capability, not a hideable module');
-assert(newItemModal.includes("id: 'commitment-wallet'") && newItemModal.includes('label={T.planDate}\n                    monthOnly'), 'Standalone commitments must select a month instead of a day');
-assert(newItemModal.includes("id: 'plan-wallet'") && newItemModal.includes('label={T.planDate}\n                      monthOnly'), 'Linked commitments must select a month instead of a day');
+assert(newItemModal.includes("id: 'commitment-wallet'") && newItemModal.includes("planDate: ar ? 'تاريخ الدفع' : 'Payment date'"), 'Standalone commitments must select an exact payment date');
+assert(newItemModal.includes("id: 'plan-wallet'") && newItemModal.includes('firstDueISO: planDate'), 'Linked commitments must preserve the exact selected payment date');
 assert(addModal.includes('const [categoryTouched, setCategoryTouched]'), 'Manual category selection must prevent smart title matching from overriding the user');
 assert(addModal.includes('suggestCategoryFromHistory(title, trans'), 'Transaction titles must suggest categories from the user ledger');
 assert(addModal.includes('getCategoriesForFlow(cats, entryFlow)'), 'Transaction entry must filter categories by income or expense flow');
 assert(addModal.includes('const categoryOptions = entryCategories.map(category =>'), 'Transaction categories must derive from the filtered income/expense list');
 assert(addModal.includes("id: 'category'"), 'Transaction entry must expose the category as a compact dropdown');
-assert(settings.includes('flow: newCatFlow'), 'New custom categories must persist their income/expense flow');
-assert(settings.includes('categoryFlowLabel(cat, cfg.lang)'), 'Settings must show whether a category belongs to income, expense, or both');
+assert(legacySettings.includes('flow: newCatFlow'), 'Advanced financial settings must persist custom category flow');
+assert(legacySettings.includes('categoryFlowLabel(cat, cfg.lang)'), 'Advanced financial settings must show category flow');
 assert(notificationCenter.includes('onDismissItems?.(dismissalKeys)'), 'Notification center must support dismissing individual alerts');
 assert(notificationCenter.includes('dismiss(selectedKeys)'), 'Notification center must support dismissing selected alerts in bulk');
 assert(notificationCenter.includes("items.map(item => String(item.id || 'notification'))"), 'Notification selection must use stable notification identities');
@@ -126,6 +134,7 @@ const pdf = fs.readFileSync(path.join(srcRoot, 'lib', 'pdf.js'), 'utf8');
 const constants = fs.readFileSync(path.join(srcRoot, 'lib', 'constants.js'), 'utf8');
 const trackers = fs.readFileSync(path.join(srcRoot, 'screens', 'TrackersLabScreen.js'), 'utf8');
 const home = fs.readFileSync(path.join(srcRoot, 'screens', 'HomeScreen.js'), 'utf8');
+const onboarding = fs.readFileSync(path.join(srcRoot, 'screens', 'OnboardingScreen.js'), 'utf8');
 assert.equal(/<TextInpu\b/.test(history), false, 'History must use the imported TextInput component');
 assert.equal(/<SectionLis\b/.test(history), false, 'History must use the imported SectionList component');
 assert(history.includes('onPress={applyDraft}'), 'History filters must have an explicit apply action');
@@ -136,31 +145,46 @@ assert.equal(history.includes('tagBadge'), false, 'History rows must not show tr
 assert.equal(history.includes('amountRange'), false, 'History filter sheet must stay compact');
 assert.equal(history.includes('searchableTransactionTags'), false, 'Transaction tags must remain searchable metadata, not a separate crowded filter');
 assert(reports.indexOf('const financialReport =') < reports.indexOf('const stats ='), 'Reports must create the shared report model before reading its stats');
-assert(reports.includes('periodCard: { minHeight: 78'), 'Reports period selector must stay compact at the top of the screen');
-assert(reports.includes('shareCenterBtn: { width: 58'), 'Reports share action must not create a tall top row');
+assert(reports.includes('periodCard: { minHeight: 72'), 'Reports period selector must use the professional compact command-bar height');
+assert(reports.includes('shareCenterBtn: { width: 64, minHeight: 72'), 'Reports share action must align exactly with the period command card');
 assert.equal(reports.includes('monthlyBudget'), false, 'Reports must not show the monthly spending limit card');
 assert.equal(reports.includes("value: 'budget'"), false, 'Reports PDF sharing must not expose the removed budget section');
 assert.equal(reports.includes('spendingLimit'), false, 'Reports must not keep monthly spending limit styles');
 assert.equal(pdf.includes("selected.has('budget')"), false, 'Generated report PDFs must not render the removed budget section');
 assert.equal(reports.includes('الرصيد المرحّل بنهاية الفترة'), false, 'Reports must not use the confusing carried-balance title');
 assert(reports.includes('comparisonExpanded') && reports.includes('expandedChartPanel'), 'Comparison charts must offer an expanded view');
-assert(reports.includes("value: 'comparison_chart'") && reports.includes("value: 'comparison_details'"), 'Comparison sharing must separate chart and details');
+assert(reports.includes("value: 'comparison_chart'") && reports.includes("value: 'comparison_details'") && reports.includes("value: 'comparison'"), 'Comparison sharing must expose one top-level comparison choice with chart/details modes');
 assert.equal(reports.includes('proCompareChipRail'), false, 'Comparison periods must not be duplicated as a second chip rail');
 assert(reports.includes('svgSafe: true'), 'Comparison chart month labels must avoid broken Arabic SVG text shaping');
-assert(settings.includes('monthNameStyle') && settings.includes('monthStyleLabel'), 'Settings must expose a global month display preference');
-assert(constants.includes("monthNameStyle: 'numeric'"), 'Month display preference must default to numeric labels');
+assert(reports.includes('STAGE4A_EXECUTIVE_SUMMARY'), 'Reports must show a visible executive summary before expandable sections');
+assert(reports.includes('netSummaryCard') && reports.includes('stats.bal'), 'Reports top summary must focus on real report-model net income');
+assert.equal(reports.includes('executiveMetrics'), false, 'Reports top summary must not repeat income and expense mini-cards');
+assert(reports.includes('defaultExpanded = true'), 'Report sections must show their results immediately while remaining collapsible');
+assert.equal((reports.match(/MYFI_REPORT_WALLET_INLINE/g) || []).length, 1, 'Reports must render the wallet summary once');
+assert(walletBalanceCard.includes("{ar ? 'المحجوز' : 'Reserved'}"), 'Wallet summaries must expose reserved savings as a first-class metric');
+assert(walletBalanceCard.includes('defaultPill'), 'Wallet list must identify the default wallet without overloading the wallet icon');
+assert(notificationCenter.includes('selectionBar') && notificationCenter.includes('deleteSelectedButton'), 'Notifications must expose a clear select/delete-selected workflow');
+assert.equal(notificationCenter.includes('>{L.tap}</Text>'), false, 'Notification cards must not repeat an obvious tap-to-open instruction');
+assert(home.includes("quickEntryAction:{ flex: 1, flexBasis: 0"), 'Home quick actions must share equal width regardless of action count');
+assert.equal(home.includes('s.heroFacts'), false, 'Home hero must stay focused on Available balance only');
+assert(homeCenter.includes('identityText') && homeCenter.includes('accountState'), 'Account center must use a compact identity card with explicit connection state');
+assert(legacySettings.includes('monthNameStyle') && legacySettings.includes('monthStyleLabel'), 'Advanced settings must preserve the global month display preference');
+assert(constants.includes("monthNameStyle: 'system'"), 'Month display preference must follow the phone by default');
 assert(home.includes('formatMonthLabel') && home.includes('cfg.monthNameStyle'), 'Home month labels must follow the global month display preference');
 assert(trackers.includes('const paidThisMonth ='), 'Commitment cards must derive whether the current month was paid');
 assert(trackers.includes('{T.paidMonth}'), 'Commitment cards must show the current-month payment message');
+assert(trackers.includes('cycleMonth: tx.commitmentMonth'), 'Commitment trackers must preserve the due cycle for every payment');
+assert(trackers.includes('formatCommitmentDate(payment.date'), 'Commitment payment history must show the actual payment date');
 assert(trackers.includes('T.completionRetention'), 'Completed trackers must explain the seven-day review period');
 assert(trackers.includes("item.status === 'done' && !item.ended"), 'Completed trackers must show the retention notice before archive');
-assert(trackers.includes('filterMenuOpen'), 'Trackers must use a compact dropdown filter instead of a crowded chip rail');
+assert(trackers.includes('filterRail') && trackers.includes('filterChip') && !trackers.includes('filterMenuOpen'), 'Tracker type selection must use a direct horizontal chip rail, not a dropdown');
 assert.equal(trackers.includes('<View style={[s.screenHeader'), false, 'Trackers must not show an explanatory header above the quick entry panel');
 assert.equal(trackers.includes('الالتزامات تقاس بالشهر'), false, 'Trackers must not show the explanatory subtitle');
 assert(trackers.includes('trackerQuickEntry'), 'Trackers must show a Home-style quick action panel');
 assert(trackers.includes("cfg.entryMode === 'quick'"), 'Trackers quick action panel must render only in the shared quick-entry mode');
 assert(home.includes("cfg.entryMode === 'quick'"), 'Home quick actions must render only in the shared quick-entry mode');
-assert.equal(trackers.includes('trackerQuickEntryTitle'), false, 'Trackers quick action panel must not add a title above its single action');
+assert(trackers.includes('trackerQuickEntryTitle') && trackers.includes("isAr ? 'إجراءات مباشرة' : 'Direct actions'"), 'Trackers quick actions must use the same Direct actions language as Home');
+assert.equal(trackers.includes('trackerQuickEntryHint'), false, 'Tracker direct actions must not add explanatory helper copy');
 assert(trackers.includes("onNewTracker?.({ trackerType: 'owed' })"), 'Quick entry must provide a dedicated debt-I-owe card');
 assert(trackers.includes("onNewTracker?.({ trackerType: 'receivable' })"), 'Quick entry must provide a dedicated debt-owed-to-me card');
 assert(trackers.includes("onNewTracker?.({ trackerType: 'goal' })"), 'Quick entry must provide a dedicated saving card');
@@ -188,24 +212,29 @@ assert(newItemModal.includes('active ? option.color : th.cardHigh'), 'Tracker cr
 assert(newItemModal.includes('selectSheetPanel'), 'Tracker creation choices must use the floating picker design');
 assert(newItemModal.includes("typeBtn: { width: '48.5%'"), 'Tracker creation type cards must be symmetric instead of squeezed into one row');
 assert(newItemModal.includes('requestedTrackerType'), 'Tracker creation must honor the tracker type selected from quick actions');
-assert(newItemModal.includes('note: note.trim()') && newItemModal.includes('noteBlock'), 'Tracker creation must keep one unified optional note field');
+assert.equal(newItemModal.includes('value={note}'), false, 'Tracker creation must not show the removed optional note field');
 assert(newItemModal.includes('dedicatedTrackerLaunch'), 'Tracker quick actions must open a dedicated creation sheet for the selected tracker type');
 assert(newItemModal.includes('isTracker && !dedicatedTrackerLaunch'), 'Dedicated tracker creation sheets must not show the classic tracker type switcher');
-assert(newItemModal.includes('trackerHeaderCard') && newItemModal.includes('entryField') && newItemModal.includes('amountInput'), 'Tracker creation sheets must use the voted dedicated card layout');
-assert(newItemModal.includes('walletEffect') && newItemModal.includes('originImpactText'), 'Debt creation must explain when wallet balance changes');
+assert.equal(newItemModal.includes('trackerHeaderCard'), false, 'Tracker creation must not repeat the selected type in a Ready-to-enter header card');
+assert.equal(newItemModal.includes("'Ready to enter'"), false, 'Tracker creation must not show Ready to enter helper text');
+assert(newItemModal.includes('entryField') && newItemModal.includes('amountInput'), 'Tracker creation must keep the compact amount/title card layout');
+assert(newItemModal.includes('originImpactText') && newItemModal.includes('originImpactPill'), 'Debt creation must show wallet impact as one compact status line');
 assert(newItemModal.includes('commitmentRepeatMonthly') && newItemModal.includes('repeatMonthly: commitmentRepeatMonthly'), 'Commitment creation must persist monthly versus one-time repeat mode');
+assert(newItemModal.includes("id: 'commitment-repeat'"), 'Commitment category and repeat must render as a symmetric picker pair');
+assert(newItemModal.includes('selectFieldBlock: { flex: 1, flexBasis: 0'), 'Tracker paired fields must split available width equally');
+assert(newItemModal.includes('labelInside'), 'Tracker date fields must keep labels inside matching field cards');
 assert(addModal.includes('dedicatedQuickEntry'), 'Home quick actions must open dedicated money-entry sheets');
 assert(addModal.includes('!dedicatedQuickEntry'), 'Dedicated money-entry sheets must not show the classic entry type switcher');
-assert(newItemModal.includes('selectField: { minHeight: 74'), 'Tracker creation select cards must match the larger dropdown field size');
+assert(newItemModal.includes('selectField: { minHeight: 64'), 'Tracker creation paired select cards must use the same compact fixed height as transaction entry');
 assert.equal(newItemModal.includes('selectedFirstOptions'), false, 'Tracker creation wallet choices must keep their stable order');
 assert.equal(newItemModal.includes('walletChip'), false, 'Tracker creation must not keep the old horizontal wallet chip rail');
 assert(newItemModal.includes("id: 'plan-wallet'"), 'Linked monthly commitments must use the redesigned wallet picker');
 assert(newItemModal.includes("id: 'commitment-wallet'"), 'Standalone commitments must use the redesigned wallet picker');
 assert(notificationCenter.includes('policyStrip'), 'Notification center must explain automatic dismissal retention');
-assert(notificationCenter.includes('dismiss(itemKeys)'), 'Notification center must allow dismissing all visible alerts');
-assert(home.includes('profilePill'), 'Home top bar must show a labeled account pill, not only a person icon');
-assert(home.includes('accountName'), 'Home top account pill must show the account name or email');
-assert(home.includes('profileHandle'), 'Home top account pill must show the unique username handle');
+assert.equal(notificationCenter.includes('dismiss(itemKeys)'), false, 'Notification center must not expose delete-all; ordinary alerts are removed only through explicit selection');
+assert(home.includes('profileButton') && !home.includes('profilePill'), 'Home top bar must use a balanced avatar-only account action');
+assert(home.includes('accountInitial'), 'Home avatar action must preserve the account identity initial');
+assert.equal(homeCenter.includes('profileHandle'), false, 'Account center must not invent a second username/handle identity');
 assert(home.includes('avatarUri') && home.includes('walletPopup'), 'Home must support a local avatar and popup wallet picker');
 assert(home.includes('attentionHeader'), 'Important states must use the shared attention header');
 assert(home.includes('expandedRecentId'), 'Home transactions must expose inline expandable details');
@@ -215,7 +244,170 @@ assert(home.includes("icon: 'arrow-down-outline', color: th.exp"), 'Home expense
 assert(home.includes("icon: 'arrow-up-outline', color: th.inc"), 'Home income quick action must use the up arrow');
 assert.equal(home.includes('payCommitment(item.id'), false, 'Home commitment actions must open the wallet-aware payment modal');
 assert(home.includes('onQuickCommitment(item.id)'), 'Home commitment actions must route through the wallet-aware payment modal');
+assert(home.includes('postponeCommitmentFromHome') && home.includes('deferCommitment'), 'Home commitment tasks must expose the existing deferral action');
 assert(home.includes('item.actionable'), 'Home must include actionable commitments in important states');
 assert(home.includes("item.key === 'attention' && attentionItems.length > 0"), 'Due commitments must force important states onto Home');
+
+/* MYFI_STAGE3_FINAL_VISUAL_CONTRACT */
+assert(
+  /selectFieldBlock\s*:\s*\{\s*flex:\s*1,\s*flexBasis:\s*0,\s*minWidth:\s*0,\s*height:\s*64/.test(newItemModal)
+    && /selectField\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64/.test(newItemModal)
+    && /dateButton\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64,\s*borderRadius:\s*13/.test(newItemModal),
+  'Tracker Date/Month/Wallet paired cards must have exact equal geometry and radius',
+);
+assert(
+  /selectFieldBlock\s*:\s*\{\s*flex:\s*1,\s*flexBasis:\s*0,\s*minWidth:\s*0,\s*height:\s*64/.test(addModal)
+    && /selectField\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64/.test(addModal)
+    && /dateButton\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64,\s*borderRadius:\s*13/.test(addModal)
+    && /repeatField\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64/.test(addModal),
+  'Money-entry paired cards must have exact equal 64px geometry',
+);
+assert.equal((trackers.match(/STAGE3_FINAL_COMMITMENT_HISTORY/g) || []).length, 1, 'Commitments must render exactly one payment-history block');
+assert.equal((trackers.match(/\{T\.commitmentHistory\}/g) || []).length, 1, 'Commitment history title must appear exactly once in tracker JSX');
+assert.equal(trackers.includes('stage3v41'), false, 'Trackers must not depend on leftover Stage 3 patch override styles');
+assert(trackers.includes('STAGE3_FINAL_SIDE_METRIC') && trackers.includes('s.metricSide'), 'Trackers must use the final flat amount/side-metric card hierarchy');
+assert(trackers.includes('cardAccent: { height: 4') && trackers.includes('function SummaryTile({ th, lang, item, value })'), 'Trackers must use the final visual hierarchy and horizontal summary tile component');
+assert(home.includes('STAGE3_FINAL_IMPORTANT_DECISION'), 'Important states must use the final commitment decision-card layout');
+assert(home.includes('importantS.actions') && home.includes('postponeCommitmentFromHome'), 'Important states must show equal Pay and Postpone controls');
+assert(home.includes('STAGE4_COMPACT_IMPORTANT_DECISION') && home.includes('importantS.amountBlock'), 'Important-state commitments must use the compact Stage 4 decision row');
+assert.equal(home.includes('importantS.factCard'), false, 'Home commitment cards must not spend vertical space on separate Due/Amount fact cards');
+assert.equal(home.includes('renderCommitmentRow'), false, 'Home must not keep the obsolete Pay-only commitment row renderer');
+
+
+/* MYFI_STAGE4_AB_COMPACT_REFINEMENT */
+assert(
+  /action:\s*\{[^}]*height:\s*34/.test(home)
+    && /card:\s*\{[^}]*paddingHorizontal:\s*8,\s*paddingVertical:\s*7/.test(home),
+  'Home commitment decision cards must stay compact while preserving both actions',
+);
+assert(walletBalanceCard.includes('walletIdentity') && walletBalanceCard.includes('walletAvailableBlock'), 'Home wallet picker must use compact balance rows');
+assert.equal(walletBalanceCard.includes('style={[s.walletMetrics'), false, 'Home wallet rows must not expand into three stacked metric cards');
+assert.equal(homeCenter.includes('getOrCreateDeviceId') || homeCenter.includes('LOCAL-${'), false, 'Local device implementation IDs must stay out of account UX');
+assert.equal(homeCenter.includes('localIdentity') || homeCenter.includes('connectedIdentity'), false, 'Account center must keep one identity instead of local/cloud identity labels');
+assert(homeCenter.includes("connectedAccount && user?.email"), 'Email must only render when the account is connected');
+assert(homeCenter.includes("connectedAccount && user?.email ? user.email : L.local"), 'Home account center must keep one identity line and switch only its account state');
+assert(demoData.includes("linkedType: 'debt'") && demoData.includes("linkedId: 'demo_linked_debt'"), 'Demo workspace must include a debt converted to a linked commitment');
+assert(demoData.includes("linkedType: 'goal'") && demoData.includes("linkedId: 'demo_linked_goal'"), 'Demo workspace must include a goal linked to a commitment');
+assert(demoData.includes('demo_commitment_unpaid') && demoData.includes('demo_commitment_deferred'), 'Demo workspace must show unpaid and deferred commitment states');
+assert(demoData.includes('demo_linked_goal') && demoData.includes('savings: []'), 'Demo workspace must include a goal with no savings this month');
+assert(demoData.includes('demo_recurring_streaming_prev') && demoData.includes('demo_recurring_side_income_prev'), 'Demo workspace must include due recurring expense and income examples');
+
+
+/* MYFI_STAGE4_SETTINGS_DATE_WALLET_REFINEMENT */
+assert(settings.includes("label: T.useDeviceSetting") && settings.includes('subtitle={languageNote}') && settings.includes('subtitle={themeNote}'), 'Language/appearance must show the resolved value and keep device-following as a note/action');
+assert(newItemModal.includes("planDate: ar ? 'تاريخ الدفع' : 'Payment date'"), 'Commitments must label their selected day as Payment date');
+assert.equal(newItemModal.includes('monthOnly'), false, 'Commitment creation and linked commitments must use a normal day-level date picker');
+assert(newItemModal.includes('firstDueISO: startDate') && newItemModal.includes('firstDueISO: planDate'), 'Commitment creation must persist the exact selected payment date');
+assert.equal(newItemModal.includes("· ${isAr ? 'كلي' : 'Total'}"), false, 'Tracker wallet pickers must show Available only, not Total balance details');
+assert(addModal.includes("${cfg.lang === 'ar' ? 'متاح' : 'Available'}") && !addModal.includes("${cfg.lang === 'ar' ? 'كلي' : 'Total'}"), 'Income, expense, payment, and Smart wallet choices must show Available only');
+assert(trackers.includes('firstDueISO: draft.date'), 'Editing a commitment must preserve the exact selected payment date');
+assert.equal(trackers.includes("monthOnly={editTrackerDraft?.kind === 'monthly'}"), false, 'Commitment editing must use a normal day-level date picker');
+assert(trackers.includes('dueDateLabel = formatCommitmentDate') && trackers.includes('daysUntil < 0'), 'Commitment status must evaluate the selected due day, not only its month');
+assert.equal(home.includes('s.heroFacts'), false, 'Home must keep wallet balance detail out of the main hero and show only Available balance');
+assert(home.includes("'الرصيد المتاح' : 'Available balance'"), 'Home main balance must remain explicitly Available balance');
+assert(walletBalanceCard.includes("'الكلي' : 'Total'") && walletBalanceCard.includes("محجوز للتوفير") && walletBalanceCard.includes("'المتاح' : 'Available'"), 'Detailed wallet balance breakdown must remain available inside the wallet list');
+
+
+/* MYFI_STAGE4_MASTER_REFINEMENT */
+assert(constants.includes("{ key: 'saving', visible: true }") && constants.includes("{ key: 'net', visible: true }"), 'Home month summary must include Savings and Net by default');
+assert(constants.includes('HOME_LAYOUT_VERSION = 3'), 'Home layout must migrate existing profiles to the restored four-card summary');
+assert(home.includes("item.key === 'saving'") && home.includes('monthSavingTotal'), 'Home must calculate and render actual current-month goal savings');
+assert(home.indexOf("{visibleHomeCards.length > 0 ? (") < home.indexOf("{cfg.entryMode === 'quick' ? ("), 'Direct actions must appear immediately after Month summary');
+assert(walletBalanceCard.includes('lock-closed-outline') && walletBalanceCard.includes('محجوز للتوفير'), 'Reserved savings must use a clear compact locked-savings treatment in the wallet list');
+assert(walletBalanceCard.includes(".sort((a, b) => (a.id === defaultId ? -1"), 'The selected default wallet must sort to the first position');
+assert(home.includes("onSelectWallet={(id) => { setCfg({ defaultWalletId: id }); }}"), 'Selecting a Home wallet must update the default wallet without hiding the list before the reorder is visible');
+assert(trackers.includes('filterRailTitle') && trackers.includes('filterCount'), 'Tracker type selection must expose direct type chips with counts');
+assert(reports.includes('walletRailBlock') && reports.includes('walletChip') && !reports.includes("setSheet('wallet')"), 'Report wallet selection must use a direct horizontal wallet rail instead of a dropdown');
+assert(reports.includes('reportInsightList') && reports.includes('reportRows') && reports.includes('reportInlineDetail'), 'Reports must use one compact drill-down list with each active detail rendered inline under its own row');
+assert.equal(reports.includes('<SectionCard th={th} title={C.smartTitle}'), false, 'Reports main view must remove non-essential Smart insight clutter');
+assert(settings.includes('saveIdentity') && settings.includes('editIdentity'), 'Account must let local and connected users edit identity from one detail screen');
+assert(settings.includes('pickAvatar') && settings.includes('T.changePhoto') && settings.includes('T.removePhoto'), 'Account must provide add/change/remove photo controls');
+assert(homeCenter.includes("String(cfg.displayName || '').trim()") && homeCenter.includes('cfg.avatarUri ?'), 'Home account center must reflect the local user name and photo, not a generic local placeholder only');
+
+assert.equal(reports.includes('reportTileGrid'), false, 'Reports must not return to the square dashboard tile grid');
+assert.equal(reports.includes("detailKey === 'cashflow' && scope === 'month'"), false, 'Forecast clutter must stay out of the essential report surface');
+assert(home.includes('stopRecurringFromHome'), 'Important recurring entries must support stopping the recurrence');
+assert(home.includes("isAr ? 'تسجيل الآن' : 'Record now'"), 'Important recurring entries must expose a direct Record now action');
+assert(home.includes("isAr ? 'إيقاف التكرار' : 'Stop recurring'"), 'Important recurring entries must expose Stop recurring without deleting history');
+
+/* MYFI_IDENTITY_REFRESH_V4 */
+assert(home.includes('const recentLimit = 3;'), 'Home recent activity must show exactly three transactions');
+assert(home.includes('savingPanel') && home.includes('savingSummary') && home.includes('savingGoalRow'), 'Home savings must use the same compact panel hierarchy as other Home sections');
+assert(history.includes('typeRail') && history.includes('typeChip') && history.includes('historyHead'), 'History must use the refreshed direct-filter visual hierarchy');
+assert.equal(history.includes("renderFilterPicker({ id: 'type'"), false, 'History transaction type must not be duplicated inside the advanced filter sheet');
+assert(onboarding.includes('dashboardCard') && onboarding.includes('insightCard') && onboarding.includes('PromiseRow'), 'Onboarding must communicate value with real finance, insight, and concise trust rows');
+assert.equal(onboarding.includes('finishSummary'), false, 'Onboarding must not add a redundant completion screen');
+assert(reports.includes('netSummaryCard') && reports.includes("ar ? 'تفاصيل الفترة' : 'Period details'"), 'Reports must use the new net-only summary and compact period detail list');
+assert(settings.includes('profileHero') && settings.includes('AccountPage') && settings.includes('AuthModal'), 'Account must use a dedicated professional profile screen with optional cloud connection');
+
+
+/* MYFI_STAGE5_FOUNDATION */
+assert(settings.includes('MenuGroup') && settings.includes('SectionLabel') && !settings.includes('accessibilityState={{ expanded }}'), 'Settings must use flat grouped navigation instead of nested collapsible cards');
+assert(settings.indexOf('accountCard') < settings.indexOf('T.general'), 'Account identity card must be first on the Settings index');
+assert(settings.includes('profileAvatarWrap') && settings.includes('cameraButton') && settings.includes('editPill'), 'Account must use an avatar-first profile surface with direct edit affordance');
+assert(settings.includes('Connect MYFI account') && settings.includes("account: ar ? 'الحساب' : 'Account'") && !settings.includes('Local profile'), 'Account UX must keep one identity and expose MYFI connection only as an optional capability');
+assert(history.includes('historyFilterAction') && history.includes('filterCountBadge'), 'History advanced filters must be reachable from the compact header action');
+assert(history.includes('dayHeader') && history.includes('rowFirst') && history.includes('rowLast'), 'History transactions must read as grouped ledger rows rather than isolated floating cards');
+assert(history.includes("diff === 0") && history.includes("diff === 1"), 'History day labels must use Today/Yesterday semantics when applicable');
+assert(onboarding.includes('dashboardCard') && onboarding.includes('localFirst') && onboarding.includes('unifiedEngine'), 'Onboarding welcome must be financial-first and local-first without setup choices');
+assert.equal(onboarding.includes('<View style={s.ideaVisual}>'), false, 'Onboarding must remove the decorative fake-phone illustration from the primary welcome path');
+assert(homeCenter.includes('identityNameRow') && !homeCenter.includes('style={[s.identityFacts'), 'Home account center must use a compact identity summary rather than metric-style account fact cards');
+
+
+// Stage 5A professional settings/account contract.
+assert(/rowIcon/.test(settings), 'Settings rows must expose a restrained icon hierarchy');
+assert(/rowSub/.test(settings), 'Settings rows must expose concise subtitles');
+assert(/accountCard/.test(settings) && /editPill/.test(settings), 'Settings must expose one account entry and one clear edit action');
+assert(/إضافة صورة|Add photo/.test(settings), 'Local/connected account must expose an explicit Add photo action');
+assert(/تغيير الصورة|Change photo/.test(settings), 'Account must expose an explicit Change photo action');
+assert(/إزالة|Remove/.test(settings), 'Account must expose an explicit Remove photo action');
+assert(!/الحساب، التفضيلات، الأمان والبيانات في مكان واحد/.test(settings), 'Settings must not use the old explanatory marketing subtitle');
+
+
+/* MYFI_STAGE5B_HISTORY_LEDGER_V2 */
+const transactionDetails = fs.readFileSync(path.join(srcRoot, 'components', 'TransactionDetailsModal.js'), 'utf8');
+assert(history.includes('historyToolbar') && history.includes('searchBox') && history.includes('historyFilterAction'), 'History search and advanced filters must share one compact toolbar');
+assert(history.includes('dayCountBadge') && history.includes('rowSignals'), 'History must use compact day-group and transaction-signal hierarchy');
+assert.equal(history.includes("import ActionMenu from '../components/ActionMenu'"), false, 'History ledger rows must not carry a permanent overflow menu');
+assert(history.includes('onLongPress={() => selection.toggle(item.id)}'), 'Long press must preserve fast multi-selection');
+assert(history.includes('setDetails(item)'), 'Single tap must open transaction details');
+assert(history.includes('canEdit={!!details') && history.includes('canDuplicate={!!details'), 'History must route edit/duplicate eligibility into transaction details');
+assert(transactionDetails.includes('actionRow') && transactionDetails.includes('onEdit') && transactionDetails.includes('onDuplicate') && transactionDetails.includes('onDelete'), 'Transaction details must own edit/duplicate/delete actions');
+assert(transactionDetails.includes('C.delete') && transactionDetails.includes('trash-outline'), 'Transaction details must expose a clear destructive delete action');
+
+
+/* MYFI_STAGE6_CONSOLIDATED_UX */
+assert(appRoot.includes("const INTERNAL_DEMO_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_INTERNAL_DEMO === '1';"), 'Demo tools must be gated behind an explicit internal development flag');
+assert(appRoot.includes('INTERNAL_DEMO_ENABLED && cfg.demoMode'), 'Demo banner must never appear in the normal user build');
+assert(appRoot.includes("if (!ready || INTERNAL_DEMO_ENABLED || !cfg.demoMode) return;") && appRoot.includes('exitDemoMode?.()'), 'A legacy demo session must automatically restore real data in normal user builds');
+assert(appRoot.includes("if (cfg.langMode !== 'system') return undefined;") && appRoot.includes('detectSystemLang()'), 'System language must be detected silently instead of exposed as an onboarding choice');
+assert(appRoot.includes("const orientationMode = ['system', 'auto', 'portrait'].includes(cfg.orientationMode)"), 'Orientation must preserve device, explicit auto-rotate, and portrait choices');
+
+assert.equal(onboarding.includes('enterDemoMode'), false, 'Demo mode must not be part of the user onboarding flow');
+assert.equal(onboarding.includes('startMode'), false, 'Onboarding must not ask users to choose real versus demo data');
+assert.equal(onboarding.includes('finishSummary'), false, 'Onboarding must go directly to Home without a redundant completion screen');
+assert.equal(onboarding.includes('systemLanguage'), false, 'Onboarding must not show Follow device as a visible choice');
+assert.equal(onboarding.includes('monthNames'), false, 'Onboarding must not ask for device-derived date preferences');
+assert.equal(onboarding.includes('themeMode'), false, 'Onboarding must not ask for device-derived appearance preferences');
+assert(onboarding.includes('[0, 1, 2].map') && onboarding.includes("step === 2 ? T.start : T.next"), 'Onboarding must stay a concise three-step flow');
+assert(onboarding.includes('dashboardCard') && onboarding.includes('insightCard') && onboarding.includes('quickSetupCard'), 'Onboarding must combine product value with a compact usage/country/currency setup');
+
+assert(settings.includes('title={T.rotation}'), 'Screen rotation must stay in the public Settings UX');
+assert(settings.includes("choice === 'orientation'"), 'Screen rotation must use the same device/manual choice pattern as language and appearance');
+assert(settings.includes("const rotationValue = cfg.orientationMode === 'system'"), 'Screen rotation row must show the selected behavior');
+assert(settings.includes("const rotationNote = cfg.orientationMode === 'system' ? T.followsDevice : null;"), 'Only the device-controlled rotation mode may show device-following');
+assert(settings.includes("{ value: 'auto', label: T.autoRotate"), 'Orientation picker must expose explicit app auto-rotation');
+assert(settings.includes("onSelect: value => setCfg({ orientationMode: ['system', 'auto', 'portrait'].includes(value) ? value : 'system' })"), 'Orientation picker must preserve device, auto, and portrait semantics');
+assert(settings.includes("const languageNote = cfg.langMode === 'system' ? T.followsDevice : null;"), 'Preferences must show device-following under the resolved language');
+assert(settings.includes("const themeNote = cfg.themeMode === 'system' ? T.followsDevice : null;"), 'Preferences must show device-following under the resolved appearance');
+assert.equal(settings.includes("cfg.langMode === 'system' ? T.system"), false, 'Follow-device must not replace the visible language value');
+assert.equal(settings.includes("cfg.themeMode === 'system' ? T.system"), false, 'Follow-device must not replace the visible appearance value');
+assert(legacySettings.includes("MONTH_NAME_STYLES.filter(style => style !== 'system')"), 'Advanced date display choices must preserve the existing month style behavior');
+assert(legacySettings.includes('INTERNAL_DEMO_ENABLED ? (') && legacySettings.includes('بيانات اختبار داخلية'), 'Demo data must remain available only as an internal advanced test tool');
+
+assert(reports.includes('const reportRows = [') && reports.includes("key: 'comparison'"), 'Comparison must be part of the same report row model as other reports');
+assert(reports.includes('reportRows.map((item, index) =>') && reports.includes('reportInlineDetail'), 'Each report detail must expand directly below the selected report row');
+assert.equal(reports.includes('s.reportCompareRow'), false, 'Comparison must not use a visually different top-level row');
+assert.equal(reports.includes('reportCompareText'), false, 'Legacy comparison-row styling must be removed');
 
 console.log('MYFI modal and settings UI contract: all assertions passed');

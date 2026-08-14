@@ -10,25 +10,30 @@ import { filterByActiveScope, filterFeatureEntities, getTransactionDisplayAmount
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import { formatCommitmentMonth, getUpcomingCommitments } from '../lib/commitments';
 import { getUpcomingRecurring } from '../utils/calc';
-import { accountPublicId, deriveDisplayName } from '../lib/accountIdentity';
+import { deriveDisplayName } from '../lib/accountIdentity';
 
 const text = (lang) => {
   const ar = lang === 'ar';
   return {
-    profile: ar ? 'الحساب والبيانات' : 'Account & data',
+    profile: ar ? 'الحساب' : 'Account',
     search: ar ? 'بحث شامل' : 'Universal search',
     review: ar ? 'مراجعة الإدخالات الذكية' : 'Smart entry review',
     calendar: ar ? 'الاستحقاقات' : 'Due dates',
-    guest: ar ? 'استخدام محلي' : 'Local use',
-    signed: ar ? 'حساب متصل' : 'Connected account',
+    guest: ar ? 'على هذا الجهاز' : 'On this device',
+    signed: ar ? 'متصل' : 'Connected',
     sync: ar ? 'مزامنة الآن' : 'Sync now',
     syncing: ar ? 'جاري المزامنة…' : 'Syncing…',
     synced: ar ? 'البيانات متزامنة' : 'Data is synced',
-    local: ar ? 'محفوظة محلياً' : 'Saved locally',
+    local: ar ? 'محفوظ على هذا الجهاز' : 'Saved on this device',
     pending: ar ? 'تغييرات تنتظر المزامنة' : 'Changes waiting to sync',
     conflict: ar ? 'يوجد تعارض يحتاج حلاً' : 'A conflict needs attention',
     offline: ar ? 'غير متصل — بياناتك المحلية آمنة' : 'Offline — local data is safe',
-    settings: ar ? 'فتح الإعدادات والنسخ الاحتياطي' : 'Settings & backup',
+    settings: ar ? 'إدارة الحساب والأمان' : 'Account & security',
+                email: ar ? 'البريد' : 'Email',
+    phone: ar ? 'الهاتف' : 'Phone',
+    storage: ar ? 'التخزين' : 'Storage',
+    onDevice: ar ? 'على هذا الجهاز' : 'On this device',
+        created: ar ? 'تاريخ الإنشاء' : 'Created',
     noResults: ar ? 'لا توجد نتائج مطابقة' : 'No matching results',
     searchHint: ar ? 'ابحث بالاسم، التصنيف، التاريخ أو المبلغ' : 'Search name, category, date, or amount',
     noSmart: ar ? 'لا توجد إدخالات ذكية تحتاج مراجعة' : 'No smart entries need review',
@@ -178,8 +183,12 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
     );
   };
 
-  const profileName = deriveDisplayName({ user, cfg }) || L.guest;
-  const profileHandle = accountPublicId({ user, cfg });
+  const connectedAccount = !!user?.id;
+  const profileName = deriveDisplayName({ user, cfg }) || String(cfg.displayName || '').trim() || (ar ? 'أضف اسمك' : 'Add your name');
+  const profileInitial = (profileName || 'M').trim().charAt(0).toUpperCase();
+  const accountCreated = connectedAccount && user?.created_at
+    ? new Date(user.created_at).toLocaleDateString(ar ? 'ar-IQ' : 'en')
+    : null;
   const conflictCount = Number(syncConflict?.total || syncConflict?.items?.length || 0);
   const conflictLabel = syncConflict?.type === 'merged_changes'
     ? (ar ? 'تم دمج تغييرات جهازين' : 'Changes from two devices were merged')
@@ -215,24 +224,47 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
               <Ionicons name={mode === 'search' ? 'search-outline' : mode === 'calendar' ? 'calendar-outline' : mode === 'review' ? 'sparkles-outline' : 'person-outline'} size={19} color={th.primary} />
             </View>
             <Text style={[s.title, { color: th.text, textAlign: align }]}>{modeTitle}</Text>
+            <TouchableOpacity onPress={onClose} style={[s.closeAction, { backgroundColor: th.cardHigh }]}>
+              <Ionicons name="chevron-down" size={18} color={th.sub} />
+            </TouchableOpacity>
           </View>
 
           {mode === 'profile' ? (
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-              <View style={[s.account, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
-                <View style={[s.avatar, { backgroundColor: th.primSoft }]}>{cfg.avatarUri ? <Image source={{ uri: cfg.avatarUri }} style={s.avatarImage} /> : <Ionicons name="person" size={25} color={th.primary} />}</View>
-                <Text style={[s.accountName, { color: th.text }]} numberOfLines={1}>{profileName}</Text>
-                <Text style={[s.accountHandle, { color: th.primary }]} numberOfLines={1}>{profileHandle}</Text>
-                {user?.email ? <Text style={{ color: th.sub, fontSize: 12 }}>{user.email}</Text> : null}
-                <Text style={{ color: th.sub, fontSize: 12 }}>{user ? L.signed : L.guest}</Text>
+              <View style={[s.account, { backgroundColor: th.card, borderColor: th.border }]}>
+                <View style={[s.accountTop, { flexDirection: dir }]}>
+                  <View style={[s.avatar, { backgroundColor: th.primSoft }]}>
+                    {cfg.avatarUri ? (
+                      <Image source={{ uri: cfg.avatarUri }} style={s.avatarImage} />
+                    ) : (
+                      <Text style={{ color: th.primary, fontSize: 20, fontWeight: '900' }}>{profileInitial}</Text>
+                    )}
+                  </View>
+                  <View style={s.identityText}>
+                    <View style={[s.identityNameRow, { flexDirection: dir }]}>
+                      <Text style={[s.accountName, { color: th.text, textAlign: align }]} numberOfLines={1}>{profileName}</Text>
+                      <View style={[s.accountState, { backgroundColor: connectedAccount ? th.incBg : th.primSoft }]}>
+                        <View style={[s.accountStateDot, { backgroundColor: connectedAccount ? th.inc : th.primary }]} />
+                        <Text style={[s.accountStateText, { color: connectedAccount ? th.inc : th.primary }]} numberOfLines={1}>
+                          {connectedAccount ? L.signed : L.guest}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={[s.identityType, { color: connectedAccount ? th.primary : th.sub, textAlign: align, writingDirection: connectedAccount && user?.email ? 'ltr' : undefined }]} numberOfLines={1}>
+                      {connectedAccount && user?.email ? user.email : L.local}
+                    </Text>
+                  </View>
+                </View>
               </View>
-              <View style={[s.status, { borderColor: syncConflict || lastSyncError ? th.warn : th.border, backgroundColor: th.cardHigh, flexDirection: dir }]}>
+              <View style={[s.status, { borderColor: syncConflict || lastSyncError ? `${th.warn}66` : th.border, backgroundColor: th.cardHigh, flexDirection: dir }]}>
                 <Ionicons name={syncConflict || lastSyncError ? 'warning-outline' : online ? 'cloud-done-outline' : 'cloud-offline-outline'} size={20} color={syncConflict || lastSyncError ? th.warn : th.inc} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: th.text, fontWeight: '900', textAlign: align }}>{syncText}</Text>
-                  <Text style={{ color: th.sub, fontSize: 12, marginTop: 3, textAlign: align }}>
-                    {L.lastSync}: {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString(ar ? 'ar-IQ' : 'en') : L.never}
-                  </Text>
+                  {connectedAccount ? (
+                    <Text style={{ color: th.sub, fontSize: 12, marginTop: 3, textAlign: align }}>
+                      {L.lastSync}: {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString(ar ? 'ar-IQ' : 'en') : L.never}
+                    </Text>
+                  ) : null}
                   {vaultRecovery ? (
                     <Text style={{ color: th.warn, fontSize: 11, marginTop: 4, textAlign: align }}>
                       {ar ? `تم الاسترداد من النسخة المحلية الاحتياطية رقم ${vaultRecovery.backupIndex || 1}` : `Recovered from local backup #${vaultRecovery.backupIndex || 1}`}
@@ -253,12 +285,14 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
                   </View>
                 </View>
               ) : null}
-              <View style={s.actions}>
-                <TouchableOpacity disabled={!user || syncing} onPress={syncCloud} style={[s.primaryAction, { backgroundColor: th.primary, opacity: !user ? 0.45 : 1 }]}>
-                  <Ionicons name="sync-outline" size={17} color={th.onPrimary} />
-                  <Text style={{ color: th.onPrimary, fontWeight: '900' }}>{syncing ? L.syncing : L.sync}</Text>
-                </TouchableOpacity>
-              </View>
+              {connectedAccount ? (
+                <View style={s.actions}>
+                  <TouchableOpacity disabled={syncing} onPress={syncCloud} style={[s.primaryAction, { backgroundColor: th.primary, opacity: syncing ? 0.65 : 1 }]}>
+                    <Ionicons name="sync-outline" size={17} color={th.onPrimary} />
+                    <Text style={{ color: th.onPrimary, fontWeight: '900' }}>{syncing ? L.syncing : L.sync}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
               <TouchableOpacity onPress={() => { onClose?.(); onOpenTab?.('settings'); }} style={[s.settings, { borderColor: th.border, flexDirection: dir }]}>
                 <Ionicons name="shield-checkmark-outline" size={19} color={th.primary} />
                 <Text style={{ flex: 1, color: th.text, fontWeight: '900', textAlign: align }}>{L.settings}</Text>
@@ -306,27 +340,40 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
 
 const s = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 11, maxHeight: '84%', minHeight: '48%' },
-  handle: { width: 38, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 17 },
-  header: { alignItems: 'center', gap: 10, marginBottom: 14 },
-  titleIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  sheet: { borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 16, paddingTop: 10, maxHeight: '86%', minHeight: '48%' },
+  handle: { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 14 },
+  header: { alignItems: 'center', gap: 10, marginBottom: 12 },
+  titleIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   title: { flex: 1, fontSize: 18, lineHeight: 24, fontWeight: '900' },
-  account: { borderWidth: 1, borderRadius: 16, alignItems: 'center', padding: 18, marginBottom: 10 },
-  avatar: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 9, overflow: 'hidden' },
+  closeAction: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  account: { borderWidth: 1, borderRadius: 18, padding: 13, marginBottom: 9 },
+  accountTop: { alignItems: 'center', gap: 11 },
+  avatar: { width: 60, height: 60, borderRadius: 20, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
   avatarImage: { width: '100%', height: '100%' },
-  accountName: { fontSize: 16, fontWeight: '900', marginBottom: 4, maxWidth: '90%' },
-  accountHandle: { fontSize: 12, fontWeight: '900', marginBottom: 3, writingDirection: 'ltr' },
-  status: { borderWidth: 1, borderRadius: 14, padding: 13, gap: 10, alignItems: 'center', marginBottom: 10 },
+  identityText: { flex: 1, minWidth: 0 },
+  identityNameRow: { alignItems: 'center', gap: 7 },
+  identityType: { fontSize: 10, lineHeight: 14, fontWeight: '800', marginTop: 2 },
+  identityFacts: { borderTopWidth: 1, marginTop: 9, paddingTop: 8, gap: 6, flexWrap: 'wrap' },
+  identityFact: { flex: 1, flexBasis: 0, minWidth: '30%', minHeight: 45, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 6, justifyContent: 'center' },
+  identityFactLabel: { fontSize: 8, lineHeight: 12, fontWeight: '800', textAlign: 'center' },
+  identityFactValue: { fontSize: 10, lineHeight: 15, fontWeight: '900', textAlign: 'center', marginTop: 2 },
+  accountEmail: { fontSize: 10, lineHeight: 15, marginTop: 1, writingDirection: 'ltr' },
+  accountState: { minHeight: 24, maxWidth: 94, borderRadius: 12, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5, flexShrink: 0 },
+  accountStateDot: { width: 7, height: 7, borderRadius: 4 },
+  accountStateText: { fontSize: 9, lineHeight: 13, fontWeight: '900' },
+  accountName: { fontSize: 16, lineHeight: 21, fontWeight: '900', flex: 1 },
+  accountHandle: { fontSize: 11, lineHeight: 16, fontWeight: '700', marginTop: 3, writingDirection: 'ltr' },
+  status: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 11, paddingVertical: 9, gap: 9, alignItems: 'center', marginBottom: 9 },
   actions: { gap: 8, marginBottom: 10 },
   primaryAction: { minHeight: 46, borderRadius: 13, width: '100%', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, paddingHorizontal: 10 },
   secondaryAction: { minHeight: 46, borderRadius: 13, borderWidth: 1, flex: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, paddingHorizontal: 8 },
-  settings: { minHeight: 52, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 13 },
+  settings: { minHeight: 50, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 12 },
   recoveryBlock: { borderWidth: 1, borderRadius: 14, padding: 14, gap: 10, marginBottom: 10 },
   recoveryText: { fontSize: 12, lineHeight: 18 },
   recoveryActions: { gap: 8, marginTop: 10 },
   recoveryButton: { flex: 1, minHeight: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, borderWidth: 1 },
   searchBox: { minHeight: 48, borderWidth: 1, borderRadius: 14, alignItems: 'center', gap: 9, paddingHorizontal: 12, marginBottom: 12 },
-  row: { minHeight: 62, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 9, padding: 10, marginBottom: 7 },
+  row: { minHeight: 62, borderRadius: 15, borderWidth: 1, alignItems: 'center', gap: 9, padding: 10, marginBottom: 7 },
   rowIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   rowTitle: { fontSize: 14, lineHeight: 19, fontWeight: '900' },
   rowSub: { fontSize: 11, lineHeight: 17, marginTop: 3 },

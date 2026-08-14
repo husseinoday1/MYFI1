@@ -22,6 +22,8 @@ export const FLOW_TYPES = {
   RECEIVABLE_COLLECTION: 'receivable_collection',
   GOAL_ALLOCATION: 'goal_allocation',
   COMMITMENT_PAYMENT: 'commitment_payment',
+  OPENING_BALANCE: 'opening_balance',
+  BALANCE_ADJUSTMENT: 'balance_adjustment',
 };
 
 export const FEATURE_DEFINITIONS = {
@@ -109,9 +111,33 @@ export const scopeMatches = (item = {}, cfg = {}) => {
   return normalizeScope(item.scope, defaultScopeForProfile(cfg.profileType)) === active;
 };
 
-export const filterByActiveScope = (items = [], cfg = {}) => (
-  (Array.isArray(items) ? items : []).filter(item => scopeMatches(item, cfg))
+const activeScopeCache = new WeakMap();
+const featureFilterCache = new WeakMap();
+
+const activeScopeCacheKey = (cfg = {}) => (
+  `${cfg.profileType || PROFILE_TYPES.PERSONAL}|${getActiveScope(cfg)}`
 );
+
+const enabledTransactionFeaturesKey = (cfg = {}) => {
+  const modules = getModules(cfg);
+  return ['wallets', 'debtsOwed', 'debtsReceivable', 'goals', 'commitments']
+    .map(key => modules[key] === false ? '0' : '1')
+    .join('');
+};
+
+export const filterByActiveScope = (items = [], cfg = {}) => {
+  const source = Array.isArray(items) ? items : [];
+  if (getActiveScope(cfg) === SCOPES.ALL) return source;
+  const key = activeScopeCacheKey(cfg);
+  const cachedByScope = activeScopeCache.get(source);
+  const cached = cachedByScope?.get(key);
+  if (cached) return cached;
+  const filtered = source.filter(item => scopeMatches(item, cfg));
+  const nextCache = cachedByScope || new Map();
+  nextCache.set(key, filtered);
+  if (!cachedByScope) activeScopeCache.set(source, nextCache);
+  return filtered;
+};
 
 export const inferFlowType = (tx = {}) => {
   if (tx.flowType && Object.values(FLOW_TYPES).includes(tx.flowType)) return tx.flowType;
@@ -170,13 +196,37 @@ export const featureForTransaction = (tx = {}) => {
   if (flow === FLOW_TYPES.RECEIVABLE_CREATED) return 'debtsReceivable';
   if (flow === FLOW_TYPES.GOAL_ALLOCATION) return 'goals';
   if (flow === FLOW_TYPES.COMMITMENT_PAYMENT) return 'commitments';
-  if (flow === FLOW_TYPES.TRANSFER) return 'wallets';
+  if ([FLOW_TYPES.TRANSFER, FLOW_TYPES.OPENING_BALANCE, FLOW_TYPES.BALANCE_ADJUSTMENT].includes(flow)) return 'wallets';
   return null;
 };
 
 export const transactionFeatureEnabled = (tx = {}, cfg = {}) => {
   const feature = featureForTransaction(tx);
   return !feature || isFeatureEnabled(cfg, feature);
+};
+
+
+
+export const filterTransactionsByEnabledFeatures = (items = [], cfg = {}) => {
+  const source = Array.isArray(items) ? items : [];
+  const modules = getModules(cfg);
+  const allTransactionFeaturesEnabled = [
+    'wallets',
+    'debtsOwed',
+    'debtsReceivable',
+    'goals',
+    'commitments',
+  ].every(key => modules[key] !== false);
+  if (allTransactionFeaturesEnabled) return source;
+  const key = enabledTransactionFeaturesKey(cfg);
+  const cachedByFeatures = featureFilterCache.get(source);
+  const cached = cachedByFeatures?.get(key);
+  if (cached) return cached;
+  const filtered = source.filter(item => transactionFeatureEnabled(item, cfg));
+  const nextCache = cachedByFeatures || new Map();
+  nextCache.set(key, filtered);
+  if (!cachedByFeatures) featureFilterCache.set(source, nextCache);
+  return filtered;
 };
 
 export const filterFeatureEntities = ({
@@ -208,7 +258,11 @@ export const getFeatureDataCount = (key, state = {}) => {
   if (key === 'goals') return (state.goals || []).length;
   if (key === 'commitments') return (state.commitments || []).length;
   if (key === 'wallets') return Math.max(0, (state.wallets || []).length - 1);
-  if (key === 'budgets') return Object.keys(state.cfg?.categoryBudgets || {}).length;
+  if (key === 'budgets') {
+    const monthly = state.cfg?.categoryBudgetsByMonth || {};
+    const latest = Object.keys(monthly).sort().pop();
+    return Object.keys(latest ? (monthly[latest] || {}) : (state.cfg?.categoryBudgets || {})).length;
+  }
   if (key === 'recurring') return (state.trans || []).filter(item => item.recurring).length;
   return 0;
 };

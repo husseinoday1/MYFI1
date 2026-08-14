@@ -14,6 +14,7 @@ export const STORAGE = {
   FAB_POS:   'MYFI_FAB_POS_V1',
   DEMO_REAL: 'MYFI_DEMO_REAL_V1',
   DEMO_DATA: 'MYFI_DEMO_DATA_V1',
+  DEMO_ACTIVE: 'MYFI_DEMO_ACTIVE_V1',
 };
 
 export const LEGACY_STORAGE_KEYS = {
@@ -26,10 +27,17 @@ export const LEGACY_STORAGE_KEYS = {
 
 export const detectSystemLang = () => {
   try {
-    const locale = Intl?.DateTimeFormat?.().resolvedOptions?.().locale || '';
-    return String(locale).toLowerCase().startsWith('ar') ? 'ar' : 'en';
+    const nav = typeof navigator !== 'undefined' ? navigator : null;
+    const candidates = [
+      ...(Array.isArray(nav?.languages) ? nav.languages : []),
+      nav?.language,
+      Intl?.DateTimeFormat?.().resolvedOptions?.().locale,
+      Intl?.NumberFormat?.().resolvedOptions?.().locale,
+    ].filter(Boolean);
+    const locale = String(candidates[0] || '').toLowerCase();
+    return locale.startsWith('ar') ? 'ar' : 'en';
   } catch {
-    return 'ar';
+    return 'en';
   }
 };
 
@@ -173,8 +181,8 @@ export const DEF_MODULES = {
 export const DEF_HOME_CARDS = [
   { key: 'income', visible: true },
   { key: 'expense', visible: true },
+  { key: 'saving', visible: true },
   { key: 'net', visible: true },
-  { key: 'dueSoon', visible: true },
 ];
 export const DEF_HOME_SECTIONS = [
   { key: 'hero', visible: true },
@@ -193,14 +201,14 @@ export const DEF_QUICK_ACTIONS = [
   { key: 'payCommitment', visible: true },
 ];
 export const DEF_START_TAB = 'home';
-const HOME_LAYOUT_VERSION = 2;
+const HOME_LAYOUT_VERSION = 3;
 
 export const DEF_CFG = {
-  theme: 'dark', themeMode: 'manual', lang: detectSystemLang(), langMode: 'system', currency: 'IQD',
+  theme: 'dark', themeMode: 'system', lang: detectSystemLang(), langMode: 'system', currency: 'IQD',
   orientationMode: 'system',
-  monthNameStyle: 'numeric',
-  displayName: '', username: '', phone: '', avatarUri: '', accountConsentAccepted: false,
-  country: 'IQ', name: 'المستخدم', avatar: '🌿',
+  monthNameStyle: 'system',
+  displayName: '', username: '', phone: '', avatarUri: '', avatarPath: '', accountConsentAccepted: false,
+  country: 'IQ', name: '', avatar: '🌿',
   profileType: 'personal',
   activeScope: 'personal',
   enabledModules: DEF_MODULES,
@@ -214,7 +222,9 @@ export const DEF_CFG = {
   defaultWalletId: null,
   bioLock: false,
   lockDelaySeconds: 300,
+  hideNotificationDetails: true,
   categoryBudgets: {},
+  categoryBudgetsByMonth: {},
 };
 
 const normalizeModules = (modules = {}) =>
@@ -252,7 +262,9 @@ export const normalizeCfg = (cfg = {}) => {
     : DEF_START_TAB;
   const country = COUNTRIES.some(item => item.code === cfg.country) ? cfg.country : DEF_CFG.country;
   const currency = CURRENCIES.some(item => item.code === cfg.currency) ? cfg.currency : DEF_CFG.currency;
-  const displayName = String(cfg.displayName || cfg.name || '').trim().replace(/\s+/g, ' ').slice(0, 48);
+  const legacyName = String(cfg.name || '').trim();
+  const legacyNameIsPlaceholder = /^(المستخدم|user)$/i.test(legacyName);
+  const displayName = String(cfg.displayName || (legacyNameIsPlaceholder ? '' : legacyName) || '').trim().replace(/\s+/g, ' ').slice(0, 48);
   const username = String(cfg.username || '').trim().toLowerCase()
     .replace(/^@+/, '')
     .replace(/[^a-z0-9_]/g, '_')
@@ -261,6 +273,7 @@ export const normalizeCfg = (cfg = {}) => {
     .slice(0, 24);
   const phone = String(cfg.phone || '').trim().replace(/[^\d+]/g, '').slice(0, 18);
   const avatarUri = String(cfg.avatarUri || '').trim().slice(0, 2048);
+  const avatarPath = String(cfg.avatarPath || '').trim().slice(0, 512);
   const profileType = ['personal', 'personal_business', 'business'].includes(cfg.profileType)
     ? cfg.profileType
     : DEF_CFG.profileType;
@@ -279,20 +292,29 @@ export const normalizeCfg = (cfg = {}) => {
     country,
     currency,
     displayName,
+    name: displayName,
     username,
     phone,
     avatarUri,
+    avatarPath,
     accountConsentAccepted: cfg.accountConsentAccepted === true,
     profileType,
     activeScope,
     lockDelaySeconds,
+    hideNotificationDetails: cfg.hideNotificationDetails !== false,
     langMode,
     lang: langMode === 'system' ? detectSystemLang() : manualLang,
-    orientationMode: ['system', 'portrait', 'landscape'].includes(cfg.orientationMode) ? cfg.orientationMode : 'system',
+    orientationMode: ['system', 'auto', 'portrait', 'landscape'].includes(cfg.orientationMode) ? cfg.orientationMode : 'system',
     monthNameStyle: normalizeMonthNameStyle(cfg.monthNameStyle),
     themeMode: cfg.themeMode === 'system' ? 'system' : 'manual',
     theme: cfg.theme === 'light' ? 'light' : 'dark',
     categoryBudgets: Object.fromEntries(Object.entries(cfg.categoryBudgets || {}).filter(([, value]) => Number(value) > 0)),
+    categoryBudgetsByMonth: Object.fromEntries(
+      Object.entries(cfg.categoryBudgetsByMonth || {})
+        .filter(([month, map]) => /^\d{4}-\d{2}$/.test(month) && map && typeof map === 'object' && !Array.isArray(map))
+        .map(([month, map]) => [month, Object.fromEntries(Object.entries(map).filter(([, value]) => Number(value) > 0))])
+        .filter(([, map]) => Object.keys(map).length > 0),
+    ),
     // Monthly recurrence is a core entry capability. Existing profiles that
     // hid the old optional module are migrated back to the enabled state.
     enabledModules: { ...normalizeModules(cfg.enabledModules), recurring: true },

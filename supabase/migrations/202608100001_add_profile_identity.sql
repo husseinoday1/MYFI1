@@ -1,6 +1,7 @@
 -- Adds MYFI account identity fields used for rooms, sharing, and future subscriptions.
 
 alter table public.profiles
+  add column if not exists display_name text,
   add column if not exists username text,
   add column if not exists phone text;
 

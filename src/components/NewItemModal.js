@@ -17,8 +17,6 @@ import { suggestCategoryForText } from '../lib/localIntelligence';
 import { CATEGORY_FLOWS, getCategoriesForFlow } from '../lib/categories';
 
 const cleanNumber = parseNumberInput;
-const monthStartISO = (value = today()) => `${String(value).slice(0, 7)}-01`;
-
 const modalCopy = (lang = 'ar') => {
   const ar = lang === 'ar';
   return {
@@ -39,7 +37,7 @@ const modalCopy = (lang = 'ar') => {
     linkPlan: ar ? 'إضافة التزام شهري مرتبط' : 'Add linked monthly commitment',
     linkPlanHint: ar ? 'سينشئ التزاماً بدفعة شهرية مرتبطة بالدين أو هدف التوفير.' : 'Creates a monthly payment commitment linked to this debt or saving goal.',
     planAmount: ar ? 'قيمة الدفعة الشهرية' : 'Monthly payment amount',
-    planDate: ar ? 'شهر بدء الالتزام' : 'First commitment month',
+    planDate: ar ? 'تاريخ الدفع' : 'Payment date',
     wallet: ar ? 'محفظة الدفع' : 'Payment wallet',
     category: ar ? 'فئة الالتزام' : 'Commitment category',
     categoryHint: ar ? 'نقترح الفئة من اسم الالتزام ويمكنك تغييرها يدوياً.' : 'We suggest a category from the name; you can override it.',
@@ -73,8 +71,6 @@ const modalCopy = (lang = 'ar') => {
     monthlyRepeat: ar ? 'شهري' : 'Monthly',
     oneTimeRepeat: ar ? 'مرة واحدة' : 'One time',
     repeatMode: ar ? 'تكرار الالتزام' : 'Commitment repeat',
-    note: ar ? 'ملاحظة' : 'Note',
-    notePlaceholder: ar ? 'أضف ملاحظة اختيارية' : 'Add an optional note',
   };
 };
 
@@ -125,7 +121,6 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const [commitmentCat, setCommitmentCat] = useState('other');
   const [commitmentCatTouched, setCommitmentCatTouched] = useState(false);
   const [commitmentRepeatMonthly, setCommitmentRepeatMonthly] = useState(true);
-  const [note, setNote] = useState('');
   const [expandedPicker, setExpandedPicker] = useState(null);
 
   useEffect(() => {
@@ -141,13 +136,12 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setStartDate(today());
     setWithPlan(false);
     setPlanAmount('');
-    setPlanDate(monthStartISO());
+    setPlanDate(today());
     setPlanWalletId(defaultWalletId);
     setOriginMode('previous');
     setCommitmentCat(suggestCategoryForText(presetName, commitmentCategories));
     setCommitmentCatTouched(false);
     setCommitmentRepeatMonthly(true);
-    setNote('');
     setExpandedPicker(null);
   }, [visible, linkedPlanMode, presetKind, preset?.linkedName, requestedTrackerType, defaultWalletId]);
 
@@ -188,7 +182,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setTrackerType(value);
     setOriginMode('previous');
     if (value === 'commitment') {
-      setStartDate(monthStartISO());
+      setStartDate(today());
       setCommitmentCat(suggestCategoryForText(name, commitmentCategories));
       setCommitmentCatTouched(false);
       setCommitmentRepeatMonthly(true);
@@ -226,13 +220,12 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setStartDate(today());
     setWithPlan(false);
     setPlanAmount('');
-    setPlanDate(monthStartISO());
+    setPlanDate(today());
     setPlanWalletId(defaultWalletId);
     setOriginMode('previous');
     setCommitmentCat('other');
     setCommitmentCatTouched(false);
     setCommitmentRepeatMonthly(true);
-    setNote('');
     setExpandedPicker(null);
   };
 
@@ -262,12 +255,11 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
 
   const walletOptions = walletList.map(wallet => {
     const info = walletBalanceById(wallet.id) || wallet;
-    const total = Number(info?.balance || 0);
-    const available = Number(info?.availableBalance ?? total);
+    const available = Number(info?.availableBalance ?? info?.balance ?? 0);
     return {
       value: wallet.id,
       label: getWalletLabel(wallet, cfg.lang),
-      detail: `${isAr ? 'متاح' : 'Available'} ${Math.round(available).toLocaleString()} ${sym} · ${isAr ? 'كلي' : 'Total'} ${Math.round(total).toLocaleString()} ${sym}`,
+      detail: `${isAr ? 'متاح' : 'Available'} ${Math.round(available).toLocaleString()} ${sym}`,
       icon: 'wallet-outline',
       color: available >= 0 ? th.primary : th.exp,
     };
@@ -279,6 +271,10 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     icon: cat.icon || 'pricetag-outline',
     color: cat.color || th.primary,
   }));
+  const commitmentRepeatOptions = [
+    { value: true, label: T.monthlyRepeat, icon: 'repeat-outline', color: th.warn },
+    { value: false, label: T.oneTimeRepeat, icon: 'ellipse-outline', color: th.warn },
+  ];
   const trackerMeta = {
     owed: { label: T.owed, icon: 'arrow-down-outline', color: th.exp, bg: th.expBg },
     receivable: { label: T.receivable, icon: 'arrow-up-outline', color: th.inc, bg: th.incBg },
@@ -339,7 +335,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
             <Text numberOfLines={1} style={[s.selectValue, { color: th.text, textAlign: align }]}>
               {selected?.label || (isAr ? 'اختر' : 'Choose')}
             </Text>
-            <Text numberOfLines={2} style={[s.selectDetail, { color: th.sub, textAlign: align }]}>
+            <Text numberOfLines={1} style={[s.selectDetail, { color: th.sub, textAlign: align }]}>
               {selected?.detail || ' '}
             </Text>
           </View>
@@ -359,10 +355,9 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
       await addCommitment({
         name: linkedName,
         amt: linkedValue,
-        firstDueISO: monthStartISO(planDate),
+        firstDueISO: planDate,
         walletId: planWalletId,
         cat: preset?.cat || suggestCategoryForText(linkedName, cats),
-        note: note.trim(),
         linkedType: preset?.linkedType || 'debt',
         linkedId: preset?.linkedId || null,
       });
@@ -383,10 +378,9 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
       await addCommitment({
         name: name.trim(),
         amt: totalValue,
-        firstDueISO: monthStartISO(startDate),
+        firstDueISO: startDate,
         walletId: planWalletId,
         cat: commitmentCat || suggestCategoryForText(name, commitmentCategories),
-        note: note.trim(),
         linkedType: 'none',
         repeatMonthly: commitmentRepeatMonthly,
       });
@@ -405,14 +399,12 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         direction: isReceivable ? 'receivable' : 'owed',
         originMode,
         walletId: planWalletId,
-        note: note.trim(),
       });
     } else {
       created = await addGoal({
         name: name.trim(),
         target: totalValue,
         createdAt: startDate,
-        note: note.trim(),
       });
     }
 
@@ -420,7 +412,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
       await addCommitment({
         name: name.trim(),
         amt: linkedValue,
-        firstDueISO: monthStartISO(planDate),
+        firstDueISO: planDate,
         walletId: planWalletId,
         cat: suggestCategoryForText(name, cats),
         linkedType: isGoal ? 'goal' : isReceivable ? 'receivable' : 'debt',
@@ -492,20 +484,6 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                 </View>
               ) : null}
 
-              <View style={[s.trackerHeaderCard, { backgroundColor: activeMeta.bg, borderColor: `${activeMeta.color}44`, flexDirection: rowDir }]}>
-                <View style={[s.trackerHeaderIcon, { backgroundColor: activeMeta.color }]}>
-                  <Ionicons name={activeMeta.icon} size={18} color="#fff" />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text numberOfLines={1} style={[s.trackerHeaderTitle, { color: th.text, textAlign: align }]}>
-                    {activeMeta.label}
-                  </Text>
-                  <Text numberOfLines={1} style={[s.trackerHeaderMeta, { color: activeMeta.color, textAlign: align }]}>
-                    {amountValue > 0 ? moneyPreview(amountValue) : (isAr ? 'جاهز للإدخال' : 'Ready to enter')}
-                  </Text>
-                </View>
-              </View>
-
               {renderTextField({
                 label: nameLabel,
                 value: name,
@@ -522,15 +500,6 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                 tone: activeColor,
                 large: true,
               })}
-
-              {isGoal ? (
-                renderInfoCard({
-                  icon: 'wallet-outline',
-                  label: T.savingMode,
-                  value: T.savingReserveLater,
-                  tone: th.primary,
-                })
-              ) : null}
 
               {isDebt ? (
                 <View style={s.originBlock}>
@@ -554,31 +523,18 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                       );
                     })}
                   </View>
-                  {renderInfoCard({
-                    icon: originMode === 'previous' ? 'remove-circle-outline' : 'wallet-outline',
-                    label: T.balanceEffect,
-                    value: originImpactText,
-                    tone: activeColor,
-                  })}
-                  <Text style={{ color: th.faint, fontSize: 12, lineHeight: 18, ...weight('700'), textAlign: align }}>
-                    {originMode === 'received' ? T.receivedHint : originMode === 'lent' ? T.lentHint : T.previousHint}
-                  </Text>
+                  <View style={[s.originImpactPill, { backgroundColor: `${activeColor}12`, flexDirection: rowDir }]}>
+                    <Ionicons
+                      name={originMode === 'previous' ? 'remove-circle-outline' : 'wallet-outline'}
+                      size={14}
+                      color={activeColor}
+                    />
+                    <Text numberOfLines={1} style={{ flex: 1, color: activeColor, fontSize: 11, ...weight('900'), textAlign: align }}>
+                      {originImpactText}
+                    </Text>
+                  </View>
                 </View>
               ) : null}
-
-              <View style={[s.noteBlock, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
-                <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>{T.note}</Text>
-                <TextInput
-                  value={note}
-                  onChangeText={setNote}
-                  placeholder={T.notePlaceholder}
-                  placeholderTextColor={th.faint}
-                  multiline
-                  numberOfLines={2}
-                  textAlignVertical="top"
-                  style={[s.noteInput, { color: th.text, textAlign: align }]}
-                />
-              </View>
 
               {isCommitment ? (
                 <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
@@ -589,9 +545,9 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                     lang={cfg.lang}
                     monthNameStyle={cfg.monthNameStyle}
                     label={T.planDate}
-                    monthOnly
                     style={s.selectFieldBlock}
                     buttonStyle={s.dateButton}
+                    labelInside
                   />
                   {walletList.length > 0 ? renderSelectField({
                     id: 'commitment-wallet',
@@ -614,6 +570,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                     label={T.startDate}
                     style={s.selectFieldBlock}
                     buttonStyle={s.dateButton}
+                    labelInside
                   />
                   {renderSelectField({
                     id: 'origin-wallet',
@@ -635,44 +592,30 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                   label={T.startDate}
                   style={{ marginBottom: 16 }}
                   buttonStyle={s.dateButton}
+                  labelInside
                 />
               )}
-
               {isCommitment ? (
-                <>
-                  <View style={s.categoryBlock}>
-                    {renderSelectField({
-                      id: 'commitment-category',
-                      label: T.category,
-                      value: commitmentCat,
-                      options: commitmentCategoryOptions,
-                      icon: 'pricetag-outline',
-                      tone: th.warn,
-                      onChange: selectCommitmentCategory,
-                    })}
-                    <Text style={[s.categoryHint, { color: th.faint, textAlign: align }]}>{T.categoryHint}</Text>
-                  </View>
-                  <View style={s.repeatBlock}>
-                    <Text style={[s.label, { color: th.sub, textAlign: align }]}>{T.repeatMode}</Text>
-                    <View style={[s.originModes, { flexDirection: rowDir }]}>
-                      {[
-                        { value: true, label: T.monthlyRepeat },
-                        { value: false, label: T.oneTimeRepeat },
-                      ].map(option => {
-                        const active = commitmentRepeatMonthly === option.value;
-                        return (
-                          <TouchableOpacity
-                            key={String(option.value)}
-                            onPress={() => setCommitmentRepeatMonthly(option.value)}
-                            style={[s.originMode, { backgroundColor: active ? th.warnBg : th.cardHigh, borderColor: active ? th.warn : th.border }]}
-                          >
-                            <Text style={{ color: active ? th.warn : th.sub, fontSize: 12, ...weight('900') }}>{option.label}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  </View>
-                </>
+                <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
+                  {renderSelectField({
+                    id: 'commitment-category',
+                    label: T.category,
+                    value: commitmentCat,
+                    options: commitmentCategoryOptions,
+                    icon: 'pricetag-outline',
+                    tone: th.warn,
+                    onChange: selectCommitmentCategory,
+                  })}
+                  {renderSelectField({
+                    id: 'commitment-repeat',
+                    label: T.repeatMode,
+                    value: commitmentRepeatMonthly,
+                    options: commitmentRepeatOptions,
+                    icon: 'repeat-outline',
+                    tone: th.warn,
+                    onChange: setCommitmentRepeatMonthly,
+                  })}
+                </View>
               ) : null}
             </>
           )}
@@ -683,7 +626,6 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                 <View style={[s.planToggle, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: align }}>{T.linkPlan}</Text>
-                    <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, ...weight('700'), marginTop: 3, textAlign: align }}>{T.linkPlanHint}</Text>
                   </View>
                   <Switch
                     value={withPlan}
@@ -717,9 +659,9 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                       lang={cfg.lang}
                       monthNameStyle={cfg.monthNameStyle}
                       label={T.planDate}
-                      monthOnly
                       style={s.selectFieldBlock}
                       buttonStyle={s.dateButton}
+                      labelInside
                     />
                     {walletList.length > 0 ? renderSelectField({
                       id: 'plan-wallet',
@@ -828,17 +770,11 @@ const s = StyleSheet.create({
   title: { flex: 1, fontSize: 18, lineHeight: 24, ...weight('900') },
   typeGrid: { gap: 8, marginBottom: 12, flexWrap: 'wrap' },
   typeBtn: { width: '48.5%', minWidth: 0, minHeight: 70, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 8 },
-  trackerHeaderCard: { minHeight: 64, borderRadius: 16, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
-  trackerHeaderIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  trackerHeaderTitle: { fontSize: 15, lineHeight: 21, ...weight('900') },
-  trackerHeaderMeta: { fontSize: 12, lineHeight: 17, ...weight('900'), marginTop: 2 },
-  entryField: { minHeight: 64, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 9, justifyContent: 'center' },
-  amountField: { minHeight: 76 },
+  entryField: { minHeight: 60, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 9, justifyContent: 'center' },
+  amountField: { minHeight: 72 },
   fieldLabel: { fontSize: 11, lineHeight: 15, ...weight('800'), marginBottom: 4 },
   inlineInput: { minHeight: 28, padding: 0, fontSize: 14, lineHeight: 19, ...weight('900') },
   amountInput: { minHeight: 36, padding: 0, fontSize: 22, lineHeight: 30, ...weight('900') },
-  noteBlock: { minHeight: 76, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 10 },
-  noteInput: { minHeight: 38, padding: 0, fontSize: 13, lineHeight: 19, ...weight('700') },
   infoCard: { minHeight: 58, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 9, paddingHorizontal: 10, paddingVertical: 9, marginBottom: 8 },
   infoValue: { fontSize: 12, lineHeight: 17, ...weight('900'), marginTop: 1 },
   infoBox: { borderRadius: 14, borderWidth: 0.5, padding: 12, gap: 10, marginBottom: 16, alignItems: 'center' },
@@ -854,13 +790,14 @@ const s = StyleSheet.create({
   goalPurposeBlock: { marginBottom: 14 },
   originModes: { gap: 8, marginBottom: 7 },
   originMode: { flex: 1, minHeight: 40, borderRadius: 11, borderWidth: 0.5, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-  twoColumnRow: { alignItems: 'stretch', gap: 10, marginBottom: 10 },
-  selectFieldBlock: { flex: 1, minWidth: 0, marginBottom: 7 },
-  selectField: { minHeight: 74, alignItems: 'center', gap: 8, borderRadius: 13, borderWidth: 0.5, paddingHorizontal: 10, paddingVertical: 8 },
+  originImpactPill: { minHeight: 30, borderRadius: 10, alignItems: 'center', gap: 6, paddingHorizontal: 9, marginTop: 1 },
+  twoColumnRow: { width: '100%', alignItems: 'stretch', gap: 8, marginBottom: 9 },
+  selectFieldBlock: { flex: 1, flexBasis: 0, minWidth: 0, height: 64, marginBottom: 0 },
+  selectField: { minHeight: 64, height: 64, alignItems: 'center', gap: 8, borderRadius: 13, borderWidth: 0.5, paddingHorizontal: 10, paddingVertical: 6 },
   selectLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
   selectValue: { fontSize: 13, lineHeight: 18, ...weight('900'), marginTop: 1 },
   selectDetail: { fontSize: 9, lineHeight: 12, ...weight('700'), marginTop: 1 },
-  dateButton: { minHeight: 74, paddingHorizontal: 10 },
+  dateButton: { minHeight: 64, height: 64, borderRadius: 13, borderWidth: 0.5, paddingHorizontal: 10, paddingVertical: 6 },
   emptySelect: { padding: 10, fontSize: 12, ...weight('700') },
   selectSheetOverlay: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 12 },
   selectSheetPanel: { width: '100%', maxWidth: 520, alignSelf: 'center', maxHeight: '54%', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, paddingHorizontal: 12, paddingTop: 10 },
@@ -870,8 +807,8 @@ const s = StyleSheet.create({
   selectSheetClose: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   selectSheetList: { width: '100%' },
   selectSheetOption: { minHeight: 48, alignItems: 'center', gap: 9, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 7 },
-  planToggle: { borderRadius: 14, paddingHorizontal: 13, paddingVertical: 12, gap: 10, alignItems: 'center', marginBottom: 14 },
-  planSection: { borderRadius: 14, borderWidth: 0.5, padding: 12, marginBottom: 16 },
+  planToggle: { minHeight: 54, borderRadius: 14, paddingHorizontal: 13, paddingVertical: 9, gap: 10, alignItems: 'center', marginBottom: 10 },
+  planSection: { borderRadius: 16, borderWidth: 1, padding: 10, marginBottom: 10 },
   planHead: { alignItems: 'center', gap: 7, marginBottom: 10 },
   planInput: { marginBottom: 12 },
   saveBtn: { minHeight: 52, borderRadius: 15, padding: 15, alignItems: 'center', justifyContent: 'center' },

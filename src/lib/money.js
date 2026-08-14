@@ -36,3 +36,17 @@ export const formatMoneyNumber = (
 
   return isNegative ? `-${result}` : result;
 };
+// Backward-compatible aliases kept for Phase 1 contracts and any existing callers.
+export const toMinorUnits = (value, currency = 'IQD') => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return null;
+  const factor = 10 ** currencyFractionDigits(currency);
+  const scaled = Math.round((amount + Number.EPSILON) * factor);
+  return Number.isSafeInteger(scaled) ? scaled : null;
+};
+
+export const fromMinorUnits = (minor, currency = 'IQD') => {
+  const value = Number(minor);
+  if (!Number.isSafeInteger(value)) return null;
+  return value / (10 ** currencyFractionDigits(currency));
+};

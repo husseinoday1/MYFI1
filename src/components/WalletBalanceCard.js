@@ -5,7 +5,7 @@ import { TH } from '../lib/theme';
 import { getSymbol } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
 import { filterByActiveScope } from '../lib/modules';
-import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel } from '../lib/wallets';
+import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel, walletAmountToBase } from '../lib/wallets';
 import { Touchable as TouchableOpacity } from './AppPrimitives';
 import { RADIUS, weight } from '../lib/tokens';
 import { rowDirFor, textAlignFor } from '../lib/layout';
@@ -35,7 +35,8 @@ export default function WalletBalanceCard({
     const scoped = filterByActiveScope(wallets, cfg);
     const source = scoped.length ? scoped : wallets;
     const defaultId = getDefaultWalletId(source, cfg.currency, cfg.defaultWalletId);
-    return getWalletAvailableBalances(source, transactions, cfg.currency, defaultId);
+    return getWalletAvailableBalances(source, transactions, cfg.currency, defaultId)
+      .sort((a, b) => (a.id === defaultId ? -1 : b.id === defaultId ? 1 : getWalletLabel(a, cfg.lang).localeCompare(getWalletLabel(b, cfg.lang))));
   }, [
     wallets,
     transactions,
@@ -57,10 +58,12 @@ export default function WalletBalanceCard({
     ? rows.find(item => item.id === selectedWalletId)
     : null;
 
+  // Aggregate cards are always expressed in the workspace/base currency.
+  // Individual wallet rows remain in their native currencies.
   const aggregate = summary || {
-    physical: rows.reduce((sum, item) => sum + n(item.balance), 0),
-    available: rows.reduce((sum, item) => sum + n(item.availableBalance), 0),
-    reserved: rows.reduce((sum, item) => sum + n(item.reservedBalance), 0),
+    physical: rows.reduce((sum, item) => sum + walletAmountToBase(item, item.balance, cfg.currency), 0),
+    available: rows.reduce((sum, item) => sum + walletAmountToBase(item, item.availableBalance, cfg.currency), 0),
+    reserved: rows.reduce((sum, item) => sum + walletAmountToBase(item, item.reservedBalance, cfg.currency), 0),
   };
 
   const display = selected
@@ -71,9 +74,14 @@ export default function WalletBalanceCard({
       }
     : aggregate;
 
-  const unit = selected?.currency || cfg.currency || sym;
-  const fmt = value => formatMoneyNumber(Math.abs(n(value)), cfg.currency, cfg.lang);
+  const displayCurrency = selected?.currency || cfg.currency || 'IQD';
+  const unit = getSymbol(displayCurrency);
+  const fmt = value => formatMoneyNumber(Math.abs(n(value)), displayCurrency, cfg.lang);
   const money = value => `${n(value) < 0 ? '-' : ''}${fmt(value)} ${unit}`;
+  const walletMoney = (wallet, value) => {
+    const currency = wallet?.currency || cfg.currency || 'IQD';
+    return `${n(value) < 0 ? '-' : ''}${formatMoneyNumber(Math.abs(n(value)), currency, cfg.lang)} ${getSymbol(currency)}`;
+  };
 
   if (compact) {
     const label = selected
@@ -109,9 +117,23 @@ export default function WalletBalanceCard({
               style={[s.compactMetricValue, { color: th.text }]}
               numberOfLines={1}
               adjustsFontSizeToFit
-              minimumFontScale={0.68}
+              minimumFontScale={0.62}
             >
               {money(display.physical)}
+            </Text>
+          </View>
+
+          <View style={[s.compactMetric, { backgroundColor: th.warnBg }]}>
+            <Text style={[s.compactMetricLabel, { color: th.warn }]}>
+              {ar ? 'المحجوز' : 'Reserved'}
+            </Text>
+            <Text
+              style={[s.compactMetricValue, { color: n(display.reserved) > 0 ? th.warn : th.sub }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.62}
+            >
+              {money(display.reserved)}
             </Text>
           </View>
 
@@ -123,7 +145,7 @@ export default function WalletBalanceCard({
               style={[s.compactMetricValue, { color: n(display.available) >= 0 ? th.primary : th.exp }]}
               numberOfLines={1}
               adjustsFontSizeToFit
-              minimumFontScale={0.68}
+              minimumFontScale={0.62}
             >
               {money(display.available)}
             </Text>
@@ -191,57 +213,61 @@ export default function WalletBalanceCard({
                   >
                     <Ionicons
                       name={isDefault ? 'star' : 'wallet-outline'}
-                      size={16}
+                      size={15}
                       color={isDefault ? th.primary : th.sub}
                     />
                   </View>
 
-                  <Text
-                    style={[s.walletName, { color: th.text, textAlign: align }]}
-                    numberOfLines={2}
-                  >
-                    {getWalletLabel(wallet, cfg.lang)}
-                  </Text>
-
-                  {reserved > 0 ? (
-                    <View style={[s.reservePill, { backgroundColor: th.card }]}>
-                      <Text style={[s.reserveText, { color: th.sub }]}>
-                        {ar ? 'محجوز' : 'Reserved'} {money(reserved)}
+                  <View style={s.walletIdentity}>
+                    <View style={[s.walletNameLine, { flexDirection: rowDir }]}>
+                      <Text
+                        style={[s.walletName, { color: th.text, textAlign: align }]}
+                        numberOfLines={1}
+                      >
+                        {getWalletLabel(wallet, cfg.lang)}
                       </Text>
+                      {isDefault ? (
+                        <View style={[s.defaultPill, { backgroundColor: th.card }]}>
+                          <Text style={[s.defaultText, { color: th.primary }]}>
+                            {ar ? 'افتراضية' : 'Default'}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
-                  ) : null}
-                </View>
-
-                <View style={[s.walletMetrics, { flexDirection: rowDir }]}>
-                  <View style={s.walletMetric}>
-                    <Text style={[s.walletMetricLabel, { color: th.sub }]}>
-                      {ar ? 'الكلي' : 'Total'}
-                    </Text>
-                    <Text
-                      style={[s.walletMetricValue, { color: th.text }]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.7}
-                    >
-                      {money(total)}
-                    </Text>
+                    <View style={[s.walletMetaLine, { flexDirection: rowDir }]}>
+                      <View style={[s.metaItem, { backgroundColor: th.card }]}>
+                        <Text style={[s.metaItemText, { color: th.sub }]}>
+                          {ar ? 'الكلي' : 'Total'} {walletMoney(wallet, total)}
+                        </Text>
+                      </View>
+                      {reserved > 0 ? (
+                        <View style={[s.reservedItem, { backgroundColor: th.warnBg }]}>
+                          <Ionicons name="lock-closed-outline" size={10} color={th.warn} />
+                          <Text style={[s.reservedText, { color: th.warn }]} numberOfLines={1}>
+                            {ar ? 'محجوز للتوفير' : 'Reserved'} {walletMoney(wallet, reserved)}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
                   </View>
 
-                  <View style={[s.walletDivider, { backgroundColor: th.border }]} />
-
-                  <View style={s.walletMetric}>
-                    <Text style={[s.walletMetricLabel, { color: th.primary }]}>
+                  <View style={s.walletAvailableBlock}>
+                    <Text style={[s.walletAvailableLabel, { color: th.sub }]}>
                       {ar ? 'المتاح' : 'Available'}
                     </Text>
                     <Text
-                      style={[s.walletMetricValue, { color: available >= 0 ? th.primary : th.exp }]}
+                      style={[s.walletAvailableValue, { color: available >= 0 ? th.primary : th.exp }]}
                       numberOfLines={1}
                       adjustsFontSizeToFit
                       minimumFontScale={0.7}
                     >
-                      {money(available)}
+                      {walletMoney(wallet, available)}
                     </Text>
                   </View>
+
+                  {selectable ? (
+                    <Ionicons name={ar ? 'chevron-back' : 'chevron-forward'} size={15} color={th.faint} />
+                  ) : null}
                 </View>
                 {available < 0 ? (
                   <View style={[s.walletWarning, { backgroundColor: th.expBg, flexDirection: rowDir }]}>
@@ -263,7 +289,7 @@ export default function WalletBalanceCard({
 const s = StyleSheet.create({
   compact: {
     borderWidth: 1,
-    borderRadius: RADIUS.lg,
+    borderRadius: 16,
     padding: 10,
     marginBottom: 10,
   },
@@ -276,21 +302,24 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   compactTitle: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 18, ...weight('900') },
-  compactMetrics: { gap: 7 },
+  compactMetrics: { gap: 6 },
   compactMetric: {
     flex: 1,
+    flexBasis: 0,
     minWidth: 0,
-    borderRadius: RADIUS.md,
-    paddingHorizontal: 9,
-    paddingVertical: 8,
+    minHeight: 58,
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 7,
+    justifyContent: 'center',
   },
-  compactMetricLabel: { fontSize: 9, lineHeight: 13, ...weight('800'), textAlign: 'center' },
-  compactMetricValue: { fontSize: 13, lineHeight: 19, ...weight('900'), textAlign: 'center', marginTop: 2 },
+  compactMetricLabel: { fontSize: 9, lineHeight: 13, ...weight('900'), textAlign: 'center' },
+  compactMetricValue: { fontSize: 12, lineHeight: 18, ...weight('900'), textAlign: 'center', marginTop: 2 },
 
   card: {
     borderWidth: 1,
-    borderRadius: RADIUS.xl,
-    padding: 11,
+    borderRadius: 18,
+    padding: 10,
     marginBottom: 12,
   },
   head: { alignItems: 'center', gap: 8, marginBottom: 9 },
@@ -312,41 +341,44 @@ const s = StyleSheet.create({
   },
   countText: { fontSize: 10, ...weight('900') },
 
-  walletList: { gap: 8 },
+  walletList: { gap: 6 },
   walletRow: {
     borderWidth: 1,
-    borderRadius: RADIUS.lg,
-    padding: 10,
+    borderRadius: 13,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
   },
-  walletTop: { alignItems: 'center', gap: 8 },
+  walletTop: { minHeight: 50, alignItems: 'center', gap: 8 },
   walletIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 9,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  walletName: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 18, ...weight('900') },
-  reservePill: {
-    minHeight: 24,
-    borderRadius: 12,
-    paddingHorizontal: 7,
+  walletIdentity: { flex: 1, minWidth: 0 },
+  walletNameLine: { alignItems: 'center', gap: 5 },
+  walletName: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 17, ...weight('900') },
+  walletMetaLine: { alignItems: 'center', gap: 4, marginTop: 3, flexWrap: 'wrap' },
+  metaItem: { minHeight: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center' },
+  metaItemText: { fontSize: 8, lineHeight: 12, ...weight('800') },
+  reservedItem: { minHeight: 20, maxWidth: '100%', borderRadius: 10, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 3 },
+  reservedText: { fontSize: 8, lineHeight: 12, ...weight('900'), flexShrink: 1 },
+  defaultPill: {
+    minHeight: 18,
+    borderRadius: 9,
+    paddingHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    maxWidth: '42%',
   },
-  reserveText: { fontSize: 9, lineHeight: 13, ...weight('800') },
-  walletMetrics: {
-    marginTop: 9,
-    alignItems: 'stretch',
-  },
-  walletMetric: { flex: 1, minWidth: 0, paddingHorizontal: 7 },
-  walletMetricLabel: { fontSize: 9, lineHeight: 13, ...weight('800'), textAlign: 'center' },
-  walletMetricValue: { fontSize: 13, lineHeight: 19, ...weight('900'), textAlign: 'center', marginTop: 2 },
-  walletDivider: { width: 1, opacity: 0.7 },
-  walletWarning: { borderRadius: RADIUS.md, alignItems: 'center', gap: 6, paddingHorizontal: 9, paddingVertical: 7, marginTop: 8 },
-  walletWarningText: { flex: 1, fontSize: 10, lineHeight: 15, ...weight('900') },
+  defaultText: { fontSize: 8, lineHeight: 11, ...weight('900') },
+  walletAvailableBlock: { width: 96, maxWidth: '32%', alignItems: 'flex-end', flexShrink: 0 },
+  walletAvailableLabel: { fontSize: 9, lineHeight: 13, ...weight('800') },
+  walletAvailableValue: { fontSize: 14, lineHeight: 19, ...weight('900'), marginTop: 1 },
+
+  walletWarning: { borderRadius: 9, alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 5, marginTop: 5 },
+  walletWarningText: { flex: 1, fontSize: 9, lineHeight: 13, ...weight('900') },
 });

@@ -13,6 +13,7 @@ const labels = (lang) => {
     select: ar ? 'تحديد' : 'Select',
     selected: ar ? 'محدد' : 'selected',
     dismissSelected: ar ? 'حذف المحدد' : 'Delete selected',
+    cancel: ar ? 'إلغاء' : 'Cancel',
     review: ar ? 'مراجعة الإدخالات الذكية' : 'Review smart entries',
     reviewTitle: ar ? 'إدخالات ذكية تحتاج مراجعة' : 'Smart entries need review',
     reviewBody: ar
@@ -100,50 +101,60 @@ export default function NotificationCenterModal({
             <View style={[s.titleIcon, { backgroundColor: th.primSoft }]}>
               <Ionicons name="notifications-outline" size={18} color={th.primary} />
             </View>
-            <Text style={[s.title, { color: th.text, textAlign: isRtl ? 'right' : 'left', writingDirection: isRtl ? 'rtl' : 'ltr' }]}>{L.title}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[s.title, { color: th.text, textAlign: isRtl ? 'right' : 'left', writingDirection: isRtl ? 'rtl' : 'ltr' }]}>{L.title}</Text>
+              {hasNotifications ? (
+                <Text style={[s.headerMeta, { color: th.sub, textAlign: isRtl ? 'right' : 'left' }]}>
+                  {items.length} {L.count}
+                </Text>
+              ) : null}
+            </View>
+            <TouchableOpacity accessibilityLabel="Close notifications" onPress={onClose} style={[s.headerAction, { backgroundColor: th.cardHigh }]}>
+              <Ionicons name="chevron-down" size={18} color={th.sub} />
+            </TouchableOpacity>
+          </View>
 
-            {selecting ? (
-              <Text style={[s.selectionCount, { color: th.sub }]}>{selectedKeys.length} {L.selected}</Text>
-            ) : hasNotifications ? (
-              <View style={[s.countPill, { backgroundColor: th.primSoft }]}>
-                <Text style={{ color: th.primary, fontSize: 12, fontWeight: '900' }}>{items.length} {L.count}</Text>
-              </View>
-            ) : null}
-
-            {hasNotifications ? (
+          {hasNotifications ? (
+            <View style={[s.selectionBar, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: isRtl ? 'row-reverse' : 'row' }]}>
               <TouchableOpacity
                 accessibilityLabel={L.select}
                 onPress={() => {
                   setSelecting(current => !current);
                   setSelectedKeys([]);
                 }}
-                style={[s.headerAction, { backgroundColor: selecting ? th.primSoft : th.cardHigh }]}
+                style={[s.selectionButton, { backgroundColor: selecting ? th.primSoft : th.card }]}
               >
-                <Ionicons name={selecting ? 'return-down-back-outline' : 'checkmark-circle-outline'} size={18} color={th.primary} />
+                <Ionicons name={selecting ? 'return-down-back-outline' : 'checkmark-circle-outline'} size={16} color={th.primary} />
+                <Text style={[s.selectionButtonText, { color: th.primary }]}>
+                  {selecting ? L.cancel : L.select}
+                </Text>
               </TouchableOpacity>
-            ) : null}
 
-            {selecting && selectedKeys.length > 0 ? (
-              <TouchableOpacity
-                accessibilityLabel={L.dismissSelected}
-                onPress={() => dismiss(selectedKeys)}
-                style={[s.headerAction, { backgroundColor: th.expBg }]}
-              >
-                <Ionicons name="trash-outline" size={18} color={th.exp} />
-              </TouchableOpacity>
-            ) : null}
+              <Text style={[s.selectionCount, { color: th.sub, textAlign: isRtl ? 'right' : 'left' }]}>
+                {selecting ? `${selectedKeys.length} ${L.selected}` : L.retention}
+              </Text>
 
-            <TouchableOpacity accessibilityLabel="Close notifications" onPress={onClose} style={[s.headerAction, { backgroundColor: th.cardHigh }]}>
-              <Ionicons name="chevron-down" size={18} color={th.sub} />
-            </TouchableOpacity>
-          </View>
+              {selecting && selectedKeys.length > 0 ? (
+                <TouchableOpacity
+                  accessibilityLabel={L.dismissSelected}
+                  onPress={() => dismiss(selectedKeys)}
+                  style={[s.deleteSelectedButton, { backgroundColor: th.expBg }]}
+                >
+                  <Ionicons name="trash-outline" size={15} color={th.exp} />
+                  <Text style={[s.deleteSelectedText, { color: th.exp }]}>{L.dismissSelected}</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
 
-          <View style={[s.policyStrip, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: isRtl ? 'row-reverse' : 'row' }]}>
-            <Ionicons name="time-outline" size={16} color={th.primary} />
-            <Text style={[s.policyText, { color: th.sub, textAlign: isRtl ? 'right' : 'left', writingDirection: isRtl ? 'rtl' : 'ltr' }]}>
-              {L.retention}
-            </Text>
-          </View>
+          {!hasNotifications && hasSmartReview ? (
+            <View style={[s.policyStrip, { backgroundColor: th.cardHigh, flexDirection: isRtl ? 'row-reverse' : 'row' }]}>
+              <Ionicons name="information-circle-outline" size={14} color={th.sub} />
+              <Text style={[s.policyText, { color: th.sub, textAlign: isRtl ? 'right' : 'left', writingDirection: isRtl ? 'rtl' : 'ltr' }]}>
+                {L.retention}
+              </Text>
+            </View>
+          ) : null}
 
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled contentContainerStyle={{ paddingBottom: 8 }}>
             {hasSmartReview ? (
@@ -207,9 +218,6 @@ export default function NotificationCenterModal({
                   <View style={{ flex: 1 }}>
                     <Text style={[s.itemTitle, { color: th.text, textAlign: isRtl ? 'right' : 'left', writingDirection: isRtl ? 'rtl' : 'ltr' }]}>{item.title}</Text>
                     <Text style={[s.itemBody, { color: th.sub, textAlign: isRtl ? 'right' : 'left', writingDirection: isRtl ? 'rtl' : 'ltr' }]}>{item.body}</Text>
-                    {!selecting && actionable ? (
-                      <Text style={{ color, fontSize: 12, fontWeight: '900', marginTop: 4, textAlign: isRtl ? 'right' : 'left', writingDirection: isRtl ? 'rtl' : 'ltr' }}>{L.tap}</Text>
-                    ) : null}
                   </View>
 
                   {!selecting && actionable ? (
@@ -227,28 +235,34 @@ export default function NotificationCenterModal({
 
 const s = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 16, paddingTop: 10, maxHeight: '74%' },
-  handle: { width: 38, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 12 },
-  header: { alignItems: 'center', gap: 8, marginBottom: 10 },
-  titleIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  title: { flex: 1, fontSize: 18, lineHeight: 24, fontWeight: '900' },
-  countPill: { borderRadius: 8, paddingHorizontal: 9, paddingVertical: 6 },
-  selectionCount: { fontSize: 12, fontWeight: '800' },
-  headerAction: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  policyStrip: { minHeight: 38, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, gap: 8, alignItems: 'center', marginBottom: 9 },
-  policyText: { flex: 1, fontSize: 11, lineHeight: 17, fontWeight: '800' },
-  reviewCard: { borderWidth: 1, borderRadius: 13, padding: 11, marginBottom: 9, gap: 10 },
+  sheet: { borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 16, paddingTop: 10, maxHeight: '78%' },
+  handle: { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 14 },
+  header: { alignItems: 'center', gap: 9, marginBottom: 10 },
+  titleIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 18, lineHeight: 24, fontWeight: '900' },
+
+  headerMeta: { fontSize: 11, lineHeight: 16, fontWeight: '800', marginTop: 1 },
+  selectionCount: { flex: 1, minWidth: 0, fontSize: 10, lineHeight: 15, fontWeight: '800' },
+  headerAction: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  selectionBar: { minHeight: 44, borderRadius: 13, borderWidth: 1, alignItems: 'center', gap: 8, paddingHorizontal: 7, paddingVertical: 5, marginBottom: 8 },
+  selectionButton: { minHeight: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5, paddingHorizontal: 9 },
+  selectionButtonText: { fontSize: 11, lineHeight: 15, fontWeight: '900' },
+  deleteSelectedButton: { minHeight: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5, paddingHorizontal: 9 },
+  deleteSelectedText: { fontSize: 10, lineHeight: 14, fontWeight: '900' },
+  policyStrip: { minHeight: 30, borderRadius: 10, paddingHorizontal: 9, gap: 6, alignItems: 'center', marginBottom: 8 },
+  policyText: { flex: 1, fontSize: 10, lineHeight: 15, fontWeight: '700' },
+  reviewCard: { borderWidth: 1, borderRadius: 15, padding: 11, marginBottom: 9, gap: 10 },
   reviewTop: { alignItems: 'center', gap: 10 },
   reviewIcon: { width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   reviewTitle: { fontSize: 14, lineHeight: 20, fontWeight: '900' },
   reviewBody: { marginTop: 3, fontSize: 11, lineHeight: 17, fontWeight: '600' },
   reviewButton: { minHeight: 38, borderRadius: 10, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 },
   reviewButtonText: { fontSize: 12, fontWeight: '900' },
-  item: { borderRadius: 13, padding: 10, gap: 10, marginBottom: 7, borderWidth: 1, alignItems: 'center' },
+  item: { minHeight: 66, borderRadius: 15, paddingHorizontal: 10, paddingVertical: 9, gap: 10, marginBottom: 7, borderWidth: 1, alignItems: 'center' },
   itemIcon: { width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   itemTitle: { fontSize: 14, lineHeight: 19, fontWeight: '900', marginBottom: 2 },
   itemBody: { fontSize: 12, lineHeight: 18, fontWeight: '600' },
-  empty: { borderWidth: 0.5, borderStyle: 'dashed', borderRadius: 8, padding: 24, alignItems: 'center' },
+  empty: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 15, padding: 24, alignItems: 'center' },
   emptyTitle: { fontSize: 15, lineHeight: 21, fontWeight: '900', marginTop: 10, textAlign: 'center' },
   emptyBody: { fontSize: 12, marginTop: 6, textAlign: 'center', lineHeight: 19 },
 });

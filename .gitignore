@@ -53,6 +53,7 @@ tmp/
 *.db
 *.sqlite
 *.sqlite3
+.myfi-backups/
 
 # Tools / Binaries
 tools/supabase-cli/supabase.exe
@@ -61,6 +62,7 @@ tools/*.tar.gz
 
 # Reports
 *.html
+!website/*.html
 .tmp-backfill-demo-report.json
 
 # Android build (keep source, ignore build output)

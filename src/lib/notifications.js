@@ -1,4 +1,4 @@
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { STR } from './strings';
@@ -13,16 +13,41 @@ import { filterByActiveScope, getModules, isExpenseFlow } from './modules';
 const CHANNEL_ID = 'myfi-reminders';
 const THROTTLE_KEY = 'MYFI_ALERT_THROTTLE_V1';
 const isWeb = Platform.OS === 'web';
+const isExpoGo = !!Constants.expoGoConfig || Constants.appOwnership === 'expo';
+const isExpoGoAndroid = Platform.OS === 'android' && isExpoGo;
+let notificationsApi = null;
+let notificationsLoad = null;
+let handlerConfigured = false;
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+const loadNotifications = async () => {
+  if (isWeb || isExpoGoAndroid) return null;
+  if (notificationsApi) return notificationsApi;
+  if (!notificationsLoad) {
+    notificationsLoad = import('expo-notifications')
+      .then(module => {
+        notificationsApi = module;
+        if (!handlerConfigured) {
+          notificationsApi.setNotificationHandler({
+            handleNotification: async () => ({
+              shouldShowBanner: true,
+              shouldShowList: true,
+              shouldShowAlert: true,
+              shouldPlaySound: true,
+              shouldSetBadge: false,
+            }),
+          });
+          handlerConfigured = true;
+        }
+        return notificationsApi;
+      })
+      .catch(error => {
+        console.warn('[MYFI] expo-notifications unavailable in this runtime:', error?.message || error);
+        notificationsLoad = null;
+        return null;
+      });
+  }
+  return notificationsLoad;
+};
 
 const localText = (lang) => {
   const ar = lang === 'ar';
@@ -30,6 +55,9 @@ const localText = (lang) => {
     unsupported: ar
       ? 'الإشعارات لا تعمل على الويب. جرّبها من الهاتف أو من APK.'
       : 'Notifications are not supported on web. Test them on phone or APK.',
+    expoGoUnsupported: ar
+      ? 'إشعارات MYFI الكاملة تحتاج Development Build على Android. Expo Go يبقى مناسباً لاختبار الواجهة فقط.'
+      : 'Full MYFI notifications require an Android development build. Expo Go remains suitable for UI testing.',
     denied: ar
       ? 'الإشعارات غير مفعلة من إعدادات النظام.'
       : 'Notifications are disabled in system settings.',
@@ -43,8 +71,8 @@ const localText = (lang) => {
   };
 };
 
-const ensureAndroidChannel = async () => {
-  if (Platform.OS !== 'android') return;
+const ensureAndroidChannel = async (Notifications) => {
+  if (Platform.OS !== 'android' || !Notifications) return;
   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
     name: 'MYFI reminders',
     importance: Notifications.AndroidImportance.HIGH,
@@ -57,8 +85,11 @@ const ensureAndroidChannel = async () => {
 export const ensureNotificationPermission = async (lang = 'ar') => {
   const text = localText(lang);
   if (isWeb) return { ok: false, reason: text.unsupported };
+  if (isExpoGoAndroid) return { ok: false, reason: text.expoGoUnsupported, developmentBuildRequired: true };
 
-  await ensureAndroidChannel();
+  const Notifications = await loadNotifications();
+  if (!Notifications) return { ok: false, reason: text.expoGoUnsupported, developmentBuildRequired: true };
+  await ensureAndroidChannel(Notifications);
 
   const current = await Notifications.getPermissionsAsync();
   let status = current.status;
@@ -78,6 +109,8 @@ const immediateTrigger = () => (
 export const setupDailyNotif = async (lang, trans = [], hour = 21) => {
   const permission = await ensureNotificationPermission(lang);
   if (!permission.ok) return permission;
+  const Notifications = await loadNotifications();
+  if (!Notifications) return { ok: false, developmentBuildRequired: true };
 
   const now = new Date();
   const mo = now.getMonth();
@@ -117,7 +150,9 @@ export const setupDailyNotif = async (lang, trans = [], hour = 21) => {
 };
 
 export const cancelNotifs = async () => {
-  if (isWeb) return { ok: false };
+  if (isWeb || isExpoGoAndroid) return { ok: false, developmentBuildRequired: isExpoGoAndroid };
+  const Notifications = await loadNotifications();
+  if (!Notifications) return { ok: false, developmentBuildRequired: true };
   await Notifications.cancelAllScheduledNotificationsAsync();
   await AsyncStorage.setItem(STORAGE.NOTIF, JSON.stringify({ enabled: false }));
   return { ok: true };
@@ -126,6 +161,8 @@ export const cancelNotifs = async () => {
 export const sendTestNotification = async (lang = 'ar') => {
   const permission = await ensureNotificationPermission(lang);
   if (!permission.ok) return permission;
+  const Notifications = await loadNotifications();
+  if (!Notifications) return { ok: false, developmentBuildRequired: true };
   const ar = lang === 'ar';
   await Notifications.scheduleNotificationAsync({
     content: {
@@ -157,15 +194,20 @@ export const checkDecisionAlerts = async ({
 
   const permission = await ensureNotificationPermission(cfg.lang || 'ar');
   if (!permission.ok) return permission;
+  const Notifications = await loadNotifications();
+  if (!Notifications) return { ok: false, developmentBuildRequired: true };
 
   let fired = 0;
+  const privateBody = (cfg.lang || 'ar') === 'ar'
+    ? 'لديك تحديث مالي يحتاج مراجعتك داخل MYFI.'
+    : 'A financial update needs your review in MYFI.';
   for (const item of decisions) {
     const key = `decision-${item.fingerprint || item.id}`;
     if (!(await canFire(key, item.throttleHours || 12))) continue;
     await Notifications.scheduleNotificationAsync({
       content: {
         title: item.title,
-        body: item.body,
+        body: cfg.hideNotificationDetails !== false ? privateBody : item.body,
         sound: 'default',
       },
       trigger: immediateTrigger(),
@@ -181,6 +223,8 @@ export const checkRecurringAlerts = async (lang = 'ar', trans = []) => {
   if (due.length === 0) return { ok: false };
   const permission = await ensureNotificationPermission(lang);
   if (!permission.ok) return permission;
+  const Notifications = await loadNotifications();
+  if (!Notifications) return { ok: false, developmentBuildRequired: true };
   const key = `recurring-${due.map(item => `${item.recurringGroupId || item.id}:${item.dueISO}`).join('|')}`;
   if (!(await canFire(key, 12))) return { ok: false };
   const ar = lang === 'ar';
@@ -208,6 +252,8 @@ export const checkCommitmentAlerts = async (lang = 'ar', commitments = [], notif
   if (due.length === 0) return { ok: false };
   const permission = await ensureNotificationPermission(lang);
   if (!permission.ok) return permission;
+  const Notifications = await loadNotifications();
+  if (!Notifications) return { ok: false, developmentBuildRequired: true };
   const key = `commitment-${due.map(item => `${item.id}:${item.dueISO}`).join('|')}`;
   if (!(await canFire(key, 12))) return { ok: false };
   const ar = lang === 'ar';
@@ -268,6 +314,8 @@ export const checkDebtAndBalanceAlerts = async (lang, trans = [], debts = [], no
 
   const permission = await ensureNotificationPermission(lang);
   if (!permission.ok) return permission;
+  const Notifications = await loadNotifications();
+  if (!Notifications) return { ok: false, developmentBuildRequired: true };
 
   if (lowHit) {
     if (await canFire('low')) {

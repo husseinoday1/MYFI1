@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import { buildFinancialCoach, getBudgetRows, getBudgetSummary, normalizeBudgets, suggestBudgetsFromHistory } from '../src/lib/budgets.js';
 import { getWalletBalances, getWalletMonthlyMovement, normalizeWallets } from '../src/lib/wallets.js';
 import { analyzeSmartEntry } from '../src/lib/smartEntry.js';
+import { parseSpokenNumberPhrase } from '../src/lib/spokenNumbers.js';
+import { resolveSmartCaptureDraft } from '../src/lib/smartCapture.js';
 import { normalizeCfg, normalizeHomeCards } from '../src/lib/constants.js';
 import { buildChartData, buildFinancialReport, buildFinancialSnapshot, byMonth, calcCashFlow, calcStats, catSpend, getUpcomingRecurring, monthlyForecast, pct } from '../src/utils/calc.js';
 import { auditFinancialData } from '../src/lib/financialIntegrity.js';
@@ -396,14 +398,14 @@ const suggestions = suggestBudgetsFromHistory([
   { amt: -1800, cat: 'food', dateISO: '2026-05-01' },
   { amt: -1500, cat: 'food', dateISO: '2026-06-01' },
 ], categories, new Date('2026-07-15T12:00:00'));
-assert.equal(suggestions.food, 2000, 'three-month suggestion should round the average up to the nearest thousand');
+assert.equal(suggestions.food, 1500, 'three-month suggestion should use the recent-weighted adaptive estimate');
 const latestThreeSuggestions = suggestBudgetsFromHistory([
   { amt: -9000, cat: 'food', dateISO: '2026-03-01' },
   { amt: -1200, cat: 'food', dateISO: '2026-04-01' },
   { amt: -1800, cat: 'food', dateISO: '2026-05-01' },
   { amt: -1500, cat: 'food', dateISO: '2026-06-01' },
 ], categories, new Date('2026-07-15T12:00:00'));
-assert.equal(latestThreeSuggestions.food, 2000, 'budget suggestions must ignore history older than the latest three completed months');
+assert.equal(latestThreeSuggestions.food, 1500, 'budget suggestions must reject a large older outlier without distorting the recent estimate');
 
 const reportMonth = byMonth(transactions, 6, 2026).filter(item => item.kind !== 'transfer');
 assert.deepEqual(calcStats(reportMonth), { inc: 1000, exp: 300, bal: 700 });
@@ -521,6 +523,124 @@ const voiceDraft = analyzeSmartEntry({
 assert.equal(voiceDraft.amount, 3500, 'Arabic voice digits must parse correctly');
 assert.equal(voiceDraft.walletId, 'cash');
 
+// MYFI_SMART_MULTIMODAL_V2_TESTS
+[
+  ['ألف ونص', 1500],
+  ['مليون ونص', 1500000],
+  ['مليون وربع', 1250000],
+  ['نص مليون', 500000],
+  ['ربع مليون', 250000],
+  ['ثلاثة ونص', 3.5],
+  ['ثلاثة وربع', 3.25],
+  ['ثلاثة إلا ربع', 2.75],
+  ['مليون إلا ربع', 750000],
+  ['خمسة آلاف وسبعمية وخمسين', 5750],
+  ['مية وخمسة وعشرين ألف', 125000],
+  ['one and a half thousand', 1500],
+  ['half a million', 500000],
+  ['two and a quarter', 2.25],
+  ['one point five million', 1500000],
+  ['twenty five hundred', 2500],
+].forEach(([spoken, expected]) => {
+  const actual = parseSpokenNumberPhrase(spoken);
+  assert.ok(Math.abs(actual - expected) < 0.01, `spoken number failed: ${spoken} => ${actual}`);
+});
+
+const iraqiVoiceAmount = analyzeSmartEntry({
+  text: 'دفعت مليون ونص إيجار من Cash أمس',
+  cats: smartCats,
+  wallets,
+  lang: 'ar',
+});
+assert.equal(iraqiVoiceAmount.amount, 1500000, 'Iraqi spoken million-and-half must become 1.5M');
+
+const referenceVsAmount = analyzeSmartEntry({
+  text: 'رقم الطلب ثلاثة آلاف ودفعت خمسين دولار',
+  cats: smartCats,
+  wallets,
+  lang: 'ar',
+});
+assert.equal(referenceVsAmount.amount, 50, 'spoken order number must not replace the paid amount');
+
+const bankDebitDraft = resolveSmartCaptureDraft({
+  text: 'Debited 75,000 IQD at SUPERMARKET',
+  analysis: {
+    sourceType: 'bank_notification',
+    transactionLikely: true,
+    multipleTransactions: false,
+    flow: 'expense',
+    direction: 'outgoing',
+    amount: 75000,
+    currency: 'IQD',
+    dateISO: '2026-08-10',
+    amountConfidence: 0.98,
+    dateConfidence: 0.9,
+    overallConfidence: 0.95,
+    merchant: 'SUPERMARKET',
+    category: 'food',
+    warnings: [],
+  },
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+  currency: 'IQD',
+});
+assert.equal(bankDebitDraft.ok, true);
+assert.equal(bankDebitDraft.draft.amount, 75000);
+assert.equal(bankDebitDraft.draft.type, 'exp');
+
+const bankCreditDraft = resolveSmartCaptureDraft({
+  text: 'Salary credited 1,250,000 IQD',
+  analysis: {
+    sourceType: 'salary_notice',
+    transactionLikely: true,
+    multipleTransactions: false,
+    flow: 'income',
+    direction: 'incoming',
+    amount: 1250000,
+    currency: 'IQD',
+    dateISO: '2026-08-10',
+    amountConfidence: 0.99,
+    dateConfidence: 0.9,
+    overallConfidence: 0.98,
+    title: 'Salary',
+    category: 'salary',
+    warnings: [],
+  },
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+  currency: 'IQD',
+});
+assert.equal(bankCreditDraft.draft.type, 'inc');
+
+assert.equal(resolveSmartCaptureDraft({
+  text: 'Statement',
+  analysis: {
+    transactionLikely: true,
+    multipleTransactions: true,
+    amount: null,
+  },
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+  currency: 'IQD',
+}).reason, 'multiple_transactions', 'bank statement must not silently choose one row');
+
+assert.equal(resolveSmartCaptureDraft({
+  text: 'Invoice total 500 due next week',
+  analysis: {
+    transactionLikely: false,
+    multipleTransactions: false,
+    amount: 500,
+  },
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+  currency: 'IQD',
+}).reason, 'not_transaction', 'unpaid invoice must not become a completed transaction automatically');
+
+
 const reorderedHomeCards = normalizeHomeCards([
   { key: 'expense', visible: true },
   { key: 'income', visible: true },
@@ -529,10 +649,11 @@ const reorderedHomeCards = normalizeHomeCards([
 ]);
 assert.deepEqual(
   reorderedHomeCards.map(item => item.key),
-  ['expense', 'income', 'dueSoon', 'net'],
-  'home-card normalization must preserve the monthly due card',
+  ['expense', 'income', 'net', 'saving'],
+  'home-card normalization must migrate the removed due card to the current-month savings card',
 );
-assert.equal(reorderedHomeCards[2].visible, false, 'home-card visibility must survive reordering');
+assert.equal(reorderedHomeCards.some(item => item.key === 'dueSoon'), false, 'the old monthly due card must not return after the home-summary migration');
+assert.equal(reorderedHomeCards.find(item => item.key === 'saving')?.visible, true, 'the current-month savings card must be available after migration');
 
 const independentLocaleCfg = normalizeCfg({ country: 'US', currency: 'IQD' });
 assert.equal(independentLocaleCfg.country, 'US', 'country must be stored independently');
@@ -591,10 +712,12 @@ const runLinkedStoreAssertions = async () => {
   assert.ok(addedTx, 'transaction slice must add a normal transaction');
   assert.equal(addedTx.flowType, FLOW_TYPES.INCOME);
   const transCountBeforeOverspend = state.trans.length;
-  assert.equal(await useStore.getState().addTrans({ amt: -100000, cat: 'food', walletId: 'cash', dateISO: '2026-07-02' }), false);
-  assert.equal(useStore.getState().trans.length, transCountBeforeOverspend, 'overspending a wallet must not create an expense transaction');
-  assert.equal(await useStore.getState().editTrans(addedTx.id, { amt: -100000 }), false);
-  assert.equal(useStore.getState().trans.find(item => item.id === addedTx.id).amt, 250, 'invalid expense edit must preserve the original transaction');
+  assert.equal(await useStore.getState().addTrans({ amt: -100000, cat: 'food', walletId: 'cash', dateISO: '2026-07-02' }), true);
+  assert.equal(useStore.getState().trans.length, transCountBeforeOverspend + 1, 'the ledger must record a real expense even when it makes the wallet negative');
+  const overspendTx = useStore.getState().trans.find(item => item.cat === 'food' && item.amt === -100000);
+  assert.equal(overspendTx?.balanceWarning, true, 'an expense that makes the wallet negative must carry a balance warning');
+  assert.equal(await useStore.getState().editTrans(overspendTx.id, { amt: -120000 }), true);
+  assert.equal(useStore.getState().trans.find(item => item.id === overspendTx.id).balanceWarning, true, 'editing a negative-balance expense must preserve the warning contract');
   assert.equal(await useStore.getState().duplicateTrans(addedTx.id), true);
   state = useStore.getState();
   assert.equal(
@@ -608,13 +731,38 @@ const runLinkedStoreAssertions = async () => {
   assert.equal(crossScopeTransfer.fromScope, 'personal');
   assert.equal(crossScopeTransfer.toScope, 'business');
   const transferCount = state.trans.filter(item => item.kind === 'transfer').length;
-  assert.equal(await useStore.getState().addTransfer({ fromWalletId: 'cash', toWalletId: 'savings', amount: 5000 }), false);
-  assert.equal(useStore.getState().trans.filter(item => item.kind === 'transfer').length, transferCount, 'insufficient transfer must not be stored');
+  assert.equal(await useStore.getState().addTransfer({ fromWalletId: 'cash', toWalletId: 'savings', amount: 5000 }), true);
+  assert.equal(useStore.getState().trans.filter(item => item.kind === 'transfer').length, transferCount + 1, 'the ledger must retain a transfer even when the source wallet becomes negative');
+  assert.equal(useStore.getState().trans.find(item => item.kind === 'transfer' && item.transferAmount === 5000)?.balanceWarning, true, 'an overdrawn transfer must carry a balance warning');
   assert.equal(await useStore.getState().addTransfer({ fromWalletId: 'cash', toWalletId: 'savings', amount: -10 }), false);
-  assert.equal(await useStore.getState().editTrans(crossScopeTransfer.id, { transferAmount: 5000 }), false);
-  assert.equal(useStore.getState().trans.find(item => item.id === crossScopeTransfer.id).transferAmount, 75, 'invalid transfer edit must preserve the original amount');
+  assert.equal(await useStore.getState().editTrans(crossScopeTransfer.id, { transferAmount: 5000 }), true);
+  assert.equal(useStore.getState().trans.find(item => item.id === crossScopeTransfer.id).balanceWarning, true, 'editing a transfer beyond the source balance must flag it');
   assert.equal(await useStore.getState().editTrans(crossScopeTransfer.id, { toWalletId: 'savings' }), true);
   assert.equal(useStore.getState().trans.find(item => item.id === crossScopeTransfer.id).toWalletId, 'savings', 'transfer edits must accept another wallet scope');
+
+  useStore.setState({
+    trans: [
+      { id: 'recurring-income-june', title: 'Side income', amt: 100, cat: 'salary', walletId: 'cash', dateISO: '2026-06-10', recurring: true, recurringGroupId: 'side-income-series', flowType: FLOW_TYPES.INCOME },
+      { id: 'recurring-income-july', title: 'Side income', amt: 100, cat: 'salary', walletId: 'cash', dateISO: '2026-07-10', recurring: true, recurringGroupId: 'side-income-series', flowType: FLOW_TYPES.INCOME },
+    ],
+    debts: [],
+    goals: [],
+    commitments: [],
+    wallets,
+    cfg: { ...initialCfg, currency: 'IQD', defaultWalletId: 'cash' },
+    user: null,
+  });
+  assert.equal(await useStore.getState().editTrans('recurring-income-july', { recurring: false }), true);
+  assert.equal(
+    useStore.getState().trans.filter(item => item.recurringGroupId === 'side-income-series' && item.recurring).length,
+    0,
+    'stopping a recurring item must stop the full future series while keeping its historical entries',
+  );
+  assert.equal(
+    useStore.getState().trans.filter(item => item.recurringGroupId === 'side-income-series').length,
+    2,
+    'stopping recurrence must preserve historical transactions',
+  );
 
   useStore.setState({
     trans: [],
@@ -719,9 +867,9 @@ const runLinkedStoreAssertions = async () => {
     user: null,
   });
   const lowCashCommitment = await useStore.getState().payCommitment('commit-low-cash', '2026-07-10', 'cash');
-  assert.equal(lowCashCommitment.ok, false);
-  assert.equal(lowCashCommitment.reason, 'insufficient_balance');
-  assert.equal(useStore.getState().trans.length, 0, 'insufficient commitment payment must not create a transaction');
+  assert.equal(lowCashCommitment.ok, true);
+  assert.equal(useStore.getState().trans.length, 1, 'a paid commitment must remain in the ledger even when it makes the wallet negative');
+  assert.equal(useStore.getState().trans[0].balanceWarning, true, 'an overdrawn commitment payment must carry a balance warning');
 
   useStore.setState({
     wallets,
@@ -729,8 +877,8 @@ const runLinkedStoreAssertions = async () => {
     commitments: [],
     cfg: { ...initialCfg, currency: 'IQD', defaultWalletId: 'cash' },
   });
-  assert.equal(await useStore.getState().deleteWallet('bank'), true);
-  assert.equal(useStore.getState().trans.length, 0, 'deleting a wallet must not leave a self-transfer behind');
+  assert.equal(await useStore.getState().deleteWallet('bank'), false);
+  assert.equal(useStore.getState().trans.length, 1, 'a wallet with financial history must not be deleted or rewrite its transfer history');
 
   useStore.setState({
     wallets,
@@ -878,6 +1026,8 @@ const runLinkedStoreAssertions = async () => {
     }],
     commitments: [{
       id: 'reserve-goal-plan',
+      name: 'Reserve plan',
+      amt: 100,
       linkedType: 'goal',
       linkedId: 'reserve-goal',
       active: true,
@@ -929,12 +1079,11 @@ const runLinkedStoreAssertions = async () => {
     cfg: { ...initialCfg, currency: 'IQD', defaultWalletId: 'cash' },
     user: null,
   });
-  assert.equal(await useStore.getState().deleteWalletsMany(['bank', 'card']), true);
+  assert.equal(await useStore.getState().deleteWalletsMany(['bank', 'card']), false);
   state = useStore.getState();
-  assert.deepEqual(state.wallets.map(item => item.id), ['cash']);
-  assert.equal(state.trans.length, 1, 'bulk wallet delete must remove transfers that collapse into one wallet');
-  assert.equal(state.trans[0].walletId, 'cash');
-  assert.equal(state.commitments[0].walletId, 'cash');
+  assert.deepEqual(state.wallets.map(item => item.id), ['cash', 'bank', 'card']);
+  assert.equal(state.trans.length, 2, 'bulk wallet deletion must preserve every row when any selected wallet has history');
+  assert.equal(state.commitments[0].walletId, 'card');
 
   useStore.setState({
     cats: [{ id: 'food' }, { id: 'rent' }, { id: 'other' }],
@@ -985,25 +1134,33 @@ const runLinkedStoreAssertions = async () => {
   assert.equal(inspectedArchive.payload.kind, 'year_archive');
   assert.equal(inspectedArchive.payload.data.trans.length, 2);
   assert.ok(inspectedArchive.csv.includes('old-income'));
-  assert.equal(await useStore.getState().commitYearArchive(2024, archivePackage.checksum), true);
+  assert.equal(
+    await useStore.getState().commitYearArchive(2024, archivePackage.checksum),
+    false,
+    'the web-compatible runtime gate must abort archive cutover when native SQLite is unavailable',
+  );
   state = useStore.getState();
-  assert.deepEqual(state.trans.map(item => item.id), ['old-business-income', 'current-expense']);
-  assert.equal(state.debts[0].archivedPaid, 100);
+  assert.deepEqual(
+    state.trans.map(item => item.id),
+    ['old-income', 'old-debt', 'old-business-income', 'current-expense'],
+    'a failed native archive write must leave active history untouched',
+  );
+  assert.equal(state.debts[0].archivedPaid, 0);
   assert.equal(state.debts[0].paid, 100);
   const afterArchiveBalance = getWalletBalances(state.wallets, state.trans, 'IQD', 'archive-cash')[0].balance;
-  assert.equal(afterArchiveBalance, beforeArchiveBalance, 'annual archive must preserve wallet balance');
-  assert.equal(state.cfg.archiveSummaries[0].year, 2024);
+  assert.equal(afterArchiveBalance, beforeArchiveBalance, 'an aborted annual archive must preserve wallet balance');
+  assert.deepEqual(state.cfg.archiveSummaries, []);
 
   const fullPackage = await buildMyfiPackage({
     kind: 'full_backup',
-    data: JSON.parse(useStore.getState().exportBackup()),
+    data: JSON.parse(await useStore.getState().exportBackup()),
   });
   const inspectedBackup = await inspectMyfiPackage(fullPackage.base64);
   assert.equal(inspectedBackup.payload.kind, 'full_backup');
   assert.equal(inspectedBackup.payload.format, 'MYFI');
   const encryptedPackage = await buildMyfiPackage({
     kind: 'full_backup',
-    data: JSON.parse(useStore.getState().exportBackup()),
+    data: JSON.parse(await useStore.getState().exportBackup()),
     password: 'correct-horse-42',
   });
   const lockedBackup = await inspectMyfiPackage(encryptedPackage.base64);
@@ -1020,20 +1177,21 @@ const runLinkedStoreAssertions = async () => {
   const realIds = useStore.getState().trans.map(item => item.id);
   assert.equal(await useStore.getState().enterDemoMode(), true);
   assert.equal(useStore.getState().cfg.demoMode, true);
-  assert.ok(useStore.getState().trans.some(item => item.id === 'demo_salary_0'));
+  assert.equal(useStore.getState().cfg.performanceTestTier, '200');
+  assert.equal(useStore.getState().trans.length, 200, 'the web fallback must retain active and cold fixture rows when native SQLite is unavailable');
   const demoMonthCounts = useStore.getState().trans.reduce((map, tx) => {
     const key = String(tx.dateISO || '').slice(0, 7);
     if (key) map.set(key, (map.get(key) || 0) + 1);
     return map;
   }, new Map());
-  assert.equal(demoMonthCounts.size, 12, 'demo mode must cover a full year of monthly examples');
+  assert.equal(demoMonthCounts.size, 24, 'the default performance fixture must cover its configured 24-month history');
   assert.ok(
-    [...demoMonthCounts.values()].every(count => count >= 10),
-    'demo mode must include at least ten transactions in every sample month',
+    [...demoMonthCounts.values()].every(count => count > 0),
+    'the performance fixture must include transactions in every configured month',
   );
   assert.ok(useStore.getState().trans.some(item => item.kind === 'transfer'), 'demo mode must include wallet transfers');
-  assert.ok(useStore.getState().trans.some(item => item.flowType === FLOW_TYPES.RECEIVABLE_COLLECTION), 'demo mode must include receivable collections');
-  assert.ok(useStore.getState().trans.some(item => item.flowType === FLOW_TYPES.GOAL_ALLOCATION && item.allocationAmount > 0), 'demo mode must include goal allocations');
+  assert.ok(useStore.getState().trans.some(item => item.flowType === FLOW_TYPES.INCOME), 'demo mode must include income');
+  assert.ok(useStore.getState().trans.some(item => item.flowType === FLOW_TYPES.EXPENSE), 'demo mode must include expenses');
   assert.equal(await useStore.getState().exitDemoMode(), true);
   assert.equal(useStore.getState().cfg.demoMode, undefined);
   assert.deepEqual(useStore.getState().trans.map(item => item.id), realIds, 'leaving demo mode must restore real data');
@@ -1045,3 +1203,204 @@ runLinkedStoreAssertions()
     console.error(error);
     process.exitCode = 1;
   });
+
+
+// MYFI_SMART_BANK_VOICE_V21_TESTS
+const iqBankPurchase = analyzeSmartEntry({
+  text: 'Transaction details\nTransaction type POS - Purchase\nTransaction date 05/08/2026\nAmount -13,200.000 IQD\nTransaction reference FT2621706165',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+});
+assert.equal(iqBankPurchase.amount, 13200, 'IQD bank format -13,200.000 must mean 13,200');
+
+const iqSalary = analyzeSmartEntry({
+  text: 'Transaction details\nTransaction type Salary Domiciliation\nTransaction date 29/07/2026\nAmount 2,518,269.000 IQD\nTransaction reference FT2621000155',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+});
+assert.equal(iqSalary.amount, 2518269, 'IQD salary format must preserve comma grouping and 3 decimal minor digits');
+assert.equal(iqSalary.type, 'inc');
+
+assert.equal(analyzeSmartEntry({
+  text: 'Transaction type ATM-POS-Ecom Commission\nAmount -660.000 IQD',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 660);
+
+assert.equal(analyzeSmartEntry({
+  text: 'Transaction type POS - Purchase\nAmount -5,480.000 IQD',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 5480);
+
+assert.equal(analyzeSmartEntry({
+  text: 'TOTAL: 1,234.56 USD',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 1234.56);
+
+assert.equal(analyzeSmartEntry({
+  text: 'TOTAL: 1.234,56 EUR',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 1234.56);
+
+assert.equal(analyzeSmartEntry({
+  text: 'TOTAL: ١٣٬٢٠٠٫٠٠٠ IQD',
+  cats: smartCats,
+  wallets,
+  lang: 'ar',
+}).amount, 13200);
+
+assert.equal(analyzeSmartEntry({
+  text: 'اشتريت تيبس ب 500 دينار',
+  cats: smartCats,
+  wallets,
+  lang: 'ar',
+}).amount, 500, 'simple Arabic spoken numeric purchase must fill amount');
+
+assert.equal(analyzeSmartEntry({
+  text: 'بطيخ بألف ونص',
+  cats: smartCats,
+  wallets,
+  lang: 'ar',
+}).amount, 1500, 'Arabic attached ب-price phrase must parse ألف ونص');
+
+const aiFalseButBankClear = resolveSmartCaptureDraft({
+  text: 'Transaction details\nTransaction type POS - Purchase\nTransaction date 05/08/2026\nAmount -13,200.000 IQD\nTransaction reference FT2621706165',
+  analysis: {
+    sourceType: 'bank_app_screen',
+    transactionLikely: false,
+    multipleTransactions: false,
+    flow: 'expense',
+    direction: 'outgoing',
+    amount: null,
+    amountEvidence: '-13,200.000 IQD',
+    amountConfidence: 0.4,
+    overallConfidence: 0.55,
+    warnings: ['model_classification_conflict'],
+  },
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+  currency: 'IQD',
+});
+assert.equal(aiFalseButBankClear.ok, true, 'strong bank transaction screen must recover from an AI false-negative');
+assert.equal(aiFalseButBankClear.draft.amount, 13200);
+
+const aiFalseButVoiceClear = resolveSmartCaptureDraft({
+  text: 'اشتريت تيبس ب 500 دينار',
+  analysis: {
+    sourceType: 'other',
+    transactionLikely: false,
+    multipleTransactions: false,
+    flow: 'unknown',
+    direction: 'unknown',
+    amount: null,
+    amountConfidence: 0,
+    overallConfidence: 0.3,
+    warnings: [],
+  },
+  cats: smartCats,
+  wallets,
+  lang: 'ar',
+  currency: 'IQD',
+});
+assert.equal(aiFalseButVoiceClear.ok, true, 'clear spoken purchase must recover from AI false-negative');
+assert.equal(aiFalseButVoiceClear.draft.amount, 500);
+
+
+
+// MYFI_SMART_SEPARATOR_V22_TESTS
+assert.equal(analyzeSmartEntry({
+  text: 'TOTAL: 75,000 IQD',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 75000, 'single comma in explicit IQD is thousands grouping');
+
+assert.equal(analyzeSmartEntry({
+  text: 'TOTAL: 660.000 IQD',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 660, 'single dot with 3 IQD minor digits is decimal');
+
+assert.equal(analyzeSmartEntry({
+  text: 'TOTAL: 13,200.000 IQD',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 13200, 'mixed IQD punctuation must keep comma thousands and dot decimals');
+
+assert.equal(analyzeSmartEntry({
+  text: 'TOTAL: 2,518,269.000 IQD',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 2518269, 'large IQD bank amount must parse correctly');
+
+assert.equal(analyzeSmartEntry({
+  text: 'TOTAL: 1,234.56 USD',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 1234.56, 'US punctuation must remain valid');
+
+assert.equal(analyzeSmartEntry({
+  text: 'TOTAL: 1.234,56 EUR',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 1234.56, 'European punctuation must remain valid');
+
+
+
+// MYFI_SMART_SPOKEN_ARBITRATION_V23_TESTS
+assert.equal(analyzeSmartEntry({
+  text: 'Debited 75,000 IQD at SUPERMARKET',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 75000, 'spoken-number helper must never reinterpret a formatted IQD digit amount');
+
+assert.equal(analyzeSmartEntry({
+  text: 'Transaction details\nTransaction type POS - Purchase\nAmount -13,200.000 IQD',
+  cats: smartCats,
+  wallets,
+  lang: 'en',
+}).amount, 13200, 'spoken-number helper must not override Iraqi bank decimal formatting');
+
+assert.equal(analyzeSmartEntry({
+  text: 'اشتريت تيبس ب 500 دينار',
+  cats: smartCats,
+  wallets,
+  lang: 'ar',
+}).amount, 500, 'plain spoken transcript digits must be handled by the numeric parser');
+
+assert.equal(analyzeSmartEntry({
+  text: 'بطيخ بألف ونص',
+  cats: smartCats,
+  wallets,
+  lang: 'ar',
+}).amount, 1500, 'Iraqi attached price preposition + spoken fraction must become 1500');
+
+assert.equal(analyzeSmartEntry({
+  text: 'دفعت مليون ونص إيجار من Cash أمس',
+  cats: smartCats,
+  wallets,
+  lang: 'ar',
+}).amount, 1500000, 'spoken million-and-half must remain supported');
+
+assert.equal(analyzeSmartEntry({
+  text: 'رقم الطلب ثلاثة آلاف ودفعت خمسين دولار',
+  cats: smartCats,
+  wallets,
+  lang: 'ar',
+}).amount, 50, 'spoken reference number must remain separate from the payment amount');

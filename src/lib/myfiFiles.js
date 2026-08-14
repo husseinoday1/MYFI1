@@ -1,11 +1,13 @@
-﻿import * as Crypto from 'expo-crypto';
+import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
+import { Platform } from 'react-native';
+import { deflateSync, inflateSync, strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { decryptStringWithPassword, encryptStringWithPassword } from './cryptoBox';
 import { getTransactionDisplayAmount } from './modules';
 import { inspectBackupData, MYFI_BACKUP_DATA_VERSION } from './backupData';
+import { PRODUCT_FILE_PREFIX, PRODUCT_NAME } from './productIdentity';
 
 export const MYFI_SCHEMA_VERSION = 1;
 export const MYFI_FORMAT = 'MYFI';
@@ -90,11 +92,12 @@ const csvCell = (value) => {
 
 export const transactionsToCsv = (trans = [], currency = '') => {
   const columns = [
-    'id', 'date', 'flow_type', 'title', 'amount', 'currency',
+    'app', 'id', 'date', 'flow_type', 'title', 'amount', 'currency',
     'transaction_tag', 'category_id', 'wallet_id', 'from_wallet_id', 'to_wallet_id',
     'transfer_amount', 'scope', 'note',
   ];
   const rows = (Array.isArray(trans) ? trans : []).map(item => [
+    PRODUCT_NAME,
     item.id,
     item.dateISO,
     item.flowType || item.kind || '',
@@ -127,7 +130,7 @@ export const buildMyfiPackage = async ({
   kind = 'full_backup',
   data = {},
   year = null,
-  label = 'MYFI',
+  label = PRODUCT_NAME,
   password = '',
 } = {}) => {
   const createdAt = new Date().toISOString();
@@ -142,17 +145,24 @@ export const buildMyfiPackage = async ({
     data,
   };
   const backupJson = JSON.stringify(payload, null, 2);
+  const compactBackupJson = JSON.stringify(payload);
   const transactionsCsv = transactionsToCsv(data.trans, data.cfg?.currency || '');
   const encrypted = !!String(password || '');
   const aad = `${MYFI_FORMAT}:${kind}:${MYFI_SCHEMA_VERSION}`;
+  // Password security remains unchanged. For speed, compact + low-level deflate
+  // happens BEFORE AES-GCM; compressing encrypted ciphertext is wasted CPU.
+  const compressedPlaintext = encrypted
+    ? bytesToBase64(deflateSync(utf8(compactBackupJson), { level: 1 }))
+    : '';
   const encryptedEnvelope = encrypted
     ? JSON.stringify({
         format: MYFI_FORMAT,
         schemaVersion: MYFI_SCHEMA_VERSION,
         kind,
         encrypted: true,
+        compression: 'deflate-base64-v1',
         aad,
-        box: await encryptStringWithPassword(backupJson, password, aad),
+        box: await encryptStringWithPassword(compressedPlaintext, password, aad),
       })
     : '';
   const payloadFiles = encrypted
@@ -193,8 +203,8 @@ export const buildMyfiPackage = async ({
     'manifest-sha256.txt': utf8(manifest),
     'tagmanifest-sha256.txt': utf8(tagManifest),
     data: payloadFiles,
-  }, { level: 6 });
-  const prefix = kind === 'year_archive' ? `MYFI_Archive_${year}` : 'MYFI_Backup';
+  }, { level: encrypted ? 0 : 6 });
+  const prefix = kind === 'year_archive' ? `${PRODUCT_FILE_PREFIX}_Archive_${year}` : `${PRODUCT_FILE_PREFIX}_Backup`;
   return {
     base64: bytesToBase64(zipped),
     fileName: `${prefix}_${safeStamp()}.zip`,
@@ -269,11 +279,14 @@ export const inspectMyfiPackage = async (base64, { password = '' } = {}) => {
       };
     }
     try {
-      payload = JSON.parse(await decryptStringWithPassword(
+      const decrypted = await decryptStringWithPassword(
         encryptedMeta.box,
         password,
         encryptedMeta.aad || `${MYFI_FORMAT}:${encryptedMeta.kind}:${encryptedMeta.schemaVersion}`,
-      ));
+      );
+      payload = encryptedMeta.compression === 'deflate-base64-v1'
+        ? JSON.parse(text(inflateSync(base64ToBytes(decrypted))))
+        : JSON.parse(decrypted);
     } catch {
       throw new Error('The backup password is incorrect');
     }
@@ -305,17 +318,47 @@ export const inspectMyfiPackage = async (base64, { password = '' } = {}) => {
   };
 };
 
+export const shareMyfiPackage = async ({ uri, kind = 'full_backup' } = {}) => {
+  if (!uri) throw new Error('MYFI package file is unavailable');
+  if (!(await Sharing.isAvailableAsync())) throw new Error('File sharing is unavailable');
+  await Sharing.shareAsync(uri, {
+    mimeType: 'application/zip',
+    UTI: 'public.zip-archive',
+    dialogTitle: kind === 'year_archive' ? `${PRODUCT_NAME} Annual Archive` : `${PRODUCT_NAME} Backup`,
+  });
+  return true;
+};
+
+export const saveMyfiPackageToDevice = async ({ base64, fileName, uri, kind = 'year_archive' } = {}) => {
+  if (Platform.OS !== 'android') {
+    // iOS exposes "Save to Files" through the native share sheet.
+    await shareMyfiPackage({ uri, kind });
+    return { saved: true, via: 'share' };
+  }
+  const SAF = FileSystem.StorageAccessFramework;
+  if (!SAF?.requestDirectoryPermissionsAsync || !SAF?.createFileAsync) {
+    throw new Error('Direct folder saving is unavailable on this device');
+  }
+  const permission = await SAF.requestDirectoryPermissionsAsync();
+  if (!permission?.granted || !permission.directoryUri) return { saved: false, cancelled: true };
+  const targetUri = await SAF.createFileAsync(
+    permission.directoryUri,
+    String(fileName || `${PRODUCT_FILE_PREFIX}_Archive.zip`),
+    'application/zip',
+  );
+  const sourceBase64 = base64 || (uri ? await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 }) : '');
+  if (!sourceBase64) throw new Error('MYFI package content is unavailable');
+  await FileSystem.writeAsStringAsync(targetUri, sourceBase64, { encoding: FileSystem.EncodingType.Base64 });
+  return { saved: true, via: 'folder', uri: targetUri };
+};
+
 export const exportMyfiPackage = async (options = {}) => {
-  const built = await buildMyfiPackage(options);
+  const { delivery = 'share', ...buildOptions } = options;
+  const built = await buildMyfiPackage(buildOptions);
   const uri = `${FileSystem.documentDirectory}${built.fileName}`;
   await FileSystem.writeAsStringAsync(uri, built.base64, { encoding: FileSystem.EncodingType.Base64 });
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(uri, {
-      mimeType: 'application/zip',
-      UTI: 'public.zip-archive',
-      dialogTitle: options.kind === 'year_archive' ? 'MYFI Annual Archive' : 'MYFI Backup',
-    });
-  }
+  if (delivery === 'share') await shareMyfiPackage({ uri, kind: buildOptions.kind });
+  if (delivery === 'save') await saveMyfiPackageToDevice({ ...built, uri, kind: buildOptions.kind });
   return { ...built, uri };
 };
 

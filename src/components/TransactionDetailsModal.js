@@ -30,11 +30,14 @@ const copy = (lang) => {
     linked: ar ? '\u0645\u0631\u062a\u0628\u0637 \u0628\u0645\u062a\u0627\u0628\u0639\u0629' : 'Linked to a tracker',
     recurring: ar ? '\u0645\u062a\u0643\u0631\u0631\u0629' : 'Recurring',
     recordedAs: ar ? '\u0637\u0631\u064a\u0642\u0629 \u0627\u0644\u0625\u062f\u062e\u0627\u0644' : 'Recorded as',
+    edit: ar ? 'تعديل' : 'Edit',
+    duplicate: ar ? 'تكرار' : 'Duplicate',
+    delete: ar ? 'حذف' : 'Delete',
     close: ar ? '\u0625\u063a\u0644\u0627\u0642' : 'Close',
   };
 };
 
-export default function TransactionDetailsModal({ visible, transaction, cats = [], wallets = [], cfg = {}, onClose }) {
+export default function TransactionDetailsModal({ visible, transaction, cats = [], wallets = [], cfg = {}, onClose, canEdit = false, canDuplicate = false, onEdit, onDuplicate, onDelete }) {
   const th = TH[cfg.theme] || TH.dark;
   const C = copy(cfg.lang);
   const sym = getSymbol(cfg.currency);
@@ -122,6 +125,37 @@ export default function TransactionDetailsModal({ visible, transaction, cats = [
               </View>
             ) : null}
           </ScrollView>
+          {(canEdit || canDuplicate || onDelete) ? (
+            <View style={[s.actionRow, { flexDirection: rowDir }]}>
+              {canEdit && onEdit ? (
+                <TouchableOpacity
+                  onPress={onEdit}
+                  style={[s.actionBtn, { backgroundColor: th.primSoft, borderColor: th.primSoft }]}
+                >
+                  <Ionicons name="create-outline" size={16} color={th.primary} />
+                  <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.edit}</Text>
+                </TouchableOpacity>
+              ) : null}
+              {canDuplicate && onDuplicate ? (
+                <TouchableOpacity
+                  onPress={onDuplicate}
+                  style={[s.actionBtn, { backgroundColor: th.cardHigh, borderColor: th.border }]}
+                >
+                  <Ionicons name="copy-outline" size={16} color={th.text} />
+                  <Text style={{ color: th.text, fontSize: 12, ...weight('900') }}>{C.duplicate}</Text>
+                </TouchableOpacity>
+              ) : null}
+              {onDelete ? (
+                <TouchableOpacity
+                  onPress={onDelete}
+                  style={[s.actionBtn, { backgroundColor: th.expBg, borderColor: th.expBg }]}
+                >
+                  <Ionicons name="trash-outline" size={16} color={th.exp} />
+                  <Text style={{ color: th.exp, fontSize: 12, ...weight('900') }}>{C.delete}</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
           <TouchableOpacity onPress={onClose} style={[s.closeBtn, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
             <Text style={{ color: th.text, ...weight('900') }}>{C.close}</Text>
           </TouchableOpacity>
@@ -146,5 +180,7 @@ const s = StyleSheet.create({
   statusLine: { gap: 7, flexWrap: 'wrap', marginTop: 10 },
   status: { borderRadius: RADIUS.pill, paddingHorizontal: 9, paddingVertical: 5 },
   noteCard: { borderWidth: 1, borderRadius: RADIUS.lg, padding: 13, marginTop: 10 },
-  closeBtn: { borderWidth: 1, borderRadius: RADIUS.md, minHeight: 46, alignItems: 'center', justifyContent: 'center', marginTop: 14 },
+  actionRow: { gap: 8, marginTop: 14 },
+  actionBtn: { flex: 1, minHeight: 42, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: 8 },
+  closeBtn: { borderWidth: 1, borderRadius: RADIUS.md, minHeight: 46, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
 });
