@@ -134,6 +134,7 @@ export default function HomeScreen({
   onQuickCommitment = noop,
   onSmartEntry = noop,
   onOpenTab = noop,
+  onOpenSettingsPage = noop,
   onNotificationAction = noop,
 }) {
   const { trans, debts, goals, wallets, commitments, cats, cfg, notif, user, setCfg, editTrans, deleteTrans, deleteTransMany, deferCommitment, financialLedgerV7Cutover, workspaceNamespace } = useStore();
@@ -1203,6 +1204,7 @@ export default function HomeScreen({
         onClose={() => setCenterMode(null)}
         onMode={setCenterMode}
         onOpenTab={onOpenTab}
+        onOpenSettingsPage={onOpenSettingsPage}
         onEditTransaction={setEditing}
         onOpenTransactionDetails={setDetails}
       />

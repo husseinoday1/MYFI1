@@ -125,6 +125,7 @@ function AppRoot() {
   } = useStore();
   const [tab, setTab] = useState('home');
   const [settingsResetSignal, setSettingsResetSignal] = useState(0);
+  const [settingsOpenRequest, setSettingsOpenRequest] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [addPreset, setAddPreset] = useState({ mode: 'exp', debtId: null, goalId: null, commitmentId: null, focused: false });
   const [addDraft, setAddDraft] = useState(null);
@@ -665,6 +666,11 @@ function AppRoot() {
     setShowNewItem(true);
   };
 
+  const openSettingsPage = (page = 'root') => {
+    setSettingsOpenRequest({ page, nonce: Date.now() });
+    setTab('settings');
+  };
+
   const handleFab = () => openAddExp(false);
   const classicEntry = cfg.entryMode === 'classic';
 
@@ -741,6 +747,7 @@ function AppRoot() {
         onQuickCommitment={openQuickCommitment}
         onSmartEntry={openSmartEntry}
         onOpenTab={setTab}
+        onOpenSettingsPage={openSettingsPage}
         onNotificationAction={handleNotificationPress}
       />
     ),
@@ -756,7 +763,7 @@ function AppRoot() {
       />
     ),
     reports: <ReportsScreen />,
-    settings: <SettingsScreen onOpenArchive={() => setArchiveOpen(true)} tabs={visibleTabs} resetSignal={settingsResetSignal} />,
+    settings: <SettingsScreen onOpenArchive={() => setArchiveOpen(true)} tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} />,
   };
 
   return (

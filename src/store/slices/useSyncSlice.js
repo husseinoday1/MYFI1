@@ -16,7 +16,7 @@ import {
   flushLedgerMirror,
 } from '../../lib/activeLedgerRepository';
 import { accountIdentityPatch, ensureProfileIdentity } from '../../lib/accountIdentity';
-import { workspaceNamespaceForSession } from '../../lib/accountWorkspace';
+import { accountIdFromWorkspaceNamespace, resolveWorkspaceTransition, workspaceNamespaceForSession } from '../../lib/accountWorkspace';
 import { readPerformanceSnapshot, schedulePerformanceSnapshotWrite } from '../../dev/performanceTestStorage';
 import { exportColdArchives, getColdArchiveNamespace, replaceColdArchives } from '../../lib/localArchiveRepository';
 import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
@@ -57,19 +57,71 @@ const FRESH_TEST_NAMESPACE = 'fresh-test-new-user';
 
 const RESET_MARKER_PREFIX = 'MYFI_INTENTIONAL_RESET_V1';
 const ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY = 'MYFI_ACTIVE_LOCAL_LEDGER_NAMESPACE_V1';
+const ACTIVE_LOCAL_LEDGER_CONTEXT_KEY = 'MYFI_ACTIVE_LOCAL_LEDGER_CONTEXT_V1';
 const R04_OPERATIONAL_CUTOVER_ENABLED = true;
-const readActiveLocalLedgerNamespace = async () => {
+
+const localIdentityFromState = state => accountIdentityPatch({
+  displayName: state?.cfg?.displayName || state?.cfg?.name,
+  username: state?.cfg?.username,
+  phone: state?.cfg?.phone,
+  avatarUri: state?.cfg?.avatarUri,
+  avatarPath: state?.cfg?.avatarPath,
+});
+
+const parseLedgerContext = raw => {
+  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+};
+
+const readActiveLocalLedgerContext = async () => {
   try {
-    const value = String(await AsyncStorage.getItem(ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY) || '').trim();
-    return value || GUEST_NAMESPACE;
+    const rows = await AsyncStorage.multiGet([
+      ACTIVE_LOCAL_LEDGER_CONTEXT_KEY,
+      ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY,
+    ]);
+    const contextRaw = rows.find(([key]) => key === ACTIVE_LOCAL_LEDGER_CONTEXT_KEY)?.[1] || null;
+    const legacyNamespaceRaw = rows.find(([key]) => key === ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY)?.[1] || null;
+    const parsed = parseLedgerContext(contextRaw);
+    const namespace = String(parsed.namespace || legacyNamespaceRaw || GUEST_NAMESPACE).trim() || GUEST_NAMESPACE;
+    const linkedUserId = String(parsed.linkedUserId || accountIdFromWorkspaceNamespace(namespace) || '').trim() || null;
+    const identity = accountIdentityPatch(parsed.identity || {});
+    return { namespace, linkedUserId, identity };
   } catch {
-    return GUEST_NAMESPACE;
+    return { namespace: GUEST_NAMESPACE, linkedUserId: null, identity: {} };
   }
 };
-const writeActiveLocalLedgerNamespace = async namespace => {
+
+const writeActiveLocalLedgerContext = async ({ namespace, linkedUserId = null, identity = {} } = {}) => {
   if (FRESH_TEST_MODE) return;
   const value = String(namespace || GUEST_NAMESPACE).trim() || GUEST_NAMESPACE;
-  try { await AsyncStorage.setItem(ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY, value); } catch {}
+  const linked = String(linkedUserId || accountIdFromWorkspaceNamespace(value) || '').trim() || null;
+  const payload = {
+    version: 1,
+    namespace: value,
+    linkedUserId: linked,
+    identity: accountIdentityPatch(identity || {}),
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    await AsyncStorage.multiSet([
+      [ACTIVE_LOCAL_LEDGER_CONTEXT_KEY, JSON.stringify(payload)],
+      [ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY, value],
+    ]);
+  } catch {
+    try { await AsyncStorage.setItem(ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY, value); } catch {}
+  }
+};
+
+const readActiveLocalLedgerNamespace = async () => (await readActiveLocalLedgerContext()).namespace;
+const writeActiveLocalLedgerNamespace = async namespace => {
+  const current = await readActiveLocalLedgerContext();
+  const value = String(namespace || GUEST_NAMESPACE).trim() || GUEST_NAMESPACE;
+  await writeActiveLocalLedgerContext({
+    namespace: value,
+    linkedUserId: current.namespace === value
+      ? current.linkedUserId
+      : accountIdFromWorkspaceNamespace(value),
+    identity: current.identity,
+  });
 };
 const syncBaseNamespace = namespace => `sync-base:${String(namespace || GUEST_NAMESPACE)}`;
 const SYNC_MAX_ATTEMPTS = 4;
@@ -379,6 +431,50 @@ export const createSyncSlice = (set, get) => ({
     }
   },
 
+  disconnectCloudSession: async () => {
+    if (FRESH_TEST_MODE) {
+      await get().setUser(null);
+      return { ok: true, namespace: get().workspaceNamespace || FRESH_TEST_NAMESPACE };
+    }
+
+    const current = get();
+    const context = await readActiveLocalLedgerContext();
+    const namespace = String(current.workspaceNamespace || context.namespace || GUEST_NAMESPACE).trim() || GUEST_NAMESPACE;
+    const linkedUserId = String(
+      current.user?.id
+      || (context.namespace === namespace ? context.linkedUserId : '')
+      || accountIdFromWorkspaceNamespace(namespace)
+      || '',
+    ).trim() || null;
+    const identity = {
+      ...(context.namespace === namespace ? context.identity : {}),
+      ...localIdentityFromState(current),
+    };
+
+    try {
+      if (current.workspaceReady && !current.cfg.demoMode) {
+        await get().saveLocal({ dirty: current.dirty, force: true });
+      }
+      await writeActiveLocalLedgerContext({ namespace, linkedUserId, identity });
+    } catch (error) {
+      const reason = String(error?.message || 'local_logout_preservation_failed');
+      set({ lastSyncError: reason });
+      return { ok: false, reason, namespace };
+    }
+
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) throw error;
+    } catch (error) {
+      const reason = String(error?.message || 'cloud_signout_failed');
+      set({ lastSyncError: reason });
+      return { ok: false, reason, namespace };
+    }
+
+    await get().setUser(null);
+    return { ok: true, namespace, linkedUserId };
+  },
+
   setUser: async (user, { preserveWorkspaceOnLogout = true, switchToGuest = false } = {}) => {
     if (FRESH_TEST_MODE) {
       set({
@@ -391,70 +487,87 @@ export const createSyncSlice = (set, get) => ({
         syncConflict: null,
         lastSyncError: null,
       });
-      return;
+      return { ok: true, namespace: FRESH_TEST_NAMESPACE };
     }
 
     const current = get();
-    // Logout is a cloud-session action, not a financial-data action. Keep the
-    // currently open local ledger mounted unless a destructive lifecycle flow
-    // explicitly asks to switch to the guest namespace (for example, after a
-    // verified account deletion clone).
-    if (!user && current.user && preserveWorkspaceOnLogout && !switchToGuest) {
+    const context = await readActiveLocalLedgerContext();
+    const currentNamespace = String(current.workspaceNamespace || context.namespace || GUEST_NAMESPACE).trim() || GUEST_NAMESPACE;
+    const currentLinkedUserId = String(
+      current.user?.id
+      || (context.namespace === currentNamespace ? context.linkedUserId : '')
+      || accountIdFromWorkspaceNamespace(currentNamespace)
+      || '',
+    ).trim() || null;
+    const nextUserId = String(user?.id || '').trim() || null;
+    const currentIdentity = {
+      ...(context.namespace === currentNamespace ? context.identity : {}),
+      ...localIdentityFromState(current),
+    };
+    const transition = resolveWorkspaceTransition({
+      currentNamespace,
+      currentLinkedUserId,
+      nextUserId,
+      switchToGuest,
+    });
+
+    // Ordinary logout is a cloud-session transition only. This branch is
+    // intentionally idempotent so a Supabase SIGNED_OUT event and the explicit
+    // Settings action cannot race the app into Guest or another ledger.
+    if (!user && !switchToGuest) {
       if (current.workspaceReady && !current.cfg.demoMode) {
         await get().saveLocal({ dirty: current.dirty, force: true });
       }
-      await writeActiveLocalLedgerNamespace(current.workspaceNamespace || GUEST_NAMESPACE);
-      set({
+      await writeActiveLocalLedgerContext({
+        namespace: transition.namespace,
+        linkedUserId: transition.linkedUserId,
+        identity: currentIdentity,
+      });
+      set(state => ({
         user: null,
+        cfg: normalizeCfg({ ...state.cfg, ...currentIdentity }),
+        workspaceNamespace: transition.namespace,
         workspaceReady: true,
         pendingGuestTransfer: false,
         guestTransferPreview: null,
         syncing: false,
         syncConflict: null,
         lastSyncError: null,
+      }));
+      return {
+        ok: true,
+        preserveWorkspaceOnLogout: preserveWorkspaceOnLogout !== false,
+        namespace: transition.namespace,
+        linkedUserId: transition.linkedUserId,
+      };
+    }
+
+    if (switchToGuest) {
+      set({
+        user: null,
+        workspaceReady: false,
+        pendingGuestTransfer: false,
+        guestTransferPreview: null,
+        syncing: false,
+        syncConflict: null,
+        lastSyncError: null,
       });
-      return { ok: true, preserveWorkspaceOnLogout: true, namespace: current.workspaceNamespace || GUEST_NAMESPACE };
-    }
-    if (!user && !current.user && !switchToGuest) {
-      set({ user: null });
-      return { ok: true, preserveWorkspaceOnLogout: true, namespace: current.workspaceNamespace || GUEST_NAMESPACE };
-    }
-    const priorIdentity = accountIdentityPatch({
-      displayName: current.cfg?.displayName || current.cfg?.name,
-      avatarUri: current.cfg?.avatarUri,
-      avatarPath: current.cfg?.avatarPath,
-    });
-    const nextId = user?.id || null;
-    const currentId = current.user?.id || null;
-    const namespace = workspaceNamespaceForSession({ user });
-    if (nextId === currentId && current.workspaceNamespace === namespace && current.workspaceReady) {
-      set({ user: user || null });
-      return;
+      await get().loadLocal(GUEST_NAMESPACE, { allowLegacy: false });
+      await writeActiveLocalLedgerContext({
+        namespace: GUEST_NAMESPACE,
+        linkedUserId: null,
+        identity: localIdentityFromState(get()),
+      });
+      return { ok: true, namespace: GUEST_NAMESPACE, switchedToGuest: true };
     }
 
-    // Persist the outgoing account before changing namespaces. This protects
-    // offline edits when logout happens before the next scheduled save.
-    if (current.user && current.workspaceReady && current.dirty && !current.cfg.demoMode) {
-      await get().saveLocal({ dirty: true, force: true });
-    }
+    const priorIdentity = currentLinkedUserId && currentLinkedUserId !== nextUserId
+      ? {}
+      : currentIdentity;
 
-    set({
-      user: user || null,
-      workspaceReady: false,
-      pendingGuestTransfer: false,
-      syncing: false,
-      syncConflict: null,
-      lastSyncError: null,
-      guestTransferPreview: null,
-    });
-    await get().loadLocal(namespace, { allowLegacy: !user });
-    await writeActiveLocalLedgerNamespace(namespace);
-    if (user) {
-      // Account identity is separate from the financial workspace. Existing
-      // cloud identity wins on a new phone; a brand-new account is seeded once
-      // from the device profile so name/photo follow the MYFI account.
+    const hydrateProfile = async (fallbackIdentity = {}) => {
       try {
-        const profile = await ensureProfileIdentity(supabase, user, priorIdentity);
+        const profile = await ensureProfileIdentity(supabase, user, fallbackIdentity);
         if (profile?.patch && Object.keys(profile.patch).length) {
           set({ cfg: normalizeCfg({ ...get().cfg, ...profile.patch }) });
           await get().saveLocal({ dirty: false, force: true });
@@ -462,14 +575,79 @@ export const createSyncSlice = (set, get) => ({
       } catch (error) {
         console.warn('[STORE] profile hydrate', error);
       }
+      await writeActiveLocalLedgerContext({
+        namespace: get().workspaceNamespace || transition.namespace,
+        linkedUserId: nextUserId,
+        identity: localIdentityFromState(get()),
+      });
+    };
 
-      const guest = await readCanonicalWorkspaceState({ workspaceNamespace: GUEST_NAMESPACE, fallbackState: get() });
+    // Re-login to the account already linked to the mounted ledger. Do not
+    // unload/reload it and do not inspect Guest data: signed-out activity was
+    // activity on this same ledger, not foreign Guest data.
+    if (transition.preserveCurrent && transition.namespace === currentNamespace && current.workspaceReady) {
+      set({
+        user,
+        workspaceNamespace: currentNamespace,
+        workspaceReady: true,
+        pendingGuestTransfer: false,
+        guestTransferPreview: null,
+        syncing: false,
+        syncConflict: null,
+        lastSyncError: null,
+      });
+      await writeActiveLocalLedgerContext({
+        namespace: currentNamespace,
+        linkedUserId: nextUserId,
+        identity: priorIdentity,
+      });
+      await hydrateProfile(priorIdentity);
+      return { ok: true, namespace: currentNamespace, reusedActiveLedger: true };
+    }
+
+    if (current.user && current.workspaceReady && current.dirty && !current.cfg.demoMode) {
+      await get().saveLocal({ dirty: true, force: true });
+    }
+
+    set({
+      user,
+      workspaceReady: false,
+      pendingGuestTransfer: false,
+      syncing: false,
+      syncConflict: null,
+      lastSyncError: null,
+      guestTransferPreview: null,
+    });
+    await get().loadLocal(transition.namespace, { allowLegacy: false });
+    await writeActiveLocalLedgerContext({
+      namespace: transition.namespace,
+      linkedUserId: nextUserId,
+      identity: localIdentityFromState(get()),
+    });
+
+    const loadedIdentity = localIdentityFromState(get());
+    await hydrateProfile({ ...priorIdentity, ...loadedIdentity });
+
+    if (transition.shouldOfferGuestTransfer) {
+      const guest = await readCanonicalWorkspaceState({
+        workspaceNamespace: GUEST_NAMESPACE,
+        fallbackState: get(),
+      });
       const guestPreview = buildGuestTransferPreview(get(), guest.snapshot);
       set({
         pendingGuestTransfer: guestPreview.hasData,
         guestTransferPreview: guestPreview.hasData ? guestPreview : null,
       });
+    } else {
+      set({ pendingGuestTransfer: false, guestTransferPreview: null });
     }
+
+    return {
+      ok: true,
+      namespace: transition.namespace,
+      accountSwitch: transition.accountSwitch,
+      guestTransferOffered: transition.shouldOfferGuestTransfer,
+    };
   },
   setOnline: (v)    => set({ online: v }),
 

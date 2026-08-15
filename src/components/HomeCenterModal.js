@@ -60,7 +60,7 @@ const text = (lang) => {
   };
 };
 
-export default function HomeCenterModal({ visible, mode = 'profile', onClose, onMode, onOpenTab, onEditTransaction, onOpenTransactionDetails }) {
+export default function HomeCenterModal({ visible, mode = 'profile', onClose, onMode, onOpenTab, onOpenSettingsPage, onEditTransaction, onOpenTransactionDetails }) {
   const {
     trans, debts, goals, commitments, cats, cfg, user, syncing, online, dirty,
     lastSyncedAt, lastSyncError, syncConflict, vaultRecovery, syncCloud,
@@ -293,7 +293,7 @@ export default function HomeCenterModal({ visible, mode = 'profile', onClose, on
                   </TouchableOpacity>
                 </View>
               ) : null}
-              <TouchableOpacity onPress={() => { onClose?.(); onOpenTab?.('settings'); }} style={[s.settings, { borderColor: th.border, flexDirection: dir }]}>
+              <TouchableOpacity onPress={() => { onClose?.(); onOpenSettingsPage?.('account'); }} style={[s.settings, { borderColor: th.border, flexDirection: dir }]}>
                 <Ionicons name="shield-checkmark-outline" size={19} color={th.primary} />
                 <Text style={{ flex: 1, color: th.text, fontWeight: '900', textAlign: align }}>{L.settings}</Text>
                 <Ionicons name={ar ? 'chevron-back' : 'chevron-forward'} size={17} color={th.faint} />

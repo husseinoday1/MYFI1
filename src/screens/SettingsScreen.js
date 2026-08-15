@@ -293,12 +293,13 @@ const editableIdentityName = ({ user, cfg } = {}) => {
   return localName || cleanDisplayName(metadata.full_name || metadata.name || metadata.displayName) || '';
 };
 
-export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal = 0 }) {
+export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal = 0, openRequest = null }) {
   const {
     cfg,
     setCfg,
     user,
     setUser,
+    disconnectCloudSession,
     resetAll,
     syncing,
     online,
@@ -382,6 +383,13 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
   useEffect(() => {
     if (resetSignal > 0) resetToRoot();
   }, [resetSignal]);
+
+  useEffect(() => {
+    const requestedPage = String(openRequest?.page || '').trim();
+    if (!requestedPage) return;
+    setNavStack(requestedPage === 'root' ? [] : ['root']);
+    setPage(requestedPage);
+  }, [openRequest?.nonce]);
 
   useEffect(() => {
     setNameDraft(editableIdentityName({ user, cfg }));
@@ -641,10 +649,9 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
   };
 
   const signOutLocal = async () => {
-    try {
-      await supabase.auth.signOut({ scope: 'local' });
-    } finally {
-      await setUser(null);
+    const result = await disconnectCloudSession();
+    if (result?.ok === false) {
+      Alert.alert('', result.reason || T.accountServiceIssue);
     }
   };
 

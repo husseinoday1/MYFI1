@@ -17,6 +17,10 @@ assert(store.includes("entityType: 'budget'"), 'budgets are not committed throug
 
 const sync = read('src/store/slices/useSyncSlice.js');
 assert(sync.includes('ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY'), 'active local ledger pointer is not persisted independently of auth session');
+assert(sync.includes('ACTIVE_LOCAL_LEDGER_CONTEXT_KEY'), 'active ledger/account link is not persisted independently of auth session');
+assert(sync.includes('resolveWorkspaceTransition'), 'account/session lifecycle has no explicit transition contract');
+assert(sync.includes('disconnectCloudSession'), 'logout is not implemented as an explicit cloud-session-only action');
+assert(sync.includes('transition.shouldOfferGuestTransfer'), 'Guest transfer is not restricted to a true unlinked Guest ledger');
 assert(sync.includes('preserveWorkspaceOnLogout'), 'logout preservation contract missing');
 assert(sync.includes('runFinancialOperationalCutoverV7'), 'operational cutover gate missing from runtime lifecycle');
 
@@ -61,6 +65,8 @@ assert(settingsLegacy.includes('reconcileRate'), 'foreign wallet reconciliation 
 assert(settingsLegacy.includes('await setCfg({ country: country.code })'), 'legacy country change still owns or silently changes base currency');
 const settings = read('src/screens/SettingsScreen.js');
 assert(settings.includes('await setCfg({ country: country.code })') && !settings.includes('const currencyPatch = country.currency'), 'primary Settings country change still owns or silently changes base currency');
+const accountCenter = read('src/components/HomeCenterModal.js');
+assert(accountCenter.includes("onOpenSettingsPage?.('account')") && !accountCenter.includes("onOpenTab?.('settings')"), 'Profile Account & Security still routes to generic Settings');
 
 const trackers = read('src/store/slices/trackersSlice.js');
 const debtDelete = trackers.slice(trackers.indexOf('deleteDebt: async'), trackers.indexOf('addPayment: async'));
