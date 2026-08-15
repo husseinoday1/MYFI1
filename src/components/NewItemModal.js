@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
-import { getSymbol } from '../lib/constants';
+import { CURRENCIES, getSymbol } from '../lib/constants';
 import { today, isISODate } from '../utils/calc';
 import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel, sortWalletsByDefault } from '../lib/wallets';
 import { Touchable as TouchableOpacity } from './AppPrimitives';
@@ -71,6 +71,9 @@ const modalCopy = (lang = 'ar') => {
     monthlyRepeat: ar ? 'شهري' : 'Monthly',
     oneTimeRepeat: ar ? 'مرة واحدة' : 'One time',
     repeatMode: ar ? 'تكرار الالتزام' : 'Commitment repeat',
+    currency: ar ? 'عملة المتابعة' : 'Tracker currency',
+    entityBaseRate: ar ? 'سعر الصرف التاريخي إلى العملة الأساسية' : 'Historical rate to base currency',
+    walletBaseRate: ar ? 'سعر محفظة الدفع إلى العملة الأساسية' : 'Payment-wallet rate to base currency',
   };
 };
 
@@ -79,7 +82,6 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
   const T = modalCopy(cfg.lang);
-  const sym = getSymbol(cfg.currency);
   const modules = getModules(cfg);
   const commitmentCategories = getCategoriesForFlow(cats, CATEGORY_FLOWS.EXPENSE);
   const enabledKinds = getTrackerKinds(cfg);
@@ -112,6 +114,9 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const [trackerType, setTrackerType] = useState('owed');
   const [name, setName] = useState('');
   const [amt, setAmt] = useState('');
+  const [entityCurrency, setEntityCurrency] = useState(cfg.currency);
+  const [entityBaseRate, setEntityBaseRate] = useState('');
+  const [walletBaseRate, setWalletBaseRate] = useState('');
   const [startDate, setStartDate] = useState(today());
   const [withPlan, setWithPlan] = useState(false);
   const [planAmount, setPlanAmount] = useState('');
@@ -133,6 +138,9 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         : (enabledKinds[0] || 'owed'));
     setName(presetName);
     setAmt('');
+    setEntityCurrency(String(preset?.linkedCurrency || cfg.currency || 'IQD').toUpperCase());
+    setEntityBaseRate('');
+    setWalletBaseRate('');
     setStartDate(today());
     setWithPlan(false);
     setPlanAmount('');
@@ -143,7 +151,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setCommitmentCatTouched(false);
     setCommitmentRepeatMonthly(true);
     setExpandedPicker(null);
-  }, [visible, linkedPlanMode, presetKind, preset?.linkedName, requestedTrackerType, defaultWalletId]);
+  }, [visible, linkedPlanMode, presetKind, preset?.linkedName, preset?.linkedCurrency, requestedTrackerType, defaultWalletId, cfg.currency]);
 
   const currentKind = linkedPlanMode
     ? presetKind
@@ -217,6 +225,9 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setTrackerType('owed');
     setName('');
     setAmt('');
+    setEntityCurrency(cfg.currency);
+    setEntityBaseRate('');
+    setWalletBaseRate('');
     setStartDate(today());
     setWithPlan(false);
     setPlanAmount('');
@@ -259,7 +270,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     return {
       value: wallet.id,
       label: getWalletLabel(wallet, cfg.lang),
-      detail: `${isAr ? 'متاح' : 'Available'} ${Math.round(available).toLocaleString()} ${sym}`,
+      detail: `${isAr ? 'متاح' : 'Available'} ${Math.round(available).toLocaleString()} ${getSymbol(wallet.currency || cfg.currency)}`,
       icon: 'wallet-outline',
       color: available >= 0 ? th.primary : th.exp,
     };
@@ -275,6 +286,21 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     { value: true, label: T.monthlyRepeat, icon: 'repeat-outline', color: th.warn },
     { value: false, label: T.oneTimeRepeat, icon: 'ellipse-outline', color: th.warn },
   ];
+  const currencyOptions = CURRENCIES.map(item => ({
+    value: item.code,
+    label: `${item.code} · ${isAr ? item.name : item.nameEn}`,
+    detail: item.sym,
+    icon: 'cash-outline',
+    color: th.primary,
+  }));
+  const selectedEntityCurrency = String(entityCurrency || cfg.currency || 'IQD').toUpperCase();
+  const entitySym = getSymbol(selectedEntityCurrency);
+  const selectedPaymentWallet = walletList.find(wallet => wallet.id === planWalletId) || walletList[0] || null;
+  const selectedPaymentCurrency = String(selectedPaymentWallet?.currency || cfg.currency || 'IQD').toUpperCase();
+  const needsEntityOriginRate = isDebt && originMode !== 'previous' && selectedEntityCurrency !== String(cfg.currency || 'IQD').toUpperCase();
+  const needsWalletOriginRate = isDebt && originMode !== 'previous'
+    && selectedPaymentCurrency !== String(cfg.currency || 'IQD').toUpperCase()
+    && selectedPaymentCurrency !== selectedEntityCurrency;
   const trackerMeta = {
     owed: { label: T.owed, icon: 'arrow-down-outline', color: th.exp, bg: th.expBg },
     receivable: { label: T.receivable, icon: 'arrow-up-outline', color: th.inc, bg: th.incBg },
@@ -285,7 +311,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     ? { label: T.planTitle, icon: 'calendar-outline', color: th.warn, bg: th.warnBg }
     : trackerMeta[currentKind] || trackerMeta.owed;
   const amountValue = Math.abs(cleanNumber(amt));
-  const moneyPreview = (value) => `${Math.round(Math.abs(Number(value) || 0)).toLocaleString()} ${sym}`;
+  const moneyPreview = (value) => `${Math.round(Math.abs(Number(value) || 0)).toLocaleString()} ${entitySym}`;
   const originImpactText = originMode === 'received'
     ? (isAr ? `يزيد الرصيد ${moneyPreview(amountValue)}` : `Adds ${moneyPreview(amountValue)} to balance`)
     : originMode === 'lent'
@@ -360,6 +386,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         cat: preset?.cat || suggestCategoryForText(linkedName, cats),
         linkedType: preset?.linkedType || 'debt',
         linkedId: preset?.linkedId || null,
+        currencyCode: selectedEntityCurrency,
       });
       handleClose();
       return;
@@ -374,6 +401,14 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
       );
       return;
     }
+    if (needsEntityOriginRate && !(cleanNumber(entityBaseRate) > 0)) {
+      Alert.alert('', isAr ? 'أدخل سعر الصرف التاريخي لعملة الدين.' : 'Enter the debt historical exchange rate.');
+      return;
+    }
+    if (needsWalletOriginRate && !(cleanNumber(walletBaseRate) > 0)) {
+      Alert.alert('', isAr ? 'أدخل سعر الصرف التاريخي لمحفظة التأثير.' : 'Enter the payment wallet historical exchange rate.');
+      return;
+    }
     if (isCommitment) {
       await addCommitment({
         name: name.trim(),
@@ -382,6 +417,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         walletId: planWalletId,
         cat: commitmentCat || suggestCategoryForText(name, commitmentCategories),
         linkedType: 'none',
+        currencyCode: selectedEntityCurrency,
         repeatMonthly: commitmentRepeatMonthly,
       });
       handleClose();
@@ -399,11 +435,15 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         direction: isReceivable ? 'receivable' : 'owed',
         originMode,
         walletId: planWalletId,
+        currencyCode: selectedEntityCurrency,
+        entityBaseRate: cleanNumber(entityBaseRate) || undefined,
+        walletBaseRate: cleanNumber(walletBaseRate) || undefined,
       });
     } else {
       created = await addGoal({
         name: name.trim(),
         target: totalValue,
+        currencyCode: selectedEntityCurrency,
         createdAt: startDate,
       });
     }
@@ -417,6 +457,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         cat: suggestCategoryForText(name, cats),
         linkedType: isGoal ? 'goal' : isReceivable ? 'receivable' : 'debt',
         linkedId: created.id,
+        currencyCode: selectedEntityCurrency,
       });
     }
 
@@ -492,14 +533,28 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
               })}
 
               {renderTextField({
-                label: `${amountLabel} (${sym})`,
+                label: `${amountLabel} (${entitySym})`,
                 value: amt,
                 onChangeText: (value) => setAmt(formatNumberInput(value)),
                 keyboardType: 'numeric',
-                placeholder: `0 ${sym}`,
+                placeholder: `0 ${entitySym}`,
                 tone: activeColor,
                 large: true,
               })}
+
+              {!linkedPlanMode ? renderSelectField({
+                id: 'tracker-currency',
+                label: T.currency,
+                value: selectedEntityCurrency,
+                options: currencyOptions,
+                icon: 'cash-outline',
+                tone: activeColor,
+                onChange: value => {
+                  setEntityCurrency(value);
+                  setEntityBaseRate('');
+                  setWalletBaseRate('');
+                },
+              }) : null}
 
               {isDebt ? (
                 <View style={s.originBlock}>
@@ -535,6 +590,21 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                   </View>
                 </View>
               ) : null}
+
+              {needsEntityOriginRate ? renderTextField({
+                label: `${T.entityBaseRate} · 1 ${selectedEntityCurrency} = ? ${cfg.currency}`,
+                value: entityBaseRate,
+                onChangeText: value => setEntityBaseRate(formatNumberInput(value)),
+                keyboardType: 'decimal-pad',
+                placeholder: '0',
+              }) : null}
+              {needsWalletOriginRate ? renderTextField({
+                label: `${T.walletBaseRate} · 1 ${selectedPaymentCurrency} = ? ${cfg.currency}`,
+                value: walletBaseRate,
+                onChangeText: value => setWalletBaseRate(formatNumberInput(value)),
+                keyboardType: 'decimal-pad',
+                placeholder: '0',
+              }) : null}
 
               {isCommitment ? (
                 <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
@@ -643,11 +713,11 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                   </View>
 
                   {renderTextField({
-                    label: `${T.planAmount} (${sym})`,
+                    label: `${T.planAmount} (${entitySym})`,
                     value: planAmount,
                     onChangeText: (value) => setPlanAmount(formatNumberInput(value)),
                     keyboardType: 'numeric',
-                    placeholder: `0 ${sym}`,
+                    placeholder: `0 ${entitySym}`,
                     tone: th.warn,
                   })}
 

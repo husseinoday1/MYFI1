@@ -1,4 +1,5 @@
 import { asDate, daysInMonth, isISODate, normalizeDate, today } from './dateCore';
+import { normalizeCurrencyCode } from './financialCoreV2';
 
 const clampDay = (value) => {
   const n = Math.round(Math.abs(Number(value) || 1));
@@ -81,7 +82,7 @@ export const commitmentCycleMonth = (commitment = {}, date = new Date()) => {
   return monthKey(dateToISO(date));
 };
 
-export const normalizeCommitments = (items = [], fallbackWalletId = null) =>
+export const normalizeCommitments = (items = [], fallbackWalletId = null, fallbackCurrency = 'IQD') =>
   (Array.isArray(items) ? items : [])
     .filter(item => item && (item.name || Number(item.amt || 0)))
     .map(item => {
@@ -91,6 +92,7 @@ export const normalizeCommitments = (items = [], fallbackWalletId = null) =>
         ...item,
         name: String(item.name || '').trim() || 'التزام شهري',
         amt: Math.abs(Number(item.amt || 0)),
+        currencyCode: normalizeCurrencyCode(item.currencyCode || item.currency, fallbackCurrency),
         firstDueISO,
         day: firstDueISO ? dayFromISO(firstDueISO) : clampDay(item.day),
         cat: item.cat || 'other',

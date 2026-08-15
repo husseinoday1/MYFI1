@@ -17,6 +17,14 @@ const copy = (lang) => {
     title: ar ? '\u062a\u0641\u0627\u0635\u064a\u0644 \u0627\u0644\u062d\u0631\u0643\u0629' : 'Transaction details',
     date: ar ? '\u0627\u0644\u062a\u0627\u0631\u064a\u062e' : 'Date',
     amount: ar ? '\u0627\u0644\u0645\u0628\u0644\u063a' : 'Amount',
+    sent: ar ? 'المبلغ المرسل' : 'Sent amount',
+    received: ar ? 'المبلغ المستلم' : 'Received amount',
+    directRate: ar ? 'سعر التحويل المثبت' : 'Frozen transfer rate',
+    fee: ar ? 'رسوم التحويل' : 'Transfer fee',
+    historicalBase: ar ? 'القيمة التاريخية للتقارير' : 'Historical reporting value',
+    historicalRate: ar ? 'سعر التقارير التاريخي' : 'Historical reporting rate',
+    trackerAmount: ar ? 'قيمة المتابعة الأصلية' : 'Original tracker amount',
+    trackerRate: ar ? 'سعر المتابعة التاريخي' : 'Tracker historical rate',
     category: ar ? '\u0627\u0644\u062a\u0635\u0646\u064a\u0641' : 'Category',
     wallet: ar ? '\u0627\u0644\u0645\u062d\u0641\u0638\u0629' : 'Wallet',
     from: ar ? '\u0645\u0646' : 'From',
@@ -41,6 +49,7 @@ export default function TransactionDetailsModal({ visible, transaction, cats = [
   const th = TH[cfg.theme] || TH.dark;
   const C = copy(cfg.lang);
   const sym = getSymbol(cfg.currency);
+  const baseCurrency = String(cfg.currency || 'IQD').toUpperCase();
   const isAr = isRTL(cfg.lang);
   const align = textAlignFor(cfg.lang);
   const rowDir = rowDirFor(cfg.lang);
@@ -57,18 +66,60 @@ export default function TransactionDetailsModal({ visible, transaction, cats = [
   const typeLabel = transfer ? C.transfer : goalSaving ? C.saving : amount >= 0 ? C.income : C.expense;
   const recordedAs = getTransactionTagMeta(transaction);
   const linked = transaction.isDebtPayment || transaction.isGoalSaving || transaction.isCommitmentPayment;
-  const amountText = `${transfer ? '' : amount >= 0 ? '+' : '-'}${formatMoneyNumber(
-    Math.abs(transfer ? transaction.transferAmount : amount),
-    cfg.currency,
-    cfg.lang,
-  )}`;
+  const entryWallet = walletMap.get(transaction.walletId);
+  const fromWallet = walletMap.get(transaction.fromWalletId);
+  const toWallet = walletMap.get(transaction.toWalletId);
+  const nativeCurrency = String(transaction.walletCurrency || transaction.currencyCode || entryWallet?.currency || baseCurrency).toUpperCase();
+  const fromCurrency = String(transaction.fromCurrency || fromWallet?.currency || baseCurrency).toUpperCase();
+  const toCurrency = String(transaction.toCurrency || toWallet?.currency || baseCurrency).toUpperCase();
+  const sourceAmount = Math.abs(Number(transaction.transferFromAmount ?? transaction.transferAmount ?? 0));
+  const targetAmount = Math.abs(Number(transaction.transferToAmount ?? transaction.transferAmount ?? 0));
+  const directRate = Number(transaction.transferRate ?? transaction.exchangeRate ?? (sourceAmount > 0 ? targetAmount / sourceAmount : 0));
+  const feeAmount = Math.abs(Number(transaction.feeAmount || 0));
+  const nativeAmount = Object.prototype.hasOwnProperty.call(transaction || {}, 'walletAmount')
+    ? Number(transaction.walletAmount || 0)
+    : Number(amount || 0);
+  const baseAmount = Object.prototype.hasOwnProperty.call(transaction || {}, 'baseAmount')
+    ? Number(transaction.baseAmount || 0)
+    : Number(amount || 0);
+  const amountText = `${amount >= 0 ? '+' : '-'}${formatMoneyNumber(Math.abs(nativeAmount), nativeCurrency, cfg.lang)} ${getSymbol(nativeCurrency)}`;
+  const transferSourceText = `${formatMoneyNumber(sourceAmount, fromCurrency, cfg.lang)} ${getSymbol(fromCurrency)}`;
+  const transferTargetText = `${formatMoneyNumber(targetAmount, toCurrency, cfg.lang)} ${getSymbol(toCurrency)}`;
+  const transferRateText = sourceAmount > 0 && targetAmount > 0 && directRate > 0
+    ? `1 ${fromCurrency} = ${directRate.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${toCurrency}`
+    : '-';
+  const feeText = feeAmount > 0 ? `${formatMoneyNumber(feeAmount, fromCurrency, cfg.lang)} ${getSymbol(fromCurrency)}` : '-';
+  const historicalBaseText = nativeCurrency !== baseCurrency
+    ? `${formatMoneyNumber(Math.abs(baseAmount), baseCurrency, cfg.lang)} ${getSymbol(baseCurrency)}`
+    : null;
+  const historicalRateText = nativeCurrency !== baseCurrency && Number(transaction.exchangeRate) > 0
+    ? `1 ${nativeCurrency} = ${Number(transaction.exchangeRate).toLocaleString(undefined, { maximumFractionDigits: 8 })} ${baseCurrency}`
+    : null;
+  const entityCurrency = String(transaction.entityCurrencyCode || baseCurrency).toUpperCase();
+  const entityAmount = Math.abs(Number(transaction.entityAmount ?? transaction.allocationAmount ?? 0));
+  const entityAmountText = linked && entityAmount > 0
+    ? `${formatMoneyNumber(entityAmount, entityCurrency, cfg.lang)} ${getSymbol(entityCurrency)}`
+    : null;
+  const entityRateText = entityCurrency !== baseCurrency && Number(transaction.entityBaseRate) > 0
+    ? `1 ${entityCurrency} = ${Number(transaction.entityBaseRate).toLocaleString(undefined, { maximumFractionDigits: 8 })} ${baseCurrency}`
+    : null;
   const detailRows = [
     { label: C.type, value: typeLabel },
     { label: C.date, value: transaction.dateISO || '-' },
     !transfer ? { label: C.category, value: cfg.lang === 'ar' ? category.label : category.labelEn || category.label } : null,
-    transfer ? { label: C.from, value: getWalletLabel(walletMap.get(transaction.fromWalletId), cfg.lang) } : null,
-    transfer ? { label: C.to, value: getWalletLabel(walletMap.get(transaction.toWalletId), cfg.lang) } : null,
-    !transfer && transaction.walletId ? { label: C.wallet, value: getWalletLabel(walletMap.get(transaction.walletId), cfg.lang) } : null,
+    transfer ? { label: C.from, value: getWalletLabel(fromWallet, cfg.lang) } : null,
+    transfer ? { label: C.to, value: getWalletLabel(toWallet, cfg.lang) } : null,
+    transfer ? { label: C.sent, value: transferSourceText } : null,
+    transfer ? { label: C.received, value: transferTargetText } : null,
+    transfer && fromCurrency !== toCurrency ? { label: C.directRate, value: transferRateText } : null,
+    transfer && feeAmount > 0 ? { label: C.fee, value: feeText } : null,
+    transfer && fromCurrency !== baseCurrency && Number(transaction.fromBaseRate) > 0 ? { label: C.historicalRate, value: `1 ${fromCurrency} = ${Number(transaction.fromBaseRate).toLocaleString(undefined, { maximumFractionDigits: 8 })} ${baseCurrency}` } : null,
+    transfer && toCurrency !== baseCurrency && Number(transaction.toBaseRate) > 0 ? { label: C.historicalRate + ` · ${toCurrency}`, value: `1 ${toCurrency} = ${Number(transaction.toBaseRate).toLocaleString(undefined, { maximumFractionDigits: 8 })} ${baseCurrency}` } : null,
+    !transfer && transaction.walletId ? { label: C.wallet, value: getWalletLabel(entryWallet, cfg.lang) } : null,
+    !transfer && entityAmountText ? { label: C.trackerAmount, value: entityAmountText } : null,
+    !transfer && entityRateText ? { label: C.trackerRate, value: entityRateText } : null,
+    !transfer && historicalBaseText ? { label: C.historicalBase, value: historicalBaseText } : null,
+    !transfer && historicalRateText ? { label: C.historicalRate, value: historicalRateText } : null,
     recordedAs.id !== 'none' ? { label: C.recordedAs, value: cfg.lang === 'ar' ? recordedAs.label : recordedAs.labelEn } : null,
   ].filter(Boolean);
 
@@ -91,17 +142,27 @@ export default function TransactionDetailsModal({ visible, transaction, cats = [
           </View>
           <View style={[s.amountCard, { backgroundColor: `${amountColor}14`, borderColor: `${amountColor}33` }]}>
             <Text style={{ color: th.sub, fontSize: 12, ...weight('800'), textAlign: 'center' }}>{C.amount}</Text>
-            <View style={[s.amountLine, { flexDirection: rowDir }]}>
-              <Text
-                style={[s.amountValue, { color: amountColor }]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.58}
-              >
-                {amountText}
-              </Text>
-              <Text style={{ color: amountColor, fontSize: 13, ...weight('900') }}>{sym}</Text>
-            </View>
+            {transfer ? (
+              <View style={{ marginTop: 5, gap: 5 }}>
+                <Text style={[s.transferAmountValue, { color: amountColor, textAlign: 'center' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.62}>
+                  {transferSourceText} → {transferTargetText}
+                </Text>
+                {fromCurrency !== toCurrency ? (
+                  <Text style={{ color: th.sub, fontSize: 11, ...weight('800'), textAlign: 'center' }}>{transferRateText}</Text>
+                ) : null}
+              </View>
+            ) : (
+              <View style={[s.amountLine, { flexDirection: rowDir }]}>
+                <Text
+                  style={[s.amountValue, { color: amountColor }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.58}
+                >
+                  {amountText}
+                </Text>
+              </View>
+            )}
           </View>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <View style={[s.detailCard, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
@@ -175,6 +236,7 @@ const s = StyleSheet.create({
   amountCard: { borderWidth: 1, borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 10 },
   amountLine: { alignItems: 'baseline', justifyContent: 'center', gap: 6, marginTop: 3 },
   amountValue: { flexShrink: 1, fontSize: 24, lineHeight: 31, ...weight('900'), textAlign: 'center', fontVariant: ['tabular-nums'] },
+  transferAmountValue: { fontSize: 19, lineHeight: 27, ...weight('900'), fontVariant: ['tabular-nums'] },
   detailCard: { borderWidth: 1, borderRadius: RADIUS.lg, overflow: 'hidden' },
   detailRow: { alignItems: 'flex-start', gap: 14, paddingHorizontal: 13, paddingVertical: 11, borderTopWidth: 1 },
   statusLine: { gap: 7, flexWrap: 'wrap', marginTop: 10 },

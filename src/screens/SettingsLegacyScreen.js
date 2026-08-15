@@ -2815,14 +2815,21 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
             })}
           </ScrollView>
           {newWalletCurrency !== cfg.currency ? (
-            <TextInput
-              value={newWalletRate}
-              onChangeText={(value) => setNewWalletRate(formatNumberInput(value))}
-              keyboardType="decimal-pad"
-              placeholder={isAr ? `1 ${newWalletCurrency} = ؟ ${cfg.currency}` : `1 ${newWalletCurrency} = ? ${cfg.currency}`}
-              placeholderTextColor={th.sub}
-              style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
-            />
+            <View>
+              <Text style={{ color: th.sub, fontSize: 11, lineHeight: 18, marginBottom: 7, textAlign: isAr ? 'right' : 'left' }}>
+                {isAr
+                  ? `هذه المحفظة تبقى بعملة ${newWalletCurrency} ولا تغيّر العملة الأساسية ${cfg.currency}. السعر أدناه للتقييم الحالي فقط؛ عند تسجيل حركة مالية بعملة مختلفة سيطلب MYFI تأكيد السعر التاريخي للحركة ولن يعيد كتابة الماضي لاحقاً.`
+                  : `This wallet stays in ${newWalletCurrency} and does not change the ${cfg.currency} base currency. The rate below is for current valuation only; MYFI asks you to confirm the historical rate when recording a foreign-currency transaction and never rewrites past transactions later.`}
+              </Text>
+              <TextInput
+                value={newWalletRate}
+                onChangeText={(value) => setNewWalletRate(formatNumberInput(value))}
+                keyboardType="decimal-pad"
+                placeholder={isAr ? `السعر الحالي · 1 ${newWalletCurrency} = ؟ ${cfg.currency}` : `Current rate · 1 ${newWalletCurrency} = ? ${cfg.currency}`}
+                placeholderTextColor={th.sub}
+                style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
+              />
+            </View>
           ) : null}
           <TextInput
             value={newWalletOpening}

@@ -11,7 +11,7 @@ import {
   uid,
 } from '../domain';
 import { debtLifecycle, goalLifecycle, reopenCompletionCommitments } from '../../lib/trackerLifecycle';
-import { buildCurrencyFieldsFromBaseAmount } from '../../lib/financialCoreV2';
+import { buildEntityCurrencyFields, normalizeCurrencyCode } from '../../lib/financialCoreV2';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
 import {
   commitEntityChangesV7,
@@ -24,8 +24,10 @@ export const createTrackersSlice = (set, get) => ({
     const originMode = ['received', 'lent'].includes(d.originMode) ? d.originMode : 'previous';
     const debtId = uid();
     const originTransactionId = originMode === 'previous' ? null : uid();
+    const entityCurrency = normalizeCurrencyCode(d.currencyCode || d.currency, get().cfg.currency);
     const debt = normalizeDebtItems([{
       ...d,
+      currencyCode: entityCurrency,
       scope,
       direction: d.direction || 'owed',
       id: debtId,
@@ -34,24 +36,34 @@ export const createTrackersSlice = (set, get) => ({
       createdAt: normalizeDate(d.createdAt),
       originMode,
       originTransactionId,
-    }], scope)[0];
+    }], scope, entityCurrency)[0];
     const walletId = d.walletId || getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
     const originAmount = originMode === 'received'
       ? Math.abs(Number(debt.total) || 0)
       : originMode === 'lent'
         ? -Math.abs(Number(debt.total) || 0)
         : 0;
-    const originCurrencyFields = originAmount ? buildCurrencyFieldsFromBaseAmount({
-      baseAmount: originAmount,
-      walletId,
-      wallets: get().wallets,
-      baseCurrency: get().cfg.currency,
-      exchangeRate: d.exchangeRate,
-    }) : null;
+    let originCurrencyFields = null;
+    if (originAmount) {
+      try {
+        originCurrencyFields = buildEntityCurrencyFields({
+          entityAmount: originAmount,
+          entityCurrency: debt.currencyCode,
+          walletId,
+          wallets: get().wallets,
+          baseCurrency: get().cfg.currency,
+          entityBaseRate: d.entityBaseRate,
+          walletBaseRate: d.walletBaseRate ?? d.exchangeRate,
+        });
+      } catch (error) {
+        set({ ledgerError: String(error?.message || 'debt_origin_fx_required') });
+        return false;
+      }
+    }
     const originTx = originAmount ? {
       id: originTransactionId,
       title: originMode === 'received' ? `استلام دين عليّ — ${debt.name}` : `إنشاء دين لي — ${debt.name}`,
-      amt: originAmount,
+      amt: originCurrencyFields.baseAmount,
       ...originCurrencyFields,
       cat: 'other',
       walletId,
@@ -63,7 +75,7 @@ export const createTrackersSlice = (set, get) => ({
       isDebtOrigin: true,
       debtId: debt.id,
       rateDate: debt.createdAt,
-      rateSource: originCurrencyFields?.walletCurrency === get().cfg.currency ? 'same_currency' : 'user_entered',
+      rateSource: originCurrencyFields?.fxSnapshotSource || 'same_currency',
       idempotencyKey: `debt-origin:${originTransactionId}`,
     } : null;
     try {
@@ -100,7 +112,7 @@ export const createTrackersSlice = (set, get) => ({
       let reopenedLink = null;
       const debts = s.debts.map(d => {
         if (d.id !== id) return d;
-        const next = normalizeDebtItems([{ ...d, ...patch }], d.scope)[0];
+        const next = normalizeDebtItems([{ ...d, ...patch, currencyCode: d.currencyCode || patch.currencyCode }], d.scope, d.currencyCode || get().cfg.currency)[0];
         nextName = next.name;
         if (d.status === 'settled' && next.status === 'active') {
           reopenedLink = {
@@ -163,14 +175,22 @@ export const createTrackersSlice = (set, get) => ({
     const n = Math.min(Math.abs(Number(amt) || 0), remainingAmount(debt.total, debt.paid));
     if (n <= 0) return false;
     const isReceivable = debt?.direction === 'receivable';
-    const signedAmt = isReceivable ? n : -n;
-    const currencyFields = buildCurrencyFieldsFromBaseAmount({
-      baseAmount: signedAmt,
-      walletId: txWalletId,
-      wallets: get().wallets,
-      baseCurrency: get().cfg.currency,
-      exchangeRate: transactionMeta.exchangeRate,
-    });
+    const signedEntityAmount = isReceivable ? n : -n;
+    let currencyFields;
+    try {
+      currencyFields = buildEntityCurrencyFields({
+        entityAmount: signedEntityAmount,
+        entityCurrency: debt.currencyCode || get().cfg.currency,
+        walletId: txWalletId,
+        wallets: get().wallets,
+        baseCurrency: get().cfg.currency,
+        entityBaseRate: transactionMeta.entityBaseRate,
+        walletBaseRate: transactionMeta.walletBaseRate ?? transactionMeta.exchangeRate,
+      });
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'debt_payment_fx_required') });
+      return false;
+    }
     const availableBalance = getWalletAvailableBalances(
       normalizeWallets(get().wallets, get().cfg.currency),
       get().trans,
@@ -182,9 +202,10 @@ export const createTrackersSlice = (set, get) => ({
       !Number.isFinite(availableBalance) || spendNative > Number(availableBalance || 0) + 0.0001
     );
     const pay = {
-      id: payId, amt: n, date: entryDate, ts: Date.now(),
+      id: payId, amt: n, currencyCode: debt.currencyCode || get().cfg.currency, date: entryDate, ts: Date.now(),
       walletId: txWalletId, walletAmount: Math.abs(Number(currencyFields.walletAmount || 0)),
       walletCurrency: currencyFields.walletCurrency, exchangeRate: currencyFields.exchangeRate,
+      entityBaseRate: currencyFields.entityBaseRate, walletBaseRate: currencyFields.walletBaseRate,
     };
     const nextPaid = debtPaidTotal(debt, [...(debt.payments || []), pay]);
     const nextDebtBase = { ...debt, payments: [...(debt.payments || []), pay], paid: nextPaid };
@@ -193,14 +214,14 @@ export const createTrackersSlice = (set, get) => ({
     const title = `${isReceivable ? 'تحصيل دين لي' : 'سداد دين عليّ'} — ${debt ? debt.name : ''}`;
     const paymentTx = {
       ...transactionMeta,
-      id: uid(), title, amt: signedAmt, ...currencyFields, cat: transactionMeta.cat || 'other', walletId: txWalletId,
+      id: uid(), title, amt: currencyFields.baseAmount, ...currencyFields, cat: transactionMeta.cat || 'other', walletId: txWalletId,
       dateISO: entryDate, ts: Date.now(), balanceWarning,
       scope: normalizeScope(transactionMeta.scope || debt.scope, getEntryScope(get().cfg)),
       flowType: isReceivable ? FLOW_TYPES.RECEIVABLE_COLLECTION : FLOW_TYPES.DEBT_PAYMENT,
       transactionTag: transactionMeta.transactionTag || (isReceivable ? 'debt_receivable' : 'debt_owed'),
       isDebtPayment: true, debtId, paymentId: payId,
       rateDate: transactionMeta.rateDate || entryDate,
-      rateSource: transactionMeta.rateSource || (currencyFields.walletCurrency === get().cfg.currency ? 'same_currency' : 'user_entered'),
+      rateSource: transactionMeta.rateSource || currencyFields.fxSnapshotSource,
       idempotencyKey: transactionMeta.idempotencyKey || `debt-payment:${payId}`,
       ...(completesDebt ? { completionNotice: 'debt_ended' } : {}),
     };
@@ -267,7 +288,8 @@ export const createTrackersSlice = (set, get) => ({
 
   addGoal: async (g) => {
     const scope = normalizeScope(g.scope, getEntryScope(get().cfg));
-    const goal = normalizeGoalItems([{ ...g, scope, id: uid(), cur: 0, savings: [], createdAt: normalizeDate(g.createdAt) }], scope)[0];
+    const entityCurrency = normalizeCurrencyCode(g.currencyCode || g.currency, get().cfg.currency);
+    const goal = normalizeGoalItems([{ ...g, currencyCode: entityCurrency, scope, id: uid(), cur: 0, savings: [], createdAt: normalizeDate(g.createdAt) }], scope, entityCurrency)[0];
     try {
       const committed = await commitEntityChangesV7({
         namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
@@ -290,7 +312,7 @@ export const createTrackersSlice = (set, get) => ({
       let reopenedLink = null;
       const goals = s.goals.map(g => {
         if (g.id !== id) return g;
-        const next = normalizeGoalItems([{ ...g, ...patch }], g.scope)[0];
+        const next = normalizeGoalItems([{ ...g, ...patch, currencyCode: g.currencyCode || patch.currencyCode }], g.scope, g.currencyCode || get().cfg.currency)[0];
         nextName = next.name;
         if (g.status === 'settled' && next.status === 'active') {
           reopenedLink = { linkedType: 'goal', linkedId: id, endReason: 'goal_completed' };
@@ -339,13 +361,21 @@ export const createTrackersSlice = (set, get) => ({
     if (!goal) return false;
     const n = Math.min(Math.abs(Number(amt) || 0), remainingAmount(goal.target, goal.cur));
     if (n <= 0) return false;
-    const allocationCurrency = buildCurrencyFieldsFromBaseAmount({
-      baseAmount: n,
-      walletId: txWalletId,
-      wallets: get().wallets,
-      baseCurrency: get().cfg.currency,
-      exchangeRate: transactionMeta.exchangeRate,
-    });
+    let allocationCurrency;
+    try {
+      allocationCurrency = buildEntityCurrencyFields({
+        entityAmount: n,
+        entityCurrency: goal.currencyCode || get().cfg.currency,
+        walletId: txWalletId,
+        wallets: get().wallets,
+        baseCurrency: get().cfg.currency,
+        entityBaseRate: transactionMeta.entityBaseRate,
+        walletBaseRate: transactionMeta.walletBaseRate ?? transactionMeta.exchangeRate,
+      });
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'goal_saving_fx_required') });
+      return false;
+    }
     const allocationWalletAmount = Math.abs(Number(allocationCurrency.walletAmount || 0));
     const availableBalance = getWalletAvailableBalances(
       normalizeWallets(get().wallets, get().cfg.currency),
@@ -357,9 +387,10 @@ export const createTrackersSlice = (set, get) => ({
       !Number.isFinite(availableBalance) || allocationWalletAmount > Number(availableBalance || 0) + 0.0001
     );
     const entry = {
-      id: saveId, amt: n, date: entryDate, ts: Date.now(), walletId: txWalletId,
+      id: saveId, amt: n, currencyCode: goal.currencyCode || get().cfg.currency, date: entryDate, ts: Date.now(), walletId: txWalletId,
       walletAmount: allocationWalletAmount, walletCurrency: allocationCurrency.walletCurrency,
-      exchangeRate: allocationCurrency.exchangeRate,
+      exchangeRate: allocationCurrency.exchangeRate, entityBaseRate: allocationCurrency.entityBaseRate,
+      walletBaseRate: allocationCurrency.walletBaseRate,
     };
     const nextSaved = Math.min(goalSavedTotal(goal, [...(goal.savings || []), entry]), goal.target);
     const nextGoalBase = { ...goal, savings: [...(goal.savings || []), entry], cur: nextSaved };
@@ -368,7 +399,12 @@ export const createTrackersSlice = (set, get) => ({
     const savingTx = {
       ...transactionMeta,
       id: uid(), title: transactionMeta.title || `توفير — ${goal ? goal.name : ''}`, amt: 0, allocationAmount: n,
-      allocationWalletAmount, walletCurrency: allocationCurrency.walletCurrency,
+      entityAmount: n, entityCurrencyCode: goal.currencyCode || get().cfg.currency,
+      entityBaseRate: allocationCurrency.entityBaseRate, walletBaseRate: allocationCurrency.walletBaseRate,
+      allocationBaseAmount: Math.abs(Number(allocationCurrency.baseAmount || 0)),
+      allocationBaseAmountMinor: Math.abs(Number(allocationCurrency.baseAmountMinor || 0)),
+      allocationWalletAmount, allocationWalletAmountMinor: Math.abs(Number(allocationCurrency.walletAmountMinor || 0)),
+      walletCurrency: allocationCurrency.walletCurrency,
       currencyCode: allocationCurrency.walletCurrency, baseCurrencyCode: allocationCurrency.baseCurrencyCode,
       exchangeRate: allocationCurrency.exchangeRate, walletAmount: 0, baseAmount: 0,
       balanceWarning, cat: transactionMeta.cat || 'other', walletId: txWalletId, dateISO: entryDate, ts: Date.now(),
@@ -377,7 +413,7 @@ export const createTrackersSlice = (set, get) => ({
       transactionTag: transactionMeta.transactionTag || 'saving',
       isGoalSaving: true, goalId, savingId: saveId,
       rateDate: transactionMeta.rateDate || entryDate,
-      rateSource: transactionMeta.rateSource || (allocationCurrency.walletCurrency === get().cfg.currency ? 'same_currency' : 'user_entered'),
+      rateSource: transactionMeta.rateSource || allocationCurrency.fxSnapshotSource,
       idempotencyKey: transactionMeta.idempotencyKey || `goal-saving:${saveId}`,
       ...(completesGoal ? { completionNotice: 'goal_completed' } : {}),
     };

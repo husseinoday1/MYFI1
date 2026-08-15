@@ -3,8 +3,8 @@ import {
   discardFinancialWorkspaceStageV7,
   financialLedgerV7Supported,
   getFinancialWorkspaceStateV7,
-  promoteFinancialWorkspaceStageV7,
   readFinancialProjectionV7,
+  setFinancialWorkspaceStateV7,
   stageFinancialWorkspaceV7,
 } from './financialLedgerV7Repository';
 import {
@@ -259,7 +259,7 @@ const metricsFromSource = ({ workspace, activeTransactions, archivedTransactions
   };
 };
 
-const metricsFromTarget = ({ projection, sourceMetrics }) => {
+const metricsFromTarget = ({ projection, sourceMetrics, baseCurrency }) => {
   const accountTotals = {};
   for (const posting of projection?.postings || []) {
     const row = accountTotals[posting.accountId] || { physicalMinor: 0, reservedMinor: 0 };
@@ -297,7 +297,7 @@ const metricsFromTarget = ({ projection, sourceMetrics }) => {
     currencyBalances,
     monthlyTotals: monthlyTotalsFromTransactions(
       (projection?.transactions || []).map(item => item.payload).filter(Boolean),
-      Object.values(sourceMetrics.walletBalances)[0]?.currency || 'IQD',
+      normalizeCurrencyCode(baseCurrency, 'IQD'),
     ),
   };
 };
@@ -327,6 +327,10 @@ export const buildFinancialShadowProjectionV7 = ({
     seen.set(transaction.id, transaction);
   }
   const dedupedArchived = archivedTransactions.filter(transaction => !activeTransactions.some(item => item.id === transaction.id));
+  const unresolvedFx = [...dedupedArchived, ...activeTransactions].filter(transaction => transaction?.fxStatus === 'UNRESOLVED_FX');
+  if (unresolvedFx.length) {
+    throw new Error(`financial_v7_shadow_unresolved_fx:${unresolvedFx.slice(0, 20).map(item => item.id).join(',')}`);
+  }
 
   const coldMovement = new Map(wallets.map(wallet => [wallet.id, 0]));
   for (const transaction of dedupedArchived) {
@@ -403,6 +407,18 @@ export const runFinancialShadowMigrationV7 = async ({
   if (currentState?.source_mode === 'sqlite' && !forceReplace) {
     return { supported: true, ok: true, alreadyCutover: true, checksum: currentState.shadow_checksum, sourceMode: 'sqlite' };
   }
+  const sourceUnresolvedFx = [
+    ...(Array.isArray(workspace?.trans) ? workspace.trans : []),
+    ...archiveRows(coldArchives),
+  ].filter(transaction => transaction?.fxStatus === 'UNRESOLVED_FX');
+  if (sourceUnresolvedFx.length) {
+    return {
+      supported: true,
+      ok: false,
+      reason: 'UNRESOLVED_FX',
+      differences: sourceUnresolvedFx.slice(0, 20).map(item => ({ field: 'fx', id: item.id })),
+    };
+  }
   const stageNamespace = `${namespace}::shadow-stage::v7`;
   const projection = buildFinancialShadowProjectionV7({ namespace: stageNamespace, workspace, coldArchives });
   const expectedIds = new Set(projection.commands.map(command => command.header.id));
@@ -425,7 +441,7 @@ export const runFinancialShadowMigrationV7 = async ({
     const staged = await readFinancialProjectionV7({ namespace: stageNamespace, database });
     const targetDocument = rawProjectionDocument(staged);
     const targetChecksum = financialProjectionChecksum(targetDocument);
-    const targetMetrics = metricsFromTarget({ projection: staged, sourceMetrics: projection.metrics });
+    const targetMetrics = metricsFromTarget({ projection: staged, sourceMetrics: projection.metrics, baseCurrency: projection.baseCurrency });
     const differences = [];
     compareMetric(differences, 'checksum', projection.checksum, targetChecksum);
     for (const field of [
@@ -441,13 +457,43 @@ export const runFinancialShadowMigrationV7 = async ({
         sourceCounts: projection.metrics, targetCounts: targetMetrics,
       };
     }
-    return promoteFinancialWorkspaceStageV7({
-      namespace, stageNamespace, checksum: projection.checksum,
-      sourceCounts: projection.metrics, targetCounts: targetMetrics,
-      differences, workspacePayload: projection.workspacePayload,
-      resetPendingOutbox: forceReplace,
+    // Phase 5 is readiness proof only. A successful shadow comparison must not
+    // make SQLite operationally authoritative; that cutover belongs to a later
+    // gated phase. Keep only the verified checksum/state and discard staging.
+    await discardFinancialWorkspaceStageV7({ stageNamespace, database });
+    const verifiedAt = new Date().toISOString();
+    await setFinancialWorkspaceStateV7({
+      namespace,
+      sourceMode: 'shadow',
+      checksum: projection.checksum,
+      verifiedAt,
+      payload: {
+        ...projection.workspacePayload,
+        migrationReadiness: {
+          status: 'ready',
+          verifiedAt,
+          sourceChecksum: projection.checksum,
+          targetChecksum,
+          sourceCounts: projection.metrics,
+          targetCounts: targetMetrics,
+        },
+      },
       database,
     });
+    return {
+      supported: true,
+      ok: true,
+      migrationReady: true,
+      sourceMode: 'shadow',
+      checksum: projection.checksum,
+      sourceChecksum: projection.checksum,
+      targetChecksum,
+      sourceCounts: projection.metrics,
+      targetCounts: targetMetrics,
+      differences: [],
+      verifiedAt,
+      cutover: false,
+    };
   } catch (error) {
     await discardFinancialWorkspaceStageV7({ stageNamespace, database }).catch(() => {});
     throw error;

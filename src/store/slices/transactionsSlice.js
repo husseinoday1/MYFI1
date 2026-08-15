@@ -12,7 +12,7 @@ import {
   uid,
 } from '../domain';
 import { debtLifecycle, goalLifecycle, reopenCompletionCommitments } from '../../lib/trackerLifecycle';
-import { buildCurrencyFields, buildCurrencyFieldsFromBaseAmount, buildTransferCurrencyFields } from '../../lib/financialCoreV2';
+import { buildCurrencyFields, buildEntityCurrencyFields, buildTransferCurrencyFields } from '../../lib/financialCoreV2';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
 import {
   commitExpenseToFinancialLedgerV7,
@@ -137,6 +137,8 @@ export const createTransactionSlice = (set, get) => ({
         toAmount: current.transferToAmount,
         exchangeRate: current.transferRate ?? current.exchangeRate,
         feeAmount: current.feeAmount || 0,
+        fromBaseRate: current.fromBaseRate,
+        toBaseRate: current.toBaseRate,
         dateISO: today(),
         note: current.note || '',
       });
@@ -155,7 +157,7 @@ export const createTransactionSlice = (set, get) => ({
     });
   },
 
-  addTransfer: async ({ fromWalletId, toWalletId, amount, toAmount = null, exchangeRate = null, feeAmount = 0, dateISO = today(), note = '' }) => {
+  addTransfer: async ({ fromWalletId, toWalletId, amount, toAmount = null, exchangeRate = null, feeAmount = 0, fromBaseRate = null, toBaseRate = null, dateISO = today(), note = '' }) => {
     const n = Number(amount);
     const normalizedWallets = normalizeWallets(get().wallets, get().cfg.currency);
     const walletIds = new Set(normalizedWallets.map(wallet => wallet.id));
@@ -167,16 +169,23 @@ export const createTransactionSlice = (set, get) => ({
       get().cfg.currency,
       get().cfg.defaultWalletId,
     ).find(wallet => wallet.id === fromWalletId)?.availableBalance;
-    const fields = buildTransferCurrencyFields({
-      fromWalletId,
-      toWalletId,
-      fromAmount: n,
-      toAmount,
-      wallets: normalizedWallets,
-      baseCurrency: get().cfg.currency,
-      exchangeRate,
-      feeAmount,
-    });
+    let fields;
+    try {
+      fields = buildTransferCurrencyFields({
+        fromWalletId,
+        toWalletId,
+        fromAmount: n,
+        toAmount,
+        wallets: normalizedWallets,
+        baseCurrency: get().cfg.currency,
+        exchangeRate,
+        feeAmount,
+        fromBaseRate,
+        toBaseRate,
+      });
+    } catch {
+      return false;
+    }
     const fromWallet = normalizedWallets.find(wallet => wallet.id === fromWalletId);
     const toWallet = normalizedWallets.find(wallet => wallet.id === toWalletId);
     const entryDate = normalizeDate(dateISO);
@@ -257,16 +266,23 @@ export const createTransactionSlice = (set, get) => ({
         get().cfg.currency,
         get().cfg.defaultWalletId,
       ).find(wallet => wallet.id === fromWalletId)?.availableBalance;
-      const transferFields = buildTransferCurrencyFields({
-        fromWalletId,
-        toWalletId,
-        fromAmount: transferAmount,
-        toAmount: safePatch.transferToAmount ?? current.transferToAmount,
-        wallets: normalizedWallets,
-        baseCurrency: get().cfg.currency,
-        exchangeRate: safePatch.transferRate ?? safePatch.exchangeRate ?? current.transferRate ?? current.exchangeRate,
-        feeAmount: safePatch.feeAmount ?? current.feeAmount ?? 0,
-      });
+      let transferFields;
+      try {
+        transferFields = buildTransferCurrencyFields({
+          fromWalletId,
+          toWalletId,
+          fromAmount: transferAmount,
+          toAmount: safePatch.transferToAmount ?? current.transferToAmount,
+          wallets: normalizedWallets,
+          baseCurrency: get().cfg.currency,
+          exchangeRate: safePatch.transferRate ?? safePatch.exchangeRate ?? current.transferRate ?? current.exchangeRate,
+          feeAmount: safePatch.feeAmount ?? current.feeAmount ?? 0,
+          fromBaseRate: safePatch.fromBaseRate ?? current.fromBaseRate,
+          toBaseRate: safePatch.toBaseRate ?? current.toBaseRate,
+        });
+      } catch {
+        return false;
+      }
       Object.assign(safePatch, transferFields, {
         transferAmount: transferFields.transferFromAmount,
         balanceWarning: !Number.isFinite(sourceBalance) || (transferFields.transferFromAmount + transferFields.feeAmount) > sourceBalance + 0.0001,
@@ -302,17 +318,23 @@ export const createTransactionSlice = (set, get) => ({
     const nextWalletId = safePatch.walletId || current.walletId || getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
     if (current.kind !== 'transfer' && safePatch.kind !== 'transfer') {
       if (current.isGoalSaving) {
-        const allocationBaseAmount = hasAmt
+        const allocationEntityAmount = hasAmt
           ? linkedAbsAmt
-          : Math.abs(Number(current.allocationAmount || 0));
-        const allocationFields = buildCurrencyFieldsFromBaseAmount({
-          baseAmount: allocationBaseAmount,
-          walletId: nextWalletId,
-          wallets: get().wallets,
-          baseCurrency: get().cfg.currency,
-          exchangeRate: safePatch.exchangeRate ?? current.exchangeRate ?? 1,
-          walletCurrency: safePatch.walletCurrency ?? current.walletCurrency ?? current.currencyCode,
-        });
+          : Math.abs(Number(current.entityAmount ?? current.allocationAmount ?? 0));
+        let allocationFields;
+        try {
+          allocationFields = buildEntityCurrencyFields({
+            entityAmount: allocationEntityAmount,
+            entityCurrency: linkedGoal?.currencyCode || current.entityCurrencyCode || get().cfg.currency,
+            walletId: nextWalletId,
+            wallets: get().wallets,
+            baseCurrency: get().cfg.currency,
+            entityBaseRate: safePatch.entityBaseRate ?? current.entityBaseRate,
+            walletBaseRate: safePatch.walletBaseRate ?? safePatch.exchangeRate ?? current.walletBaseRate ?? current.exchangeRate,
+          });
+        } catch {
+          return false;
+        }
         Object.assign(safePatch, {
           walletId: nextWalletId,
           amt: 0,
@@ -320,7 +342,12 @@ export const createTransactionSlice = (set, get) => ({
           walletAmountMinor: 0,
           baseAmount: 0,
           baseAmountMinor: 0,
-          allocationAmount: allocationBaseAmount,
+          allocationAmount: allocationEntityAmount,
+          entityAmount: allocationEntityAmount,
+          entityCurrencyCode: linkedGoal?.currencyCode || current.entityCurrencyCode || get().cfg.currency,
+          entityBaseRate: allocationFields.entityBaseRate,
+          walletBaseRate: allocationFields.walletBaseRate,
+          allocationBaseAmount: Math.abs(Number(allocationFields.baseAmount || 0)),
           allocationBaseAmountMinor: Math.abs(Number(allocationFields.baseAmountMinor || 0)),
           allocationWalletAmount: Math.abs(Number(allocationFields.walletAmount || 0)),
           allocationWalletAmountMinor: Math.abs(Number(allocationFields.walletAmountMinor || 0)),
@@ -340,15 +367,21 @@ export const createTransactionSlice = (set, get) => ({
         });
         safePatch.balanceWarning = !!spendCheck.warning;
       } else if (current.isDebtPayment) {
-        const paymentBaseAmount = hasAmt ? debtSign * linkedAbsAmt : Number(current.baseAmount ?? current.amt ?? 0);
-        const paymentFields = buildCurrencyFieldsFromBaseAmount({
-          baseAmount: paymentBaseAmount,
-          walletId: nextWalletId,
-          wallets: get().wallets,
-          baseCurrency: get().cfg.currency,
-          exchangeRate: safePatch.exchangeRate ?? current.exchangeRate ?? 1,
-          walletCurrency: safePatch.walletCurrency ?? current.walletCurrency ?? current.currencyCode,
-        });
+        const paymentEntityAmount = hasAmt ? debtSign * linkedAbsAmt : Number(current.entityAmount ?? (debtSign * Math.abs(currentDebtPayment?.amt || 0)));
+        let paymentFields;
+        try {
+          paymentFields = buildEntityCurrencyFields({
+            entityAmount: paymentEntityAmount,
+            entityCurrency: linkedDebt?.currencyCode || current.entityCurrencyCode || get().cfg.currency,
+            walletId: nextWalletId,
+            wallets: get().wallets,
+            baseCurrency: get().cfg.currency,
+            entityBaseRate: safePatch.entityBaseRate ?? current.entityBaseRate,
+            walletBaseRate: safePatch.walletBaseRate ?? safePatch.exchangeRate ?? current.walletBaseRate ?? current.exchangeRate,
+          });
+        } catch {
+          return false;
+        }
         Object.assign(safePatch, paymentFields, { walletId: nextWalletId, amt: paymentFields.baseAmount });
         if (Number(paymentFields.walletAmount || 0) < 0) {
           const spendCheck = canSpendFromWallet({
@@ -397,8 +430,9 @@ export const createTransactionSlice = (set, get) => ({
 
     const nextTransaction = current.isDebtPayment || current.isGoalSaving
       ? {
-          ...current, ...safePatch, amt: nextAmt,
-          ...(current.isGoalSaving && hasAmt ? { allocationAmount: linkedAbsAmt } : {}),
+          ...current, ...safePatch,
+          amt: current.isGoalSaving ? 0 : Number(safePatch.baseAmount ?? current.baseAmount ?? current.amt ?? 0),
+          ...(current.isGoalSaving && hasAmt ? { allocationAmount: linkedAbsAmt, entityAmount: linkedAbsAmt } : {}),
           ...(current.isCommitmentPayment ? { commitmentMonth: nextCommitmentMonth } : {}),
         }
       : current.isCommitmentPayment
@@ -424,6 +458,9 @@ export const createTransactionSlice = (set, get) => ({
               walletAmount: Math.abs(Number(safePatch.walletAmount ?? p.walletAmount ?? 0)),
               walletCurrency: safePatch.walletCurrency || p.walletCurrency,
               exchangeRate: safePatch.exchangeRate || p.exchangeRate,
+              currencyCode: linkedDebt?.currencyCode || p.currencyCode || get().cfg.currency,
+              entityBaseRate: safePatch.entityBaseRate ?? p.entityBaseRate,
+              walletBaseRate: safePatch.walletBaseRate ?? p.walletBaseRate,
             } : {}),
             ...(patch.dateISO ? { date: patch.dateISO } : {}),
           } : p);
@@ -448,6 +485,9 @@ export const createTransactionSlice = (set, get) => ({
               walletAmount: Math.abs(Number(safePatch.allocationWalletAmount ?? sv.walletAmount ?? 0)),
               walletCurrency: safePatch.walletCurrency || sv.walletCurrency,
               exchangeRate: safePatch.exchangeRate || sv.exchangeRate,
+              currencyCode: linkedGoal?.currencyCode || sv.currencyCode || get().cfg.currency,
+              entityBaseRate: safePatch.entityBaseRate ?? sv.entityBaseRate,
+              walletBaseRate: safePatch.walletBaseRate ?? sv.walletBaseRate,
             } : {}),
             ...(patch.dateISO ? { date: patch.dateISO } : {}),
           } : sv);
@@ -527,8 +567,12 @@ export const createTransactionSlice = (set, get) => ({
           return {
             ...t,
             ...safePatch,
-            amt: nextAmt,
-            ...(t.isGoalSaving && hasAmt ? { allocationAmount: linkedAbsAmt } : {}),
+            // Linked tracker amounts live in entityAmount/allocationAmount. `amt`
+            // remains the frozen reporting/base value committed to SQLite.
+            amt: t.isGoalSaving
+              ? 0
+              : Number(safePatch.baseAmount ?? safePatch.amt ?? t.baseAmount ?? t.amt ?? 0),
+            ...(t.isGoalSaving && hasAmt ? { allocationAmount: linkedAbsAmt, entityAmount: linkedAbsAmt } : {}),
             ...(t.isCommitmentPayment ? { commitmentMonth: nextCommitmentMonth } : {}),
           };
         }

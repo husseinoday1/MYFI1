@@ -186,6 +186,18 @@ export const buildFinancialLedgerCommand = ({
     return row?.id || null;
   };
 
+  const entityCurrencyCode = transaction?.entityCurrencyCode
+    ? normalizeCurrencyCode(transaction.entityCurrencyCode, reportingCurrency)
+    : null;
+  if (entityCurrencyCode && entityCurrencyCode !== reportingCurrency) {
+    addRate({
+      id: 'entity-to-base-rate',
+      fromCurrency: entityCurrencyCode,
+      rate: transaction.entityBaseRate,
+      source: 'entity_payment',
+    });
+  }
+
   if (kind === 'transfer') {
     const fromAccount = accounts.find(item => item.id === String(transaction.fromWalletId));
     const toAccount = accounts.find(item => item.id === String(transaction.toWalletId));

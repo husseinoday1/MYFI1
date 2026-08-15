@@ -525,7 +525,7 @@ export const createSyncSlice = (set, get) => ({
           } else if (migration.ok) {
             set({
               financialLedgerV7Ready: true,
-              financialLedgerV7Cutover: true,
+              financialLedgerV7Cutover: migration.sourceMode === 'sqlite' && migration.migrationReady !== true,
               financialLedgerV7Checksum: migration.checksum || null,
               financialLedgerV7Migration: migration,
             });
@@ -1105,119 +1105,105 @@ export const createSyncSlice = (set, get) => ({
       return { ok: true, reason: 'duplicate_only', rollbackAvailable: true, preview };
     }
     const guest = stateFromSnapshot(snapshot, current.cfg);
-    const accountHasData = hasMeaningfulLocalData({
-      trans: current.trans,
-      debts: current.debts,
-      goals: current.goals,
-      wallets: current.wallets,
-      commitments: current.commitments,
+    // Guest financial data is imported into the signed-in workspace, but the
+    // account configuration (especially its base currency) remains authoritative.
+    // Currency meaning travels on each wallet/transaction/tracker instead.
+    const remapIds = (incoming, existing) => {
+      const occupied = new Set(existing.map(item => item.id));
+      const map = new Map();
+      incoming.forEach(item => {
+        const nextId = occupied.has(item.id) ? uid() : item.id;
+        occupied.add(nextId);
+        map.set(item.id, nextId);
+      });
+      return map;
+    };
+    const referencedGuestWalletIds = new Set();
+    guest.trans.forEach(item => {
+      if (item.walletId) referencedGuestWalletIds.add(item.walletId);
+      if (item.fromWalletId) referencedGuestWalletIds.add(item.fromWalletId);
+      if (item.toWalletId) referencedGuestWalletIds.add(item.toWalletId);
     });
-    if (!accountHasData) {
-      set({
-        ...guest,
-        user: current.user,
-        workspaceNamespace: workspaceNamespaceForSession({ user: current.user }),
-        workspaceReady: true,
-        dirty: true,
-        cloudRevision: current.cloudRevision,
-        pendingGuestTransfer: false,
-        guestTransferPreview: null,
-        lastMergeRollback: rollback,
-        syncConflict: null,
-      });
-    } else {
-      const remapIds = (incoming, existing) => {
-        const occupied = new Set(existing.map(item => item.id));
-        const map = new Map();
-        incoming.forEach(item => {
-          const nextId = occupied.has(item.id) ? uid() : item.id;
-          occupied.add(nextId);
-          map.set(item.id, nextId);
-        });
-        return map;
-      };
-      const referencedGuestWalletIds = new Set();
-      guest.trans.forEach(item => {
-        if (item.walletId) referencedGuestWalletIds.add(item.walletId);
-        if (item.fromWalletId) referencedGuestWalletIds.add(item.fromWalletId);
-        if (item.toWalletId) referencedGuestWalletIds.add(item.toWalletId);
-      });
-      guest.commitments.forEach(item => {
-        if (item.walletId) referencedGuestWalletIds.add(item.walletId);
-      });
+    guest.commitments.forEach(item => {
+      if (item.walletId) referencedGuestWalletIds.add(item.walletId);
+    });
 
-      const currentWalletIds = new Set(current.wallets.map(item => item.id));
-      const currentDefaultWalletId = current.cfg.defaultWalletId || current.wallets[0]?.id || null;
-      const guestWalletsToImport = guest.wallets.filter(item => {
-        if (!item?.id) return false;
-        if (Number(item.openingBalance || 0) !== 0) return true;
-        if (referencedGuestWalletIds.has(item.id) && !currentWalletIds.has(item.id)) return true;
-        return false;
-      });
+    const currentWalletIds = new Set(current.wallets.map(item => item.id));
+    const currentDefaultWalletId = current.cfg.defaultWalletId || current.wallets[0]?.id || null;
+    const guestWalletsToImport = guest.wallets.filter(item => {
+      if (!item?.id) return false;
+      if (Number(item.openingBalance || 0) !== 0) return true;
+      if (!referencedGuestWalletIds.has(item.id)) return false;
+      const existing = current.wallets.find(wallet => wallet.id === item.id);
+      if (!existing) return true;
+      // Same technical ID does not mean the same financial account. A guest IRR
+      // wallet must not be collapsed into an account IQD wallet during sign-in.
+      return String(existing.currency || current.cfg.currency).toUpperCase()
+        !== String(item.currency || guest.cfg.currency).toUpperCase();
+    });
 
-      const walletIds = remapIds(guestWalletsToImport, current.wallets);
-      const debtIds = remapIds(guest.debts, current.debts);
-      const goalIds = remapIds(guest.goals, current.goals);
-      const commitmentIds = remapIds(guest.commitments, current.commitments);
-      const transactionIds = remapIds(guest.trans, current.trans);
-      const mapWallet = id => {
-        if (walletIds.has(id)) return walletIds.get(id);
-        if (id && currentWalletIds.has(id)) return id;
-        return currentDefaultWalletId || id;
-      };
-      const mapLinkedId = (type, id) => {
-        if (type === 'debt' || type === 'receivable') return debtIds.get(id) || id;
-        if (type === 'goal') return goalIds.get(id) || id;
-        return id;
-      };
-      const guestWallets = guestWalletsToImport.map(item => ({
-        ...item,
-        id: mapWallet(item.id),
-        name: walletIds.get(item.id) !== item.id ? `${item.name} (${current.cfg.lang === 'ar' ? 'ضيف' : 'Guest'})` : item.name,
-        nameEn: walletIds.get(item.id) !== item.id ? `${item.nameEn || item.name} (Guest)` : item.nameEn,
-        currency: item.currency || current.cfg.currency,
-      }));
-      const guestDebts = guest.debts.map(item => ({ ...item, id: debtIds.get(item.id) || item.id }));
-      const guestGoals = guest.goals.map(item => ({ ...item, id: goalIds.get(item.id) || item.id }));
-      const guestCommitments = guest.commitments.map(item => ({
-        ...item,
-        id: commitmentIds.get(item.id) || item.id,
-        walletId: mapWallet(item.walletId),
-        linkedId: mapLinkedId(item.linkedType, item.linkedId),
-      }));
-      const guestTrans = guest.trans.map(item => ({
-        ...item,
-        id: transactionIds.get(item.id) || item.id,
-        walletId: mapWallet(item.walletId),
-        fromWalletId: mapWallet(item.fromWalletId),
-        toWalletId: mapWallet(item.toWalletId),
-        debtId: debtIds.get(item.debtId) || item.debtId,
-        goalId: goalIds.get(item.goalId) || item.goalId,
-        commitmentId: commitmentIds.get(item.commitmentId) || item.commitmentId,
-      }));
-      const knownCats = new Set(current.cats.map(item => item.id));
-      const merged = dedupeWorkspaceData({
-        ...current,
-        trans: [...guestTrans, ...current.trans],
-        debts: [...guestDebts, ...current.debts],
-        goals: [...guestGoals, ...current.goals],
-        wallets: [...current.wallets, ...guestWallets],
-        commitments: [...guestCommitments, ...current.commitments],
-        cats: [...current.cats, ...guest.cats.filter(item => !knownCats.has(item.id))],
-      });
-      set({
-        ...merged,
-        user: current.user,
-        workspaceNamespace: workspaceNamespaceForSession({ user: current.user }),
-        workspaceReady: true,
-        dirty: true,
-        cloudRevision: current.cloudRevision,
-        pendingGuestTransfer: false,
-        guestTransferPreview: null,
-        lastMergeRollback: rollback,
-        syncConflict: null,
-      });
-    }
+    const walletIds = remapIds(guestWalletsToImport, current.wallets);
+    const debtIds = remapIds(guest.debts, current.debts);
+    const goalIds = remapIds(guest.goals, current.goals);
+    const commitmentIds = remapIds(guest.commitments, current.commitments);
+    const transactionIds = remapIds(guest.trans, current.trans);
+    const mapWallet = id => {
+      if (walletIds.has(id)) return walletIds.get(id);
+      if (id && currentWalletIds.has(id)) return id;
+      return currentDefaultWalletId || id;
+    };
+    const mapLinkedId = (type, id) => {
+      if (type === 'debt' || type === 'receivable') return debtIds.get(id) || id;
+      if (type === 'goal') return goalIds.get(id) || id;
+      return id;
+    };
+    const guestWallets = guestWalletsToImport.map(item => ({
+      ...item,
+      id: mapWallet(item.id),
+      name: walletIds.get(item.id) !== item.id ? `${item.name} (${current.cfg.lang === 'ar' ? 'ضيف' : 'Guest'})` : item.name,
+      nameEn: walletIds.get(item.id) !== item.id ? `${item.nameEn || item.name} (Guest)` : item.nameEn,
+      currency: item.currency || current.cfg.currency,
+    }));
+    const guestDebts = guest.debts.map(item => ({ ...item, id: debtIds.get(item.id) || item.id }));
+    const guestGoals = guest.goals.map(item => ({ ...item, id: goalIds.get(item.id) || item.id }));
+    const guestCommitments = guest.commitments.map(item => ({
+      ...item,
+      id: commitmentIds.get(item.id) || item.id,
+      walletId: mapWallet(item.walletId),
+      linkedId: mapLinkedId(item.linkedType, item.linkedId),
+    }));
+    const guestTrans = guest.trans.map(item => ({
+      ...item,
+      id: transactionIds.get(item.id) || item.id,
+      walletId: mapWallet(item.walletId),
+      fromWalletId: mapWallet(item.fromWalletId),
+      toWalletId: mapWallet(item.toWalletId),
+      debtId: debtIds.get(item.debtId) || item.debtId,
+      goalId: goalIds.get(item.goalId) || item.goalId,
+      commitmentId: commitmentIds.get(item.commitmentId) || item.commitmentId,
+    }));
+    const knownCats = new Set(current.cats.map(item => item.id));
+    const merged = dedupeWorkspaceData({
+      ...current,
+      trans: [...guestTrans, ...current.trans],
+      debts: [...guestDebts, ...current.debts],
+      goals: [...guestGoals, ...current.goals],
+      wallets: [...current.wallets, ...guestWallets],
+      commitments: [...guestCommitments, ...current.commitments],
+      cats: [...current.cats, ...guest.cats.filter(item => !knownCats.has(item.id))],
+    });
+    set({
+      ...merged,
+      user: current.user,
+      workspaceNamespace: workspaceNamespaceForSession({ user: current.user }),
+      workspaceReady: true,
+      dirty: true,
+      cloudRevision: current.cloudRevision,
+      pendingGuestTransfer: false,
+      guestTransferPreview: null,
+      lastMergeRollback: rollback,
+      syncConflict: null,
+    });
     await get().saveLocal({ dirty: true, force: true });
     await clearVaultSnapshot(GUEST_NAMESPACE);
     const synced = await get().syncCloud();

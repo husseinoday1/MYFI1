@@ -481,8 +481,28 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
         : Number(amount || 0);
     const fromCurrency = String(item.fromCurrency || fromWallet?.currency || cfg.currency).toUpperCase();
     const toCurrency = String(item.toCurrency || toWallet?.currency || cfg.currency).toUpperCase();
-    const transferDisplay = `${formatMoneyNumber(Math.abs(Number(item.transferFromAmount ?? item.transferAmount ?? 0)), fromCurrency, cfg.lang)} ${getSymbol(fromCurrency)} → ${formatMoneyNumber(Math.abs(Number(item.transferToAmount ?? item.transferAmount ?? 0)), toCurrency, cfg.lang)} ${getSymbol(toCurrency)}`;
+    const transferFromAmount = Math.abs(Number(item.transferFromAmount ?? item.transferAmount ?? 0));
+    const transferToAmount = Math.abs(Number(item.transferToAmount ?? item.transferAmount ?? 0));
+    const transferRate = Number(item.transferRate ?? item.exchangeRate ?? (transferFromAmount > 0 ? transferToAmount / transferFromAmount : 0));
+    const transferFee = Math.abs(Number(item.feeAmount || 0));
+    const transferDisplay = `${formatMoneyNumber(transferFromAmount, fromCurrency, cfg.lang)} ${getSymbol(fromCurrency)} → ${formatMoneyNumber(transferToAmount, toCurrency, cfg.lang)} ${getSymbol(toCurrency)}`;
+    const transferFxDisplay = isTransfer && fromCurrency !== toCurrency && transferRate > 0
+      ? `${cfg.lang === 'ar' ? 'السعر' : 'Rate'} 1 ${fromCurrency} = ${transferRate.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${toCurrency}${transferFee > 0 ? ` · ${cfg.lang === 'ar' ? 'رسوم' : 'Fee'} ${formatMoneyNumber(transferFee, fromCurrency, cfg.lang)} ${getSymbol(fromCurrency)}` : ''}`
+      : isTransfer && transferFee > 0
+        ? `${cfg.lang === 'ar' ? 'رسوم' : 'Fee'} ${formatMoneyNumber(transferFee, fromCurrency, cfg.lang)} ${getSymbol(fromCurrency)}`
+        : '';
     const nativeDisplay = `${nativeAmount > 0 ? '+' : '-'}${formatMoneyNumber(Math.abs(nativeAmount), nativeCurrency, cfg.lang)} ${getSymbol(nativeCurrency)}`;
+    const entityCurrency = String(item.entityCurrencyCode || (isGoalSaving ? goal?.currencyCode : debt?.currencyCode) || cfg.currency).toUpperCase();
+    const entityAmount = Math.abs(Number(
+      item.entityAmount
+      ?? (isGoalSaving ? item.allocationAmount : item.isDebtPayment ? item.baseAmount ?? item.amt : 0)
+      ?? 0
+    ));
+    const entityDisplay = linked && entityAmount > 0 && (
+      entityCurrency !== nativeCurrency || Math.abs(entityAmount - Math.abs(nativeAmount)) > 0.0001
+    )
+      ? `${cfg.lang === 'ar' ? 'قيمة المتابعة' : 'Tracker amount'}: ${formatMoneyNumber(entityAmount, entityCurrency, cfg.lang)} ${getSymbol(entityCurrency)}`
+      : '';
     const walletLabel = isTransfer
       ? `${getWalletLabel(fromWallet, cfg.lang)} → ${getWalletLabel(toWallet, cfg.lang)}`
       : getWalletLabel(entryWallet, cfg.lang);
@@ -532,6 +552,16 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
             <Text style={{ color, ...weight('900'), fontSize: 15, textAlign: align }} numberOfLines={1}>
               {isTransfer ? transferDisplay : nativeDisplay}
             </Text>
+            {transferFxDisplay ? (
+              <Text style={{ color: th.sub, ...weight('700'), fontSize: 10, lineHeight: 14, textAlign: align }} numberOfLines={1}>
+                {transferFxDisplay}
+              </Text>
+            ) : null}
+            {entityDisplay ? (
+              <Text style={{ color: th.sub, ...weight('700'), fontSize: 10, lineHeight: 14, textAlign: align }} numberOfLines={1}>
+                {entityDisplay}
+              </Text>
+            ) : null}
             <View style={[s.rowSignals, { flexDirection: rowDir }]}>
               {linked ? <Ionicons name="link-outline" size={12} color={th.faint} /> : null}
               {item.recurring ? <Ionicons name="repeat-outline" size={12} color={th.faint} /> : null}
@@ -741,6 +771,8 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
               transferRate: target.transferRate ?? target.exchangeRate,
               exchangeRate: target.transferRate ?? target.exchangeRate,
               feeAmount: Math.abs(Number(target.feeAmount || 0)),
+              fromBaseRate: target.fromBaseRate,
+              toBaseRate: target.toBaseRate,
               fromWalletId: target.fromWalletId,
               toWalletId: target.toWalletId,
             });

@@ -2,7 +2,7 @@ import { today, normalizeDate } from '../../utils/calc';
 import { canSpendFromWallet, getDefaultWalletId, getWalletBalances, normalizeWallets } from '../../lib/wallets';
 import { commitmentCycleMonth, deferredCommitmentDueISO, monthKey, normalizeCommitments } from '../../lib/commitments';
 import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
-import { buildCurrencyFields, buildCurrencyFieldsFromBaseAmount } from '../../lib/financialCoreV2';
+import { buildCurrencyFields, buildEntityCurrencyFields, normalizeCurrencyCode } from '../../lib/financialCoreV2';
 import { financialDataCount, syncCommitmentPaidMonth, uid } from '../domain';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
 import {
@@ -94,10 +94,20 @@ export const createManagementSlice = (set, get) => ({
 
   addCommitment: async (item) => {
     const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
+    const linkedTarget = item.linkedType === 'goal'
+      ? get().goals.find(target => target.id === item.linkedId)
+      : (item.linkedType === 'debt' || item.linkedType === 'receivable')
+        ? get().debts.find(target => target.id === item.linkedId)
+        : null;
+    const entityCurrency = normalizeCurrencyCode(
+      linkedTarget?.currencyCode || item.currencyCode || item.currency,
+      get().cfg.currency,
+    );
     const next = normalizeCommitments([{
       id: uid(),
       name: item.name,
       amt: item.amt,
+      currencyCode: entityCurrency,
       day: item.day,
       firstDueISO: item.firstDueISO,
       cat: item.cat || 'other',
@@ -108,7 +118,7 @@ export const createManagementSlice = (set, get) => ({
       repeatMonthly: item.repeatMonthly !== false,
       active: item.active !== false,
       createdAt: today(),
-    }], defaultWalletId)[0];
+    }], defaultWalletId, entityCurrency)[0];
     if (!next || !next.amt) return false;
     try {
       const committed = await commitEntityChangesV7({
@@ -131,7 +141,7 @@ export const createManagementSlice = (set, get) => ({
     set(s => ({
       commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
         item.id === id
-          ? normalizeCommitments([{ ...item, ...patch }], defaultWalletId)[0]
+          ? normalizeCommitments([{ ...item, ...patch, currencyCode: item.currencyCode || patch.currencyCode }], defaultWalletId, item.currencyCode || get().cfg.currency)[0]
           : item
       )),
     }));
@@ -141,7 +151,7 @@ export const createManagementSlice = (set, get) => ({
 
   deferCommitment: async (id, option = 'day') => {
     const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
-    const commitment = normalizeCommitments(get().commitments, defaultWalletId).find(item => item.id === id);
+    const commitment = normalizeCommitments(get().commitments, defaultWalletId, get().cfg.currency).find(item => item.id === id);
     if (!commitment || commitment.active === false) return false;
     const deferredUntilISO = deferredCommitmentDueISO(commitment, option);
     const deferredCycleMonth = commitmentCycleMonth(commitment, new Date());
@@ -349,6 +359,14 @@ export const createManagementSlice = (set, get) => ({
         )),
       }));
     }
+    const linkedTarget = linkedType === 'goal'
+      ? get().goals.find(target => target.id === linkedId)
+      : (linkedType === 'debt' || linkedType === 'receivable')
+        ? get().debts.find(target => target.id === linkedId)
+        : null;
+    if (linkedTarget && normalizeCurrencyCode(linkedTarget.currencyCode, get().cfg.currency) !== normalizeCurrencyCode(commitment.currencyCode, get().cfg.currency)) {
+      return { ok: false, reason: 'linked_currency_mismatch' };
+    }
     const requestedAmount = Math.abs(Number(commitment.amt) || 0);
     const linkedMeta = {
       ...meta,
@@ -369,7 +387,7 @@ export const createManagementSlice = (set, get) => ({
       deferredUntilISO: null,
       deferredCycleMonth: null,
       active: commitment.repeatMonthly === false ? false : commitment.active,
-    }], defaultWalletId)[0];
+    }], defaultWalletId, commitment.currencyCode || get().cfg.currency)[0];
     linkedMeta.financialEntityChanges = [{
       entityType: 'commitment', id, payload: paidCommitment,
     }];
@@ -397,13 +415,21 @@ export const createManagementSlice = (set, get) => ({
       get().scheduleCloudSync?.('management_change');
       return { ok: true, partial: applied < requestedAmount - 0.0001, appliedAmount: applied, requestedAmount };
     }
-    const currencyFields = buildCurrencyFieldsFromBaseAmount({
-      baseAmount: -requestedAmount,
-      walletId: paymentWalletId,
-      wallets: get().wallets,
-      baseCurrency: get().cfg.currency,
-      exchangeRate: meta.exchangeRate,
-    });
+    let currencyFields;
+    try {
+      currencyFields = buildEntityCurrencyFields({
+        entityAmount: -requestedAmount,
+        entityCurrency: commitment.currencyCode || get().cfg.currency,
+        walletId: paymentWalletId,
+        wallets: get().wallets,
+        baseCurrency: get().cfg.currency,
+        entityBaseRate: meta.entityBaseRate,
+        walletBaseRate: meta.walletBaseRate ?? meta.exchangeRate,
+      });
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'commitment_payment_fx_required') });
+      return { ok: false, reason: String(error?.message || 'fx_required') };
+    }
     const spendCheck = canSpendFromWallet({
       wallets: get().wallets,
       trans: get().trans,
@@ -415,7 +441,7 @@ export const createManagementSlice = (set, get) => ({
     const paymentTx = {
       id: uid(),
       title: commitment.name,
-      amt: -requestedAmount,
+      amt: currencyFields.baseAmount,
       ...currencyFields,
       balanceWarning: !!spendCheck.warning,
       cat: commitment.cat || 'other',
@@ -429,7 +455,7 @@ export const createManagementSlice = (set, get) => ({
       commitmentId: id,
       commitmentMonth: paidMonth,
       rateDate: entryDate,
-      rateSource: currencyFields.walletCurrency === get().cfg.currency ? 'same_currency' : 'user_entered',
+      rateSource: currencyFields.fxSnapshotSource,
       idempotencyKey: `commitment-payment:${id}:${paidMonth}`,
     };
     try {

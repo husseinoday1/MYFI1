@@ -84,6 +84,29 @@ export const useStore = create((set, get) => {
       const effectivePatch = baseCurrencyLocked
         ? { ...patch, currency: currentCurrency }
         : patch;
+      const baseCurrencyChanging = !!(
+        requestedCurrency
+        && requestedCurrency !== currentCurrency
+        && !baseCurrencyLocked
+      );
+      const currentDefaultWalletId = current.cfg?.defaultWalletId || current.wallets?.[0]?.id || null;
+      // Before the first financial event the reporting currency may still be
+      // changed. Keep the empty default wallet aligned with that new base so a
+      // fresh IRR workspace cannot display IRR while silently paying from IQD.
+      const walletsForCfg = baseCurrencyChanging
+        ? (current.wallets || []).map(wallet => (
+            wallet?.id === currentDefaultWalletId
+            && String(wallet?.currency || currentCurrency).toUpperCase() === currentCurrency
+            && Number(wallet?.openingBalance || 0) === 0
+              ? {
+                  ...wallet,
+                  currency: requestedCurrency,
+                  valuationRate: 1,
+                  openingBaseBalance: 0,
+                }
+              : wallet
+          ))
+        : current.wallets;
       const newCfg = normalizeCfg({
         ...current.cfg,
         ...effectivePatch,
@@ -93,7 +116,7 @@ export const useStore = create((set, get) => {
       });
       if (newCfg.enabledModules?.wallets || effectivePatch.defaultWalletId || effectivePatch.currency || effectivePatch.profileType || effectivePatch.activeScope) {
         const prepared = prepareWalletData({
-          wallets: current.wallets,
+          wallets: walletsForCfg,
           trans: current.trans,
           commitments: current.commitments,
           cfg: newCfg,

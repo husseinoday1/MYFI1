@@ -189,6 +189,7 @@ export default function TrackersLabScreen({
         id: `amount:${item.id}`,
         sourceId: item.id,
         kind,
+        currencyCode: String(item.currencyCode || cfg.currency).toUpperCase(),
         title: item.name || '',
         icon: receivable ? 'cash-outline' : 'card-outline',
         color: receivable ? th.inc : th.exp,
@@ -222,6 +223,7 @@ export default function TrackersLabScreen({
         id: `saving:${item.id}`,
         sourceId: item.id,
         kind: 'saving',
+        currencyCode: String(item.currencyCode || cfg.currency).toUpperCase(),
         title: item.name || '',
         icon: 'flag-outline',
         color: th.primary,
@@ -257,6 +259,7 @@ export default function TrackersLabScreen({
           id: `monthly:${item.id}`,
           sourceId: item.id,
           kind: 'monthly',
+          currencyCode: String(item.currencyCode || cfg.currency).toUpperCase(),
           title: item.name || '',
           icon: 'calendar-outline',
           color: th.warn,
@@ -278,7 +281,8 @@ export default function TrackersLabScreen({
           history: paymentRows
             .map(tx => ({
               id: tx.id,
-              amt: Math.abs(Number(tx.amt || 0)),
+              amt: Math.abs(Number(tx.entityAmount ?? tx.amt ?? item.amt ?? 0)),
+              currencyCode: String(tx.entityCurrencyCode || item.currencyCode || cfg.currency).toUpperCase(),
               date: tx.dateISO || tx.date || null,
               cycleMonth: tx.commitmentMonth
                 || String(tx.dateISO || tx.date || '').slice(0, 7)
@@ -303,11 +307,22 @@ export default function TrackersLabScreen({
   const currentTrackers = trackers.filter(item => !item.ended && !item.archived);
   const endedTrackers = trackers.filter(item => item.ended && !item.archived);
   const archivedTrackers = trackers.filter(item => item.archived);
+  const summarizeCurrencies = (rows, field) => {
+    const totals = new Map();
+    rows.forEach(item => {
+      const code = String(item.currencyCode || cfg.currency || 'IQD').toUpperCase();
+      totals.set(code, (totals.get(code) || 0) + Number(item[field] || 0));
+    });
+    if (!totals.size) return `${money(0)} ${sym}`;
+    return [...totals.entries()]
+      .map(([code, value]) => `${money(value)} ${getSymbol(code)}`)
+      .join(' · ');
+  };
   const summaryTiles = [
     modules.debtsOwed ? {
       key: 'owed',
       label: T.owedTotal,
-      value: currentTrackers.filter(item => item.kind === 'owed').reduce((sum, item) => sum + Number(item.remaining || 0), 0),
+      valueText: summarizeCurrencies(currentTrackers.filter(item => item.kind === 'owed'), 'remaining'),
       icon: 'card-outline',
       color: th.exp,
       bg: th.expBg,
@@ -315,7 +330,7 @@ export default function TrackersLabScreen({
     modules.debtsReceivable ? {
       key: 'receivable',
       label: T.receivableTotal,
-      value: currentTrackers.filter(item => item.kind === 'receivable').reduce((sum, item) => sum + Number(item.remaining || 0), 0),
+      valueText: summarizeCurrencies(currentTrackers.filter(item => item.kind === 'receivable'), 'remaining'),
       icon: 'cash-outline',
       color: th.inc,
       bg: th.incBg,
@@ -323,7 +338,7 @@ export default function TrackersLabScreen({
     modules.goals ? {
       key: 'saving',
       label: T.savingLeft,
-      value: currentTrackers.filter(item => item.kind === 'saving').reduce((sum, item) => sum + Number(item.remaining || 0), 0),
+      valueText: summarizeCurrencies(currentTrackers.filter(item => item.kind === 'saving'), 'remaining'),
       icon: 'flag-outline',
       color: th.primary,
       bg: th.primSoft,
@@ -331,7 +346,7 @@ export default function TrackersLabScreen({
     modules.commitments ? {
       key: 'monthly',
       label: T.monthlyTotal,
-      value: currentTrackers.filter(item => item.kind === 'monthly' && item.status !== 'done').reduce((sum, item) => sum + Number(item.total || 0), 0),
+      valueText: summarizeCurrencies(currentTrackers.filter(item => item.kind === 'monthly' && item.status !== 'done'), 'total'),
       icon: 'calendar-outline',
       color: commitmentColor,
       bg: commitmentBg,
@@ -411,25 +426,26 @@ export default function TrackersLabScreen({
     const deferredActive = !!commitment.deferredUntilISO && daysUntil > 0;
     const paidThisCycle = paidThisMonth || commitment.lastPaidMonth === monthKey(todayDate);
     const amount = Number(commitment.amt || 0);
+    const currencyCode = String(commitment.currencyCode || cfg.currency).toUpperCase();
     const oneTimeDone = commitment.repeatMonthly === false && !!commitment.lastPaidMonth;
 
     if (oneTimeDone) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle: true, active: false, label: T.done, color: th.inc, bg: th.incBg };
+      return { id: commitment.id, amount, currencyCode, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle: true, active: false, label: T.done, color: th.inc, bg: th.incBg };
     }
     if (commitment.active === false) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: false, label: T.paused, color: th.sub, bg: th.cardHigh };
+      return { id: commitment.id, amount, currencyCode, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: false, label: T.paused, color: th.sub, bg: th.cardHigh };
     }
     if (paidThisCycle) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: T.paidMonth, color: th.inc, bg: th.incBg };
+      return { id: commitment.id, amount, currencyCode, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: T.paidMonth, color: th.inc, bg: th.incBg };
     }
     if (deferredActive) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: `${T.deferredUntil}: ${deferredDateLabel}`, color: commitmentColor, bg: commitmentBg, deferredUntilISO: commitment.deferredUntilISO, deferredDateLabel };
+      return { id: commitment.id, amount, currencyCode, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: `${T.deferredUntil}: ${deferredDateLabel}`, color: commitmentColor, bg: commitmentBg, deferredUntilISO: commitment.deferredUntilISO, deferredDateLabel };
     }
     if (daysUntil < 0) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: `${T.overdueDate} ${dueDateLabel}`, color: th.exp, bg: th.expBg };
+      return { id: commitment.id, amount, currencyCode, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: `${T.overdueDate} ${dueDateLabel}`, color: th.exp, bg: th.expBg };
     }
     if (daysUntil === 0) {
-      return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: T.dueToday, color: commitmentColor, bg: commitmentBg };
+      return { id: commitment.id, amount, currencyCode, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: T.dueToday, color: commitmentColor, bg: commitmentBg };
     }
     return { id: commitment.id, amount, dueISO, dueMonthLabel, dueDateLabel, paidThisCycle, active: true, label: `${T.dueDate}: ${dueDateLabel}`, color: th.primary, bg: th.primSoft };
   };
@@ -700,7 +716,7 @@ export default function TrackersLabScreen({
               th={th}
               lang={cfg.lang}
               item={item}
-              value={`${money(item.value)} ${sym}`}
+              value={item.valueText}
             />
           ))}
         </View>
@@ -806,6 +822,7 @@ export default function TrackersLabScreen({
         const canPostpone = !!postponeCommitmentId && plan?.active && !plan?.paidThisCycle;
         const doneLabel = item.kind === 'owed' ? T.paid : item.kind === 'receivable' ? T.collected : item.kind === 'saving' ? T.saved : T.paid;
         const primaryAmount = item.kind === 'monthly' ? item.total : item.remaining;
+        const itemSym = getSymbol(item.currencyCode || cfg.currency);
         const canAddPlan = modules.commitments && item.kind !== 'monthly' && !plan && item.status !== 'done';
         const managedPlanId = item.kind === 'monthly' ? item.sourceId : plan?.id;
         const managedPlanActive = plan?.active !== false;
@@ -898,7 +915,7 @@ export default function TrackersLabScreen({
                     {amountLabel}
                   </Text>
                   <Text style={{ color: item.color, fontSize: 21, lineHeight: 29, ...weight('900'), textAlign: align, marginTop: 2 }}>
-                    {money(primaryAmount)} {sym}
+                    {money(primaryAmount)} {itemSym}
                   </Text>
                 </View>
                 {/* STAGE3_FINAL_SIDE_METRIC */}
@@ -927,7 +944,7 @@ export default function TrackersLabScreen({
                  <View style={s.progressBlock}>
                   <View style={[s.progressMeta, { flexDirection: rowDir }]}>
                     <Text style={{ color: th.sub, fontSize: 11, ...weight('800') }}>
-                      {doneLabel}: {money(item.doneValue)} {sym} / {money(item.total)} {sym}
+                      {doneLabel}: {money(item.doneValue)} {itemSym} / {money(item.total)} {itemSym}
                     </Text>
                   </View>
                   <View style={[s.progressTrack, { backgroundColor: th.cardHigh }]}>
@@ -962,8 +979,8 @@ export default function TrackersLabScreen({
 
                 {item.kind !== 'monthly' ? (
                   <View style={[s.detailGrid, { flexDirection: rowDir }]}>
-                    <DetailTile th={th} lang={cfg.lang} label={T.total} value={`${money(item.total)} ${sym}`} />
-                    <DetailTile th={th} lang={cfg.lang} label={doneLabel} value={`${money(item.doneValue)} ${sym}`} tone={item.color} />
+                    <DetailTile th={th} lang={cfg.lang} label={T.total} value={`${money(item.total)} ${itemSym}`} />
+                    <DetailTile th={th} lang={cfg.lang} label={doneLabel} value={`${money(item.doneValue)} ${itemSym}`} tone={item.color} />
                   </View>
                 ) : null}
                 {plan ? (
@@ -1002,7 +1019,7 @@ export default function TrackersLabScreen({
                     <View style={[s.planFacts, { flexDirection: rowDir }]}>
                       <View style={[s.planFactCard, { backgroundColor: th.card }]}>
                         <Text style={[s.planFactLabel, { color: th.sub, textAlign: align }]}>{T.planAmount}</Text>
-                        <Text style={[s.planFactValue, { color: th.text, textAlign: align }]}>{money(plan.amount)} {sym}</Text>
+                        <Text style={[s.planFactValue, { color: th.text, textAlign: align }]}>{money(plan.amount)} {getSymbol(plan.currencyCode || item.currencyCode || cfg.currency)}</Text>
                       </View>
                       <View style={[s.planFactCard, { backgroundColor: th.card }]}>
                         <Text style={[s.planFactLabel, { color: th.sub, textAlign: align }]}>{T.planDue}</Text>
@@ -1017,6 +1034,7 @@ export default function TrackersLabScreen({
                       linkedType: item.kind === 'saving' ? 'goal' : item.kind === 'receivable' ? 'receivable' : 'debt',
                       linkedId: item.sourceId,
                       linkedName: item.title,
+                      linkedCurrency: item.currencyCode || cfg.currency,
                       planOnly: true,
                     })}
                     style={[s.secondaryBtn, { backgroundColor: th.cardHigh, borderColor: th.border }]}
@@ -1105,7 +1123,7 @@ export default function TrackersLabScreen({
                         >
                           <View style={{ flex: 1, minWidth: 0 }}>
                             <Text style={{ color: th.text, fontSize: 13, lineHeight: 18, ...weight('900'), textAlign: align }}>
-                              {money(payment.amt)} {sym}
+                              {money(payment.amt)} {getSymbol(payment.currencyCode || item.currencyCode || cfg.currency)}
                             </Text>
                             <Text style={{ color: th.sub, fontSize: 11, lineHeight: 17, ...weight('800'), textAlign: align, marginTop: 2 }}>
                               {T.paymentMonth}: {formatCommitmentMonth(cycleISO, cfg.lang)}
@@ -1198,7 +1216,7 @@ export default function TrackersLabScreen({
                       >
                         <View style={{ flex: 1 }}>
                           <Text style={{ color: th.text, fontSize: 13, lineHeight: 18, ...weight('900'), textAlign: align }}>
-                            {money(payment.amt)} {sym}
+                            {money(payment.amt)} {getSymbol(payment.currencyCode || item.currencyCode || cfg.currency)}
                           </Text>
                           <Text style={{ color: th.sub, fontSize: 12, lineHeight: 18, ...weight('800'), textAlign: align }}>
                             {payment.date || '-'}

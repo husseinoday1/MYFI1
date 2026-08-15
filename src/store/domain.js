@@ -10,6 +10,7 @@ import {
 } from '../lib/modules';
 import { normalizeTransactionTag } from '../lib/transactionTags';
 import { debtLifecycle, goalLifecycle } from '../lib/trackerLifecycle';
+import { normalizeCurrencyCode } from '../lib/financialCoreV2';
 
 export const uid = () => Crypto.randomUUID();
 
@@ -30,7 +31,7 @@ export const capLinkedAmount = (requested, total, paid, current = 0) => {
   return Math.min(n, maxAllowed);
 };
 
-export const normalizeDebtItems = (items = [], fallbackScope = 'personal') =>
+export const normalizeDebtItems = (items = [], fallbackScope = 'personal', fallbackCurrency = 'IQD') =>
   (Array.isArray(items) ? items : [])
     .filter(item => item && item.id)
     .map(item => {
@@ -39,6 +40,7 @@ export const normalizeDebtItems = (items = [], fallbackScope = 'personal') =>
         .map(payment => ({
           ...payment,
           amt: Math.abs(Number(payment.amt || 0)),
+          currencyCode: normalizeCurrencyCode(payment.currencyCode || payment.currency || item.currencyCode || item.currency, fallbackCurrency),
           date: normalizeDate(payment.date || payment.dateISO),
         }));
       const archivedPaid = Math.abs(Number(item.archivedPaid || 0));
@@ -52,6 +54,7 @@ export const normalizeDebtItems = (items = [], fallbackScope = 'personal') =>
       return {
         ...item,
         scope: normalizeScope(item.scope, fallbackScope),
+        currencyCode: normalizeCurrencyCode(item.currencyCode || item.currency, fallbackCurrency),
         total,
         paid,
         archivedPaid,
@@ -62,7 +65,7 @@ export const normalizeDebtItems = (items = [], fallbackScope = 'personal') =>
       };
     });
 
-export const normalizeGoalItems = (items = [], fallbackScope = 'personal') =>
+export const normalizeGoalItems = (items = [], fallbackScope = 'personal', fallbackCurrency = 'IQD') =>
   (Array.isArray(items) ? items : [])
     .filter(item => item && item.id)
     .map(item => {
@@ -71,6 +74,7 @@ export const normalizeGoalItems = (items = [], fallbackScope = 'personal') =>
         .map(saving => ({
           ...saving,
           amt: Math.abs(Number(saving.amt || 0)),
+          currencyCode: normalizeCurrencyCode(saving.currencyCode || saving.currency || item.currencyCode || item.currency, fallbackCurrency),
           date: normalizeDate(saving.date || saving.dateISO),
         }));
       const archivedSaved = Math.abs(Number(item.archivedSaved || 0));
@@ -85,6 +89,7 @@ export const normalizeGoalItems = (items = [], fallbackScope = 'personal') =>
       return {
         ...item,
         scope: normalizeScope(item.scope, fallbackScope),
+        currencyCode: normalizeCurrencyCode(item.currencyCode || item.currency, fallbackCurrency),
         purpose: 'reserve',
         linkedDebtId: null,
         ...lifecycle,
@@ -174,7 +179,7 @@ export const prepareWalletData = ({ wallets, trans, commitments, cfg }) => {
     cfg: { ...cfg, defaultWalletId },
     wallets: normalizedWallets,
     trans: attachDefaultWalletToTransactions(normalizedTrans, normalizedWallets, cfg.currency, defaultWalletId),
-    commitments: normalizeCommitments(commitments, defaultWalletId).map(item => ({
+    commitments: normalizeCommitments(commitments, defaultWalletId, cfg.currency).map(item => ({
       ...item,
       scope: normalizeScope(item.scope, fallbackScope),
     })),
@@ -271,6 +276,8 @@ const transactionKey = item => {
     cleanTextKey(item.title),
     cleanTextKey(item.note),
     cleanTextKey(item.cat),
+    cleanTextKey(transfer ? item.fromCurrency : (item.entityCurrencyCode || item.walletCurrency || item.currencyCode)),
+    cleanTextKey(transfer ? item.toCurrency : item.baseCurrencyCode),
     amountKey(transfer ? item.transferAmount : item.amt),
     amountKey(item.allocationAmount),
     cleanTextKey(item.walletId),
@@ -294,6 +301,7 @@ const debtKey = item => [
   cleanTextKey(item?.direction || 'owed'),
   cleanTextKey(item?.title || item?.name),
   amountKey(item?.total),
+  cleanTextKey(item?.currencyCode || item?.currency),
   itemDateKey(item),
   cleanTextKey(item?.scope),
 ].join('|');
@@ -301,6 +309,7 @@ const debtKey = item => [
 const goalKey = item => [
   cleanTextKey(item?.title || item?.name),
   amountKey(item?.target),
+  cleanTextKey(item?.currencyCode || item?.currency),
   itemDateKey(item),
   cleanTextKey(item?.scope),
 ].join('|');
@@ -308,6 +317,7 @@ const goalKey = item => [
 const commitmentKey = item => [
   cleanTextKey(item?.title || item?.name),
   amountKey(item?.amt),
+  cleanTextKey(item?.currencyCode || item?.currency),
   cleanTextKey(item?.repeatMonthly),
   cleanTextKey(item?.dueDay),
   cleanTextKey(item?.linkedType),
@@ -423,8 +433,8 @@ export const stateFromSnapshot = (snapshot = {}, fallbackCfg = DEF_CFG) => {
   });
   return dedupeWorkspaceData({
     trans: prepared.trans,
-    debts: normalizeDebtItems(data.debts, defaultScopeForProfile(prepared.cfg.profileType)),
-    goals: normalizeGoalItems(data.goals, defaultScopeForProfile(prepared.cfg.profileType)),
+    debts: normalizeDebtItems(data.debts, defaultScopeForProfile(prepared.cfg.profileType), prepared.cfg.currency),
+    goals: normalizeGoalItems(data.goals, defaultScopeForProfile(prepared.cfg.profileType), prepared.cfg.currency),
     wallets: prepared.wallets,
     commitments: prepared.commitments,
     cats: snapshot.cats || data.cats || DEF_CATS,

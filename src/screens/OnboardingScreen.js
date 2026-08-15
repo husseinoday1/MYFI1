@@ -29,6 +29,10 @@ const copy = lang => {
     localFirstSub: ar ? 'بياناتك تبدأ على هذا الهاتف، واستخدام التطبيق لا يحتاج حساباً.' : 'Your data starts on this phone, and the app works without an account.',
     backupReady: ar ? 'نسخ احتياطي واستعادة' : 'Backup and restore',
     backupReadySub: ar ? 'ملفات MYFI منطقية، قابلة للتشفير، ومناسبة لتغير النموذج مستقبلاً.' : 'MYFI backups are logical, encryptable, and ready for future model changes.',
+    currencyRuleTitle: ar ? 'عملة أساسية + محافظ متعددة العملات' : 'Base currency + multi-currency wallets',
+    currencyRuleSub: ar
+      ? 'العملة الأساسية هي مرجع التقارير وتثبت بعد أول سجل مالي. تقدر تضيف محافظ بعملات أخرى؛ كل حركة تحفظ عملتها ومبلغها وسعرها التاريخي.'
+      : 'Your base currency is the reporting reference and becomes fixed after financial history starts. You can still add wallets in other currencies; each transaction keeps its original currency, amount, and historical rate.',
   };
 };
 
@@ -192,6 +196,7 @@ function TrustSlide({ th, isAr, T }) {
     { icon: 'git-branch-outline', title: T.unifiedEngine, body: T.unifiedEngineSub },
     { icon: 'phone-portrait-outline', title: T.localFirst, body: T.localFirstSub },
     { icon: 'archive-outline', title: T.backupReady, body: T.backupReadySub },
+    { icon: 'cash-outline', title: T.currencyRuleTitle, body: T.currencyRuleSub },
   ];
   return (
     <View style={s.slide}>

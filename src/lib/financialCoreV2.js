@@ -99,6 +99,68 @@ export const buildCurrencyFieldsFromBaseAmount = ({
   };
 };
 
+export const buildEntityCurrencyFields = ({
+  entityAmount = 0,
+  entityCurrency = 'IQD',
+  walletId = null,
+  wallets = [],
+  baseCurrency = 'IQD',
+  entityBaseRate = null,
+  walletBaseRate = null,
+} = {}) => {
+  const base = normalizeCurrencyCode(baseCurrency);
+  const entity = normalizeCurrencyCode(entityCurrency, base);
+  const wallet = walletCurrencyFor(wallets, walletId, base);
+  const signedEntity = roundCurrency(Number(entityAmount) || 0, entity);
+  const requestedEntityBaseRate = Number(entityBaseRate);
+  const requestedWalletBaseRate = Number(walletBaseRate);
+
+  const resolvedEntityBaseRate = entity === base
+    ? 1
+    : (Number.isFinite(requestedEntityBaseRate) && requestedEntityBaseRate > 0 ? requestedEntityBaseRate : null);
+  if (entity !== base && !(resolvedEntityBaseRate > 0)) {
+    throw new RangeError('entity_historical_base_rate_required');
+  }
+
+  const resolvedWalletBaseRate = wallet === base
+    ? 1
+    : wallet === entity
+      ? resolvedEntityBaseRate
+      : (Number.isFinite(requestedWalletBaseRate) && requestedWalletBaseRate > 0 ? requestedWalletBaseRate : null);
+  if (wallet !== base && !(resolvedWalletBaseRate > 0)) {
+    throw new RangeError('wallet_historical_base_rate_required');
+  }
+
+  const baseAmount = entity === base
+    ? roundCurrency(signedEntity, base)
+    : convertMoney(signedEntity, entity, base, resolvedEntityBaseRate);
+  const walletAmount = wallet === entity
+    ? roundCurrency(signedEntity, wallet)
+    : wallet === base
+      ? roundCurrency(baseAmount, wallet)
+      : roundCurrency(baseAmount / resolvedWalletBaseRate, wallet);
+
+  return {
+    entityCurrencyCode: entity,
+    entityAmount: signedEntity,
+    entityAmountMinor: moneyToMinor(signedEntity, entity),
+    currencyCode: wallet,
+    walletCurrency: wallet,
+    walletAmount,
+    walletAmountMinor: moneyToMinor(walletAmount, wallet),
+    baseCurrencyCode: base,
+    baseAmount,
+    baseAmountMinor: moneyToMinor(baseAmount, base),
+    entityBaseRate: resolvedEntityBaseRate,
+    walletBaseRate: resolvedWalletBaseRate,
+    // Existing ledger code interprets exchangeRate as wallet -> reporting/base.
+    exchangeRate: resolvedWalletBaseRate,
+    fxSnapshotSource: entity === base && wallet === base
+      ? 'same_currency'
+      : 'user_confirmed_entity_payment',
+  };
+};
+
 export const buildTransferCurrencyFields = ({
   fromWalletId,
   toWalletId,
@@ -108,48 +170,64 @@ export const buildTransferCurrencyFields = ({
   baseCurrency = 'IQD',
   exchangeRate = null,
   feeAmount = 0,
+  fromBaseRate = null,
+  toBaseRate = null,
 } = {}) => {
   const base = normalizeCurrencyCode(baseCurrency);
   const fromCurrency = walletCurrencyFor(wallets, fromWalletId, base);
   const toCurrency = walletCurrencyFor(wallets, toWalletId, base);
   const sourceAmount = Math.abs(roundCurrency(Number(fromAmount) || 0, fromCurrency));
   const explicitTarget = Number(toAmount);
-  const rate = fromCurrency === toCurrency
+  if (!(sourceAmount > 0)) throw new RangeError('transfer_source_amount_required');
+
+  const sameCurrency = fromCurrency === toCurrency;
+  const explicitTradeRate = Number(exchangeRate);
+  const derivedTradeRate = Number.isFinite(explicitTarget) && explicitTarget > 0
+    ? explicitTarget / sourceAmount
+    : null;
+  const rate = sameCurrency
     ? 1
-    : normalizeExchangeRate(
-        exchangeRate,
-        Number.isFinite(explicitTarget) && sourceAmount > 0 ? explicitTarget / sourceAmount : 1,
-      );
-  const targetAmount = fromCurrency === toCurrency
+    : normalizeExchangeRate(explicitTradeRate, normalizeExchangeRate(derivedTradeRate, null));
+  if (!sameCurrency && !(Number(rate) > 0)) throw new RangeError('transfer_exchange_rate_required');
+
+  const targetAmount = sameCurrency
     ? sourceAmount
     : Number.isFinite(explicitTarget) && explicitTarget > 0
       ? Math.abs(roundCurrency(explicitTarget, toCurrency))
       : convertMoney(sourceAmount, fromCurrency, toCurrency, rate);
-  const fromWallet = (Array.isArray(wallets) ? wallets : []).find(item => item?.id === fromWalletId);
-  const toWallet = (Array.isArray(wallets) ? wallets : []).find(item => item?.id === toWalletId);
-  // transferRate is FROM -> TO. It must never be reused as FROM -> BASE when
-  // neither side is the workspace currency. Wallet valuation rates provide the
-  // historical/base-book bridge in that case.
-  const fromBaseRate = fromCurrency === base
+  if (!(targetAmount > 0)) throw new RangeError('transfer_target_amount_required');
+
+  // Historical base rates are snapshots for reporting. For transfers where one
+  // side is the base currency, the actual sent/received amounts determine the
+  // foreign->base rate. For foreign->foreign transfers both bridge rates must
+  // be supplied explicitly and are frozen on the transaction.
+  const requestedFromBaseRate = Number(fromBaseRate);
+  const requestedToBaseRate = Number(toBaseRate);
+  const bothForeign = fromCurrency !== base && toCurrency !== base;
+  const resolvedFromBaseRate = fromCurrency === base
     ? 1
     : toCurrency === base
-      ? (targetAmount / Math.max(sourceAmount, Number.EPSILON))
-      : normalizeExchangeRate(fromWallet?.valuationRate, 1);
-  const toBaseRate = toCurrency === base
+      ? targetAmount / sourceAmount
+      : (Number.isFinite(requestedFromBaseRate) && requestedFromBaseRate > 0 ? requestedFromBaseRate : null);
+  const resolvedToBaseRate = toCurrency === base
     ? 1
     : fromCurrency === base
-      ? (sourceAmount / Math.max(targetAmount, Number.EPSILON))
-      : normalizeExchangeRate(toWallet?.valuationRate, 1);
+      ? sourceAmount / targetAmount
+      : (Number.isFinite(requestedToBaseRate) && requestedToBaseRate > 0 ? requestedToBaseRate : null);
+  if (bothForeign && (!(resolvedFromBaseRate > 0) || !(resolvedToBaseRate > 0))) {
+    throw new RangeError('transfer_historical_base_rates_required');
+  }
+
   const baseFromAmount = fromCurrency === base
     ? roundCurrency(sourceAmount, base)
-    : convertMoney(sourceAmount, fromCurrency, base, fromBaseRate);
+    : convertMoney(sourceAmount, fromCurrency, base, resolvedFromBaseRate);
   const baseToAmount = toCurrency === base
     ? roundCurrency(targetAmount, base)
-    : convertMoney(targetAmount, toCurrency, base, toBaseRate);
+    : convertMoney(targetAmount, toCurrency, base, resolvedToBaseRate);
   const fee = Math.abs(roundCurrency(Number(feeAmount) || 0, fromCurrency));
   const feeBaseAmount = fromCurrency === base
     ? roundCurrency(fee, base)
-    : convertMoney(fee, fromCurrency, base, fromBaseRate);
+    : convertMoney(fee, fromCurrency, base, resolvedFromBaseRate);
   return {
     fromCurrency,
     toCurrency,
@@ -164,14 +242,15 @@ export const buildTransferCurrencyFields = ({
     feeBaseAmount,
     feeBaseAmountMinor: moneyToMinor(feeBaseAmount, base),
     baseCurrencyCode: base,
-    fromBaseRate,
-    toBaseRate,
+    fromBaseRate: resolvedFromBaseRate,
+    toBaseRate: resolvedToBaseRate,
     baseFromAmount,
     baseFromAmountMinor: moneyToMinor(baseFromAmount, base),
     baseToAmount,
     baseToAmountMinor: moneyToMinor(baseToAmount, base),
     baseAmount: baseFromAmount,
     baseAmountMinor: moneyToMinor(baseFromAmount, base),
+    fxSnapshotSource: bothForeign ? 'user_confirmed_bridge_rates' : (sameCurrency ? 'same_currency' : 'transfer_amounts'),
   };
 };
 
@@ -199,21 +278,56 @@ export const hydrateLegacyCurrencyFields = (tx = {}, wallets = [], baseCurrency 
   if (!tx || typeof tx !== 'object') return tx;
   const base = normalizeCurrencyCode(baseCurrency);
   if (tx.kind === 'transfer') {
-    const fields = buildTransferCurrencyFields({
-      fromWalletId: tx.fromWalletId,
-      toWalletId: tx.toWalletId,
-      fromAmount: tx.transferFromAmount ?? tx.transferAmount ?? 0,
-      toAmount: tx.transferToAmount,
-      wallets,
-      baseCurrency: tx.baseCurrencyCode || base,
-      exchangeRate: tx.transferRate ?? tx.exchangeRate,
-      feeAmount: tx.feeAmount || 0,
-    });
-    return {
-      ...tx,
-      transferAmount: Math.abs(Number(tx.transferAmount ?? fields.transferFromAmount) || 0),
-      ...fields,
-    };
+    try {
+      const fields = buildTransferCurrencyFields({
+        fromWalletId: tx.fromWalletId,
+        toWalletId: tx.toWalletId,
+        fromAmount: tx.transferFromAmount ?? tx.transferAmount ?? 0,
+        toAmount: tx.transferToAmount,
+        wallets,
+        baseCurrency: tx.baseCurrencyCode || base,
+        exchangeRate: tx.transferRate ?? tx.exchangeRate,
+        feeAmount: tx.feeAmount || 0,
+        fromBaseRate: tx.fromBaseRate,
+        toBaseRate: tx.toBaseRate,
+      });
+      return {
+        ...tx,
+        transferAmount: Math.abs(Number(tx.transferAmount ?? fields.transferFromAmount) || 0),
+        ...fields,
+        fxStatus: tx.fxStatus === 'UNRESOLVED_FX' ? 'UNRESOLVED_FX' : 'RESOLVED',
+      };
+    } catch (error) {
+      if (error?.message !== 'transfer_historical_base_rates_required') throw error;
+      const fromCurrency = walletCurrencyFor(wallets, tx.fromWalletId, base);
+      const toCurrency = walletCurrencyFor(wallets, tx.toWalletId, base);
+      const sourceAmount = Math.abs(roundCurrency(Number(tx.transferFromAmount ?? tx.transferAmount ?? 0) || 0, fromCurrency));
+      const targetAmount = Math.abs(roundCurrency(Number(tx.transferToAmount || 0) || 0, toCurrency));
+      const transferRate = Number(tx.transferRate ?? tx.exchangeRate ?? (sourceAmount > 0 && targetAmount > 0 ? targetAmount / sourceAmount : 0));
+      const feeAmount = Math.abs(roundCurrency(Number(tx.feeAmount || 0) || 0, fromCurrency));
+      // Legacy foreign->foreign transfers without historical bridge rates are
+      // intentionally left unresolved. Never substitute today's wallet valuation
+      // or rate=1 because that would rewrite historical reporting meaning.
+      return {
+        ...tx,
+        fromCurrency,
+        toCurrency,
+        transferAmount: sourceAmount,
+        transferFromAmount: sourceAmount,
+        transferFromAmountMinor: moneyToMinor(sourceAmount, fromCurrency),
+        transferToAmount: targetAmount,
+        transferToAmountMinor: moneyToMinor(targetAmount, toCurrency),
+        transferRate: transferRate > 0 ? transferRate : null,
+        exchangeRate: transferRate > 0 ? transferRate : null,
+        feeAmount,
+        feeAmountMinor: moneyToMinor(feeAmount, fromCurrency),
+        baseCurrencyCode: normalizeCurrencyCode(tx.baseCurrencyCode || base),
+        fromBaseRate: Number(tx.fromBaseRate) > 0 ? Number(tx.fromBaseRate) : null,
+        toBaseRate: Number(tx.toBaseRate) > 0 ? Number(tx.toBaseRate) : null,
+        fxStatus: 'UNRESOLVED_FX',
+        unresolvedFxReason: 'missing_historical_base_bridge',
+      };
+    }
   }
   if (tx.walletCurrency && tx.baseCurrencyCode && Object.prototype.hasOwnProperty.call(tx, 'walletAmount')) return tx;
   const fields = buildCurrencyFields({
