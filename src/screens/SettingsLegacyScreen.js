@@ -96,7 +96,7 @@ const UI = {
     defaultWallet: 'المحفظة الافتراضية',
     makeDefaultWallet: 'جعلها افتراضية',
     deleteWalletTitle: 'حذف المحفظة',
-    deleteWalletBody: 'سيتم نقل معاملات هذه المحفظة إلى المحفظة الافتراضية أو أقرب محفظة متاحة.',
+    deleteWalletBody: 'يمكن حذف المحفظة فقط إذا لم يكن لها سجل مالي. الحركات القديمة لا تُنقل ولا يُعاد تفسيرها.',
     categories: 'التصنيفات',
     categoriesCount: 'تصنيفات',
     addCategory: 'إضافة تصنيف',
@@ -225,7 +225,7 @@ const UI = {
     defaultWallet: 'Default wallet',
     makeDefaultWallet: 'Make default',
     deleteWalletTitle: 'Delete wallet',
-    deleteWalletBody: 'Transactions in this wallet will move to the default or nearest available wallet.',
+    deleteWalletBody: 'A wallet can be deleted only when it has no financial history. Existing transactions are never moved or reinterpreted.',
     categories: 'Categories',
     categoriesCount: 'categories',
     addCategory: 'Add category',
@@ -359,7 +359,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
   const {
     cfg, setCfg, user, setUser, resetAll,
     syncing, online, lastSyncError, dirty,
-    notif, setNotif, cats, setCats, trans, setTransCatToOther,
+    notif, setNotif, cats, setCats, trans,
     wallets, addWallet, deleteWallet, deleteWalletsMany, deleteCategoriesMany, reconcileWalletBalance,
     debts, goals, commitments,
     exportBackup, importBackup,
@@ -570,6 +570,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
   const [reconcileWallet, setReconcileWallet] = useState(null);
   const [reconcileBalance, setReconcileBalance] = useState('');
   const [reconcileNote, setReconcileNote] = useState('');
+  const [reconcileRate, setReconcileRate] = useState('');
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [settingsSheet, setSettingsSheet] = useState(null);
   const [countryQuery, setCountryQuery] = useState('');
@@ -964,9 +965,11 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
     );
   };
 
-  const changeCountry = (country) => {
+  const changeCountry = async (country) => {
     if (!country) return;
-    changeBaseCurrency(country.currency, { country: country.code });
+    // Country is a profile/context preference only. It never owns or silently changes the ledger base currency.
+    await setCfg({ country: country.code });
+    setSettingsSheet(null);
   };
 
   const addCategory = () => {
@@ -1027,6 +1030,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
     setReconcileWallet(wallet);
     setReconcileBalance(formatNumberInput(String(wallet?.balance ?? 0)));
     setReconcileNote('');
+    setReconcileRate('');
   };
 
   const applyWalletReconciliation = async () => {
@@ -1036,14 +1040,25 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
       Alert.alert('', isAr ? 'اكتب رصيداً صحيحاً.' : 'Enter a valid balance.');
       return;
     }
-    const result = await reconcileWalletBalance?.(reconcileWallet.id, actual, undefined, reconcileNote);
+    const explicitRate = reconcileWallet.currency === cfg.currency ? 1 : parseNumberInput(reconcileRate);
+    if (reconcileWallet.currency !== cfg.currency && !(explicitRate > 0)) {
+      Alert.alert('', isAr
+        ? `اكتب السعر التاريخي لهذه التسوية: 1 ${reconcileWallet.currency} = ؟ ${cfg.currency}`
+        : `Enter the historical rate for this adjustment: 1 ${reconcileWallet.currency} = ? ${cfg.currency}`);
+      return;
+    }
+    const result = await reconcileWalletBalance?.(reconcileWallet.id, actual, undefined, reconcileNote, explicitRate);
     if (!result?.ok) {
-      Alert.alert('', isAr ? 'تعذر تسجيل تسوية الرصيد.' : 'Could not record the balance adjustment.');
+      const fxRequired = result?.reason === 'historical_fx_required';
+      Alert.alert('', fxRequired
+        ? (isAr ? 'هذه التسوية تحتاج سعراً تاريخياً واضحاً.' : 'This adjustment requires an explicit historical exchange rate.')
+        : (isAr ? 'تعذر تسجيل تسوية الرصيد.' : 'Could not record the balance adjustment.'));
       return;
     }
     setReconcileWallet(null);
     setReconcileBalance('');
     setReconcileNote('');
+    setReconcileRate('');
     if (!result.noChange) {
       const difference = Number(result.difference || 0);
       Alert.alert('', isAr
@@ -1069,15 +1084,15 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
 
   const deleteCategory = (id) => {
     if (id === 'other') return;
-    Alert.alert(L.delete, '', [
+    const body = isAr
+      ? 'سيُخفى التصنيف من الإدخالات الجديدة، لكن كل الحركات والميزانيات التاريخية ستحتفظ بتصنيفها الأصلي.'
+      : 'The category will be hidden from new entries, while historical transactions and budgets keep their original category.';
+    Alert.alert(isAr ? 'أرشفة التصنيف' : 'Archive category', body, [
       { text: T.cancel, style: 'cancel' },
       {
-        text: T.delete,
+        text: isAr ? 'أرشفة' : 'Archive',
         style: 'destructive',
-        onPress: async () => {
-          await setTransCatToOther(id);
-          setCats(cats.filter(c => c.id !== id));
-        },
+        onPress: async () => { await deleteCategoriesMany([id]); },
       },
     ]);
   };
@@ -1085,8 +1100,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
   const confirmDeleteSelectedWallets = () => {
     if (!walletSelection.selectedCount) return;
     const body = isAr
-      ? `سيتم حذف ${walletSelection.selectedCount} محافظ ونقل حركاتها إلى المحفظة الافتراضية.`
-      : `Delete ${walletSelection.selectedCount} wallets and move their transactions to the default wallet?`;
+      ? `سيتم حذف ${walletSelection.selectedCount} محافظ فقط إذا لم يكن لأي منها سجل مالي. لن تُنقل أي حركة تاريخية.`
+      : `Delete ${walletSelection.selectedCount} wallets only if none has financial history. Historical transactions will not be moved.`;
     Alert.alert(T.deleteWalletTitle, body, [
       { text: T.cancel, style: 'cancel' },
       {
@@ -1106,8 +1121,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
   const confirmDeleteSelectedCategories = () => {
     if (!categorySelection.selectedCount) return;
     const body = isAr
-      ? `سيتم حذف ${categorySelection.selectedCount} تصنيفات ونقل حركاتها إلى «أخرى».`
-      : `Delete ${categorySelection.selectedCount} categories and move their transactions to Other?`;
+      ? `سيتم أرشفة ${categorySelection.selectedCount} تصنيفات مع إبقاء الحركات والميزانيات التاريخية على تصنيفاتها الأصلية.`
+      : `Archive ${categorySelection.selectedCount} categories while keeping historical transactions and budgets on their original categories.`;
     Alert.alert(L.delete, body, [
       { text: T.cancel, style: 'cancel' },
       {
@@ -2865,6 +2880,16 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
             placeholderTextColor={th.sub}
             style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
           />
+          {reconcileWallet && reconcileWallet.currency !== cfg.currency ? (
+            <TextInput
+              value={reconcileRate}
+              onChangeText={(value) => setReconcileRate(formatNumberInput(value))}
+              keyboardType="decimal-pad"
+              placeholder={isAr ? `السعر التاريخي · 1 ${reconcileWallet.currency} = ؟ ${cfg.currency}` : `Historical rate · 1 ${reconcileWallet.currency} = ? ${cfg.currency}`}
+              placeholderTextColor={th.sub}
+              style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
+            />
+          ) : null}
           <TextInput
             value={reconcileNote}
             onChangeText={setReconcileNote}

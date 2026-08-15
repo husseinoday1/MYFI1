@@ -10,7 +10,7 @@ import { formatMoneyNumber } from '../lib/money';
 import { buildFinancialSnapshot, getUpcomingRecurring, pct, today } from '../utils/calc';
 import AddTransModal from '../components/AddTransModal';
 import { filterByActiveScope, filterFeatureEntities, filterTransactionsByEnabledFeatures, getActiveScope, getModules, getTransactionDisplayAmount } from '../lib/modules';
-import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel, normalizeWallets } from '../lib/wallets';
+import { getDefaultWalletId, getWalletAvailableBalances, getWalletBaseAvailableTotal, getWalletLabel, normalizeWallets } from '../lib/wallets';
 import { formatCommitmentDate, formatCommitmentMonth, getUpcomingCommitments } from '../lib/commitments';
 import { MetricCard, SectionTitle, Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { RADIUS, SHADOW, SPACE, TYPE, weight } from '../lib/tokens';
@@ -28,6 +28,7 @@ import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatMonthLabel } from '../lib/months';
 import { deriveDisplayName } from '../lib/accountIdentity';
 import { getMonthTransactionsByKey, getRecentTransactions, getTransactionIndex } from '../lib/transactionIndex';
+import { averageGoalProgress, summarizeCommitmentCurrencies, summarizeGoalCurrencies } from '../lib/entityCurrencySummary';
 const noop = () => {};
 
 const copy = (lang) => {
@@ -118,6 +119,8 @@ const copy = (lang) => {
     quickGoalHint: ar ? 'ادعم أول هدف نشط' : 'Top up your first active goal',
     quickCommitmentHint: ar ? 'سدّد أقرب التزام قادم' : 'Pay the next due commitment',
     smartEntry: ar ? 'ذكي' : 'Smart',
+    currenciesWord: ar ? 'عملات' : 'currencies',
+    goalsWordShort: ar ? 'أهداف' : 'goals',
   };
 };
 
@@ -133,7 +136,7 @@ export default function HomeScreen({
   onOpenTab = noop,
   onNotificationAction = noop,
 }) {
-  const { trans, debts, goals, wallets, commitments, cats, cfg, notif, user, setCfg, editTrans, deleteTrans, deleteTransMany, deferCommitment } = useStore();
+  const { trans, debts, goals, wallets, commitments, cats, cfg, notif, user, setCfg, editTrans, deleteTrans, deleteTransMany, deferCommitment, financialLedgerV7Cutover, workspaceNamespace } = useStore();
   const th  = TH[cfg.theme] || TH.dark;
   const L   = STR[cfg.lang]  || STR.ar;
   const C   = copy(cfg.lang);
@@ -191,9 +194,36 @@ export default function HomeScreen({
     () => modules.commitments ? getUpcomingCommitments(scopedCommitments) : [],
     [commitments, cfg.activeScope, cfg.profileType, modules.commitments],
   );
+  const [sqlHome, setSqlHome] = useState(null);
+  const currentMonthKey = today().slice(0, 7);
+  useEffect(() => {
+    let cancelled = false;
+    if (!financialLedgerV7Cutover) {
+      setSqlHome(null);
+      return () => { cancelled = true; };
+    }
+    const run = async () => {
+      const namespace = getLedgerNamespace(workspaceNamespace, cfg);
+      const scope = getActiveScope(cfg);
+      const [year, month] = currentMonthKey.split('-').map(Number);
+      const lastDay = new Date(year, month, 0).getDate();
+      try {
+        const [summary, recentPage, positions] = await Promise.all([
+          queryLedgerSummary({ namespace, fromDate: `${currentMonthKey}-01`, toDate: `${currentMonthKey}-${String(lastDay).padStart(2, '0')}`, scope }),
+          queryLedgerTransactions({ namespace, limit: recentLimit, scope, archived: false }),
+          queryLedgerWalletPositions({ namespace, scope }),
+        ]);
+        if (!cancelled) setSqlHome({ summary, recent: recentPage?.rows || [], positions: positions?.rows || [] });
+      } catch {
+        if (!cancelled) setSqlHome(null);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [financialLedgerV7Cutover, workspaceNamespace, cfg.activeScope, cfg.profileType, cfg.currency, currentMonthKey]);
   const recent = useMemo(
-    () => getRecentTransactions(scopedTrans, recentLimit),
-    [scopedTrans, recentLimit],
+    () => financialLedgerV7Cutover && sqlHome?.recent?.length ? sqlHome.recent : getRecentTransactions(scopedTrans, recentLimit),
+    [financialLedgerV7Cutover, sqlHome, scopedTrans, recentLimit],
   );
   const scopedTransactionIndex = useMemo(() => getTransactionIndex(scopedTrans), [scopedTrans]);
   const recentSelection = useMultiSelect(recent.map(item => item.id));
@@ -201,11 +231,20 @@ export default function HomeScreen({
     () => getDefaultWalletId(scopedWallets.length ? scopedWallets : wallets, cfg.currency, cfg.defaultWalletId),
     [wallets, cfg.currency, cfg.defaultWalletId, cfg.activeScope, cfg.profileType],
   );
-  const walletRows = useMemo(
+  const fallbackWalletRows = useMemo(
     () => getWalletAvailableBalances(scopedWallets.length ? scopedWallets : wallets, scopedTransAll, cfg.currency, defaultWalletId)
       .sort((a, b) => (a.id === defaultWalletId ? -1 : b.id === defaultWalletId ? 1 : 0)),
     [wallets, trans, cfg.currency, defaultWalletId, cfg.activeScope, cfg.profileType],
   );
+  const walletRows = useMemo(() => {
+    if (!financialLedgerV7Cutover || !sqlHome?.positions?.length) return fallbackWalletRows;
+    const byId = new Map((scopedWallets.length ? scopedWallets : wallets).map(item => [String(item.id), item]));
+    return sqlHome.positions.map(position => ({
+      ...(byId.get(String(position.id)) || {}),
+      ...position,
+      balance: position.physicalBalance,
+    })).sort((a, b) => (a.id === defaultWalletId ? -1 : b.id === defaultWalletId ? 1 : 0));
+  }, [financialLedgerV7Cutover, sqlHome, fallbackWalletRows, scopedWallets, wallets, defaultWalletId]);
   const walletMap = useMemo(() => {
     const normalized = normalizeWallets(scopedWallets.length ? scopedWallets : wallets, cfg.currency);
     return new Map(normalized.map(wallet => [wallet.id, wallet]));
@@ -223,12 +262,16 @@ export default function HomeScreen({
       ? th.warn
       : th.inc;
   const canTransfer = walletRows.length > 1;
-  const heroBalance = walletRows.reduce((sum, wallet) => sum + Number(wallet.availableBalance || 0), 0);
+  const heroBalance = getWalletBaseAvailableTotal(walletRows, cfg.currency);
   const activeGoals = scopedGoals.filter(goal => goal.active !== false && Number(goal.target || 0) > 0);
-  const totalSaved = activeGoals.reduce((sum, goal) => sum + Number(goal.cur || 0), 0);
-  const goalsTarget = activeGoals.reduce((sum, goal) => sum + Number(goal.target || 0), 0);
-  const goalsProgress = pct(totalSaved, goalsTarget, { cap: true });
-  const currentMonthKey = today().slice(0, 7);
+  const goalCurrencyGroups = useMemo(
+    () => summarizeGoalCurrencies(activeGoals, cfg.currency, { activeOnly: true }),
+    [activeGoals, cfg.currency],
+  );
+  const goalsProgress = averageGoalProgress(activeGoals);
+  const goalSummaryText = goalCurrencyGroups.length === 1
+    ? `${formatMoneyNumber(goalCurrencyGroups[0].saved, goalCurrencyGroups[0].currency, cfg.lang)} / ${formatMoneyNumber(goalCurrencyGroups[0].target, goalCurrencyGroups[0].currency, cfg.lang)} ${getSymbol(goalCurrencyGroups[0].currency)}`
+    : `${activeGoals.length} ${C.goalsWordShort} · ${goalCurrencyGroups.length} ${C.currenciesWord}`;
   const currentMonthName = formatMonthLabel(new Date().getFullYear(), new Date().getMonth(), {
     style: cfg.monthNameStyle,
     length: 'long',
@@ -239,14 +282,28 @@ export default function HomeScreen({
     || Number(item.monthsUntil || 0) <= 0
     || String(item.dueISO || '').startsWith(currentMonthKey)
   ));
-  const dueCommitmentTotal = dueCommitments
-    .reduce((sum, item) => sum + Number(item.amt || 0), 0);
+  const dueCommitmentGroups = useMemo(
+    () => summarizeCommitmentCurrencies(dueCommitments, cfg.currency, { activeOnly: false }),
+    [dueCommitments, cfg.currency],
+  );
+  const dueCommitmentText = dueCommitmentGroups.length === 0
+    ? `0 ${sym}`
+    : dueCommitmentGroups.length === 1
+      ? `${formatMoneyNumber(dueCommitmentGroups[0].amount, dueCommitmentGroups[0].currency, cfg.lang)} ${getSymbol(dueCommitmentGroups[0].currency)}`
+      : `${dueCommitmentGroups.length} ${C.currenciesWord}`;
   const currentMonthRows = getMonthTransactionsByKey(scopedTrans, currentMonthKey);
   const monthSavingTotal = currentMonthRows
     .filter(item => item.isGoalSaving)
-    .reduce((sum, item) => sum + Math.abs(Number(item.allocationAmount || item.amt || 0)), 0);
+    .reduce((sum, item) => {
+      const entityCurrency = String(item.entityCurrencyCode || item.currencyCode || cfg.currency).toUpperCase();
+      const historicalBase = Number(item.allocationBaseAmount);
+      if (Number.isFinite(historicalBase)) return sum + Math.abs(historicalBase);
+      return entityCurrency === String(cfg.currency).toUpperCase()
+        ? sum + Math.abs(Number(item.allocationAmount || 0))
+        : sum;
+    }, 0);
   const hasCashFlowActivity = currentMonthRows.length > 0;
-  const hasMonthActivity = hasCashFlowActivity || monthSavingTotal > 0 || dueCommitmentTotal > 0;
+  const hasMonthActivity = hasCashFlowActivity || monthSavingTotal > 0 || dueCommitments.length > 0;
   const hasMeaningfulHomeData = hasMonthActivity
     || activeGoals.length > 0
     || walletRows.some(wallet => Math.abs(Number(wallet.balance || 0)) > 0 || Math.abs(Number(wallet.availableBalance || 0)) > 0);
@@ -260,13 +317,16 @@ export default function HomeScreen({
   const findWallet = (walletId) => walletMap.get(walletId) || walletRows[0];
   const isHomeSectionVisible = (key) => homeSectionsMap.get(key) !== false;
   const showWalletStrip = isHomeSectionVisible('wallets') && modules.wallets && walletRows.length > 0 && (!isHomeSectionVisible('hero') || showWalletDetails);
+  const effectiveMonthSummary = financialLedgerV7Cutover && sqlHome?.summary?.supported !== false && sqlHome?.summary
+    ? { inc: Number(sqlHome.summary.income || 0), exp: Number(sqlHome.summary.expense || 0), net: Number(sqlHome.summary.net || 0), count: Number(sqlHome.summary.count || 0) }
+    : { inc: Number(snapshot.month.inc || 0), exp: Number(snapshot.month.exp || 0), net: Number(snapshot.month.net || 0), count: currentMonthRows.length };
   const homeCards = homeCardsCfg.map((item) => {
     if (item.key === 'income') {
       return {
         ...item,
         icon: 'arrow-down-circle-outline',
         label: L.income,
-        value: Number(snapshot.month.inc || 0) === 0 ? `0 ${sym}` : `+${fmt(snapshot.month.inc)} ${sym}`,
+        value: effectiveMonthSummary.inc === 0 ? `0 ${sym}` : `+${fmt(effectiveMonthSummary.inc)} ${sym}`,
         color: th.inc,
         onPress: () => onOpenTab('reports'),
       };
@@ -276,7 +336,7 @@ export default function HomeScreen({
         ...item,
         icon: 'arrow-up-circle-outline',
         label: L.expense,
-        value: Number(snapshot.month.exp || 0) === 0 ? `0 ${sym}` : `-${fmt(snapshot.month.exp)} ${sym}`,
+        value: effectiveMonthSummary.exp === 0 ? `0 ${sym}` : `-${fmt(effectiveMonthSummary.exp)} ${sym}`,
         color: th.exp,
         onPress: () => onOpenTab('reports'),
       };
@@ -296,8 +356,8 @@ export default function HomeScreen({
         ...item,
         icon: 'pulse-outline',
         label: C.netWord,
-        value: signed(snapshot.month.bal),
-        color: snapshot.month.bal >= 0 ? th.inc : th.exp,
+        value: signed(effectiveMonthSummary.net),
+        color: effectiveMonthSummary.net >= 0 ? th.inc : th.exp,
         onPress: () => onOpenTab('reports'),
       };
     }
@@ -306,8 +366,8 @@ export default function HomeScreen({
         ...item,
         icon: 'calendar-outline',
         label: C.commitmentWord,
-        value: `${fmt(dueCommitmentTotal)} ${sym}`,
-        color: dueCommitmentTotal > 0 ? th.warn : th.inc,
+        value: dueCommitmentText,
+        color: dueCommitments.length > 0 ? th.warn : th.inc,
         onPress: () => onOpenTab('trackers'),
       };
     }
@@ -611,7 +671,8 @@ export default function HomeScreen({
   // If the user has a ledger, the configured Month summary stays visible even
   // when the current month is still zero. Only a truly empty ledger uses the
   // first-entry state. This keeps Home faithful to the user's Home settings.
-  const visibleHomeCards = scopedTrans.length > 0
+  const hasLedgerEntries = financialLedgerV7Cutover && sqlHome?.summary ? Number(sqlHome.summary.count || 0) > 0 || recent.length > 0 : scopedTrans.length > 0;
+  const visibleHomeCards = hasLedgerEntries
     ? homeCards.filter(item => item.visible !== false)
     : [];
   const moneyTileWidth = (index) => (
@@ -865,7 +926,7 @@ export default function HomeScreen({
               minimumFontScale={0.72}
               style={[s.savingSummaryValue, { color: th.text, textAlign: align }]}
             >
-              {moneyText(`${fmt(totalSaved)} / ${fmt(goalsTarget)} ${sym}`)}
+              {moneyText(goalSummaryText)}
             </Text>
           </View>
           <Text style={[s.savingPercent, { color: th.primary }]}>{hidden ? C.hiddenAmount : `${goalsProgress}%`}</Text>

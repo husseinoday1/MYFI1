@@ -395,11 +395,17 @@ export const financialDataCount = (snapshot = {}) => (
   + (snapshot.commitments || []).length
 );
 
-export const hasCurrencySensitiveFinancialData = (snapshot = {}) => (
-  financialDataCount(snapshot) > 0
-  || (Array.isArray(snapshot.wallets) ? snapshot.wallets : [])
-    .some(wallet => Number(wallet?.openingBalance || 0) !== 0)
-);
+export const hasCurrencySensitiveFinancialData = (snapshot = {}) => {
+  const cfg = snapshot.cfg || {};
+  const hasBudgets = Object.values(cfg.categoryBudgets || {}).some(value => Number(value || 0) !== 0)
+    || Object.values(cfg.categoryBudgetsByMonth || {}).some(map => (
+      Object.values(map || {}).some(value => Number(value || 0) !== 0)
+    ));
+  return financialDataCount(snapshot) > 0
+    || hasBudgets
+    || (Array.isArray(snapshot.wallets) ? snapshot.wallets : [])
+      .some(wallet => Number(wallet?.openingBalance || 0) !== 0);
+};
 
 export const snapshotFromState = (state = {}, overrides = {}) => {
   const clean = dedupeWorkspaceData(state);

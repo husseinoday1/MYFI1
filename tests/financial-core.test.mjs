@@ -442,10 +442,25 @@ const mixedCfg = normalizeCfg({
   activeScope: 'business',
   enabledModules: { debtsOwed: false, debtsReceivable: true, goals: false, commitments: true },
 });
-assert.deepEqual(filterByActiveScope([
+const mixedScopeRows = [
   { id: 'p', scope: 'personal' },
   { id: 'b', scope: 'business' },
-], mixedCfg).map(item => item.id), ['p', 'b'], 'dual usage must combine personal and business data in one workspace');
+];
+assert.deepEqual(
+  filterByActiveScope(mixedScopeRows, mixedCfg).map(item => item.id),
+  ['b'],
+  'dual usage with Business selected must isolate business data',
+);
+assert.deepEqual(
+  filterByActiveScope(mixedScopeRows, normalizeCfg({ ...mixedCfg, activeScope: 'personal' })).map(item => item.id),
+  ['p'],
+  'dual usage with Personal selected must isolate personal data',
+);
+assert.deepEqual(
+  filterByActiveScope(mixedScopeRows, normalizeCfg({ ...mixedCfg, activeScope: 'all' })).map(item => item.id),
+  ['p', 'b'],
+  'dual usage with All selected must combine personal and business data in one workspace',
+);
 const visibleFeatures = filterFeatureEntities({
   debts: [
     { id: 'owed', direction: 'owed', scope: 'business' },
@@ -964,7 +979,7 @@ const runLinkedStoreAssertions = async () => {
   state = useStore.getState();
   assert.equal(state.debts.length, 0);
   assert.equal(state.goals.length, 0);
-  assert.equal(state.trans.length, 0, 'bulk tracker delete must remove linked ledger rows');
+  assert.equal(state.trans.length, 3, 'bulk tracker delete must preserve posted financial ledger rows');
   assert.equal(state.commitments.length, 0, 'plans linked to removed trackers must be deleted with their source trackers');
 
   useStore.setState({
@@ -1099,10 +1114,12 @@ const runLinkedStoreAssertions = async () => {
   });
   assert.equal(await useStore.getState().deleteCategoriesMany(['food', 'rent', 'other']), true);
   state = useStore.getState();
-  assert.deepEqual(state.cats.map(item => item.id), ['other']);
-  assert.ok(state.trans.every(item => item.cat === 'other'));
-  assert.equal(state.commitments[0].cat, 'other');
-  assert.deepEqual(state.cfg.categoryBudgets, {});
+  assert.deepEqual(state.cats.map(item => item.id), ['food', 'rent', 'other']);
+  assert.ok(state.cats.filter(item => ['food', 'rent'].includes(item.id)).every(item => item.status === 'archived' && item.archivedAt));
+  assert.deepEqual(state.trans.map(item => item.cat), ['food', 'rent'], 'category lifecycle must preserve historical transaction identity');
+  assert.equal(state.commitments[0].cat, 'rent');
+  assert.equal(state.commitments[0].categoryArchived, true);
+  assert.deepEqual(state.cfg.categoryBudgets, { food: 100, rent: 200 }, 'historical budget references must not be silently rewritten');
 
   const archiveWallets = normalizeWallets([
     { id: 'archive-cash', name: 'Cash', openingBalance: 1000, currency: 'IQD', scope: 'personal' },

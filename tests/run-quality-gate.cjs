@@ -33,6 +33,7 @@ const staticContracts = [
   'entity-currency-r03.test.cjs',
   'shadow-migration-phase5.test.cjs',
   'multicurrency-r03.test.cjs',
+  'r04-phase6-9-contract.test.cjs',
   'lifecycle-reset-wallet-search.test.cjs',
   'onboarding-preview.test.cjs',
   'performance-data-lab-v51.test.cjs',

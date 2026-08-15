@@ -23,7 +23,7 @@ export const categorySupportsFlow = (category = {}, flow = CATEGORY_FLOWS.EXPENS
 };
 
 export const getCategoriesForFlow = (categories = [], flow = CATEGORY_FLOWS.EXPENSE) => {
-  const list = Array.isArray(categories) ? categories : [];
+  const list = (Array.isArray(categories) ? categories : []).filter(category => !category?.archivedAt && category?.status !== 'archived');
   const filtered = list.filter(category => categorySupportsFlow(category, flow));
   return filtered.length ? filtered : list;
 };

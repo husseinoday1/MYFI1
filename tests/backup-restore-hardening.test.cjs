@@ -125,14 +125,15 @@ assert.equal(inspectBackupData(buildFinancialBackup({
   }],
 })).valid, false);
 
-// Ordinary stale wallet references stay repairable by prepareWalletData.
+// R04 contract: an unknown wallet reference is financial ambiguity, not a
+// repair opportunity. Restore must stop for explicit user review.
 const repairable = inspectBackupData(buildFinancialBackup({
   cfg: sourceCfg,
   wallets: base.wallets,
   trans: [{ id: 'x', walletId: 'missing', amt: -50 }],
 }));
-assert.equal(repairable.valid, true);
-assert(repairable.warnings.length > 0);
+assert.equal(repairable.valid, false);
+assert(repairable.errors.some(item => String(item).startsWith('backup_transaction_wallet_unknown:')));
 
 // Old backups remain readable, but their non-financial config is filtered.
 const legacy = {

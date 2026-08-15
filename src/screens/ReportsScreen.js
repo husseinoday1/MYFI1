@@ -17,6 +17,8 @@ import { filterByActiveScope, filterFeatureEntities, filterTransactionsByEnabled
 import { getWalletLabel } from '../lib/wallets';
 import { formatMonthLabel, monthNames } from '../lib/months';
 import { getTransactionIndex } from '../lib/transactionIndex';
+import { getLedgerNamespace, queryLedgerCategorySpend, queryLedgerSummary } from '../lib/activeLedgerRepository';
+import { currencyGroupsAreBaseOnly, mergeCurrencyAmounts, summarizeCommitmentCurrencies, summarizeDebtCurrencies, summarizeGoalCurrencies } from '../lib/entityCurrencySummary';
 
 const CHART_COLORS = ['#138A57', '#447FC1', '#C18428', '#C25761', '#6E68B5', '#4E8975'];
 
@@ -134,11 +136,15 @@ const copy = (lang) => {
     goalTarget: ar ? 'إجمالي الأهداف' : 'Goal target',
     expandSection: ar ? 'إظهار التفاصيل' : 'Show details',
     collapseSection: ar ? 'إخفاء التفاصيل' : 'Hide details',
+    currenciesWord: ar ? 'عملات' : 'currencies',
+    currentTrackerState: ar ? 'حالة المتابعات الحالية' : 'Current tracker state',
+    currentTrackerStateHint: ar ? 'القيم أدناه هي حالة المتابعات الآن وليست لقطة تاريخية للفترة المختارة.' : 'The values below show the trackers now, not a historical snapshot of the selected period.',
+    netPositionUnavailable: ar ? 'غير متاح مع ديون متعددة العملات' : 'Unavailable with multi-currency debts',
   };
 };
 
 export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = () => {} }) {
-  const { trans, debts, goals, wallets, commitments, cats, cfg } = useStore();
+  const { trans, debts, goals, wallets, commitments, cats, cfg, financialLedgerV7Cutover, workspaceNamespace } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const C = copy(cfg.lang);
   const ar = isRTL(cfg.lang);
@@ -156,7 +162,8 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
     () => filterTransactionsByEnabledFeatures(allScopedTrans, cfg),
     [allScopedTrans, cfg.enabledModules],
   );
-  const transactionIndex = useMemo(() => getTransactionIndex(viewTrans), [viewTrans]);
+  // Financial truth is independent from feature visibility. Hidden modules may hide UI sections, never ledger rows or totals.
+  const transactionIndex = useMemo(() => getTransactionIndex(allScopedTrans), [allScopedTrans]);
   const featureData = filterFeatureEntities({ debts, goals, commitments, cfg });
   const viewDebts = featureData.debts;
   const viewGoals = featureData.goals;
@@ -235,6 +242,48 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
     return new Date(year, month - 1, 15);
   }, [selectedMonthKey]);
   const selectedMonthLabel = formatMonthLabel(selectedMonth.getFullYear(), selectedMonth.getMonth(), { style: monthStyle, length: 'short' });
+  const periodDateBounds = useMemo(() => {
+    if (scope === 'month') {
+      const year = selectedMonth.getFullYear();
+      const month = selectedMonth.getMonth() + 1;
+      const key = `${year}-${String(month).padStart(2, '0')}`;
+      return { fromDate: `${key}-01`, toDate: `${key}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}` };
+    }
+    if (scope === 'year') {
+      const year = selectedMonth.getFullYear();
+      return { fromDate: `${year}-01-01`, toDate: `${year}-12-31` };
+    }
+    return { fromDate: null, toDate: null };
+  }, [scope, selectedMonth]);
+  const [sqlPeriod, setSqlPeriod] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!financialLedgerV7Cutover) {
+      setSqlPeriod(null);
+      return () => { cancelled = true; };
+    }
+    const run = async () => {
+      const namespace = getLedgerNamespace(workspaceNamespace, cfg);
+      const activeScope = getActiveScope(cfg);
+      try {
+        const [summary, categorySpend] = await Promise.all([
+          queryLedgerSummary({
+            namespace, ...periodDateBounds, scope: activeScope,
+            walletId: walletFilter === 'all' ? null : walletFilter, includeArchived: false,
+          }),
+          queryLedgerCategorySpend({
+            namespace, ...periodDateBounds, scope: activeScope,
+            walletId: walletFilter === 'all' ? null : walletFilter, includeArchived: false,
+          }),
+        ]);
+        if (!cancelled) setSqlPeriod({ summary, categories: categorySpend?.rows || [] });
+      } catch {
+        if (!cancelled) setSqlPeriod(null);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [financialLedgerV7Cutover, workspaceNamespace, cfg.activeScope, cfg.profileType, cfg.currency, scope, selectedMonthKey, walletFilter]);
   const periodLabel = scope === 'month'
     ? selectedMonthLabel
     : scope === 'year' ? String(selectedMonth.getFullYear()) : C.allTime;
@@ -253,9 +302,9 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
       ? (transactionIndex.byMonth.get(selectedMonthKey) || [])
       : scope === 'year'
         ? (transactionIndex.byYear.get(String(selectedMonth.getFullYear())) || [])
-        : viewTrans;
+        : allScopedTrans;
     return scopeRowsToWallet(baseRows);
-  }, [transactionIndex, viewTrans, scope, selectedMonthKey, selectedMonth, walletFilter, cfg.defaultWalletId]);
+  }, [transactionIndex, allScopedTrans, scope, selectedMonthKey, selectedMonth, walletFilter, cfg.defaultWalletId]);
 
   const comparisonTrans = (key, mode) => {
     const baseRows = mode === 'year'
@@ -269,8 +318,8 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
       : new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 0, 12)
   ), [selectedMonthKey, currentMonthKey, selectedMonth, now.getFullYear(), now.getMonth(), now.getDate()]);
   const walletScopedTrans = useMemo(
-    () => scopeRowsToWallet(viewTrans),
-    [viewTrans, walletFilter, cfg.defaultWalletId],
+    () => scopeRowsToWallet(allScopedTrans),
+    [allScopedTrans, walletFilter, cfg.defaultWalletId],
   );
   const intelligence = useMemo(
     () => buildLeakInsights(walletScopedTrans, cats, intelligenceDate),
@@ -300,7 +349,9 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
   const snapshot = financialReport;
   const periodCashFlow = financialReport.periodCashFlow;
   const stats = useMemo(() => {
-    const active = financialReport.stats;
+    const active = financialLedgerV7Cutover && sqlPeriod?.summary?.supported !== false && sqlPeriod?.summary
+      ? { inc: Number(sqlPeriod.summary.income || 0), exp: Number(sqlPeriod.summary.expense || 0), bal: Number(sqlPeriod.summary.net || 0) }
+      : financialReport.stats;
     const archived = walletFilter === 'all'
       ? scopedArchiveSummaries.filter(item => (
           scope === 'all' || (scope === 'year' && Number(item.year) === selectedMonth.getFullYear())
@@ -311,30 +362,57 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
       exp: total.exp + Number(item.expense || 0),
       bal: total.bal + Number(item.net || 0),
     }), active);
-  }, [financialReport.stats, scopedArchiveSummaries, scope, selectedMonth, walletFilter]);
+  }, [financialReport.stats, sqlPeriod, financialLedgerV7Cutover, scopedArchiveSummaries, scope, selectedMonth, walletFilter]);
   const reportEntryCount = useMemo(() => {
     const archivedCount = walletFilter === 'all'
       ? scopedArchiveSummaries
           .filter(item => scope === 'all' || (scope === 'year' && Number(item.year) === selectedMonth.getFullYear()))
           .reduce((sum, item) => sum + Number(item.count || 0), 0)
       : 0;
-    return periodTrans.length + archivedCount;
-  }, [periodTrans.length, scopedArchiveSummaries, scope, selectedMonth, walletFilter]);
+    const activeCount = financialLedgerV7Cutover && sqlPeriod?.summary?.supported !== false && sqlPeriod?.summary
+      ? Number(sqlPeriod.summary.count || 0)
+      : periodTrans.length;
+    return activeCount + archivedCount;
+  }, [periodTrans.length, sqlPeriod, financialLedgerV7Cutover, scopedArchiveSummaries, scope, selectedMonth, walletFilter]);
 
-  const activeCommitmentTotal = useMemo(
-    () => viewCommitments
-      .filter(item => item.active !== false)
-      .reduce((sum, item) => sum + Number(item.amt || 0), 0),
-    [viewCommitments],
+  const owedCurrencyGroups = useMemo(
+    () => summarizeDebtCurrencies(viewDebts, 'owed', cfg.currency),
+    [viewDebts, cfg.currency],
   );
+  const receivableCurrencyGroups = useMemo(
+    () => summarizeDebtCurrencies(viewDebts, 'receivable', cfg.currency),
+    [viewDebts, cfg.currency],
+  );
+  const goalCurrencyGroups = useMemo(
+    () => summarizeGoalCurrencies(viewGoals, cfg.currency),
+    [viewGoals, cfg.currency],
+  );
+  const commitmentCurrencyGroups = useMemo(
+    () => summarizeCommitmentCurrencies(viewCommitments, cfg.currency, { activeOnly: true }),
+    [viewCommitments, cfg.currency],
+  );
+  const obligationCurrencyGroups = useMemo(
+    () => mergeCurrencyAmounts(
+      owedCurrencyGroups.map(row => ({ ...row, amount: row.remaining })),
+      commitmentCurrencyGroups,
+    ),
+    [owedCurrencyGroups, commitmentCurrencyGroups],
+  );
+  const currentNetPositionReliable = currencyGroupsAreBaseOnly(owedCurrencyGroups, cfg.currency)
+    && currencyGroupsAreBaseOnly(receivableCurrencyGroups, cfg.currency);
+  const currencyGroupDisplay = (groups, field = 'amount') => {
+    if (!groups.length) return `0 ${sym}`;
+    if (groups.length > 1) return `${groups.length} ${C.currenciesWord}`;
+    const row = groups[0];
+    return `${formatMoneyNumber(Number(row[field] || 0), row.currency, cfg.lang)} ${getSymbol(row.currency)}`;
+  };
   const hasPlanningReportContent = (
     Math.abs(Number(snapshot.cashBalance || 0)) > 0
     || Math.abs(Number(snapshot.availableCash || 0)) > 0
-    || Number(snapshot.debts?.remaining || 0) > 0
-    || Number(snapshot.receivables?.remaining || 0) > 0
-    || Number(snapshot.goals?.target || 0) > 0
-    || Number(snapshot.goals?.saved || 0) > 0
-    || Number(activeCommitmentTotal || 0) > 0
+    || owedCurrencyGroups.length > 0
+    || receivableCurrencyGroups.length > 0
+    || goalCurrencyGroups.length > 0
+    || commitmentCurrencyGroups.length > 0
   );
   const hasReportContent = reportEntryCount > 0 || hasPlanningReportContent;
   const insightItems = useMemo(() => {
@@ -385,14 +463,21 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
   const receivableInfo = useMemo(() => debtSummary(viewDebts, 'receivable'), [debts, cfg.activeScope, cfg.profileType, modules.debtsOwed, modules.debtsReceivable]);
   const categories = useMemo(() => {
     const catMap = new Map(cats.map(item => [item.id, item]));
-    const rows = catSpend(periodTrans, cats).sort((a, b) => Number(b.spent || 0) - Number(a.spent || 0));
+    const sourceRows = financialLedgerV7Cutover && sqlPeriod?.categories
+      ? sqlPeriod.categories.map(row => ({
+          ...(catMap.get(row.categoryId) || catMap.get('other') || {}),
+          id: row.categoryId,
+          spent: Number(row.spent || 0),
+        }))
+      : catSpend(periodTrans, cats);
+    const rows = [...sourceRows].sort((a, b) => Number(b.spent || 0) - Number(a.spent || 0));
     const total = rows.reduce((sum, item) => sum + Number(item.spent || 0), 0);
     return rows.map((item, index) => ({
       ...item,
       color: item.color || CHART_COLORS[index % CHART_COLORS.length],
       percent: total ? Math.round((Number(item.spent || 0) / total) * 100) : 0,
     }));
-  }, [periodTrans, cats]);
+  }, [periodTrans, cats, sqlPeriod, financialLedgerV7Cutover]);
   const comparisonOptions = comparisonMode === 'month' ? monthOptions : yearOptions;
   const comparisonLimit = comparisonMode === 'month' ? 12 : 10;
   const comparisonSeries = useMemo(() => comparisonPeriods
@@ -411,7 +496,7 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
         ...periodStats,
       };
     })
-    .sort((a, b) => a.key.localeCompare(b.key)), [viewTrans, comparisonPeriods, comparisonMode, comparisonOptions, walletFilter, cfg.defaultWalletId, monthStyle]);
+    .sort((a, b) => a.key.localeCompare(b.key)), [allScopedTrans, comparisonPeriods, comparisonMode, comparisonOptions, walletFilter, cfg.defaultWalletId, monthStyle]);
 
   const comparisonPeriodSummary = useMemo(() => {
     const labels = comparisonSeries.map(item => item.label).filter(Boolean);
@@ -511,6 +596,8 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
         stats,
         debts: debtInfo,
         receivables: receivableInfo,
+        debtCurrencyGroups: owedCurrencyGroups,
+        receivableCurrencyGroups,
         debtRows: viewDebts.filter(item => item.direction !== 'receivable'),
         receivableRows: viewDebts.filter(item => item.direction === 'receivable'),
         topCategories: categories,
@@ -551,7 +638,7 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
       key: 'obligations',
       title: C.debtsDueTitle,
       hint: ar ? 'المتبقي من الديون والالتزامات' : 'Remaining debts and commitments',
-      value: `${money(Number(snapshot.debts.remaining || 0) + Number(activeCommitmentTotal || 0), cfg.lang, cfg.currency)} ${sym}`,
+      value: currencyGroupDisplay(obligationCurrencyGroups, 'amount'),
       icon: 'card-outline',
       color: th.warn,
     } : null,
@@ -559,7 +646,7 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
       key: 'savings',
       title: C.goalsTitle,
       hint: ar ? 'ما تم توفيره نحو الأهداف' : 'Saved toward your goals',
-      value: `${money(snapshot.goals.saved, cfg.lang, cfg.currency)} ${sym}`,
+      value: currencyGroupDisplay(goalCurrencyGroups, 'saved'),
       icon: 'flag-outline',
       color: th.primary,
     } : null,
@@ -783,8 +870,10 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
             {walletFilter === 'all' ? (
               <View style={[s.netPositionRow, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
                 <Text style={[s.netPositionLabel, { color: th.sub, textAlign: align }]}>{C.netPosition}</Text>
-                <Text style={[s.netPositionValue, { color: snapshot.netWorth >= 0 ? th.inc : th.exp }]}>
-                  {money(snapshot.netWorth, cfg.lang, cfg.currency)} {sym}
+                <Text style={[s.netPositionValue, { color: currentNetPositionReliable ? (snapshot.netWorth >= 0 ? th.inc : th.exp) : th.sub }]}>
+                  {currentNetPositionReliable
+                    ? `${money(snapshot.netWorth, cfg.lang, cfg.currency)} ${sym}`
+                    : C.netPositionUnavailable}
                 </Text>
               </View>
             ) : null}
@@ -804,20 +893,22 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
 
         {detailKey === 'obligations' && walletFilter === 'all' && (modules.debtsOwed || modules.debtsReceivable || modules.commitments) ? (
           <View style={s.reportInlineStack}>
+            <TrackerStateNotice th={th} align={align} title={C.currentTrackerState} text={C.currentTrackerStateHint} />
             <View style={[s.summaryGrid, { flexDirection: rowDir, marginBottom: 0 }]}>
-              <SummaryMetric label={C.owedRemaining} value={snapshot.debts.remaining} color={th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-              <SummaryMetric label={C.receivableRemaining} value={snapshot.receivables.remaining} color={th.inc} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-              <SummaryMetric label={C.activeCommitments} value={activeCommitmentTotal} color={th.warn} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <CurrencyGroupMetric label={C.owedRemaining} groups={owedCurrencyGroups} field="remaining" color={th.exp} th={th} lang={cfg.lang} />
+              <CurrencyGroupMetric label={C.receivableRemaining} groups={receivableCurrencyGroups} field="remaining" color={th.inc} th={th} lang={cfg.lang} />
+              <CurrencyGroupMetric label={C.activeCommitments} groups={commitmentCurrencyGroups} field="amount" color={th.warn} th={th} lang={cfg.lang} />
             </View>
           </View>
         ) : null}
 
         {detailKey === 'savings' && walletFilter === 'all' && modules.goals ? (
           <View style={s.reportInlineStack}>
+            <TrackerStateNotice th={th} align={align} title={C.currentTrackerState} text={C.currentTrackerStateHint} />
             <View style={[s.summaryGrid, { flexDirection: rowDir, marginBottom: 0 }]}>
-              <SummaryMetric label={C.savedAmount} value={snapshot.goals.saved} color={th.primary} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-              <SummaryMetric label={C.goalRemaining} value={snapshot.goals.remaining} color={th.warn} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-              <SummaryMetric label={C.goalTarget} value={snapshot.goals.target} color={th.text} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <CurrencyGroupMetric label={C.savedAmount} groups={goalCurrencyGroups} field="saved" color={th.primary} th={th} lang={cfg.lang} />
+              <CurrencyGroupMetric label={C.goalRemaining} groups={goalCurrencyGroups} field="remaining" color={th.warn} th={th} lang={cfg.lang} />
+              <CurrencyGroupMetric label={C.goalTarget} groups={goalCurrencyGroups} field="target" color={th.text} th={th} lang={cfg.lang} />
             </View>
           </View>
         ) : null}
@@ -1688,6 +1779,30 @@ function SectionCard({ th, title, subtitle, icon, lang, children, defaultExpande
   );
 }
 
+function TrackerStateNotice({ th, align, title, text }) {
+  return (
+    <View style={[s.trackerStateNotice, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+      <Text style={[s.trackerStateNoticeTitle, { color: th.text, textAlign: align }]}>{title}</Text>
+      <Text style={[s.trackerStateNoticeText, { color: th.sub, textAlign: align }]}>{text}</Text>
+    </View>
+  );
+}
+
+function CurrencyGroupMetric({ label, groups = [], field = 'amount', color, th, lang }) {
+  return (
+    <View style={[s.summaryMetric, { backgroundColor: th.card, borderColor: th.border }]}>
+      <Text style={[s.summaryMetricLabel, { color: th.sub }]} numberOfLines={1}>{label}</Text>
+      {groups.length ? groups.map(row => (
+        <Text key={`${label}-${row.currency}`} style={[s.currencyMetricValue, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.68}>
+          {formatMoneyNumber(Number(row[field] || 0), row.currency, lang)} {getSymbol(row.currency)}
+        </Text>
+      )) : (
+        <Text style={[s.currencyMetricValue, { color }]}>0</Text>
+      )}
+    </View>
+  );
+}
+
 function SummaryMetric({ label, value, color, th, lang, currency, sym }) {
   return (
     <View style={[s.summaryMetric, { backgroundColor: th.card, borderColor: th.border }]}>
@@ -1898,6 +2013,10 @@ const s = StyleSheet.create({
   summaryMetric: { flex: 1, minWidth: 0, minHeight: 62, borderRadius: 13, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 8, justifyContent: 'center' },
   summaryMetricLabel: { fontSize: 11, lineHeight: 16, ...weight('800'), textAlign: 'center' },
   summaryMetricValue: { fontSize: 14, lineHeight: 21, ...weight('900'), textAlign: 'center', marginTop: 4 },
+  currencyMetricValue: { fontSize: 12, lineHeight: 18, ...weight('900'), textAlign: 'center', marginTop: 3 },
+  trackerStateNotice: { borderWidth: 1, borderRadius: RADIUS.md, padding: 10, marginBottom: 10 },
+  trackerStateNoticeTitle: { fontSize: 11, ...weight('900') },
+  trackerStateNoticeText: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 3 },
   insightList: { gap: 8 },
   confidenceRow: { minHeight: 38, borderRadius: RADIUS.md, paddingHorizontal: 11, alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   confidenceLabel: { flex: 1, fontSize: 11, lineHeight: 16, ...weight('800') },

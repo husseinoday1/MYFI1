@@ -22,3 +22,9 @@ SQLite هو المالك الوحيد للحقيقة المالية التشغي
 ## Account relation
 
 Ledger identity يجب أن تبقى مستقلة عن Supabase user id. Logout/Delete Account لا يساوي Delete Local Financial Data.
+
+## R04 Operational Ownership
+
+After Phase 8 succeeds, V7 SQLite becomes the operational source of truth. The old relational mirror is frozen and Zustand holds only bounded UI/query cache data.
+
+The active local ledger namespace is persisted independently from authentication state. Ordinary Logout removes the cloud session but keeps the same local ledger active. Auth user id is an optional link/replication identity, not the local ledger identity.

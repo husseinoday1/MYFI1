@@ -757,48 +757,85 @@ export const commitEntityChangesV7 = async ({ namespace = 'guest', changes = [],
   }));
   if (!entities.length) return { supported: true, ok: true, changed: 0 };
   return enqueueWrite(async () => {
+    let changed = 0;
     await db.withTransactionAsync(async () => {
       for (const entity of entities) {
+        const current = await db.getFirstAsync(
+          `SELECT revision,deleted_at,payload_json FROM ledger_entities_v7
+            WHERE namespace=? AND entity_type=? AND id=? LIMIT 1`,
+          entity.namespace, entity.entityType, entity.id,
+        );
+        const currentPayload = parseJson(current?.payload_json, null);
+        const sameDeletedState = String(current?.deleted_at || '') === String(entity.deletedAt || '');
+        if (current && sameDeletedState && canonicalJson(currentPayload) === canonicalJson(entity.payload)) continue;
         const prepared = await prepareLocalEntity(db, entity);
         await upsertEntity(db, prepared);
         await insertEntityOutbox(db, prepared);
+        changed += 1;
       }
     });
-    return { supported: true, ok: true, changed: entities.length };
+    return { supported: true, ok: true, changed };
   });
 };
 
-export const readFinancialWorkspaceV7 = async ({ namespace = 'guest', database = null, includeArchived = true } = {}) => {
+export const readFinancialWorkspaceV7 = async ({ namespace = 'guest', database = null, includeArchived = true, transactionLimit = null } = {}) => {
   if (!database && !financialLedgerV7Supported()) return null;
   const db = database || await getLedgerDb();
   if (!db) return null;
   await ensureFinancialLedgerV7(db);
-  const txRows = await db.getAllAsync(
-    `SELECT payload_json,revision FROM ledger_financial_transactions_v7
-      WHERE namespace=? AND deleted_at IS NULL ${includeArchived ? '' : 'AND archived_at IS NULL'}
-      ORDER BY date_iso DESC,occurred_at DESC,id DESC`,
-    namespace,
-  );
+  const safeLimit = Number.isInteger(Number(transactionLimit)) && Number(transactionLimit) > 0
+    ? Math.min(10000, Number(transactionLimit))
+    : null;
+  const txRows = safeLimit
+    ? await db.getAllAsync(
+        `SELECT id,payload_json,revision FROM ledger_financial_transactions_v7
+          WHERE namespace=? AND deleted_at IS NULL ${includeArchived ? '' : 'AND archived_at IS NULL'}
+          ORDER BY date_iso DESC,occurred_at DESC,id DESC LIMIT ?`,
+        namespace, safeLimit,
+      )
+    : await db.getAllAsync(
+        `SELECT id,payload_json,revision FROM ledger_financial_transactions_v7
+          WHERE namespace=? AND deleted_at IS NULL ${includeArchived ? '' : 'AND archived_at IS NULL'}
+          ORDER BY date_iso DESC,occurred_at DESC,id DESC`,
+        namespace,
+      );
   const entityRows = await db.getAllAsync(
     `SELECT entity_type,id,payload_json,deleted_at FROM ledger_entities_v7 WHERE namespace=? ORDER BY entity_type,id`,
     namespace,
   );
   const state = await getFinancialWorkspaceStateV7({ namespace, database: db });
-  const entities = { debt: [], goal: [], commitment: [], budget: [], category: [], wallet: [], workspace: [] };
+  const entities = { debt: [], goal: [], commitment: [], budget: [], recurring_rule: [], category: [], wallet: [], workspace: [] };
   for (const row of entityRows) {
     if (row.deleted_at) continue;
     const payload = parseJson(row.payload_json, null);
     if (payload) (entities[row.entity_type] || (entities[row.entity_type] = [])).push(payload);
   }
-  return {
-    trans: txRows.map(row => {
+  let transactions = txRows.map(row => {
+    const payload = parseJson(row.payload_json, null);
+    return payload ? { ...payload, revision: Math.max(1, Number(row.revision || payload.revision || 1)) } : null;
+  }).filter(Boolean);
+  if (safeLimit && (entities.recurring_rule || []).length) {
+    const existingIds = new Set(transactions.map(item => String(item.id)));
+    const seedIds = [...new Set((entities.recurring_rule || []).map(item => String(item?.sourceTransactionId || '')).filter(Boolean))]
+      .filter(id => !existingIds.has(id));
+    for (const id of seedIds) {
+      const row = await db.getFirstAsync(
+        `SELECT payload_json,revision FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? AND deleted_at IS NULL LIMIT 1`,
+        namespace, id,
+      );
+      if (!row) continue;
       const payload = parseJson(row.payload_json, null);
-      return payload ? { ...payload, revision: Math.max(1, Number(row.revision || payload.revision || 1)) } : null;
-    }).filter(Boolean),
+      if (payload) transactions.push({ ...payload, revision: Math.max(1, Number(row.revision || payload.revision || 1)) });
+    }
+  }
+  return {
+    trans: transactions,
     debts: entities.debt || [], goals: entities.goal || [], commitments: entities.commitment || [],
-    budgets: entities.budget || [], cats: entities.category || [], wallets: entities.wallet || [],
+    budgets: entities.budget || [], recurringRules: entities.recurring_rule || [], cats: entities.category || [], wallets: entities.wallet || [],
     workspace: entities.workspace?.[0] || parseJson(state?.payload_json, {}),
     sourceMode: state?.source_mode || 'shadow',
+    transactionCacheBounded: !!safeLimit,
+    transactionCacheLimit: safeLimit,
   };
 };
 
@@ -1530,6 +1567,22 @@ export const reconcileFinancialWorkspaceV7 = async ({
   add('debt', workspace?.debts);
   add('goal', workspace?.goals);
   add('commitment', workspace?.commitments);
+  const recurringRules = new Map();
+  for (const transaction of Array.isArray(workspace?.trans) ? workspace.trans : []) {
+    if (!transaction?.recurring || !transaction?.id) continue;
+    const ruleId = String(transaction.recurringGroupId || transaction.id);
+    recurringRules.set(ruleId, {
+      id: ruleId,
+      type: transaction.flowType || (Number(transaction.amt || 0) >= 0 ? 'income' : 'expense'),
+      amount: Math.abs(Number(transaction.walletAmount ?? transaction.amt ?? 0)),
+      currencyCode: transaction.walletCurrency || transaction.currencyCode || workspace?.cfg?.currency || 'IQD',
+      walletId: transaction.walletId || null, categoryId: transaction.cat || 'other',
+      scope: transaction.scope || 'personal', schedule: { frequency: 'monthly', interval: 1 },
+      timezonePolicy: 'local_date', startDate: transaction.dateISO || null, endDate: null,
+      status: 'active', sourceTransactionId: transaction.id, revision: Math.max(1, Number(transaction.revision || 1)),
+    });
+  }
+  add('recurring_rule', [...recurringRules.values()]);
   add('category', workspace?.cats);
   add('budget', Object.entries(workspace?.cfg?.categoryBudgets || {}).map(([categoryId, amount]) => ({ id: `current:${categoryId}`, month: 'current', categoryId, amount })));
   add('budget', Object.entries(workspace?.cfg?.categoryBudgetsByMonth || {}).flatMap(([month, map]) => (

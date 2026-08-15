@@ -18,3 +18,7 @@ Cloud هو replica/transport، وLocal SQLite commit هو البداية الم�
 - Snapshot fallback لا يحذف قبل نجاح mutation sync + two-device + restore epoch + cross-version + account lifecycle.
 
 R01 لا يعيد تصميم sync؛ فقط يثبت العقد ويضمن أن migration infrastructure لا تسمح بالكتابة المالية قبل اكتمال schema.
+
+## R04 session/ledger separation
+
+Cloud authentication changes do not select or delete local financial truth implicitly. A local ledger pointer survives Logout. Account switch is an explicit namespace transition; ordinary Logout is not a transition to an unrelated Guest ledger. Pending V7 outbox rows remain namespaced to their ledger and are not cleared by operational stage promotion unless a dedicated reviewed reset protocol explicitly requests it.

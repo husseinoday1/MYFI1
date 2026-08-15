@@ -1,5 +1,5 @@
 import { today, normalizeDate } from '../../utils/calc';
-import { getDefaultWalletId, getWalletAvailableBalances, normalizeWallets } from '../../lib/wallets';
+import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
 import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
 import {
   capLinkedAmount,
@@ -13,10 +13,21 @@ import {
 import { debtLifecycle, goalLifecycle, reopenCompletionCommitments } from '../../lib/trackerLifecycle';
 import { buildEntityCurrencyFields, normalizeCurrencyCode } from '../../lib/financialCoreV2';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
+import { commandWalletPosition } from '../../lib/financialCommandBalances';
 import {
   commitEntityChangesV7,
   commitFinancialTransactionV7,
 } from '../../lib/financialLedgerV7Repository';
+
+const walletPositionForTrackerCommand = (get, walletId) => commandWalletPosition({
+  cutover: !!get().financialLedgerV7Cutover,
+  namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+  walletId,
+  wallets: get().wallets,
+  transactions: get().trans,
+  currency: get().cfg.currency,
+  defaultWalletId: get().cfg.defaultWalletId,
+});
 
 export const createTrackersSlice = (set, get) => ({
   addDebt: async (d) => {
@@ -107,54 +118,79 @@ export const createTrackersSlice = (set, get) => ({
   },
 
   editDebt: async (id, patch) => {
-    set(s => {
-      let nextName = null;
-      let reopenedLink = null;
-      const debts = s.debts.map(d => {
-        if (d.id !== id) return d;
-        const next = normalizeDebtItems([{ ...d, ...patch, currencyCode: d.currencyCode || patch.currencyCode }], d.scope, d.currencyCode || get().cfg.currency)[0];
-        nextName = next.name;
-        if (d.status === 'settled' && next.status === 'active') {
-          reopenedLink = {
-            linkedType: next.direction === 'receivable' ? 'receivable' : 'debt',
-            linkedId: id,
-            endReason: 'debt_settled',
-          };
+    const current = get().debts.find(item => item.id === id);
+    if (!current) return false;
+    const normalized = normalizeDebtItems([{
+      ...current,
+      ...patch,
+      currencyCode: current.currencyCode || patch.currencyCode,
+    }], current.scope, current.currencyCode || get().cfg.currency)[0];
+    const nextDebt = {
+      ...normalized,
+      ...(current.status === 'settled' && normalized.status === 'active' ? { reopenedAt: today() } : {}),
+    };
+    const reopenedLink = current.status === 'settled' && nextDebt.status === 'active'
+      ? {
+          linkedType: nextDebt.direction === 'receivable' ? 'receivable' : 'debt',
+          linkedId: id,
+          endReason: 'debt_settled',
         }
-        return {
-          ...next,
-          ...(d.status === 'settled' && next.status === 'active' ? { reopenedAt: today() } : {}),
-        };
-      });
-      const trans = patch.name
-        ? s.trans.map(t => (
-            t.isDebtPayment && t.debtId === id
-              ? {
-                  ...t,
-                  title: `${(debts.find(d => d.id === id)?.direction || 'owed') === 'receivable' ? 'تحصيل دين لي' : 'سداد دين عليّ'} — ${nextName || ''}`,
-                }
-              : t
-          ))
-        : s.trans;
-      return {
-        debts,
-        trans,
-        commitments: reopenedLink
-          ? reopenCompletionCommitments(s.commitments, [reopenedLink])
-          : s.commitments,
-      };
+      : null;
+    const nextCommitments = reopenedLink
+      ? reopenCompletionCommitments(get().commitments, [reopenedLink])
+      : get().commitments;
+    const changedCommitments = nextCommitments.filter(item => {
+      const before = get().commitments.find(previous => previous.id === item.id);
+      return before && JSON.stringify(before) !== JSON.stringify(item);
     });
+    try {
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        changes: [
+          { entityType: 'debt', id: nextDebt.id, payload: nextDebt },
+          ...changedCommitments.map(item => ({ entityType: 'commitment', id: item.id, payload: item })),
+        ],
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_debt_edit_failed') });
+      return false;
+    }
+    // Renaming tracker metadata must not rewrite historical transaction titles.
+    set(s => ({
+      debts: s.debts.map(item => item.id === id ? nextDebt : item),
+      commitments: reopenedLink ? nextCommitments : s.commitments,
+    }));
     await get().saveLocal();
     get().scheduleCloudSync?.({ reason: 'tracker_change' });
+    return true;
   },
 
   deleteDebt: async (id) => {
+    const current = get();
+    const debt = current.debts.find(item => item.id === id);
+    if (!debt) return false;
+    const linkedCommitments = current.commitments.filter(item => (
+      (item.linkedType === 'debt' || item.linkedType === 'receivable') && item.linkedId === id
+    ));
+    const now = new Date().toISOString();
+    try {
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(current.workspaceNamespace, current.cfg),
+        changes: [
+          { entityType: 'debt', id, payload: debt, deletedAt: now },
+          ...linkedCommitments.map(item => ({ entityType: 'commitment', id: item.id, payload: item, deletedAt: now })),
+        ],
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_debt_delete_failed') });
+      return false;
+    }
+    // Tracker deletion is metadata lifecycle only. Financial origin/payment rows remain immutable history.
     set(s => ({
-      debts: s.debts.filter(d => d.id !== id),
-      trans: s.trans.filter(t => !((t.isDebtPayment || t.isDebtOrigin) && t.debtId === id)),
-      commitments: s.commitments.filter(item => !(
-        (item.linkedType === 'debt' || item.linkedType === 'receivable') && item.linkedId === id
-      )),
+      debts: s.debts.filter(item => item.id !== id),
+      commitments: s.commitments.filter(item => !linkedCommitments.some(linked => linked.id === item.id)),
     }));
     await get().saveLocal({ force: true });
     get().scheduleCloudSync?.({ reason: 'tracker_change' });
@@ -191,12 +227,7 @@ export const createTrackersSlice = (set, get) => ({
       set({ ledgerError: String(error?.message || 'debt_payment_fx_required') });
       return false;
     }
-    const availableBalance = getWalletAvailableBalances(
-      normalizeWallets(get().wallets, get().cfg.currency),
-      get().trans,
-      get().cfg.currency,
-      get().cfg.defaultWalletId,
-    ).find(wallet => wallet.id === txWalletId)?.availableBalance;
+    const availableBalance = (await walletPositionForTrackerCommand(get, txWalletId))?.availableBalance;
     const spendNative = isReceivable ? 0 : Math.abs(Number(currencyFields.walletAmount || 0));
     const balanceWarning = !isReceivable && spendNative > 0 && (
       !Number.isFinite(availableBalance) || spendNative > Number(availableBalance || 0) + 0.0001
@@ -307,45 +338,74 @@ export const createTrackersSlice = (set, get) => ({
   },
 
   editGoal: async (id, patch) => {
-    set(s => {
-      let nextName = null;
-      let reopenedLink = null;
-      const goals = s.goals.map(g => {
-        if (g.id !== id) return g;
-        const next = normalizeGoalItems([{ ...g, ...patch, currencyCode: g.currencyCode || patch.currencyCode }], g.scope, g.currencyCode || get().cfg.currency)[0];
-        nextName = next.name;
-        if (g.status === 'settled' && next.status === 'active') {
-          reopenedLink = { linkedType: 'goal', linkedId: id, endReason: 'goal_completed' };
-        }
-        return { ...next, ...goalLifecycle(next, next.cur, today()) };
-      });
-      const trans = patch.name
-        ? s.trans.map(t => (
-            t.isGoalSaving && t.goalId === id
-              ? { ...t, title: `توفير — ${nextName || ''}` }
-              : t
-          ))
-        : s.trans;
-      return {
-        goals,
-        trans,
-        commitments: reopenedLink
-          ? reopenCompletionCommitments(s.commitments, [reopenedLink])
-          : s.commitments,
-      };
+    const current = get().goals.find(item => item.id === id);
+    if (!current) return false;
+    const normalized = normalizeGoalItems([{
+      ...current,
+      ...patch,
+      currencyCode: current.currencyCode || patch.currencyCode,
+    }], current.scope, current.currencyCode || get().cfg.currency)[0];
+    const nextGoal = { ...normalized, ...goalLifecycle(normalized, normalized.cur, today()) };
+    const reopenedLink = current.status === 'settled' && nextGoal.status === 'active'
+      ? { linkedType: 'goal', linkedId: id, endReason: 'goal_completed' }
+      : null;
+    const nextCommitments = reopenedLink
+      ? reopenCompletionCommitments(get().commitments, [reopenedLink])
+      : get().commitments;
+    const changedCommitments = nextCommitments.filter(item => {
+      const before = get().commitments.find(previous => previous.id === item.id);
+      return before && JSON.stringify(before) !== JSON.stringify(item);
     });
+    try {
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        changes: [
+          { entityType: 'goal', id: nextGoal.id, payload: nextGoal },
+          ...changedCommitments.map(item => ({ entityType: 'commitment', id: item.id, payload: item })),
+        ],
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_goal_edit_failed') });
+      return false;
+    }
+    // Tracker label edits do not rewrite historical saving transaction descriptions.
+    set(s => ({
+      goals: s.goals.map(item => item.id === id ? nextGoal : item),
+      commitments: reopenedLink ? nextCommitments : s.commitments,
+    }));
     await get().saveLocal();
     get().scheduleCloudSync?.({ reason: 'tracker_change' });
+    return true;
   },
 
   deleteGoal: async (id) => {
+    const current = get();
+    const goal = current.goals.find(item => item.id === id);
+    if (!goal) return false;
+    const linkedCommitments = current.commitments.filter(item => item.linkedType === 'goal' && item.linkedId === id);
+    const now = new Date().toISOString();
+    try {
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(current.workspaceNamespace, current.cfg),
+        changes: [
+          { entityType: 'goal', id, payload: goal, deletedAt: now },
+          ...linkedCommitments.map(item => ({ entityType: 'commitment', id: item.id, payload: item, deletedAt: now })),
+        ],
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_goal_delete_failed') });
+      return false;
+    }
+    // Goal tracker removal never erases allocations/releases already posted to the ledger.
     set(s => ({
-      goals: s.goals.filter(g => g.id !== id),
-      trans: s.trans.filter(t => !(t.isGoalSaving && t.goalId === id)),
-      commitments: s.commitments.filter(item => !(item.linkedType === 'goal' && item.linkedId === id)),
+      goals: s.goals.filter(item => item.id !== id),
+      commitments: s.commitments.filter(item => !linkedCommitments.some(linked => linked.id === item.id)),
     }));
     await get().saveLocal({ force: true });
     get().scheduleCloudSync?.({ reason: 'tracker_change' });
+    return true;
   },
 
   addGoalSaving: async (goalId, amt) => {
@@ -377,12 +437,7 @@ export const createTrackersSlice = (set, get) => ({
       return false;
     }
     const allocationWalletAmount = Math.abs(Number(allocationCurrency.walletAmount || 0));
-    const availableBalance = getWalletAvailableBalances(
-      normalizeWallets(get().wallets, get().cfg.currency),
-      get().trans,
-      get().cfg.currency,
-      get().cfg.defaultWalletId,
-    ).find(wallet => wallet.id === txWalletId)?.availableBalance;
+    const availableBalance = (await walletPositionForTrackerCommand(get, txWalletId))?.availableBalance;
     const balanceWarning = allocationWalletAmount > 0 && (
       !Number.isFinite(availableBalance) || allocationWalletAmount > Number(availableBalance || 0) + 0.0001
     );

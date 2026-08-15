@@ -3,6 +3,7 @@ import { DEF_CATS, DEF_CFG, DEF_NOTIF, normalizeCfg } from '../lib/constants';
 import { budgetMonthId, getBudgetMapForMonth, normalizeBudgets, setBudgetForMonth, suggestBudgetsFromHistory } from '../lib/budgets';
 import { GUEST_NAMESPACE } from '../lib/secureVault';
 import { getLedgerNamespace, queueLedgerStateDiff, upsertMonthlyBudgetMap } from '../lib/activeLedgerRepository';
+import { commitEntityChangesV7 } from '../lib/financialLedgerV7Repository';
 import {
   hasCurrencySensitiveFinancialData,
   prepareWalletData,
@@ -21,7 +22,7 @@ export const useStore = create((set, get) => {
     const before = get();
     set(partial, replace);
     const after = get();
-    if (before.trans !== after.trans || before.wallets !== after.wallets) {
+    if (!after.financialLedgerV7Cutover && (before.trans !== after.trans || before.wallets !== after.wallets)) {
       queueLedgerStateDiff({
         namespace: getLedgerNamespace(after.workspaceNamespace || GUEST_NAMESPACE, after.cfg),
         beforeTransactions: before.workspaceNamespace === after.workspaceNamespace ? before.trans : [],
@@ -121,6 +122,15 @@ export const useStore = create((set, get) => {
           commitments: current.commitments,
           cfg: newCfg,
         });
+        if (current.financialLedgerV7Cutover) {
+          const committed = await commitEntityChangesV7({
+            namespace: getLedgerNamespace(current.workspaceNamespace || GUEST_NAMESPACE, newCfg),
+            changes: (prepared.wallets || []).map(wallet => ({ entityType: 'wallet', id: wallet.id, payload: wallet })),
+          });
+          if (committed.supported && !committed.ok) {
+            return { ok: false, reason: committed.reason || 'financial_v7_wallet_config_commit_failed', currencyChanged: false };
+          }
+        }
         coreSet(prepared);
         await get().saveLocal();
         get().scheduleCloudSync?.('settings_financial');
@@ -142,40 +152,71 @@ export const useStore = create((set, get) => {
       const targetDate = date instanceof Date ? date : new Date(date);
       const month = budgetMonthId(targetDate);
       const currentMonth = budgetMonthId(new Date());
+      const scope = get().cfg.activeScope === 'business' ? 'business' : 'personal';
       const priorMap = getBudgetMapForMonth(get().cfg.categoryBudgetsByMonth || {}, targetDate, get().cfg.categoryBudgets || {});
       const monthMap = normalizeBudgets({ ...priorMap, [categoryId]: amount });
       const categoryBudgetsByMonth = setBudgetForMonth(
         get().cfg.categoryBudgetsByMonth || {}, categoryId, amount, targetDate,
       );
+      const budgetId = `${scope}:${month}:${categoryId}`;
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
+        changes: [{
+          entityType: 'budget', id: budgetId,
+          payload: {
+            id: budgetId, scope, month, categoryId, amount: Number(monthMap[categoryId] || 0),
+            currencyCode: get().cfg.currency, source: 'manual', acceptedSuggestion: false,
+          },
+        }],
+      });
+      if (committed.supported && !committed.ok) return false;
       await get().setCfg({
         ...(month === currentMonth ? { categoryBudgets: monthMap } : {}),
         categoryBudgetsByMonth,
       });
-      await upsertMonthlyBudgetMap({
-        namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
-        scope: get().cfg.activeScope === 'business' ? 'business' : 'personal',
-        monthKey: month, budgets: monthMap, currency: get().cfg.currency, source: 'manual',
-      });
+      if (!get().financialLedgerV7Cutover) {
+        await upsertMonthlyBudgetMap({
+          namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
+          scope, monthKey: month, budgets: monthMap, currency: get().cfg.currency, source: 'manual',
+        });
+      }
+      return true;
     },
 
     applySuggestedBudgets: async (date = new Date()) => {
       const targetDate = date instanceof Date ? date : new Date(date);
       const month = budgetMonthId(targetDate);
       const currentMonth = budgetMonthId(new Date());
+      const scope = get().cfg.activeScope === 'business' ? 'business' : 'personal';
       const categoryBudgets = suggestBudgetsFromHistory(get().trans, get().cats, targetDate);
       const categoryBudgetsByMonth = {
         ...(get().cfg.categoryBudgetsByMonth || {}),
         [month]: categoryBudgets,
       };
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
+        changes: Object.entries(categoryBudgets).map(([categoryId, amount]) => {
+          const id = `${scope}:${month}:${categoryId}`;
+          return {
+            entityType: 'budget', id,
+            payload: {
+              id, scope, month, categoryId, amount: Number(amount || 0), currencyCode: get().cfg.currency,
+              source: 'suggested', acceptedSuggestion: true,
+            },
+          };
+        }),
+      });
+      if (committed.supported && !committed.ok) return false;
       await get().setCfg({
         ...(month === currentMonth ? { categoryBudgets } : {}),
         categoryBudgetsByMonth,
       });
-      await upsertMonthlyBudgetMap({
-        namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
-        scope: get().cfg.activeScope === 'business' ? 'business' : 'personal',
-        monthKey: month, budgets: categoryBudgets, currency: get().cfg.currency, source: 'suggested',
-      });
+      if (!get().financialLedgerV7Cutover) {
+        await upsertMonthlyBudgetMap({
+          namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
+          scope, monthKey: month, budgets: categoryBudgets, currency: get().cfg.currency, source: 'suggested',
+        });
+      }
       return categoryBudgets;
     },
 
@@ -184,18 +225,31 @@ export const useStore = create((set, get) => {
       const previousDate = new Date(targetDate.getFullYear(), targetDate.getMonth() - 1, 15);
       const month = budgetMonthId(targetDate);
       const currentMonth = budgetMonthId(new Date());
+      const scope = get().cfg.activeScope === 'business' ? 'business' : 'personal';
       const sourceMap = getBudgetMapForMonth(get().cfg.categoryBudgetsByMonth || {}, previousDate, {});
       if (!Object.keys(sourceMap).length) return false;
       const categoryBudgetsByMonth = { ...(get().cfg.categoryBudgetsByMonth || {}), [month]: sourceMap };
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
+        changes: Object.entries(sourceMap).map(([categoryId, amount]) => {
+          const id = `${scope}:${month}:${categoryId}`;
+          return {
+            entityType: 'budget', id,
+            payload: { id, scope, month, categoryId, amount: Number(amount || 0), currencyCode: get().cfg.currency, source: 'copied_previous' },
+          };
+        }),
+      });
+      if (committed.supported && !committed.ok) return false;
       await get().setCfg({
         ...(month === currentMonth ? { categoryBudgets: sourceMap } : {}),
         categoryBudgetsByMonth,
       });
-      await upsertMonthlyBudgetMap({
-        namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
-        scope: get().cfg.activeScope === 'business' ? 'business' : 'personal',
-        monthKey: month, budgets: sourceMap, currency: get().cfg.currency, source: 'copied_previous',
-      });
+      if (!get().financialLedgerV7Cutover) {
+        await upsertMonthlyBudgetMap({
+          namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
+          scope, monthKey: month, budgets: sourceMap, currency: get().cfg.currency, source: 'copied_previous',
+        });
+      }
       return true;
     },
 
@@ -203,17 +257,30 @@ export const useStore = create((set, get) => {
       const targetDate = date instanceof Date ? date : new Date(date);
       const month = budgetMonthId(targetDate);
       const currentMonth = budgetMonthId(new Date());
+      const scope = get().cfg.activeScope === 'business' ? 'business' : 'personal';
+      const priorMap = getBudgetMapForMonth(get().cfg.categoryBudgetsByMonth || {}, targetDate, get().cfg.categoryBudgets || {});
       const categoryBudgetsByMonth = { ...(get().cfg.categoryBudgetsByMonth || {}) };
       delete categoryBudgetsByMonth[month];
+      const deletedAt = new Date().toISOString();
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
+        changes: Object.keys(priorMap).map(categoryId => {
+          const id = `${scope}:${month}:${categoryId}`;
+          return { entityType: 'budget', id, deletedAt, payload: { id, scope, month, categoryId, status: 'deleted' } };
+        }),
+      });
+      if (committed.supported && !committed.ok) return false;
       await get().setCfg({
         ...(month === currentMonth ? { categoryBudgets: {} } : {}),
         categoryBudgetsByMonth,
       });
-      await upsertMonthlyBudgetMap({
-        namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
-        scope: get().cfg.activeScope === 'business' ? 'business' : 'personal',
-        monthKey: month, budgets: {}, currency: get().cfg.currency, source: 'manual',
-      });
+      if (!get().financialLedgerV7Cutover) {
+        await upsertMonthlyBudgetMap({
+          namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, get().cfg),
+          scope, monthKey: month, budgets: {}, currency: get().cfg.currency, source: 'manual',
+        });
+      }
+      return true;
     },
 
     ...createSyncSlice(coreSet, get),

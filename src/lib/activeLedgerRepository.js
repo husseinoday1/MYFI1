@@ -573,7 +573,7 @@ const queryV7TransactionPage = async (db, {
   if (transactionClass === 'commitment') clauses.push("COALESCE(json_extract(t.payload_json,'$.isCommitmentPayment'),0)=1");
   const query = String(search || '').trim().toLowerCase();
   if (query) {
-    clauses.push("LOWER(COALESCE(t.title,'')||' '||COALESCE(t.note,'')||' '||t.date_iso||' '||COALESCE(t.category_id,'')||' '||t.payload_json) LIKE ?");
+    clauses.push("LOWER(COALESCE(t.title,'')||' '||COALESCE(t.note,'')||' '||t.date_iso||' '||COALESCE(t.category_id,'')||' '||COALESCE(t.kind,'')) LIKE ?");
     params.push(`%${query}%`);
   }
   if (cursor?.dateISO) {
@@ -684,10 +684,44 @@ export const queryLedgerTransactions = async ({
 export const queryLedgerSummary = async ({ namespace = 'guest', fromDate = null, toDate = null, scope = null, walletId = null, includeArchived = false } = {}) => {
   const directDb = await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
-    const rows = await queryV7PayloadRows(directDb, {
-      namespace, scope, fromDate, toDate, archived: includeArchived ? null : false,
-    });
-    return v7SummaryFromRows(rows, walletId);
+    const clauses = ['t.namespace=?', 't.deleted_at IS NULL', "t.status='posted'", "COALESCE(json_extract(t.payload_json,'$.hiddenFromHistory'),0)<>1"];
+    const params = [ns(namespace)];
+    if (!includeArchived) clauses.push('t.archived_at IS NULL');
+    if (fromDate) { clauses.push('t.date_iso>=?'); params.push(String(fromDate)); }
+    if (toDate) { clauses.push('t.date_iso<=?'); params.push(String(toDate)); }
+    if (scope && scope !== 'all') { clauses.push('t.scope=?'); params.push(String(scope)); }
+    if (walletId && walletId !== 'all') {
+      clauses.push(`EXISTS (SELECT 1 FROM ledger_postings_v7 wp
+        WHERE wp.namespace=t.namespace AND wp.transaction_id=t.id AND wp.account_id=?)`);
+      params.push(String(walletId));
+    }
+    const missing = await directDb.getFirstAsync(
+      `SELECT COUNT(*) AS count FROM ledger_financial_transactions_v7 t
+        WHERE ${clauses.join(' AND ')}
+          AND t.kind<>'transfer'
+          AND json_extract(t.payload_json,'$.baseAmountMinor') IS NULL`,
+      ...params,
+    );
+    if (Number(missing?.count || 0) > 0) {
+      return { supported: false, source: 'sqlite_v7', reason: 'missing_base_minor' };
+    }
+    const row = await directDb.getFirstAsync(
+      `SELECT COUNT(*) AS count,
+              SUM(CASE WHEN t.kind='income' THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.baseAmountMinor'),0) AS INTEGER)) ELSE 0 END) AS income_minor,
+              SUM(CASE WHEN t.kind IN ('expense','commitment_payment') THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.baseAmountMinor'),0) AS INTEGER)) ELSE 0 END)
+                + SUM(CASE WHEN t.kind='transfer' THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.feeBaseAmountMinor'),0) AS INTEGER)) ELSE 0 END) AS expense_minor,
+              MAX(COALESCE(json_extract(t.payload_json,'$.baseCurrencyCode'),'IQD')) AS base_currency
+         FROM ledger_financial_transactions_v7 t
+        WHERE ${clauses.join(' AND ')}`,
+      ...params,
+    );
+    const currency = normalizeCurrencyCode(row?.base_currency, 'IQD');
+    const income = moneyFromMinor(Number(row?.income_minor || 0), currency);
+    const expense = moneyFromMinor(Number(row?.expense_minor || 0), currency);
+    return {
+      supported: true, source: 'sqlite_v7', count: Number(row?.count || 0),
+      income, expense, net: income - expense, currency,
+    };
   }
   const db = await openDb();
   if (!db) return null;
@@ -722,26 +756,46 @@ export const queryLedgerCategorySpend = async ({
 } = {}) => {
   const directDb = await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
-    const rows = await queryV7PayloadRows(directDb, {
-      namespace, scope, fromDate, toDate, archived: includeArchived ? null : false,
-    });
-    const spending = new Map();
-    for (const tx of rows) {
-      if (walletId && walletId !== 'all' && ![tx.walletId, tx.fromWalletId, tx.toWalletId].includes(walletId)) continue;
-      let amount = 0;
-      if (tx.kind === 'transfer') {
-        if (!walletId || walletId === 'all' || tx.fromWalletId === walletId) amount = Math.abs(v7FeeBaseAmount(tx));
-      } else if (['expense', 'commitment_payment'].includes(inferFlowType(tx))) {
-        amount = Math.abs(v7BaseAmount(tx));
-      }
-      if (!amount) continue;
-      const category = String(tx.cat || 'other');
-      spending.set(category, (spending.get(category) || 0) + amount);
+    const clauses = ['t.namespace=?', 't.deleted_at IS NULL', "t.status='posted'", "COALESCE(json_extract(t.payload_json,'$.hiddenFromHistory'),0)<>1"];
+    const params = [ns(namespace)];
+    if (!includeArchived) clauses.push('t.archived_at IS NULL');
+    if (fromDate) { clauses.push('t.date_iso>=?'); params.push(String(fromDate)); }
+    if (toDate) { clauses.push('t.date_iso<=?'); params.push(String(toDate)); }
+    if (scope && scope !== 'all') { clauses.push('t.scope=?'); params.push(String(scope)); }
+    if (walletId && walletId !== 'all') {
+      clauses.push(`EXISTS (SELECT 1 FROM ledger_postings_v7 wp
+        WHERE wp.namespace=t.namespace AND wp.transaction_id=t.id AND wp.account_id=?)`);
+      params.push(String(walletId));
     }
+    const missing = await directDb.getFirstAsync(
+      `SELECT COUNT(*) AS count FROM ledger_financial_transactions_v7 t
+        WHERE ${clauses.join(' AND ')} AND t.kind IN ('expense','commitment_payment')
+          AND json_extract(t.payload_json,'$.baseAmountMinor') IS NULL`,
+      ...params,
+    );
+    if (Number(missing?.count || 0) > 0) {
+      return { supported: false, source: 'sqlite_v7', reason: 'missing_base_minor', rows: [] };
+    }
+    const rows = await directDb.getAllAsync(
+      `SELECT COALESCE(t.category_id,'other') AS category_id,
+              SUM(CASE WHEN t.kind IN ('expense','commitment_payment')
+                       THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.baseAmountMinor'),0) AS INTEGER)) ELSE 0 END)
+                + SUM(CASE WHEN t.kind='transfer'
+                           THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.feeBaseAmountMinor'),0) AS INTEGER)) ELSE 0 END) AS spent_minor,
+              MAX(COALESCE(json_extract(t.payload_json,'$.baseCurrencyCode'),'IQD')) AS base_currency
+         FROM ledger_financial_transactions_v7 t
+        WHERE ${clauses.join(' AND ')}
+          AND (t.kind IN ('expense','commitment_payment') OR (t.kind='transfer' AND COALESCE(json_extract(t.payload_json,'$.feeBaseAmountMinor'),0)<>0))
+        GROUP BY COALESCE(t.category_id,'other')
+        ORDER BY spent_minor DESC`,
+      ...params,
+    );
     return {
-      supported: true,
-      source: 'sqlite_v7',
-      rows: [...spending.entries()].map(([categoryId, spent]) => ({ categoryId, spent, currency: normalizeCurrencyCode(rows[0]?.baseCurrencyCode, 'IQD') })).sort((a, b) => b.spent - a.spent),
+      supported: true, source: 'sqlite_v7',
+      rows: rows.map(row => {
+        const currency = normalizeCurrencyCode(row?.base_currency, 'IQD');
+        return { categoryId: row?.category_id || 'other', spent: moneyFromMinor(Number(row?.spent_minor || 0), currency), currency };
+      }),
     };
   }
   const db = await openDb();
@@ -776,6 +830,41 @@ export const queryLedgerCategorySpend = async ({
       return { categoryId: row?.category_id || 'other', spent: moneyFromMinor(row?.spent_minor || 0, currency), currency };
     }),
   };
+};
+
+export const queryLedgerWalletPositions = async ({ namespace = 'guest', scope = null } = {}) => {
+  const directDb = await getLedgerDb();
+  if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
+    const params = [ns(namespace)];
+    let scopeClause = '';
+    if (scope && scope !== 'all') { scopeClause = ' AND a.scope=?'; params.push(String(scope)); }
+    const rows = await directDb.getAllAsync(
+      `SELECT a.id,a.name,a.account_type,a.scope,a.currency_code,a.status,
+              COALESCE(SUM(CASE WHEN p.bucket='physical' AND t.status='posted' AND t.deleted_at IS NULL THEN p.amount_minor ELSE 0 END),0) AS physical_minor,
+              COALESCE(SUM(CASE WHEN p.bucket='reserved' AND t.status='posted' AND t.deleted_at IS NULL THEN p.amount_minor ELSE 0 END),0) AS reserved_minor
+         FROM ledger_accounts_v7 a
+    LEFT JOIN ledger_postings_v7 p ON p.namespace=a.namespace AND p.account_id=a.id
+    LEFT JOIN ledger_financial_transactions_v7 t ON t.namespace=p.namespace AND t.id=p.transaction_id
+        WHERE a.namespace=? AND a.status<>'deleted'${scopeClause}
+        GROUP BY a.id,a.name,a.account_type,a.scope,a.currency_code,a.status
+        ORDER BY a.id`,
+      ...params,
+    );
+    return {
+      supported: true, source: 'sqlite_v7',
+      rows: rows.map(row => {
+        const currency = normalizeCurrencyCode(row.currency_code, 'IQD');
+        const physical = moneyFromMinor(Number(row.physical_minor || 0), currency);
+        const reserved = moneyFromMinor(Number(row.reserved_minor || 0), currency);
+        return {
+          id: String(row.id), name: row.name || '', type: row.account_type || 'other', scope: row.scope || 'personal',
+          currency, status: row.status || 'active', physicalBalance: physical, reservedBalance: reserved,
+          availableBalance: physical - reserved,
+        };
+      }),
+    };
+  }
+  return { supported: false, source: 'legacy', rows: [] };
 };
 
 export const exportLedgerTransactions = async (namespace = 'guest') => {

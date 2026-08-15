@@ -301,13 +301,13 @@ export const inspectBackupData = (data) => {
     }
 
     if (tx.walletId && walletIds.size && !walletIds.has(tx.walletId)) {
-      warnings.push(`backup_transaction_wallet_repaired:${index}`);
+      errors.push(`backup_transaction_wallet_unknown:${index}`);
     }
   });
 
   (Array.isArray(data.commitments) ? data.commitments : []).forEach((item, index) => {
     if (item?.walletId && walletIds.size && !walletIds.has(item.walletId)) {
-      warnings.push(`backup_commitment_wallet_repaired:${index}`);
+      errors.push(`backup_commitment_wallet_unknown:${index}`);
     }
   });
 

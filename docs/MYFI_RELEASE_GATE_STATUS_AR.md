@@ -130,3 +130,47 @@ R03 combined package-preparation evidence:
 - One real-device acceptance session is required after the combined automated gate; no intermediate phone test is required.
 
 Financial-data impact of applying this source package: **no existing financial rows are intentionally rewritten by the installer**. No schema DDL/version change is introduced. On app execution, Phase 5 staging is disposable and readiness metadata must not perform operational cutover. Already-existing `source_mode=sqlite` installations are not destructively downgraded.
+
+## R04 — Gates U-1/U-2 + Phases 6–9 consolidated operational package
+
+Remote base: `28c7e29e7c1623f83ccb4359bba613f8f2f5cd25` (`phase-04-multicurrency-r03`).
+
+User-approved cadence: one large release, internal patches remain independently auditable/rollback-aware, one device acceptance session after workstation gate.
+
+Internal patch map:
+- P00-R04 — canonical frozen plan + user-note reconciliation inside `docs/`.
+- P06-001 — Financial Command/Entity contract hardening and V7 canonical writes.
+- P07-001 — V7 SQL-first Home/History/Reports + bounded Zustand transaction cache.
+- P08-001 — final shadow revalidation + invariant proof + atomic V7 operational promotion.
+- P09-001 — cloud-session/local-ledger lifecycle separation; normal logout preserves active local ledger.
+
+Pre-package evidence in isolated reconstruction:
+- `tests/r04-phase6-9-contract.test.cjs`: PASS.
+- R03 entity-currency contract: PASS.
+- R03 multi-currency contract: PASS.
+- Phase 5 shadow-migration contract: PASS.
+- full JS/JSX parse: PASS.
+- static quality gate: **36 passed / 0 failed / 11 skipped**.
+- full local gate in packaging container: runtime failures are environment-only because project `node_modules/@babel/core` is absent; workstation installer must run the full gate and accept only the exact successful summary.
+
+R04 source changes do not intentionally rewrite existing financial amounts at install time. Runtime operational cutover is allowed only after checkpoint verification, repeat Phase 5 readiness, final stage checksum/metric parity, V7 invariant proof, and atomic promotion. Failure leaves the prior source usable and does not reset SQLite/SecureStore/financial data.
+
+### R04 pre-package refinement — mixed-currency planning/read truth
+
+Additional Phase 7 correctness audit found that current tracker summaries on Home/Reports could still add native debt/goal/commitment amounts from different currencies and label the result with the base-currency symbol. R04 now blocks that false aggregate:
+- Home goal progress uses a dimensionless per-goal progress average; monetary goal totals are shown only when one entity currency is present, otherwise the UI states the number of currencies.
+- Home monthly saving uses the stored historical `allocationBaseAmount` for the base/reporting card and never relabels a foreign native allocation as base.
+- Home due-commitment monetary summary is currency-aware and never adds unrelated native currencies.
+- Reports show debts/receivables/goals/commitments grouped by their own immutable entity currency and explicitly label those values as the **current tracker state**, not a historical as-of snapshot of the selected report period.
+- Net-position reporting is withheld when foreign debt/receivable entity currencies make a single current base figure unprovable under the current product contract.
+- Financial PDF transaction/tracker rows retain their own currency symbol/precision; multi-currency debt totals are grouped rather than silently relabelled.
+
+Evidence after this refinement:
+- `tests/r04-phase6-9-contract.test.cjs`: **PASS**.
+- R03 entity-currency: **PASS**.
+- R03 multi-currency: **PASS**.
+- Phase 5 shadow migration: **PASS**.
+- backup/restore hardening: **PASS**.
+- full JS/JSX parse: **PASS (107 files)**.
+- static quality gate: **36 passed / 0 failed / 11 skipped**.
+- full packaging-container gate: **42 passed / 4 failed / 11 skipped**; all four failures are solely `@babel/core` missing from the packaging environment. The workstation installer must prove the expected complete result **46 passed / 0 failed / 11 skipped** before commit.

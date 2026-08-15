@@ -3,6 +3,8 @@ import {
   discardFinancialWorkspaceStageV7,
   financialLedgerV7Supported,
   getFinancialWorkspaceStateV7,
+  promoteFinancialWorkspaceStageV7,
+  proveFinancialLedgerInvariantsV7,
   readFinancialProjectionV7,
   setFinancialWorkspaceStateV7,
   stageFinancialWorkspaceV7,
@@ -109,6 +111,28 @@ const entityRowsFor = ({ namespace, workspace, wallets, now, archives }) => {
   add('debt', workspace?.debts);
   add('goal', workspace?.goals);
   add('commitment', workspace?.commitments);
+  const recurringRules = new Map();
+  for (const transaction of Array.isArray(workspace?.trans) ? workspace.trans : []) {
+    if (!transaction?.recurring || !transaction?.id) continue;
+    const ruleId = String(transaction.recurringGroupId || transaction.id);
+    recurringRules.set(ruleId, {
+      id: ruleId,
+      type: transaction.flowType || (Number(transaction.amt || 0) >= 0 ? 'income' : 'expense'),
+      amount: Math.abs(Number(transaction.walletAmount ?? transaction.amt ?? 0)),
+      currencyCode: transaction.walletCurrency || transaction.currencyCode || workspace?.cfg?.currency || 'IQD',
+      walletId: transaction.walletId || null,
+      categoryId: transaction.cat || 'other',
+      scope: transaction.scope || 'personal',
+      schedule: { frequency: 'monthly', interval: 1 },
+      timezonePolicy: 'local_date',
+      startDate: transaction.dateISO || null,
+      endDate: null,
+      status: 'active',
+      sourceTransactionId: transaction.id,
+      revision: Math.max(1, Number(transaction.revision || 1)),
+    });
+  }
+  add('recurring_rule', [...recurringRules.values()]);
   add('category', workspace?.cats);
   add('budget', Object.entries(workspace?.cfg?.categoryBudgets || {}).map(([categoryId, amount]) => ({ id: `current:${categoryId}`, month: 'current', categoryId, amount })));
   add('budget', Object.entries(workspace?.cfg?.categoryBudgetsByMonth || {}).flatMap(([month, map]) => (
@@ -493,6 +517,119 @@ export const runFinancialShadowMigrationV7 = async ({
       differences: [],
       verifiedAt,
       cutover: false,
+    };
+  } catch (error) {
+    await discardFinancialWorkspaceStageV7({ stageNamespace, database }).catch(() => {});
+    throw error;
+  }
+};
+
+
+export const runFinancialOperationalCutoverV7 = async ({
+  namespace = 'guest', workspace = {}, coldArchives = [], database = null,
+  forceReplace = false, resetPendingOutbox = false,
+} = {}) => {
+  if (!database && !financialLedgerV7Supported()) {
+    return { supported: false, ok: false, reason: 'sqlite_unavailable', cutover: false };
+  }
+  const currentState = await getFinancialWorkspaceStateV7({ namespace, database });
+  if (currentState?.source_mode === 'sqlite' && !forceReplace) {
+    const health = await proveFinancialLedgerInvariantsV7({ namespace, database });
+    return {
+      supported: true,
+      ok: !!health?.ok,
+      alreadyCutover: true,
+      cutover: true,
+      sourceMode: 'sqlite',
+      checksum: currentState.shadow_checksum || null,
+      health,
+      reason: health?.ok ? null : 'financial_v7_health_blocking',
+    };
+  }
+
+  const readiness = forceReplace
+    ? { supported: true, ok: true, migrationReady: true, sourceMode: currentState?.source_mode || 'shadow', forceReplace: true }
+    : await runFinancialShadowMigrationV7({
+        namespace, workspace, coldArchives, database, forceReplace: false,
+      });
+  if (!readiness?.ok || readiness?.migrationReady !== true) {
+    return { ...readiness, cutover: false, reason: readiness?.reason || 'migration_not_ready' };
+  }
+
+  const stageNamespace = `${namespace}::shadow-stage::v7-cutover`;
+  const projection = buildFinancialShadowProjectionV7({
+    namespace: stageNamespace, workspace, coldArchives,
+  });
+  await stageFinancialWorkspaceV7({
+    stageNamespace,
+    commands: projection.commands,
+    entities: projection.entities,
+    workspacePayload: projection.workspacePayload,
+    database,
+  });
+
+  try {
+    const staged = await readFinancialProjectionV7({ namespace: stageNamespace, database });
+    const targetDocument = rawProjectionDocument(staged);
+    const targetChecksum = financialProjectionChecksum(targetDocument);
+    const targetMetrics = metricsFromTarget({
+      projection: staged,
+      sourceMetrics: projection.metrics,
+      baseCurrency: projection.baseCurrency,
+    });
+    const differences = [];
+    compareMetric(differences, 'checksum', projection.checksum, targetChecksum);
+    for (const field of [
+      'activeTransactions', 'archivedTransactions', 'syntheticTransactions', 'totalLedgerTransactions',
+      'postings', 'entities', 'walletBalances', 'currencyBalances', 'monthlyTotals', 'links',
+    ]) compareMetric(differences, field, projection.metrics[field], targetMetrics[field]);
+    if (differences.length) {
+      await discardFinancialWorkspaceStageV7({ stageNamespace, database });
+      return {
+        supported: true, ok: false, cutover: false, reason: 'final_cutover_parity_failed',
+        sourceChecksum: projection.checksum, targetChecksum, differences,
+        sourceCounts: projection.metrics, targetCounts: targetMetrics,
+      };
+    }
+
+    const health = await proveFinancialLedgerInvariantsV7({ namespace: stageNamespace, database });
+    if (!health?.ok) {
+      await discardFinancialWorkspaceStageV7({ stageNamespace, database });
+      return {
+        supported: true, ok: false, cutover: false, reason: 'financial_v7_health_blocking',
+        health,
+      };
+    }
+
+    const promoted = await promoteFinancialWorkspaceStageV7({
+      namespace,
+      stageNamespace,
+      checksum: projection.checksum,
+      sourceCounts: projection.metrics,
+      targetCounts: targetMetrics,
+      differences: [],
+      workspacePayload: {
+        ...projection.workspacePayload,
+        operationalCutover: {
+          status: 'active',
+          promotedAt: new Date().toISOString(),
+          sourceChecksum: projection.checksum,
+          targetChecksum,
+        },
+      },
+      resetPendingOutbox: !!resetPendingOutbox,
+      database,
+    });
+    return {
+      ...promoted,
+      cutover: promoted?.ok === true,
+      sourceMode: promoted?.ok ? 'sqlite' : 'shadow',
+      health,
+      sourceChecksum: projection.checksum,
+      targetChecksum,
+      sourceCounts: projection.metrics,
+      targetCounts: targetMetrics,
+      differences: [],
     };
   } catch (error) {
     await discardFinancialWorkspaceStageV7({ stageNamespace, database }).catch(() => {});

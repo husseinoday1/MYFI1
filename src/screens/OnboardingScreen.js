@@ -2,13 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TH } from '../lib/theme';
-import { CURRENCIES, detectSystemLang } from '../lib/constants';
+import { COUNTRIES, CURRENCIES, detectSystemLang } from '../lib/constants';
 import { useStore } from '../store/useStore';
 import { DEFAULT_WALLET_ID } from '../lib/wallets';
 import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { defaultScopeForProfile, profileModuleDefaults } from '../lib/modules';
 import { getOnboardingPreview } from '../lib/onboardingPreview';
 import { weight } from '../lib/tokens';
+import ChoiceSheet from '../components/ChoiceSheet';
 
 const copy = lang => {
   const ar = lang === 'ar';
@@ -33,6 +34,17 @@ const copy = lang => {
     currencyRuleSub: ar
       ? 'العملة الأساسية هي مرجع التقارير وتثبت بعد أول سجل مالي. تقدر تضيف محافظ بعملات أخرى؛ كل حركة تحفظ عملتها ومبلغها وسعرها التاريخي.'
       : 'Your base currency is the reporting reference and becomes fixed after financial history starts. You can still add wallets in other currencies; each transaction keeps its original currency, amount, and historical rate.',
+    setupTitle: ar ? 'إعداد مالي واضح من البداية' : 'Set your financial base clearly',
+    setupBody: ar ? 'الدولة تساعدنا على الاقتراح فقط. أنت تختار العملة الأساسية بنفسك قبل أول سجل مالي.' : 'Country is only a suggestion signal. You choose the base currency yourself before financial history starts.',
+    usage: ar ? 'نوع الاستخدام' : 'Use type',
+    country: ar ? 'الدولة' : 'Country',
+    baseCurrency: ar ? 'العملة الأساسية' : 'Base currency',
+    personal: ar ? 'شخصي' : 'Personal',
+    business: ar ? 'أعمال' : 'Business',
+    mixed: ar ? 'مزدوج' : 'Dual',
+    chooseCountry: ar ? 'اختر الدولة' : 'Choose country',
+    chooseCurrency: ar ? 'اختر العملة الأساسية' : 'Choose base currency',
+    currencyNotice: ar ? 'بعد أول سجل مالي تبقى العملة الأساسية مرجع التقارير ولا تتغير بتغيير الدولة أو تسجيل الدخول.' : 'After financial history starts, the base currency stays the reporting reference and does not change with country or sign-in.',
   };
 };
 
@@ -43,28 +55,52 @@ export default function OnboardingScreen({ cfg, onDone }) {
   const isAr = lang === 'ar';
   const th = TH[cfg.theme] || TH.dark;
   const T = copy(lang);
+  const localeCountry = useMemo(() => {
+    try {
+      const locale = String(Intl?.DateTimeFormat?.().resolvedOptions?.().locale || '');
+      const region = locale.match(/[-_]([A-Za-z]{2})(?:$|[-_])/i)?.[1]?.toUpperCase() || null;
+      return COUNTRIES.find(item => item.code === region)?.code || null;
+    } catch { return null; }
+  }, []);
+  const initialCountry = localeCountry || null;
+  const initialSuggestedCurrency = COUNTRIES.find(item => item.code === initialCountry)?.currency || '';
+  const [profileType, setProfileType] = useState('personal');
+  const [countryCode, setCountryCode] = useState(initialCountry);
+  const [currencyCode, setCurrencyCode] = useState(initialSuggestedCurrency);
+  const [currencyTouched, setCurrencyTouched] = useState(false);
+  const [choice, setChoice] = useState(null);
 
-  const selectedCurrency = CURRENCIES.find(item => item.code === cfg.currency) || CURRENCIES.find(item => item.code === 'IQD') || CURRENCIES[0];
+  const selectedCurrency = CURRENCIES.find(item => item.code === currencyCode)
+    || CURRENCIES.find(item => item.code === cfg.currency)
+    || CURRENCIES.find(item => item.code === 'IQD')
+    || CURRENCIES[0];
   const preview = useMemo(() => getOnboardingPreview({
     symbol: selectedCurrency.sym,
-    profileType: 'personal',
+    profileType,
     lang,
-  }), [selectedCurrency.code, selectedCurrency.sym, lang]);
+  }), [selectedCurrency.code, selectedCurrency.sym, profileType, lang]);
 
   const finish = async () => {
-    const type = 'personal';
-    const currency = cfg.currency || selectedCurrency.code || 'IQD';
+    if (!countryCode || !currencyCode) {
+      setStep(2);
+      setChoice(!countryCode ? 'country' : 'currency');
+      return;
+    }
+    const scope = defaultScopeForProfile(profileType);
     await setCfg({
-      currency,
-      profileType: type,
-      activeScope: defaultScopeForProfile(type),
-      enabledModules: { ...profileModuleDefaults(type), commitments: true },
+      country: countryCode,
+      currency: currencyCode,
+      baseCurrencyConfirmedAt: new Date().toISOString(),
+      profileType,
+      activeScope: scope,
+      enabledModules: { ...profileModuleDefaults(profileType), commitments: true },
       demoMode: false,
     });
-    await editWallet(DEFAULT_WALLET_ID, {
-      currency,
-      scope: defaultScopeForProfile(type),
+    const walletUpdated = await editWallet(DEFAULT_WALLET_ID, {
+      currency: currencyCode,
+      scope,
     });
+    if (walletUpdated === false) return;
     onDone();
   };
   return (
@@ -76,7 +112,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
           </View>
           <Text style={[s.brand, { color: th.text }]}>MYFI</Text>
         </View>
-        <TouchableOpacity onPress={finish} style={s.skipBtn}>
+        <TouchableOpacity onPress={() => setStep(2)} style={s.skipBtn}>
           <Text style={[s.skipText, { color: th.sub }]}>{T.skip}</Text>
         </TouchableOpacity>
       </View>
@@ -85,10 +121,16 @@ export default function OnboardingScreen({ cfg, onDone }) {
         {step === 0 ? <HeroSlide th={th} isAr={isAr} T={T} preview={preview} /> : null}
         {step === 1 ? <InsightSlide th={th} isAr={isAr} T={T} preview={preview} /> : null}
         {step === 2 ? (
-          <TrustSlide
+          <QuickSetupSlide
             th={th}
             isAr={isAr}
             T={T}
+            profileType={profileType}
+            setProfileType={setProfileType}
+            country={COUNTRIES.find(item => item.code === countryCode) || null}
+            currency={CURRENCIES.find(item => item.code === currencyCode) || null}
+            onCountry={() => setChoice('country')}
+            onCurrency={() => setChoice('currency')}
           />
         ) : null}
       </View>
@@ -108,6 +150,30 @@ export default function OnboardingScreen({ cfg, onDone }) {
           <Ionicons name={isAr ? 'arrow-back' : 'arrow-forward'} size={18} color={th.onPrimary} />
         </TouchableOpacity>
       </View>
+      <ChoiceSheet
+        visible={choice === 'country'}
+        title={T.chooseCountry}
+        value={countryCode}
+        options={COUNTRIES.map(item => ({ value: item.code, label: isAr ? item.name : item.nameEn, detail: item.currency, leading: item.flag }))}
+        onSelect={(value) => {
+          const country = COUNTRIES.find(item => item.code === value);
+          setCountryCode(value);
+          if (!currencyTouched && country?.currency) setCurrencyCode(country.currency);
+        }}
+        onClose={() => setChoice(null)}
+        th={th}
+        lang={lang}
+      />
+      <ChoiceSheet
+        visible={choice === 'currency'}
+        title={T.chooseCurrency}
+        value={currencyCode}
+        options={CURRENCIES.map(item => ({ value: item.code, label: isAr ? item.name : item.nameEn, detail: item.code, leading: item.sym }))}
+        onSelect={(value) => { setCurrencyCode(value); setCurrencyTouched(true); }}
+        onClose={() => setChoice(null)}
+        th={th}
+        lang={lang}
+      />
     </View>
   );
 }
@@ -191,44 +257,52 @@ function InsightSlide({ th, isAr, T, preview }) {
   );
 }
 
-function TrustSlide({ th, isAr, T }) {
-  const items = [
-    { icon: 'git-branch-outline', title: T.unifiedEngine, body: T.unifiedEngineSub },
-    { icon: 'phone-portrait-outline', title: T.localFirst, body: T.localFirstSub },
-    { icon: 'archive-outline', title: T.backupReady, body: T.backupReadySub },
-    { icon: 'cash-outline', title: T.currencyRuleTitle, body: T.currencyRuleSub },
+function QuickSetupSlide({ th, isAr, T, profileType, setProfileType, country, currency, onCountry, onCurrency }) {
+  const typeOptions = [
+    { value: 'personal', label: T.personal, icon: 'person-outline' },
+    { value: 'business', label: T.business, icon: 'briefcase-outline' },
+    { value: 'personal_business', label: T.mixed, icon: 'layers-outline' },
   ];
   return (
     <View style={s.slide}>
-      <View style={[s.heroCopy, { marginBottom: 16 }]}>
-        <Text style={[s.heroTitle, { color: th.text }]}>{T.trustTitle}</Text>
-        <Text style={[s.heroBody, { color: th.sub }]}>{T.trustBody}</Text>
+      <View style={[s.heroCopy, { marginBottom: 14 }]}>
+        <Text style={[s.heroTitle, { color: th.text }]}>{T.setupTitle}</Text>
+        <Text style={[s.heroBody, { color: th.sub }]}>{T.setupBody}</Text>
       </View>
-
-      <Text style={[s.quickSetupLabel, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>{T.promiseTitle}</Text>
-      <View style={[s.quickSetupCard, { backgroundColor: th.card, borderColor: th.border }]}>
-        {items.map((item, index) => (
-          <PromiseRow
-            key={item.title}
-            th={th}
-            isAr={isAr}
-            icon={item.icon}
-            title={item.title}
-            body={item.body}
-            last={index === items.length - 1}
-          />
-        ))}
+      <Text style={[s.quickSetupLabel, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>{T.usage}</Text>
+      <View style={[s.typeGrid, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+        {typeOptions.map(item => {
+          const active = profileType === item.value;
+          return (
+            <TouchableOpacity key={item.value} onPress={() => setProfileType(item.value)} style={[s.typeOption, { backgroundColor: active ? th.primSoft : th.card, borderColor: active ? th.primary : th.border }]}>
+              <Ionicons name={item.icon} size={19} color={active ? th.primary : th.sub} />
+              <Text style={[s.typeOptionText, { color: active ? th.primary : th.text }]}>{item.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
-
+      <View style={[s.setupCard, { backgroundColor: th.card, borderColor: th.border }]}>
+        <SetupRow th={th} isAr={isAr} icon="location-outline" label={T.country} value={country ? `${country.flag} ${isAr ? country.name : country.nameEn}` : T.chooseCountry} onPress={onCountry} />
+        <SetupRow th={th} isAr={isAr} icon="cash-outline" label={T.baseCurrency} value={currency ? `${currency.code} · ${currency.sym}` : T.chooseCurrency} onPress={onCurrency} last />
+      </View>
       <View style={[s.privacyStrip, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-        <View style={[s.privacyStripIcon, { backgroundColor: th.primSoft }]}>
-          <Ionicons name="shield-checkmark-outline" size={17} color={th.primary} />
-        </View>
-        <Text style={[s.privacyStripText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
-          {isAr ? 'ابدأ الآن. MYFI لا يطلب إعدادات كثيرة قبل أن ترى قيمة التطبيق.' : 'Start now. MYFI does not ask for heavy setup before showing its value.'}
-        </Text>
+        <View style={[s.privacyStripIcon, { backgroundColor: th.primSoft }]}><Ionicons name="lock-closed-outline" size={17} color={th.primary} /></View>
+        <Text style={[s.privacyStripText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.currencyNotice}</Text>
       </View>
     </View>
+  );
+}
+
+function SetupRow({ th, isAr, icon, label, value, onPress, last = false }) {
+  return (
+    <TouchableOpacity onPress={onPress} style={[s.setupRow, { borderBottomColor: last ? 'transparent' : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+      <View style={[s.quickIcon, { backgroundColor: th.primSoft }]}><Ionicons name={icon} size={17} color={th.primary} /></View>
+      <View style={{ flex: 1 }}>
+        <Text style={[s.quickLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{label}</Text>
+        <Text style={[s.quickValue, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{value}</Text>
+      </View>
+      <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={17} color={th.faint} />
+    </TouchableOpacity>
   );
 }
 
@@ -294,6 +368,11 @@ const s = StyleSheet.create({
   trustBadge: { minHeight: 34, borderRadius: 17, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 5 },
   quickSetupLabel: { fontSize: 11, lineHeight: 16, ...weight('900'), marginTop: 18, marginBottom: 7, paddingHorizontal: 3 },
   quickSetupCard: { borderRadius: 18, borderWidth: 1, overflow: 'hidden' },
+  typeGrid: { gap: 8 },
+  typeOption: { flex: 1, minHeight: 64, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 6 },
+  typeOptionText: { fontSize: 10, lineHeight: 15, ...weight('900'), textAlign: 'center' },
+  setupCard: { borderRadius: 18, borderWidth: 1, overflow: 'hidden', marginTop: 12 },
+  setupRow: { minHeight: 62, borderBottomWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 12 },
   profileDescriptionRow: { borderBottomWidth: 1, paddingHorizontal: 12, paddingTop: 2, paddingBottom: 10 },
   profileDescriptionText: { fontSize: 9, lineHeight: 15, ...weight('700') },
   privacyStrip: { marginTop: 12, borderRadius: 16, borderWidth: 1, padding: 12, alignItems: 'center', gap: 10 },

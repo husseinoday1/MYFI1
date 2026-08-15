@@ -19,13 +19,15 @@ import { accountIdentityPatch, ensureProfileIdentity } from '../../lib/accountId
 import { workspaceNamespaceForSession } from '../../lib/accountWorkspace';
 import { readPerformanceSnapshot, schedulePerformanceSnapshotWrite } from '../../dev/performanceTestStorage';
 import { exportColdArchives, getColdArchiveNamespace, replaceColdArchives } from '../../lib/localArchiveRepository';
-import { runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
+import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
 import {
   getFinancialWorkspaceStateV7,
   readFinancialWorkspaceV7,
   reconcileFinancialWorkspaceV7,
   cloneFinancialWorkspaceV7,
   clearFinancialWorkspaceV7,
+  proveFinancialLedgerInvariantsV7,
+  commitEntityChangesV7,
 } from '../../lib/financialLedgerV7Repository';
 import { compareSnapshots, loadNormalizedSnapshot } from '../../lib/normalizedRepository';
 import { syncFinancialMutationsV7 } from '../../lib/financialMutationSync';
@@ -54,6 +56,21 @@ const FRESH_TEST_MODE = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
 const FRESH_TEST_NAMESPACE = 'fresh-test-new-user';
 
 const RESET_MARKER_PREFIX = 'MYFI_INTENTIONAL_RESET_V1';
+const ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY = 'MYFI_ACTIVE_LOCAL_LEDGER_NAMESPACE_V1';
+const R04_OPERATIONAL_CUTOVER_ENABLED = true;
+const readActiveLocalLedgerNamespace = async () => {
+  try {
+    const value = String(await AsyncStorage.getItem(ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY) || '').trim();
+    return value || GUEST_NAMESPACE;
+  } catch {
+    return GUEST_NAMESPACE;
+  }
+};
+const writeActiveLocalLedgerNamespace = async namespace => {
+  if (FRESH_TEST_MODE) return;
+  const value = String(namespace || GUEST_NAMESPACE).trim() || GUEST_NAMESPACE;
+  try { await AsyncStorage.setItem(ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY, value); } catch {}
+};
 const syncBaseNamespace = namespace => `sync-base:${String(namespace || GUEST_NAMESPACE)}`;
 const SYNC_MAX_ATTEMPTS = 4;
 const SYNC_CLOUD_COLUMNS = 'user_id,trans,debts,goals,wallets,commitments,cats,cfg,revision,updated_at';
@@ -141,6 +158,74 @@ const stateFromFinancialV7 = (workspace, fallbackCfg = DEF_CFG) => {
     dirty: false,
     cloudRevision: Number(financialWorkspace.cloudRevision || 0),
   });
+};
+
+const readFullFinancialStateV7 = async ({ ledgerNamespace, fallbackState = {} } = {}) => {
+  if (!ledgerNamespace || !activeLedgerSupported()) return null;
+  const workspace = await readFinancialWorkspaceV7({
+    namespace: ledgerNamespace,
+    includeArchived: false,
+    transactionLimit: null,
+  });
+  if (!workspace) return null;
+  const loaded = stateFromFinancialV7(workspace, fallbackState.cfg || DEF_CFG);
+  return {
+    ...fallbackState,
+    ...loaded,
+    user: fallbackState.user || null,
+    workspaceNamespace: fallbackState.workspaceNamespace || GUEST_NAMESPACE,
+    workspaceReady: fallbackState.workspaceReady !== false,
+    online: fallbackState.online,
+    lastSyncError: fallbackState.lastSyncError || null,
+    lastSyncedAt: fallbackState.lastSyncedAt || null,
+    syncConflict: fallbackState.syncConflict || null,
+    financialLedgerV7Ready: true,
+    financialLedgerV7Cutover: true,
+  };
+};
+
+const readCanonicalWorkspaceState = async ({ workspaceNamespace = GUEST_NAMESPACE, fallbackState = {} } = {}) => {
+  const namespace = String(workspaceNamespace || GUEST_NAMESPACE).trim() || GUEST_NAMESPACE;
+  const ledgerNamespace = getLedgerNamespace(namespace, fallbackState.cfg || DEF_CFG);
+  if (activeLedgerSupported()) {
+    const ledgerState = await getFinancialWorkspaceStateV7({ namespace: ledgerNamespace });
+    if (ledgerState?.source_mode === 'sqlite') {
+      const full = await readFullFinancialStateV7({ ledgerNamespace, fallbackState: { ...fallbackState, workspaceNamespace: namespace } });
+      if (!full) throw new Error('financial_v7_canonical_read_failed');
+      return {
+        source: 'sqlite_v7',
+        workspaceNamespace: namespace,
+        ledgerNamespace,
+        state: full,
+        snapshot: snapshotFromState(full),
+      };
+    }
+  }
+  const vault = await readVaultSnapshot(namespace);
+  const state = vault.snapshot ? stateFromSnapshot(vault.snapshot, fallbackState.cfg || DEF_CFG) : null;
+  return {
+    source: 'vault',
+    workspaceNamespace: namespace,
+    ledgerNamespace,
+    state: state ? { ...fallbackState, ...state, workspaceNamespace: namespace, workspaceReady: true } : null,
+    snapshot: vault.snapshot || null,
+  };
+};
+
+const restoreSnapshotAsOperationalV7 = async ({ workspaceNamespace = GUEST_NAMESPACE, snapshot, fallbackCfg = DEF_CFG } = {}) => {
+  if (!snapshot || !activeLedgerSupported()) return false;
+  const state = stateFromSnapshot(snapshot, fallbackCfg);
+  const ledgerNamespace = getLedgerNamespace(workspaceNamespace, state.cfg || fallbackCfg);
+  await clearFinancialWorkspaceV7({ namespace: ledgerNamespace });
+  const restored = await runFinancialOperationalCutoverV7({
+    namespace: ledgerNamespace,
+    workspace: state,
+    coldArchives: [],
+  });
+  if (!restored?.ok || !restored?.cutover) {
+    throw new Error(restored?.reason || 'financial_v7_snapshot_restore_failed');
+  }
+  return true;
 };
 
 const snapshotData = snapshot => snapshot?.data || snapshot || {};
@@ -294,7 +379,7 @@ export const createSyncSlice = (set, get) => ({
     }
   },
 
-  setUser: async (user) => {
+  setUser: async (user, { preserveWorkspaceOnLogout = true, switchToGuest = false } = {}) => {
     if (FRESH_TEST_MODE) {
       set({
         user: user || null,
@@ -310,6 +395,30 @@ export const createSyncSlice = (set, get) => ({
     }
 
     const current = get();
+    // Logout is a cloud-session action, not a financial-data action. Keep the
+    // currently open local ledger mounted unless a destructive lifecycle flow
+    // explicitly asks to switch to the guest namespace (for example, after a
+    // verified account deletion clone).
+    if (!user && current.user && preserveWorkspaceOnLogout && !switchToGuest) {
+      if (current.workspaceReady && !current.cfg.demoMode) {
+        await get().saveLocal({ dirty: current.dirty, force: true });
+      }
+      await writeActiveLocalLedgerNamespace(current.workspaceNamespace || GUEST_NAMESPACE);
+      set({
+        user: null,
+        workspaceReady: true,
+        pendingGuestTransfer: false,
+        guestTransferPreview: null,
+        syncing: false,
+        syncConflict: null,
+        lastSyncError: null,
+      });
+      return { ok: true, preserveWorkspaceOnLogout: true, namespace: current.workspaceNamespace || GUEST_NAMESPACE };
+    }
+    if (!user && !current.user && !switchToGuest) {
+      set({ user: null });
+      return { ok: true, preserveWorkspaceOnLogout: true, namespace: current.workspaceNamespace || GUEST_NAMESPACE };
+    }
     const priorIdentity = accountIdentityPatch({
       displayName: current.cfg?.displayName || current.cfg?.name,
       avatarUri: current.cfg?.avatarUri,
@@ -339,6 +448,7 @@ export const createSyncSlice = (set, get) => ({
       guestTransferPreview: null,
     });
     await get().loadLocal(namespace, { allowLegacy: !user });
+    await writeActiveLocalLedgerNamespace(namespace);
     if (user) {
       // Account identity is separate from the financial workspace. Existing
       // cloud identity wins on a new phone; a brand-new account is seeded once
@@ -353,7 +463,7 @@ export const createSyncSlice = (set, get) => ({
         console.warn('[STORE] profile hydrate', error);
       }
 
-      const guest = await readVaultSnapshot(GUEST_NAMESPACE);
+      const guest = await readCanonicalWorkspaceState({ workspaceNamespace: GUEST_NAMESPACE, fallbackState: get() });
       const guestPreview = buildGuestTransferPreview(get(), guest.snapshot);
       set({
         pendingGuestTransfer: guestPreview.hasData,
@@ -363,6 +473,62 @@ export const createSyncSlice = (set, get) => ({
   },
   setOnline: (v)    => set({ online: v }),
 
+  activateFinancialV7Cutover: async () => {
+    const current = get();
+    if (!R04_OPERATIONAL_CUTOVER_ENABLED || current.cfg.demoMode || !activeLedgerSupported()) {
+      return { supported: false, ok: false, cutover: false, reason: 'cutover_disabled' };
+    }
+    const namespace = current.workspaceNamespace || GUEST_NAMESPACE;
+    const ledgerNamespace = getLedgerNamespace(namespace, current.cfg);
+    try {
+      // Verified local checkpoint before promotion. After cutover the Vault is a
+      // compatibility/recovery checkpoint only; it is no longer authoritative.
+      await get().saveLocal({ dirty: current.dirty, force: true });
+      const checkpoint = await readVaultSnapshot(namespace);
+      const checkpointState = checkpoint?.snapshot ? stateFromSnapshot(checkpoint.snapshot, current.cfg) : null;
+      if (!checkpointState || !sameWorkspaceData(current, checkpointState)) {
+        return { supported: true, ok: false, cutover: false, reason: 'cutover_checkpoint_verification_failed' };
+      }
+      const coldArchives = await exportColdArchives(getColdArchiveNamespace(namespace, current.cfg));
+      const result = await runFinancialOperationalCutoverV7({
+        namespace: ledgerNamespace,
+        workspace: current,
+        coldArchives,
+      });
+      if (!result?.ok || !result?.cutover) {
+        set({ financialLedgerV7Cutover: false, ledgerError: String(result?.reason || 'financial_v7_cutover_failed') });
+        return result;
+      }
+      const promotedWorkspace = await readFinancialWorkspaceV7({
+        namespace: ledgerNamespace,
+        includeArchived: false,
+        transactionLimit: 2000,
+      });
+      const boundedState = promotedWorkspace ? stateFromFinancialV7(promotedWorkspace, current.cfg) : null;
+      set(state => ({
+        ...(boundedState || {}),
+        user: state.user,
+        workspaceNamespace: namespace,
+        workspaceReady: true,
+        financialLedgerV7Ready: true,
+        financialLedgerV7Cutover: true,
+        financialLedgerV7Checksum: result.checksum || result.sourceChecksum || current.financialLedgerV7Checksum || null,
+        financialLedgerV7Migration: {
+          ...(current.financialLedgerV7Migration || {}),
+          ok: true, cutover: true, sourceMode: 'sqlite', cutoverAt: result.cutoverAt || new Date().toISOString(),
+        },
+        ledgerReady: true,
+        ledgerError: null,
+      }));
+      await writeActiveLocalLedgerNamespace(namespace);
+      return result;
+    } catch (error) {
+      const reason = String(error?.message || 'financial_v7_cutover_failed');
+      set({ financialLedgerV7Cutover: false, ledgerError: reason });
+      return { supported: true, ok: false, cutover: false, reason };
+    }
+  },
+
   refreshDataHealth: async () => {
     if (!activeLedgerSupported()) {
       const result = { ok: false, supported: false, issues: ['sqlite_unavailable'] };
@@ -370,10 +536,23 @@ export const createSyncSlice = (set, get) => ({
       return result;
     }
     try {
-      await flushLedgerMirror();
       const current = get();
+      const namespace = getLedgerNamespace(current.workspaceNamespace || GUEST_NAMESPACE, current.cfg);
+      if (current.financialLedgerV7Cutover) {
+        const proof = await proveFinancialLedgerInvariantsV7({ namespace });
+        const result = {
+          ok: !!proof?.ok,
+          supported: proof?.supported !== false,
+          level: proof?.ok ? 'HEALTHY' : 'BLOCKING',
+          issues: proof?.issues || [],
+          source: 'sqlite_v7',
+        };
+        set({ dataHealth: result, ledgerError: result.ok ? null : 'financial_v7_health_blocking' });
+        return result;
+      }
+      await flushLedgerMirror();
       const result = await getLedgerDataHealth({
-        namespace: getLedgerNamespace(current.workspaceNamespace || GUEST_NAMESPACE, current.cfg),
+        namespace,
         walletIds: (current.wallets || []).map(item => item.id),
         expectedActiveCount: Array.isArray(current.trans) ? current.trans.length : null,
       });
@@ -391,7 +570,11 @@ export const createSyncSlice = (set, get) => ({
     return armScheduledCloudSync(get, reason, 0);
   },
 
-  loadLocal: async (namespace = GUEST_NAMESPACE, { allowLegacy = namespace === GUEST_NAMESPACE } = {}) => {
+  loadLocal: async (requestedNamespace = null, options = {}) => {
+    const namespace = requestedNamespace || await readActiveLocalLedgerNamespace();
+    const allowLegacy = Object.prototype.hasOwnProperty.call(options || {}, 'allowLegacy')
+      ? !!options.allowLegacy
+      : namespace === GUEST_NAMESPACE;
     try {
       const resetMarker = await readResetMarker(namespace);
       const demoSnapshot = resetMarker?.legacyRecoveryDisabled
@@ -433,6 +616,7 @@ export const createSyncSlice = (set, get) => ({
             set({ ledgerReady: false, ledgerError: String(ledgerError?.message || ledgerError) });
           }
         }
+        await writeActiveLocalLedgerNamespace(namespace);
         return true;
       }
 
@@ -440,7 +624,7 @@ export const createSyncSlice = (set, get) => ({
         const v7Namespace = getLedgerNamespace(namespace, get().cfg || DEF_CFG);
         const v7State = await getFinancialWorkspaceStateV7({ namespace: v7Namespace });
         if (v7State?.source_mode === 'sqlite') {
-          const v7Workspace = await readFinancialWorkspaceV7({ namespace: v7Namespace, includeArchived: false });
+          const v7Workspace = await readFinancialWorkspaceV7({ namespace: v7Namespace, includeArchived: false, transactionLimit: 2000 });
           if (!v7Workspace) throw new Error('financial_v7_cutover_read_failed');
           const loadedV7 = stateFromFinancialV7(v7Workspace, get().cfg || DEF_CFG);
           set({
@@ -460,14 +644,9 @@ export const createSyncSlice = (set, get) => ({
             financialLedgerV7Checksum: v7State.shadow_checksum || null,
             ledgerError: null,
           });
-          // Transitional read adapter for screens that still issue V6 aggregate
-          // queries. The source is V7 here; Vault is never used to rebuild it.
-          await replaceLedgerSnapshot({
-            namespace: v7Namespace,
-            transactions: loadedV7.trans,
-            wallets: loadedV7.wallets,
-            baseCurrency: loadedV7.cfg?.currency || 'IQD',
-          });
+          // Phase 8: once V7 is operational, the legacy relational mirror is
+          // frozen. Screens query V7 directly through the repository adapter.
+          await writeActiveLocalLedgerNamespace(namespace);
           return true;
         }
       }
@@ -546,6 +725,9 @@ export const createSyncSlice = (set, get) => ({
             ledgerError: state.financialLedgerV7Migration?.ok === false ? state.ledgerError : null,
             dataHealth: health,
           }));
+          if (R04_OPERATIONAL_CUTOVER_ENABLED && migration?.ok && migration?.migrationReady === true) {
+            await get().activateFinancialV7Cutover();
+          }
         } catch (ledgerError) {
           console.warn('[LEDGER] bootstrap', ledgerError);
           set({ ledgerReady: false, ledgerError: String(ledgerError?.message || ledgerError) });
@@ -553,6 +735,7 @@ export const createSyncSlice = (set, get) => ({
       } else {
         set({ ledgerReady: false, ledgerError: null, dataHealth: { ok: true, supported: false, issues: [] } });
       }
+      await writeActiveLocalLedgerNamespace(namespace);
       return !!snapshot;
     } catch (e) {
       console.error('[STORE] loadLocal', e);
@@ -611,17 +794,48 @@ export const createSyncSlice = (set, get) => ({
     }
     const next = { ...current, localUpdatedAt: updatedAt, dirty: nextDirty };
     const clean = dedupeWorkspaceData(next);
-    if (activeLedgerSupported()) {
-      const reconciled = await reconcileFinancialWorkspaceV7({
+    const postCutover = !!(activeLedgerSupported() && current.financialLedgerV7Cutover);
+    if (postCutover) {
+      // Phase 8 invariant: Zustand contains only a bounded query cache after
+      // operational cutover. Never reconcile that cache as a complete ledger
+      // snapshot, otherwise older SQLite transactions could be mistaken for
+      // deletions. Persist only the small workspace/config entity here; every
+      // financial command/entity mutation commits to V7 at its own boundary.
+      const committed = await commitEntityChangesV7({
         namespace: getLedgerNamespace(current.workspaceNamespace, clean.cfg),
-        workspace: clean,
+        changes: [{
+          entityType: 'workspace',
+          id: 'workspace',
+          payload: {
+            cfg: clean.cfg,
+            notif: clean.notif,
+            cloudRevision: Number(clean.cloudRevision || 0),
+          },
+        }],
       });
-      if (reconciled.supported && !reconciled.ok) throw new Error(reconciled.reason || 'financial_v7_workspace_reconcile_failed');
-    }
-    if (activeLedgerSupported()) await flushLedgerMirror();
-    await writeVaultSnapshot(current.workspaceNamespace, snapshotFromState(clean), { force });
-    if (force && financialDataCount(clean) === 0) {
-      await writeResetMarker(current.workspaceNamespace, { pendingCloudSync: !!current.user });
+      if (committed.supported && !committed.ok) {
+        throw new Error(committed.reason || 'financial_v7_workspace_metadata_commit_failed');
+      }
+      if (force && financialDataCount(clean) === 0) {
+        await writeResetMarker(current.workspaceNamespace, { pendingCloudSync: !!current.user });
+      }
+      // The pre-cutover encrypted Vault remains a recovery checkpoint. A
+      // bounded cache must never overwrite it as if it were a full financial
+      // snapshot. Full snapshots are produced from SQLite only at explicit
+      // sync/account-lifecycle/backup boundaries.
+    } else {
+      if (activeLedgerSupported()) {
+        const reconciled = await reconcileFinancialWorkspaceV7({
+          namespace: getLedgerNamespace(current.workspaceNamespace, clean.cfg),
+          workspace: clean,
+        });
+        if (reconciled.supported && !reconciled.ok) throw new Error(reconciled.reason || 'financial_v7_workspace_reconcile_failed');
+        await flushLedgerMirror();
+      }
+      await writeVaultSnapshot(current.workspaceNamespace, snapshotFromState(clean), { force });
+      if (force && financialDataCount(clean) === 0) {
+        await writeResetMarker(current.workspaceNamespace, { pendingCloudSync: !!current.user });
+      }
     }
     set({
       trans: clean.trans,
@@ -644,7 +858,7 @@ export const createSyncSlice = (set, get) => ({
     if (!current.user) return { ok: true, accountNamespace: null };
 
     const accountNamespace = current.workspaceNamespace || workspaceNamespaceForSession({ user: current.user });
-    const guest = await readVaultSnapshot(GUEST_NAMESPACE);
+    const guest = await readCanonicalWorkspaceState({ workspaceNamespace: GUEST_NAMESPACE, fallbackState: current });
     const guestWasMeaningful = !!(guest.snapshot && hasMeaningfulLocalData(guest.snapshot));
     const rollbackGuestSnapshot = guest.snapshot && !guestWasMeaningful ? guest.snapshot : null;
 
@@ -656,9 +870,19 @@ export const createSyncSlice = (set, get) => ({
 
     await get().saveLocal({ dirty: false, force: true });
     current = get();
+    let preservationState = current;
     if (activeLedgerSupported()) {
       const sourceLedgerNamespace = getLedgerNamespace(accountNamespace, current.cfg);
       const targetLedgerNamespace = getLedgerNamespace(GUEST_NAMESPACE, current.cfg);
+      const sourceState = await getFinancialWorkspaceStateV7({ namespace: sourceLedgerNamespace });
+      if (sourceState?.source_mode === 'sqlite') {
+        const fullSource = await readFullFinancialStateV7({
+          ledgerNamespace: sourceLedgerNamespace,
+          fallbackState: { ...current, workspaceNamespace: accountNamespace },
+        });
+        if (!fullSource) throw new Error('local_account_delete_v7_full_read_failed');
+        preservationState = fullSource;
+      }
       const cloned = await cloneFinancialWorkspaceV7({
         sourceNamespace: sourceLedgerNamespace,
         targetNamespace: targetLedgerNamespace,
@@ -669,7 +893,7 @@ export const createSyncSlice = (set, get) => ({
       if (!archivesCloned) throw new Error('local_account_delete_archive_clone_failed');
     }
     const localOnly = {
-      ...dedupeWorkspaceData(current),
+      ...dedupeWorkspaceData(preservationState),
       user: null,
       workspaceNamespace: GUEST_NAMESPACE,
       workspaceReady: true,
@@ -745,9 +969,57 @@ export const createSyncSlice = (set, get) => ({
       try {
         const namespace = initial.workspaceNamespace || workspaceNamespaceForSession({ user: initial.user });
         const baseNamespace = syncBaseNamespace(namespace);
+        const cutoverBridge = !!(activeLedgerSupported() && initial.financialLedgerV7Cutover);
+        const readCurrentForSnapshot = async () => {
+          const ui = get();
+          if (!cutoverBridge) return ui;
+          const full = await readFullFinancialStateV7({
+            ledgerNamespace: getLedgerNamespace(namespace, ui.cfg),
+            fallbackState: { ...ui, workspaceNamespace: namespace },
+          });
+          if (!full) throw new Error('financial_v7_sync_full_snapshot_failed');
+          return full;
+        };
+        const installCanonicalState = async (canonicalState, statePatch = {}) => {
+          const session = get();
+          if (!cutoverBridge) {
+            set({
+              ...canonicalState,
+              user: session.user,
+              workspaceNamespace: namespace,
+              workspaceReady: true,
+              ...statePatch,
+            });
+            return canonicalState;
+          }
+          const ledgerNamespace = getLedgerNamespace(namespace, canonicalState.cfg || session.cfg);
+          const reconciled = await reconcileFinancialWorkspaceV7({
+            namespace: ledgerNamespace,
+            workspace: canonicalState,
+          });
+          if (reconciled.supported && !reconciled.ok) {
+            throw new Error(reconciled.reason || 'financial_v7_sync_reconcile_failed');
+          }
+          const boundedWorkspace = await readFinancialWorkspaceV7({
+            namespace: ledgerNamespace, includeArchived: false, transactionLimit: 2000,
+          });
+          if (!boundedWorkspace) throw new Error('financial_v7_sync_bounded_reload_failed');
+          const bounded = stateFromFinancialV7(boundedWorkspace, canonicalState.cfg || session.cfg);
+          set({
+            ...bounded,
+            user: session.user,
+            workspaceNamespace: namespace,
+            workspaceReady: true,
+            financialLedgerV7Ready: true,
+            financialLedgerV7Cutover: true,
+            financialLedgerV7Checksum: session.financialLedgerV7Checksum || null,
+            ...statePatch,
+          });
+          return canonicalState;
+        };
         // Capture a high-water mark. Mutations created while this network sync is
         // in flight get larger ids and are never accidentally acknowledged.
-        const outboxAtStart = activeLedgerSupported() ? await drainLedgerOutbox(namespace, 1000) : [];
+        const outboxAtStart = activeLedgerSupported() && !cutoverBridge ? await drainLedgerOutbox(namespace, 1000) : [];
         const outboxHighWater = outboxAtStart.length ? Number(outboxAtStart[outboxAtStart.length - 1]?.id || 0) : 0;
         const deviceId = await getOrCreateDeviceId();
         let financialMutationSync = null;
@@ -761,6 +1033,7 @@ export const createSyncSlice = (set, get) => ({
             const v7Workspace = await readFinancialWorkspaceV7({
               namespace: getLedgerNamespace(namespace, initial.cfg),
               includeArchived: false,
+              transactionLimit: 2000,
             });
             const loadedV7 = stateFromFinancialV7(v7Workspace, initial.cfg);
             set(current => ({
@@ -793,25 +1066,49 @@ export const createSyncSlice = (set, get) => ({
         const persistSynced = async ({ revision, syncedAt, syncConflict = null }) => {
           if (get().user?.id !== syncUserId) return false;
           if (await supersededByReset()) return false;
-          const current = get();
+          const revisionValue = Number(revision || 0);
+          const syncedAtValue = syncedAt || new Date().toISOString();
           set({
             dirty: false,
-            cloudRevision: Number(revision || 0),
-            lastSyncedAt: syncedAt || new Date().toISOString(),
+            cloudRevision: revisionValue,
+            lastSyncedAt: syncedAtValue,
             online: true,
             lastSyncError: null,
             syncConflict,
           });
 
-          const finalState = get();
-          const finalSnapshot = snapshotFromState(finalState, {
+          let finalState = await readCurrentForSnapshot();
+          finalState = {
+            ...finalState,
             dirty: false,
-            cloudRevision: Number(revision || 0),
-            lastSyncedAt: syncedAt || new Date().toISOString(),
-          });
-          const empty = financialDataCount(finalState) === 0;
+            cloudRevision: revisionValue,
+            lastSyncedAt: syncedAtValue,
+            syncConflict,
+          };
 
-          if (activeLedgerSupported()) {
+          if (cutoverBridge) {
+            const workspaceCommit = await commitEntityChangesV7({
+              namespace: getLedgerNamespace(namespace, finalState.cfg),
+              changes: [{
+                entityType: 'workspace', id: 'workspace',
+                payload: { cfg: finalState.cfg, notif: finalState.notif, cloudRevision: revisionValue },
+              }],
+            });
+            if (workspaceCommit.supported && !workspaceCommit.ok) {
+              throw new Error(workspaceCommit.reason || 'financial_v7_sync_workspace_metadata_failed');
+            }
+            if (Number(workspaceCommit.changed || 0) > 0) {
+              const bridged = await syncFinancialMutationsV7({
+                supabase, namespace: getLedgerNamespace(namespace, finalState.cfg), deviceId,
+              });
+              set({ financialMutationSync: bridged });
+            }
+            finalState = await readCurrentForSnapshot();
+            finalState = {
+              ...finalState, dirty: false, cloudRevision: revisionValue,
+              lastSyncedAt: syncedAtValue, syncConflict,
+            };
+          } else if (activeLedgerSupported()) {
             const reconciled = await reconcileFinancialWorkspaceV7({
               namespace: getLedgerNamespace(namespace, finalState.cfg),
               workspace: finalState,
@@ -819,27 +1116,18 @@ export const createSyncSlice = (set, get) => ({
             if (reconciled.supported && !reconciled.ok) {
               throw new Error(reconciled.reason || 'financial_v7_post_sync_reconcile_failed');
             }
-            if (reconciled.ok && (
-              Number(reconciled.updatedTransactions || 0)
-              + Number(reconciled.updatedEntities || 0)
-              + Number(reconciled.voidedTransactions || 0)
-            ) > 0) {
-              const bridged = await syncFinancialMutationsV7({
-                supabase,
-                namespace: getLedgerNamespace(namespace, finalState.cfg),
-                deviceId,
-              });
-              set({ financialMutationSync: bridged });
-            }
           }
 
+          const finalSnapshot = snapshotFromState(finalState, {
+            dirty: false, cloudRevision: revisionValue, lastSyncedAt: syncedAtValue,
+          });
+          const empty = financialDataCount(finalState) === 0;
+          // Snapshot sync is a temporary Phase-14 compatibility bridge. Build
+          // it from the full SQLite projection, never from the 2k UI cache.
           await writeVaultSnapshot(namespace, finalSnapshot, { force: empty });
           await writeVaultSnapshot(baseNamespace, finalSnapshot, { force: true });
 
-          if (empty) {
-            await writeResetMarker(namespace, { pendingCloudSync: false });
-          }
-
+          if (empty) await writeResetMarker(namespace, { pendingCloudSync: false });
           baseState = stateFromSnapshot(finalSnapshot, finalState.cfg);
           if (outboxHighWater > 0) {
             await acknowledgeLedgerOutbox(namespace, outboxHighWater);
@@ -853,8 +1141,8 @@ export const createSyncSlice = (set, get) => ({
         };
 
         const applyMergedState = async ({ remoteState, cloudRevision }) => {
-          if (await supersededByReset()) return false;
-          const current = get();
+          if (await supersededByReset()) return null;
+          const current = await readCurrentForSnapshot();
           const conflicts = [];
           const merged = mergeWorkspaceStates({
             base: baseState,
@@ -874,39 +1162,24 @@ export const createSyncSlice = (set, get) => ({
 
           const normalized = stateFromSnapshot(
             snapshotFromState(
-              {
-                ...current,
-                ...merged,
-                user: current.user,
-              },
-              {
-                dirty: true,
-                cloudRevision,
-              },
+              { ...current, ...merged, user: current.user },
+              { dirty: true, cloudRevision },
             ),
             current.cfg,
           );
 
-          set({
-            ...normalized,
-            user: current.user,
-            workspaceNamespace: namespace,
-            workspaceReady: true,
+          await installCanonicalState(normalized, {
             online: true,
             dirty: true,
             cloudRevision,
             syncConflict: pendingSyncConflict,
             lastSyncError: null,
           });
-
           await writeVaultSnapshot(
             namespace,
-            snapshotFromState(get(), {
-              dirty: true,
-              cloudRevision,
-            }),
+            snapshotFromState(normalized, { dirty: true, cloudRevision }),
           );
-          return true;
+          return normalized;
         };
 
         // Four attempts are enough to absorb a second device writing during
@@ -944,7 +1217,7 @@ export const createSyncSlice = (set, get) => ({
               const applied = await applyMergedState({ remoteState, cloudRevision });
               if (!applied) return false;
 
-              if (sameWorkspaceData(get(), remoteState)) {
+              if (sameWorkspaceData(applied, remoteState)) {
                 return persistSynced({
                   revision: cloudRevision,
                   syncedAt: cloud.updated_at || new Date().toISOString(),
@@ -952,9 +1225,10 @@ export const createSyncSlice = (set, get) => ({
                 });
               }
             } else {
+              const localState = await readCurrentForSnapshot();
               const localChanged = (
                 !!get().dirty
-                || !sameWorkspaceData(baseState, get())
+                || !sameWorkspaceData(baseState, localState)
               );
               const remoteChanged = (
                 cloudRevision !== Number(baseSnapshot?.cloudRevision || 0)
@@ -963,16 +1237,8 @@ export const createSyncSlice = (set, get) => ({
 
               if (!localChanged && remoteChanged) {
                 pendingSyncConflict = null;
-                set({
-                  ...remoteState,
-                  user: get().user,
-                  workspaceNamespace: namespace,
-                  workspaceReady: true,
-                  online: true,
-                  dirty: false,
-                  cloudRevision,
-                  syncConflict: null,
-                  lastSyncError: null,
+                await installCanonicalState(remoteState, {
+                  online: true, dirty: false, cloudRevision, syncConflict: null, lastSyncError: null,
                 });
                 return persistSynced({
                   revision: cloudRevision,
@@ -991,7 +1257,7 @@ export const createSyncSlice = (set, get) => ({
               if (!applied) return false;
 
               // The remote already contains the full merged result.
-              if (sameWorkspaceData(get(), remoteState)) {
+              if (sameWorkspaceData(applied, remoteState)) {
                 return persistSynced({
                   revision: cloudRevision,
                   syncedAt: cloud.updated_at || new Date().toISOString(),
@@ -1004,7 +1270,7 @@ export const createSyncSlice = (set, get) => ({
           // Cloud row missing, local changes exist, bootstrap merge produced a
           // combined state, or an intentional reset must replace cloud.
           if (get().user?.id !== syncUserId) return false;
-          const current = get();
+          const current = await readCurrentForSnapshot();
           const expectedRevision = cloudRevision;
 
           const { data, error } = await supabase.rpc('sync_user_data_v2', {
@@ -1080,23 +1346,30 @@ export const createSyncSlice = (set, get) => ({
   },
 
   transferGuestToCurrent: async () => {
-    const current = get();
-    if (!current.user) return false;
-    const { snapshot } = await readVaultSnapshot(GUEST_NAMESPACE);
+    const currentUi = get();
+    if (!currentUi.user) return false;
+    const namespace = workspaceNamespaceForSession({ user: currentUi.user });
+    const guestSource = await readCanonicalWorkspaceState({ workspaceNamespace: GUEST_NAMESPACE, fallbackState: currentUi });
+    const snapshot = guestSource.snapshot;
     if (!snapshot || !hasMeaningfulLocalData(snapshot)) {
       set({ pendingGuestTransfer: false, guestTransferPreview: null });
       return false;
     }
-    const namespace = workspaceNamespaceForSession({ user: current.user });
+    const accountSource = await readCanonicalWorkspaceState({ workspaceNamespace: namespace, fallbackState: currentUi });
+    const current = accountSource.state || currentUi;
+    const accountSnapshot = accountSource.snapshot || snapshotFromState(current);
     const rollback = await saveMergeRollback({
       namespace,
-      accountSnapshot: snapshotFromState(current),
+      accountSnapshot,
       guestSnapshot: snapshot,
       type: 'guest_transfer',
     });
     const preview = buildGuestTransferPreview(current, snapshot);
     if (!preview.addsData) {
       await clearVaultSnapshot(GUEST_NAMESPACE);
+      if (guestSource.source === 'sqlite_v7') {
+        await clearFinancialWorkspaceV7({ namespace: guestSource.ledgerNamespace });
+      }
       set({
         pendingGuestTransfer: false,
         guestTransferPreview: null,
@@ -1192,20 +1465,53 @@ export const createSyncSlice = (set, get) => ({
       commitments: [...guestCommitments, ...current.commitments],
       cats: [...current.cats, ...guest.cats.filter(item => !knownCats.has(item.id))],
     });
-    set({
-      ...merged,
-      user: current.user,
-      workspaceNamespace: workspaceNamespaceForSession({ user: current.user }),
-      workspaceReady: true,
-      dirty: true,
-      cloudRevision: current.cloudRevision,
-      pendingGuestTransfer: false,
-      guestTransferPreview: null,
-      lastMergeRollback: rollback,
-      syncConflict: null,
-    });
-    await get().saveLocal({ dirty: true, force: true });
+    if (accountSource.source === 'sqlite_v7') {
+      const reconciled = await reconcileFinancialWorkspaceV7({
+        namespace: accountSource.ledgerNamespace,
+        workspace: merged,
+      });
+      if (reconciled.supported && !reconciled.ok) {
+        throw new Error(reconciled.reason || 'guest_workspace_v7_merge_failed');
+      }
+      const boundedWorkspace = await readFinancialWorkspaceV7({
+        namespace: accountSource.ledgerNamespace,
+        includeArchived: false,
+        transactionLimit: 2000,
+      });
+      const bounded = stateFromFinancialV7(boundedWorkspace, merged.cfg);
+      set({
+        ...bounded,
+        user: current.user,
+        workspaceNamespace: namespace,
+        workspaceReady: true,
+        dirty: true,
+        cloudRevision: current.cloudRevision,
+        pendingGuestTransfer: false,
+        guestTransferPreview: null,
+        lastMergeRollback: rollback,
+        syncConflict: null,
+        financialLedgerV7Ready: true,
+        financialLedgerV7Cutover: true,
+      });
+    } else {
+      set({
+        ...merged,
+        user: current.user,
+        workspaceNamespace: namespace,
+        workspaceReady: true,
+        dirty: true,
+        cloudRevision: current.cloudRevision,
+        pendingGuestTransfer: false,
+        guestTransferPreview: null,
+        lastMergeRollback: rollback,
+        syncConflict: null,
+      });
+      await get().saveLocal({ dirty: true, force: true });
+    }
     await clearVaultSnapshot(GUEST_NAMESPACE);
+    if (guestSource.source === 'sqlite_v7') {
+      await clearFinancialWorkspaceV7({ namespace: guestSource.ledgerNamespace });
+    }
     const synced = await get().syncCloud();
     return { ok: synced || true, reason: 'merged', rollbackAvailable: true, preview };
   },
@@ -1219,23 +1525,65 @@ export const createSyncSlice = (set, get) => ({
     if (!rollback?.accountSnapshot) return false;
 
     const restored = stateFromSnapshot(rollback.accountSnapshot, current.cfg);
-    set({
-      ...restored,
-      user: current.user,
-      workspaceNamespace: namespace,
-      workspaceReady: true,
-      pendingGuestTransfer: false,
-      guestTransferPreview: null,
-      lastMergeRollback: null,
-      syncConflict: null,
-      lastSyncError: null,
-      dirty: true,
-    });
-    await writeVaultSnapshot(namespace, snapshotFromState(get(), { dirty: true }), { force: true });
+    const accountLedgerNamespace = getLedgerNamespace(namespace, restored.cfg);
+    const accountLedgerState = activeLedgerSupported()
+      ? await getFinancialWorkspaceStateV7({ namespace: accountLedgerNamespace })
+      : null;
+
+    if (accountLedgerState?.source_mode === 'sqlite') {
+      const reconciled = await reconcileFinancialWorkspaceV7({
+        namespace: accountLedgerNamespace,
+        workspace: restored,
+      });
+      if (reconciled.supported && !reconciled.ok) return false;
+      const boundedWorkspace = await readFinancialWorkspaceV7({
+        namespace: accountLedgerNamespace, includeArchived: false, transactionLimit: 2000,
+      });
+      const bounded = stateFromFinancialV7(boundedWorkspace, restored.cfg);
+      set({
+        ...bounded,
+        user: current.user,
+        workspaceNamespace: namespace,
+        workspaceReady: true,
+        pendingGuestTransfer: false,
+        guestTransferPreview: null,
+        lastMergeRollback: null,
+        syncConflict: null,
+        lastSyncError: null,
+        dirty: true,
+        financialLedgerV7Ready: true,
+        financialLedgerV7Cutover: true,
+      });
+    } else {
+      set({
+        ...restored,
+        user: current.user,
+        workspaceNamespace: namespace,
+        workspaceReady: true,
+        pendingGuestTransfer: false,
+        guestTransferPreview: null,
+        lastMergeRollback: null,
+        syncConflict: null,
+        lastSyncError: null,
+        dirty: true,
+      });
+      await writeVaultSnapshot(namespace, snapshotFromState(get(), { dirty: true }), { force: true });
+    }
+
     if (rollback.guestSnapshot) {
       await writeVaultSnapshot(GUEST_NAMESPACE, rollback.guestSnapshot, { force: true });
+      if (activeLedgerSupported()) {
+        await restoreSnapshotAsOperationalV7({
+          workspaceNamespace: GUEST_NAMESPACE,
+          snapshot: rollback.guestSnapshot,
+          fallbackCfg: restored.cfg,
+        });
+      }
     } else {
       await clearVaultSnapshot(GUEST_NAMESPACE);
+      if (activeLedgerSupported()) {
+        await clearFinancialWorkspaceV7({ namespace: getLedgerNamespace(GUEST_NAMESPACE, restored.cfg) });
+      }
     }
     await clearVaultSnapshot(mergeRollbackNamespace(namespace));
     await get().syncCloud();

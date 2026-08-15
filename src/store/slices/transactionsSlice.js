@@ -1,5 +1,5 @@
 import { today, normalizeDate } from '../../utils/calc';
-import { canSpendFromWallet, getDefaultWalletId, getWalletAvailableBalances, normalizeWallets } from '../../lib/wallets';
+import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
 import { monthKey } from '../../lib/commitments';
 import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
 import { inferTransactionTag } from '../../lib/transactionTags';
@@ -14,12 +14,24 @@ import {
 import { debtLifecycle, goalLifecycle, reopenCompletionCommitments } from '../../lib/trackerLifecycle';
 import { buildCurrencyFields, buildEntityCurrencyFields, buildTransferCurrencyFields } from '../../lib/financialCoreV2';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
+import { commandWalletPosition } from '../../lib/financialCommandBalances';
 import {
   commitExpenseToFinancialLedgerV7,
   commitFinancialTransactionV7,
   replaceFinancialTransactionV7,
   voidFinancialTransactionsV7,
 } from '../../lib/financialLedgerV7Repository';
+
+const walletPositionForCommand = (get, walletId, excludeTransaction = null) => commandWalletPosition({
+  cutover: !!get().financialLedgerV7Cutover,
+  namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+  walletId,
+  wallets: get().wallets,
+  transactions: get().trans,
+  currency: get().cfg.currency,
+  defaultWalletId: get().cfg.defaultWalletId,
+  excludeTransaction,
+});
 
 export const createTransactionSlice = (set, get) => ({
   addTrans: async (t) => {
@@ -35,14 +47,14 @@ export const createTransactionSlice = (set, get) => ({
     const selectedWalletCurrency = String(selectedWallet?.currency || get().cfg.currency || 'IQD').toUpperCase();
     const baseCurrency = String(get().cfg.currency || 'IQD').toUpperCase();
     const explicitRate = Number(t.exchangeRate);
-    const walletRate = Number(selectedWallet?.valuationRate);
+    // A current wallet valuation is never a historical transaction rate.
+    // Foreign entries must arrive at the command boundary with an explicit,
+    // user-confirmed snapshot rate.
     const resolvedExchangeRate = selectedWalletCurrency === baseCurrency
       ? 1
       : Number.isFinite(explicitRate) && explicitRate > 0
         ? explicitRate
-        : Number.isFinite(walletRate) && walletRate > 0
-          ? walletRate
-          : null;
+        : null;
     if (selectedWalletCurrency !== baseCurrency && !resolvedExchangeRate) return false;
     const currencyFields = buildCurrencyFields({
       amount: Number(t.walletAmount ?? t.amt ?? 0),
@@ -62,13 +74,7 @@ export const createTransactionSlice = (set, get) => ({
       walletId,
       ...currencyFields,
       rateDate: t.rateDate || t.dateISO || today(),
-      rateSource: t.rateSource || (
-        selectedWalletCurrency === baseCurrency
-          ? 'same_currency'
-          : Number.isFinite(explicitRate) && explicitRate > 0
-            ? 'user_entered'
-            : 'wallet_valuation'
-      ),
+      rateSource: t.rateSource || (selectedWalletCurrency === baseCurrency ? 'same_currency' : 'user_entered'),
       idempotencyKey: t.idempotencyKey || `expense-or-income:${id}`,
       // amt remains the base/reporting value for compatibility with existing reports.
       amt: currencyFields.baseAmount,
@@ -77,15 +83,10 @@ export const createTransactionSlice = (set, get) => ({
       dateISO: t.dateISO || today(),
     };
     if (Number(currencyFields.walletAmount || 0) < 0) {
-      const spendCheck = canSpendFromWallet({
-        wallets: get().wallets,
-        trans: get().trans,
-        currency: get().cfg.currency,
-        defaultWalletId: get().cfg.defaultWalletId,
-        walletId: tx.walletId,
-        amount: Math.abs(currencyFields.walletAmount),
-      });
-      tx.balanceWarning = !!spendCheck.warning;
+      const position = await walletPositionForCommand(get, tx.walletId);
+      const available = Number(position?.availableBalance);
+      tx.balanceWarning = !Number.isFinite(available)
+        || Math.abs(Number(currencyFields.walletAmount || 0)) > available + 0.0001;
     }
     let v7Commit = null;
     if (tx.kind !== 'transfer') {
@@ -95,9 +96,34 @@ export const createTransactionSlice = (set, get) => ({
           transaction: tx,
           baseCurrency: get().cfg.currency,
         };
-        v7Commit = tx.flowType === FLOW_TYPES.EXPENSE
+        const recurringEntityChanges = tx.recurring ? [{
+          entityType: 'recurring_rule',
+          id: String(tx.recurringGroupId || tx.id),
+          payload: {
+            id: String(tx.recurringGroupId || tx.id),
+            ledgerId: get().workspaceNamespace,
+            type: tx.flowType,
+            amount: Math.abs(Number(tx.walletAmount ?? tx.amt ?? 0)),
+            currencyCode: tx.walletCurrency || selectedWalletCurrency,
+            walletId: tx.walletId,
+            categoryId: tx.cat || 'other',
+            schedule: 'monthly',
+            timezonePolicy: 'local_date',
+            startDate: tx.dateISO,
+            endDate: null,
+            nextOccurrence: null,
+            status: 'active',
+            revision: 1,
+            sourceTransactionId: tx.id,
+          },
+        }] : [];
+        v7Commit = tx.flowType === FLOW_TYPES.EXPENSE && !recurringEntityChanges.length
           ? await commitExpenseToFinancialLedgerV7({ ...commitArgs, wallet: selectedWallet })
-          : await commitFinancialTransactionV7({ ...commitArgs, wallets: [selectedWallet].filter(Boolean) });
+          : await commitFinancialTransactionV7({
+              ...commitArgs,
+              wallets: [selectedWallet].filter(Boolean),
+              entityChanges: recurringEntityChanges,
+            });
         if (v7Commit.supported && !v7Commit.ok) return false;
         if (v7Commit.ok) {
           tx.id = v7Commit.transactionId;
@@ -163,12 +189,7 @@ export const createTransactionSlice = (set, get) => ({
     const walletIds = new Set(normalizedWallets.map(wallet => wallet.id));
     if (!Number.isFinite(n) || n <= 0 || !fromWalletId || !toWalletId || fromWalletId === toWalletId) return false;
     if (!walletIds.has(fromWalletId) || !walletIds.has(toWalletId)) return false;
-    const sourceBalance = getWalletAvailableBalances(
-      normalizedWallets,
-      get().trans,
-      get().cfg.currency,
-      get().cfg.defaultWalletId,
-    ).find(wallet => wallet.id === fromWalletId)?.availableBalance;
+    const sourceBalance = (await walletPositionForCommand(get, fromWalletId))?.availableBalance;
     let fields;
     try {
       fields = buildTransferCurrencyFields({
@@ -260,12 +281,7 @@ export const createTransactionSlice = (set, get) => ({
       if (!Number.isFinite(transferAmount) || transferAmount <= 0 || !fromWallet || !toWallet || fromWalletId === toWalletId) return false;
       const sourceScope = normalizeScope(fromWallet.scope, getEntryScope(get().cfg));
       const targetScope = normalizeScope(toWallet.scope, getEntryScope(get().cfg));
-      const sourceBalance = getWalletAvailableBalances(
-        normalizedWallets,
-        get().trans.filter(transaction => transaction.id !== id),
-        get().cfg.currency,
-        get().cfg.defaultWalletId,
-      ).find(wallet => wallet.id === fromWalletId)?.availableBalance;
+      const sourceBalance = (await walletPositionForCommand(get, fromWalletId, current))?.availableBalance;
       let transferFields;
       try {
         transferFields = buildTransferCurrencyFields({
@@ -356,16 +372,10 @@ export const createTransactionSlice = (set, get) => ({
           baseCurrencyCode: allocationFields.baseCurrencyCode,
           exchangeRate: allocationFields.exchangeRate,
         });
-        const spendCheck = canSpendFromWallet({
-          wallets: get().wallets,
-          trans: get().trans,
-          currency: get().cfg.currency,
-          defaultWalletId: get().cfg.defaultWalletId,
-          walletId: nextWalletId,
-          amount: Math.abs(Number(allocationFields.walletAmount || 0)),
-          excludeTransactionId: id,
-        });
-        safePatch.balanceWarning = !!spendCheck.warning;
+        const position = await walletPositionForCommand(get, nextWalletId, current);
+        const available = Number(position?.availableBalance);
+        safePatch.balanceWarning = !Number.isFinite(available)
+          || Math.abs(Number(allocationFields.walletAmount || 0)) > available + 0.0001;
       } else if (current.isDebtPayment) {
         const paymentEntityAmount = hasAmt ? debtSign * linkedAbsAmt : Number(current.entityAmount ?? (debtSign * Math.abs(currentDebtPayment?.amt || 0)));
         let paymentFields;
@@ -384,16 +394,10 @@ export const createTransactionSlice = (set, get) => ({
         }
         Object.assign(safePatch, paymentFields, { walletId: nextWalletId, amt: paymentFields.baseAmount });
         if (Number(paymentFields.walletAmount || 0) < 0) {
-          const spendCheck = canSpendFromWallet({
-            wallets: get().wallets,
-            trans: get().trans,
-            currency: get().cfg.currency,
-            defaultWalletId: get().cfg.defaultWalletId,
-            walletId: nextWalletId,
-            amount: Math.abs(paymentFields.walletAmount),
-            excludeTransactionId: id,
-          });
-          safePatch.balanceWarning = !!spendCheck.warning;
+          const position = await walletPositionForCommand(get, nextWalletId, current);
+          const available = Number(position?.availableBalance);
+          safePatch.balanceWarning = !Number.isFinite(available)
+            || Math.abs(Number(paymentFields.walletAmount || 0)) > available + 0.0001;
         }
       } else {
         const currentNativeAmount = Object.prototype.hasOwnProperty.call(current, 'walletAmount') ? Number(current.walletAmount || 0) : Number(current.amt || 0);
@@ -411,16 +415,10 @@ export const createTransactionSlice = (set, get) => ({
         Object.assign(safePatch, currencyFields);
         safePatch.amt = currencyFields.baseAmount;
         if (Number(currencyFields.walletAmount || 0) < 0) {
-          const spendCheck = canSpendFromWallet({
-            wallets: get().wallets,
-            trans: get().trans,
-            currency: get().cfg.currency,
-            defaultWalletId: get().cfg.defaultWalletId,
-            walletId: nextWalletId,
-            amount: Math.abs(currencyFields.walletAmount),
-            excludeTransactionId: id,
-          });
-          safePatch.balanceWarning = !!spendCheck.warning;
+          const position = await walletPositionForCommand(get, nextWalletId, current);
+          const available = Number(position?.availableBalance);
+          safePatch.balanceWarning = !Number.isFinite(available)
+            || Math.abs(Number(currencyFields.walletAmount || 0)) > available + 0.0001;
         }
       }
     }
@@ -529,10 +527,37 @@ export const createTransactionSlice = (set, get) => ({
     const changedCommitments = previewCommitments.filter(item => (
       JSON.stringify(existingCommitments.get(item.id) || null) !== JSON.stringify(item)
     ));
+    const recurringRuleId = String(nextTransaction.recurringGroupId || current.recurringGroupId || current.id);
+    const recurringRuleChange = current.recurring || nextTransaction.recurring || stopRecurringSeries
+      ? [{
+          entityType: 'recurring_rule',
+          id: recurringRuleId,
+          ...(nextTransaction.recurring && !stopRecurringSeries
+            ? { payload: {
+                id: recurringRuleId,
+                ledgerId: get().workspaceNamespace,
+                type: nextTransaction.flowType,
+                amount: Math.abs(Number(nextTransaction.walletAmount ?? nextTransaction.amt ?? 0)),
+                currencyCode: nextTransaction.walletCurrency || nextTransaction.currencyCode || get().cfg.currency,
+                walletId: nextTransaction.walletId,
+                categoryId: nextTransaction.cat || 'other',
+                schedule: 'monthly',
+                timezonePolicy: 'local_date',
+                startDate: nextTransaction.dateISO,
+                endDate: null,
+                nextOccurrence: null,
+                status: 'active',
+                revision: Math.max(1, Number(current.revision || 1) + 1),
+                sourceTransactionId: current.id,
+              } }
+            : { deletedAt: new Date().toISOString(), payload: { id: recurringRuleId, status: 'stopped' } }),
+        }]
+      : [];
     const entityChanges = [
       ...(current.debtId ? previewDebts.filter(item => item.id === current.debtId).map(payload => ({ entityType: 'debt', id: payload.id, payload })) : []),
       ...(current.goalId ? previewGoals.filter(item => item.id === current.goalId).map(payload => ({ entityType: 'goal', id: payload.id, payload })) : []),
       ...changedCommitments.map(payload => ({ entityType: 'commitment', id: payload.id, payload })),
+      ...recurringRuleChange,
     ];
     try {
       const committed = await replaceFinancialTransactionV7({

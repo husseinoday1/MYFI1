@@ -23,7 +23,7 @@ import { clearColdArchives, exportColdArchives, getColdArchiveNamespace, replace
 import { compareTransactionsNewestFirst } from '../../lib/transactionIndex';
 import { activeLedgerSupported, clearLedgerNamespace, getLedgerNamespace, replaceLedgerSnapshot } from '../../lib/activeLedgerRepository';
 import { archiveFinancialTransactionsV7, clearFinancialWorkspaceV7 } from '../../lib/financialLedgerV7Repository';
-import { runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
+import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
 
 const RESET_MARKER_PREFIX = 'MYFI_INTENTIONAL_RESET_V1';
 const syncBaseNamespace = namespace => `sync-base:${String(namespace || GUEST_NAMESPACE)}`;
@@ -243,11 +243,19 @@ export const createDataSlice = (set, get) => ({
           throw new Error(resetMigration.reason || 'financial_v7_reset_cutover_failed');
         }
         if (resetMigration.ok) {
+          const cutover = await runFinancialOperationalCutoverV7({
+            namespace: getLedgerNamespace(namespace, resetCfg),
+            workspace: get(),
+            coldArchives: [],
+          });
+          if (!cutover?.ok || !cutover?.cutover) {
+            throw new Error(cutover?.reason || 'financial_v7_reset_cutover_failed');
+          }
           set({
             financialLedgerV7Ready: true,
             financialLedgerV7Cutover: true,
-            financialLedgerV7Checksum: resetMigration.checksum || null,
-            financialLedgerV7Migration: resetMigration,
+            financialLedgerV7Checksum: cutover.checksum || resetMigration.checksum || null,
+            financialLedgerV7Migration: cutover,
             ledgerError: null,
           });
         }
@@ -474,6 +482,11 @@ export const createDataSlice = (set, get) => ({
         cats: current.cats,
         cfg: current.cfg,
         notif: current.notif,
+        workspaceNamespace: current.workspaceNamespace,
+        financialLedgerV7Ready: current.financialLedgerV7Ready,
+        financialLedgerV7Cutover: current.financialLedgerV7Cutover,
+        financialLedgerV7Checksum: current.financialLedgerV7Checksum,
+        financialLedgerV7Migration: current.financialLedgerV7Migration,
         coldArchiveNamespace,
         coldArchives: rollbackColdArchives,
       };
@@ -507,16 +520,27 @@ export const createDataSlice = (set, get) => ({
 
       if (activeLedgerSupported()) {
         const restoredState = get();
-        const migrated = await runFinancialShadowMigrationV7({
+        const cutover = await runFinancialOperationalCutoverV7({
           namespace: getLedgerNamespace(restoredState.workspaceNamespace || GUEST_NAMESPACE, restoredState.cfg),
           workspace: restoredState,
           coldArchives: data.coldArchives || [],
           forceReplace: true,
+          resetPendingOutbox: true,
         });
-        if (migrated.supported && !migrated.ok) throw new Error(migrated.reason || 'backup_v7_restore_parity_failed');
+        if (!cutover?.ok || !cutover?.cutover) throw new Error(cutover?.reason || 'backup_v7_restore_parity_failed');
+        set({
+          financialLedgerV7Ready: true,
+          financialLedgerV7Cutover: true,
+          financialLedgerV7Checksum: cutover.checksum || null,
+          financialLedgerV7Migration: cutover,
+          ledgerError: null,
+          dirty: true,
+        });
+        await get().loadLocal(restoredState.workspaceNamespace || GUEST_NAMESPACE, { allowLegacy: false });
+        set({ dirty: true });
+      } else {
+        await get().saveLocal({ force: true, dirty: true });
       }
-
-      await get().saveLocal({ force: true, dirty: true });
 
       if (current.user) {
         let synced = await get().syncCloud();
@@ -547,15 +571,11 @@ export const createDataSlice = (set, get) => ({
         set(stateRollback);
         try {
           await replaceColdArchives(coldArchiveNamespace, coldArchives || []);
-          if (activeLedgerSupported()) {
-            await runFinancialShadowMigrationV7({
-              namespace: getLedgerNamespace(stateRollback.workspaceNamespace || get().workspaceNamespace || GUEST_NAMESPACE, stateRollback.cfg),
-              workspace: stateRollback,
-              coldArchives: coldArchives || [],
-              forceReplace: true,
-            });
+          if (activeLedgerSupported() && stateRollback.financialLedgerV7Cutover) {
+            await get().loadLocal(stateRollback.workspaceNamespace || get().workspaceNamespace || GUEST_NAMESPACE, { allowLegacy: false });
+          } else {
+            await get().saveLocal({ force: true });
           }
-          await get().saveLocal({ force: true });
         } catch {}
       }
       return false;

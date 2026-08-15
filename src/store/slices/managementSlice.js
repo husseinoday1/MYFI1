@@ -1,36 +1,15 @@
 import { today, normalizeDate } from '../../utils/calc';
-import { canSpendFromWallet, getDefaultWalletId, getWalletBalances, normalizeWallets } from '../../lib/wallets';
+import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
 import { commitmentCycleMonth, deferredCommitmentDueISO, monthKey, normalizeCommitments } from '../../lib/commitments';
 import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
 import { buildCurrencyFields, buildEntityCurrencyFields, normalizeCurrencyCode } from '../../lib/financialCoreV2';
 import { financialDataCount, syncCommitmentPaidMonth, uid } from '../domain';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
+import { commandWalletBalance, commandWalletPosition } from '../../lib/financialCommandBalances';
 import {
   commitEntityChangesV7,
   commitFinancialTransactionV7,
 } from '../../lib/financialLedgerV7Repository';
-const localNumber = value => {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-};
-
-const cleanLinkName = value => String(value || '')
-  .trim()
-  .replace(/\s+/g, ' ')
-  .replace(/\s*\((Guest|ضيف)\)\s*$/i, '')
-  .toLowerCase();
-
-const debtRemainingLocal = item => Math.max(
-  0,
-  Math.abs(localNumber(item?.total)) - Math.abs(localNumber(item?.paid)),
-);
-
-const goalRemainingLocal = item => (
-  ['released', 'settled'].includes(item?.status)
-    ? 0
-    : Math.max(0, Math.abs(localNumber(item?.target)) - Math.abs(localNumber(item?.cur)))
-);
-
 const restoreArchivedItem = (item, active) => {
   const next = { ...item };
   const wasActive = item.archivedFromActive !== false;
@@ -40,56 +19,43 @@ const restoreArchivedItem = (item, active) => {
   return next;
 };
 
-const linkNamesMatch = (a, b) => {
-  const left = cleanLinkName(a);
-  const right = cleanLinkName(b);
-  if (!left || !right) return false;
-  return left === right || left.includes(right) || right.includes(left);
-};
+const walletPositionForManagementCommand = (get, walletId) => commandWalletPosition({
+  cutover: !!get().financialLedgerV7Cutover,
+  namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+  walletId,
+  wallets: get().wallets,
+  transactions: get().trans,
+  currency: get().cfg.currency,
+  defaultWalletId: get().cfg.defaultWalletId,
+});
 
-const findRepairLinkedTarget = ({ commitment, linkedType, linkedId, debts = [], goals = [] }) => {
-  if (linkedType === 'debt' || linkedType === 'receivable') {
-    const direction = linkedType === 'receivable' ? 'receivable' : 'owed';
-    const current = debts.find(item => item.id === linkedId);
-    if (current && current.direction === direction && debtRemainingLocal(current) > 0) return current;
-
-    const candidates = debts.filter(item => (
-      item.direction === direction
-      && !item.archivedAt
-      && debtRemainingLocal(item) > 0
-      && (!commitment?.scope || !item.scope || item.scope === commitment.scope)
-    ));
-
-    const sourceName = current?.name || commitment?.name;
-    const byName = candidates.find(item => linkNamesMatch(item.name, sourceName));
-    if (byName) return byName;
-    return candidates.length === 1 ? candidates[0] : null;
-  }
-
-  if (linkedType === 'goal') {
-    const current = goals.find(item => item.id === linkedId);
-    if (current && goalRemainingLocal(current) > 0) return current;
-
-    const candidates = goals.filter(item => (
-      !item.archivedAt
-      && goalRemainingLocal(item) > 0
-      && (!commitment?.scope || !item.scope || item.scope === commitment.scope)
-    ));
-
-    const sourceName = current?.name || commitment?.name;
-    const byName = candidates.find(item => linkNamesMatch(item.name, sourceName));
-    if (byName) return byName;
-    return candidates.length === 1 ? candidates[0] : null;
-  }
-
-  return null;
-};
+const walletBalanceForManagementCommand = (get, walletId) => commandWalletBalance({
+  cutover: !!get().financialLedgerV7Cutover,
+  namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+  walletId,
+  wallets: get().wallets,
+  transactions: get().trans,
+  currency: get().cfg.currency,
+  defaultWalletId: get().cfg.defaultWalletId,
+});
 
 export const createManagementSlice = (set, get) => ({
   setCats: async (cats) => {
-    set({ cats });
+    const nextCats = Array.isArray(cats) ? cats : [];
+    try {
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        changes: nextCats.filter(item => item?.id).map(item => ({ entityType: 'category', id: item.id, payload: item })),
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_category_update_failed') });
+      return false;
+    }
+    set({ cats: nextCats });
     await get().saveLocal();
     get().scheduleCloudSync?.('management_change');
+    return true;
   },
 
   addCommitment: async (item) => {
@@ -138,30 +104,49 @@ export const createManagementSlice = (set, get) => ({
 
   editCommitment: async (id, patch) => {
     const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
-    set(s => ({
-      commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
-        item.id === id
-          ? normalizeCommitments([{ ...item, ...patch, currencyCode: item.currencyCode || patch.currencyCode }], defaultWalletId, item.currencyCode || get().cfg.currency)[0]
-          : item
-      )),
-    }));
+    const current = normalizeCommitments(get().commitments, defaultWalletId).find(item => item.id === id);
+    if (!current) return false;
+    const next = normalizeCommitments([{
+      ...current,
+      ...(patch || {}),
+      currencyCode: current.currencyCode || patch?.currencyCode,
+    }], defaultWalletId, current.currencyCode || get().cfg.currency)[0];
+    try {
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        changes: [{ entityType: 'commitment', id, payload: next }],
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_commitment_edit_failed') });
+      return false;
+    }
+    set(s => ({ commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => item.id === id ? next : item) }));
     await get().saveLocal();
     get().scheduleCloudSync?.('management_change');
+    return true;
   },
 
   deferCommitment: async (id, option = 'day') => {
     const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
     const commitment = normalizeCommitments(get().commitments, defaultWalletId, get().cfg.currency).find(item => item.id === id);
     if (!commitment || commitment.active === false) return false;
-    const deferredUntilISO = deferredCommitmentDueISO(commitment, option);
-    const deferredCycleMonth = commitmentCycleMonth(commitment, new Date());
-    set(s => ({
-      commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
-        item.id === id
-          ? normalizeCommitments([{ ...item, deferredUntilISO, deferredCycleMonth }], defaultWalletId)[0]
-          : item
-      )),
-    }));
+    const next = normalizeCommitments([{
+      ...commitment,
+      deferredUntilISO: deferredCommitmentDueISO(commitment, option),
+      deferredCycleMonth: commitmentCycleMonth(commitment, new Date()),
+    }], defaultWalletId, commitment.currencyCode || get().cfg.currency)[0];
+    try {
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        changes: [{ entityType: 'commitment', id, payload: next }],
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_commitment_defer_failed') });
+      return false;
+    }
+    set(s => ({ commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => item.id === id ? next : item) }));
     await get().saveLocal();
     get().scheduleCloudSync?.('management_change');
     return true;
@@ -169,67 +154,77 @@ export const createManagementSlice = (set, get) => ({
 
   clearCommitmentDeferral: async (id) => {
     const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
-    set(s => ({
-      commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
-        item.id === id
-          ? normalizeCommitments([{ ...item, deferredUntilISO: null, deferredCycleMonth: null }], defaultWalletId)[0]
-          : item
-      )),
-    }));
+    const commitment = normalizeCommitments(get().commitments, defaultWalletId, get().cfg.currency).find(item => item.id === id);
+    if (!commitment) return false;
+    const next = normalizeCommitments([{ ...commitment, deferredUntilISO: null, deferredCycleMonth: null }], defaultWalletId, commitment.currencyCode || get().cfg.currency)[0];
+    try {
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        changes: [{ entityType: 'commitment', id, payload: next }],
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_commitment_deferral_clear_failed') });
+      return false;
+    }
+    set(s => ({ commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => item.id === id ? next : item) }));
     await get().saveLocal();
     get().scheduleCloudSync?.('management_change');
     return true;
   },
 
   deleteCommitment: async (id) => {
-    set(s => ({
-      commitments: s.commitments.filter(item => item.id !== id),
-      trans: s.trans
-        .map(t => {
-          if (!(t.isCommitmentPayment && t.commitmentId === id)) return t;
-          if (t.isDebtPayment || t.isGoalSaving) {
-            const {
-              isCommitmentPayment,
-              commitmentId,
-              commitmentMonth,
-              commitmentLinkedType,
-              commitmentLinkedId,
-              ...rest
-            } = t;
-            return rest;
-          }
-          return null;
-        })
-        .filter(Boolean),
-    }));
+    const current = get().commitments.find(item => item.id === id);
+    if (!current) return false;
+    const deletedAt = new Date().toISOString();
+    try {
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+        changes: [{ entityType: 'commitment', id, deletedAt, payload: { ...current, deletedAt, active: false } }],
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_commitment_delete_failed') });
+      return false;
+    }
+    // Deleting tracker metadata must never delete posted financial history.
+    set(s => ({ commitments: s.commitments.filter(item => item.id !== id) }));
     await get().saveLocal({ force: true });
     get().scheduleCloudSync?.('management_change');
+    return true;
   },
 
   archiveTracker: async (kind, sourceId) => {
     if (!sourceId) return false;
     const archivedAt = today();
-    set(s => {
-      const debtKinds = kind === 'owed' || kind === 'receivable';
-      return {
-        debts: debtKinds
-          ? s.debts.map(item => item.id === sourceId ? { ...item, archivedAt } : item)
-          : s.debts,
-        goals: kind === 'saving'
-          ? s.goals.map(item => item.id === sourceId ? { ...item, archivedAt, archivedFromActive: item.active !== false, active: false } : item)
-          : s.goals,
-        commitments: s.commitments.map(item => {
-          if (kind === 'monthly' && item.id === sourceId) return { ...item, archivedAt, archivedFromActive: item.active !== false, active: false };
-          if (debtKinds && (item.linkedType === 'debt' || item.linkedType === 'receivable') && item.linkedId === sourceId) {
-            return { ...item, archivedAt, archivedFromActive: item.active !== false, active: false };
-          }
-          if (kind === 'saving' && item.linkedType === 'goal' && item.linkedId === sourceId) {
-            return { ...item, archivedAt, archivedFromActive: item.active !== false, active: false };
-          }
-          return item;
-        }),
-      };
+    const current = get();
+    const debtKinds = kind === 'owed' || kind === 'receivable';
+    const debts = debtKinds
+      ? current.debts.map(item => item.id === sourceId ? { ...item, archivedAt } : item)
+      : current.debts;
+    const goals = kind === 'saving'
+      ? current.goals.map(item => item.id === sourceId ? { ...item, archivedAt, archivedFromActive: item.active !== false, active: false } : item)
+      : current.goals;
+    const commitments = current.commitments.map(item => {
+      if (kind === 'monthly' && item.id === sourceId) return { ...item, archivedAt, archivedFromActive: item.active !== false, active: false };
+      if (debtKinds && (item.linkedType === 'debt' || item.linkedType === 'receivable') && item.linkedId === sourceId) {
+        return { ...item, archivedAt, archivedFromActive: item.active !== false, active: false };
+      }
+      if (kind === 'saving' && item.linkedType === 'goal' && item.linkedId === sourceId) {
+        return { ...item, archivedAt, archivedFromActive: item.active !== false, active: false };
+      }
+      return item;
     });
+    const changes = [
+      ...debts.filter((item, index) => item !== current.debts[index]).map(payload => ({ entityType: 'debt', id: payload.id, payload })),
+      ...goals.filter((item, index) => item !== current.goals[index]).map(payload => ({ entityType: 'goal', id: payload.id, payload })),
+      ...commitments.filter((item, index) => item !== current.commitments[index]).map(payload => ({ entityType: 'commitment', id: payload.id, payload })),
+    ];
+    const committed = await commitEntityChangesV7({
+      namespace: getLedgerNamespace(current.workspaceNamespace, current.cfg), changes,
+    });
+    if (committed.supported && !committed.ok) return false;
+    set({ debts, goals, commitments });
     await get().saveLocal();
     get().scheduleCloudSync?.('management_change');
     return true;
@@ -237,28 +232,29 @@ export const createManagementSlice = (set, get) => ({
 
   restoreTracker: async (kind, sourceId) => {
     if (!sourceId) return false;
-    set(s => {
-      const debtKinds = kind === 'owed' || kind === 'receivable';
-      return {
-        debts: debtKinds
-          ? s.debts.map(item => item.id === sourceId ? restoreArchivedItem(item, false) : item)
-          : s.debts,
-        goals: kind === 'saving'
-          ? s.goals.map(item => item.id === sourceId
-            ? restoreArchivedItem(item, item.status !== 'released')
-            : item)
-          : s.goals,
-        commitments: s.commitments.map(item => {
-          const linkedToDebt = debtKinds
-            && (item.linkedType === 'debt' || item.linkedType === 'receivable')
-            && item.linkedId === sourceId;
-          const linkedToGoal = kind === 'saving' && item.linkedType === 'goal' && item.linkedId === sourceId;
-          if (kind === 'monthly' && item.id === sourceId) return restoreArchivedItem(item, true);
-          if (linkedToDebt || linkedToGoal) return restoreArchivedItem(item, true);
-          return item;
-        }),
-      };
+    const current = get();
+    const debtKinds = kind === 'owed' || kind === 'receivable';
+    const debts = debtKinds
+      ? current.debts.map(item => item.id === sourceId ? restoreArchivedItem(item, false) : item)
+      : current.debts;
+    const goals = kind === 'saving'
+      ? current.goals.map(item => item.id === sourceId ? restoreArchivedItem(item, item.status !== 'released') : item)
+      : current.goals;
+    const commitments = current.commitments.map(item => {
+      const linkedToDebt = debtKinds && (item.linkedType === 'debt' || item.linkedType === 'receivable') && item.linkedId === sourceId;
+      const linkedToGoal = kind === 'saving' && item.linkedType === 'goal' && item.linkedId === sourceId;
+      if (kind === 'monthly' && item.id === sourceId) return restoreArchivedItem(item, true);
+      if (linkedToDebt || linkedToGoal) return restoreArchivedItem(item, true);
+      return item;
     });
+    const changes = [
+      ...debts.filter((item, index) => item !== current.debts[index]).map(payload => ({ entityType: 'debt', id: payload.id, payload })),
+      ...goals.filter((item, index) => item !== current.goals[index]).map(payload => ({ entityType: 'goal', id: payload.id, payload })),
+      ...commitments.filter((item, index) => item !== current.commitments[index]).map(payload => ({ entityType: 'commitment', id: payload.id, payload })),
+    ];
+    const committed = await commitEntityChangesV7({ namespace: getLedgerNamespace(current.workspaceNamespace, current.cfg), changes });
+    if (committed.supported && !committed.ok) return false;
+    set({ debts, goals, commitments });
     await get().saveLocal();
     get().scheduleCloudSync?.('management_change');
     return true;
@@ -267,22 +263,29 @@ export const createManagementSlice = (set, get) => ({
   archiveTrackersMany: async (items = []) => {
     const rows = (Array.isArray(items) ? items : []).filter(item => item?.sourceId && item?.kind);
     if (!rows.length) return false;
+    const current = get();
     const debtIds = new Set(rows.filter(item => item.kind === 'owed' || item.kind === 'receivable').map(item => item.sourceId));
     const goalIds = new Set(rows.filter(item => item.kind === 'saving').map(item => item.sourceId));
     const commitmentIds = new Set(rows.filter(item => item.kind === 'monthly').map(item => item.sourceId));
     const archivedAt = today();
-    set(s => ({
-      debts: s.debts.map(item => debtIds.has(item.id) ? { ...item, archivedAt } : item),
-      goals: s.goals.map(item => goalIds.has(item.id) ? { ...item, archivedAt, archivedFromActive: item.active !== false, active: false } : item),
-      commitments: s.commitments.map(item => {
-        const selected = commitmentIds.has(item.id);
-        const debtLinked = (item.linkedType === 'debt' || item.linkedType === 'receivable') && debtIds.has(item.linkedId);
-        const goalLinked = item.linkedType === 'goal' && goalIds.has(item.linkedId);
-        return selected || debtLinked || goalLinked
-          ? { ...item, archivedAt, archivedFromActive: item.active !== false, active: false }
-          : item;
-      }),
-    }));
+    const debts = current.debts.map(item => debtIds.has(item.id) ? { ...item, archivedAt } : item);
+    const goals = current.goals.map(item => goalIds.has(item.id) ? { ...item, archivedAt, archivedFromActive: item.active !== false, active: false } : item);
+    const commitments = current.commitments.map(item => {
+      const selected = commitmentIds.has(item.id);
+      const debtLinked = (item.linkedType === 'debt' || item.linkedType === 'receivable') && debtIds.has(item.linkedId);
+      const goalLinked = item.linkedType === 'goal' && goalIds.has(item.linkedId);
+      return selected || debtLinked || goalLinked
+        ? { ...item, archivedAt, archivedFromActive: item.active !== false, active: false }
+        : item;
+    });
+    const changes = [
+      ...debts.filter((item, index) => item !== current.debts[index]).map(payload => ({ entityType: 'debt', id: payload.id, payload })),
+      ...goals.filter((item, index) => item !== current.goals[index]).map(payload => ({ entityType: 'goal', id: payload.id, payload })),
+      ...commitments.filter((item, index) => item !== current.commitments[index]).map(payload => ({ entityType: 'commitment', id: payload.id, payload })),
+    ];
+    const committed = await commitEntityChangesV7({ namespace: getLedgerNamespace(current.workspaceNamespace, current.cfg), changes });
+    if (committed.supported && !committed.ok) return false;
+    set({ debts, goals, commitments });
     await get().saveLocal();
     get().scheduleCloudSync?.('management_change');
     return true;
@@ -291,43 +294,28 @@ export const createManagementSlice = (set, get) => ({
   deleteTrackersMany: async (items = []) => {
     const rows = (Array.isArray(items) ? items : []).filter(item => item?.sourceId && item?.kind);
     if (!rows.length) return false;
+    const current = get();
     const debtIds = new Set(rows.filter(item => item.kind === 'owed' || item.kind === 'receivable').map(item => item.sourceId));
     const goalIds = new Set(rows.filter(item => item.kind === 'saving').map(item => item.sourceId));
     const commitmentIds = new Set(rows.filter(item => item.kind === 'monthly').map(item => item.sourceId));
-    set(s => {
-      let trans = s.trans.filter(item => (
-        !(item.isDebtPayment && debtIds.has(item.debtId))
-        && !(item.isGoalSaving && goalIds.has(item.goalId))
-      ));
-      trans = trans
-        .map(item => {
-          if (!(item.isCommitmentPayment && commitmentIds.has(item.commitmentId))) return item;
-          if (item.isDebtPayment || item.isGoalSaving) {
-            const {
-              isCommitmentPayment,
-              commitmentId,
-              commitmentMonth,
-              commitmentLinkedType,
-              commitmentLinkedId,
-              ...rest
-            } = item;
-            return rest;
-          }
-          return null;
-        })
-        .filter(Boolean);
-      const commitments = s.commitments.filter(item => {
-        if (commitmentIds.has(item.id)) return false;
-        const debtLinked = (item.linkedType === 'debt' || item.linkedType === 'receivable') && debtIds.has(item.linkedId);
-        const goalLinked = item.linkedType === 'goal' && goalIds.has(item.linkedId);
-        return !debtLinked && !goalLinked;
-      });
-      return {
-        trans,
-        commitments,
-        debts: s.debts.filter(item => !debtIds.has(item.id)),
-        goals: s.goals.filter(item => !goalIds.has(item.id)),
-      };
+    const linkedCommitmentIds = new Set(current.commitments.filter(item => (
+      commitmentIds.has(item.id)
+      || ((item.linkedType === 'debt' || item.linkedType === 'receivable') && debtIds.has(item.linkedId))
+      || (item.linkedType === 'goal' && goalIds.has(item.linkedId))
+    )).map(item => item.id));
+    const deletedAt = new Date().toISOString();
+    const changes = [
+      ...current.debts.filter(item => debtIds.has(item.id)).map(item => ({ entityType: 'debt', id: item.id, deletedAt, payload: { ...item, deletedAt } })),
+      ...current.goals.filter(item => goalIds.has(item.id)).map(item => ({ entityType: 'goal', id: item.id, deletedAt, payload: { ...item, deletedAt, active: false } })),
+      ...current.commitments.filter(item => linkedCommitmentIds.has(item.id)).map(item => ({ entityType: 'commitment', id: item.id, deletedAt, payload: { ...item, deletedAt, active: false } })),
+    ];
+    const committed = await commitEntityChangesV7({ namespace: getLedgerNamespace(current.workspaceNamespace, current.cfg), changes });
+    if (committed.supported && !committed.ok) return false;
+    // Metadata removal is separate from ledger history. Posted payments remain.
+    set({
+      commitments: current.commitments.filter(item => !linkedCommitmentIds.has(item.id)),
+      debts: current.debts.filter(item => !debtIds.has(item.id)),
+      goals: current.goals.filter(item => !goalIds.has(item.id)),
     });
     await get().saveLocal({ force: true });
     get().scheduleCloudSync?.('management_change');
@@ -343,27 +331,19 @@ export const createManagementSlice = (set, get) => ({
     const paidMonth = cycleMonth || commitmentCycleMonth(commitment, new Date(`${entryDate}T12:00:00`));
     if (commitment.lastPaidMonth === paidMonth) return { ok: false, reason: 'already_paid' };
     const linkedType = commitment.linkedType || 'none';
-    let linkedId = commitment.linkedId || null;
-    const repairedLinkedTarget = findRepairLinkedTarget({
-      commitment,
-      linkedType,
-      linkedId,
-      debts: get().debts,
-      goals: get().goals,
-    });
-    if (repairedLinkedTarget?.id && repairedLinkedTarget.id !== linkedId) {
-      linkedId = repairedLinkedTarget.id;
-      set(s => ({
-        commitments: normalizeCommitments(s.commitments, defaultWalletId).map(item => (
-          item.id === id ? { ...item, linkedId } : item
-        )),
-      }));
-    }
+    const linkedId = commitment.linkedId || null;
     const linkedTarget = linkedType === 'goal'
       ? get().goals.find(target => target.id === linkedId)
       : (linkedType === 'debt' || linkedType === 'receivable')
         ? get().debts.find(target => target.id === linkedId)
         : null;
+    if (linkedType !== 'none' && (!linkedId || !linkedTarget)) {
+      // Financial links are identities, not labels. Never relink by name or by "only candidate" heuristics.
+      return { ok: false, reason: 'linked_reference_review_required' };
+    }
+    if (linkedTarget?.archivedAt || ['released', 'settled'].includes(linkedTarget?.status)) {
+      return { ok: false, reason: 'linked_unavailable' };
+    }
     if (linkedTarget && normalizeCurrencyCode(linkedTarget.currencyCode, get().cfg.currency) !== normalizeCurrencyCode(commitment.currencyCode, get().cfg.currency)) {
       return { ok: false, reason: 'linked_currency_mismatch' };
     }
@@ -430,20 +410,15 @@ export const createManagementSlice = (set, get) => ({
       set({ ledgerError: String(error?.message || 'commitment_payment_fx_required') });
       return { ok: false, reason: String(error?.message || 'fx_required') };
     }
-    const spendCheck = canSpendFromWallet({
-      wallets: get().wallets,
-      trans: get().trans,
-      currency: get().cfg.currency,
-      defaultWalletId: get().cfg.defaultWalletId,
-      walletId: paymentWalletId,
-      amount: Math.abs(Number(currencyFields.walletAmount || 0)),
-    });
+    const paymentPosition = await walletPositionForManagementCommand(get, paymentWalletId);
+    const paymentAvailable = Number(paymentPosition?.availableBalance);
+    const paymentNativeAmount = Math.abs(Number(currencyFields.walletAmount || 0));
     const paymentTx = {
       id: uid(),
       title: commitment.name,
       amt: currencyFields.baseAmount,
       ...currencyFields,
-      balanceWarning: !!spendCheck.warning,
+      balanceWarning: !Number.isFinite(paymentAvailable) || paymentNativeAmount > paymentAvailable + 0.0001,
       cat: commitment.cat || 'other',
       walletId: paymentWalletId,
       dateISO: entryDate,
@@ -490,8 +465,9 @@ export const createManagementSlice = (set, get) => ({
   addWallet: async (wallet) => {
     const cfg = get().cfg;
     const walletCurrency = String(wallet.currency || cfg.currency || 'IQD').toUpperCase();
-    const valuationRate = Number(wallet.valuationRate || 1);
-    const safeRate = Number.isFinite(valuationRate) && valuationRate > 0 ? valuationRate : 1;
+    const valuationRate = Number(wallet.valuationRate);
+    if (walletCurrency !== cfg.currency && !(Number.isFinite(valuationRate) && valuationRate > 0)) return false;
+    const safeRate = walletCurrency === cfg.currency ? 1 : valuationRate;
     const openingBalance = Number(wallet.openingBalance || 0);
     const next = {
       id: uid(),
@@ -500,6 +476,7 @@ export const createManagementSlice = (set, get) => ({
       type: wallet.type || 'cash',
       currency: walletCurrency,
       valuationRate: walletCurrency === cfg.currency ? 1 : safeRate,
+      valuationUpdatedAt: walletCurrency === cfg.currency ? null : new Date().toISOString(),
       // New wallets use a ledger opening entry instead of a mutable magic balance.
       // Existing wallets remain in legacy mode until an explicit migration is performed.
       openingBalance: 0,
@@ -529,7 +506,7 @@ export const createManagementSlice = (set, get) => ({
       isOpeningBalance: true,
       note: '',
       rateDate: today(),
-      rateSource: walletCurrency === cfg.currency ? 'same_currency' : 'wallet_valuation',
+      rateSource: walletCurrency === cfg.currency ? 'same_currency' : 'user_entered_opening',
       idempotencyKey: `opening-balance:${next.id}`,
     };
     try {
@@ -559,19 +536,22 @@ export const createManagementSlice = (set, get) => ({
     return next;
   },
 
-  reconcileWalletBalance: async (id, actualBalance, dateISO = today(), note = '') => {
+  reconcileWalletBalance: async (id, actualBalance, dateISO = today(), note = '', exchangeRate = null) => {
     const cfg = get().cfg;
     const wallets = normalizeWallets(get().wallets, cfg.currency);
     const wallet = wallets.find(item => item.id === id);
     const actual = Number(actualBalance);
     if (!wallet || !Number.isFinite(actual)) return { ok: false, reason: 'invalid_balance' };
-    const current = getWalletBalances(wallets, get().trans, cfg.currency, cfg.defaultWalletId)
-      .find(item => item.id === id);
+    const current = await walletBalanceForManagementCommand(get, id);
     if (!current) return { ok: false, reason: 'wallet_not_found' };
     const difference = actual - Number(current.balance || 0);
     const epsilon = 1 / (10 ** 3);
     if (Math.abs(difference) < epsilon) return { ok: true, noChange: true, difference: 0 };
-    const rate = wallet.currency === cfg.currency ? 1 : Number(wallet.valuationRate || 1);
+    const explicitRate = Number(exchangeRate);
+    if (wallet.currency !== cfg.currency && !(Number.isFinite(explicitRate) && explicitRate > 0)) {
+      return { ok: false, reason: 'historical_fx_required' };
+    }
+    const rate = wallet.currency === cfg.currency ? 1 : explicitRate;
     const fields = buildCurrencyFields({
       amount: difference,
       walletId: id,
@@ -597,7 +577,7 @@ export const createManagementSlice = (set, get) => ({
       reconciliationFrom: Number(current.balance || 0),
       reconciliationTo: actual,
       rateDate: normalizeDate(dateISO),
-      rateSource: wallet.currency === cfg.currency ? 'same_currency' : 'wallet_valuation',
+      rateSource: wallet.currency === cfg.currency ? 'same_currency' : 'user_entered_reconciliation',
       idempotencyKey: `balance-adjustment:${uid()}`,
     };
     try {
@@ -624,35 +604,46 @@ export const createManagementSlice = (set, get) => ({
   },
 
   editWallet: async (id, patch) => {
-    const current = normalizeWallets(get().wallets, get().cfg.currency).find(wallet => wallet.id === id);
+    const cfg = get().cfg;
+    const current = normalizeWallets(get().wallets, cfg.currency).find(wallet => wallet.id === id);
     if (!current) return false;
-    const requestedCurrency = String(patch?.currency || current.currency || get().cfg.currency).toUpperCase();
+    const requestedCurrency = String(patch?.currency || current.currency || cfg.currency).toUpperCase();
     const hasHistory = get().trans.some(tx => tx.walletId === id || tx.fromWalletId === id || tx.toWalletId === id);
     if (hasHistory && requestedCurrency !== current.currency) return false;
-    const valuationRate = Number(patch?.valuationRate ?? current.valuationRate ?? 1);
-    const safeRate = Number.isFinite(valuationRate) && valuationRate > 0 ? valuationRate : 1;
-    set(s => ({
-      wallets: normalizeWallets(s.wallets, s.cfg.currency).map(wallet => {
-        if (wallet.id !== id) return wallet;
-        const ledgerOpening = wallet.openingBalanceMode === 'ledger';
-        const openingBalance = ledgerOpening
-          ? Number(wallet.openingBalance || 0)
-          : Number(patch?.openingBalance ?? wallet.openingBalance ?? 0);
-        return {
-          ...wallet,
-          ...(patch || {}),
-          currency: requestedCurrency,
-          valuationRate: requestedCurrency === s.cfg.currency ? 1 : safeRate,
-          openingBalance,
-          openingBalanceMode: ledgerOpening ? 'ledger' : 'legacy',
-          openingBaseBalance: ledgerOpening
-            ? Number(wallet.openingBaseBalance || 0)
-            : requestedCurrency === s.cfg.currency
-              ? openingBalance
-              : Number(patch?.openingBaseBalance ?? openingBalance * safeRate),
-        };
-      }),
-    }));
+    const valuationRate = Number(patch?.valuationRate ?? current.valuationRate);
+    if (requestedCurrency !== cfg.currency && !(Number.isFinite(valuationRate) && valuationRate > 0)) return false;
+    const safeRate = requestedCurrency === cfg.currency ? 1 : valuationRate;
+    const ledgerOpening = current.openingBalanceMode === 'ledger';
+    const openingBalance = ledgerOpening
+      ? Number(current.openingBalance || 0)
+      : Number(patch?.openingBalance ?? current.openingBalance ?? 0);
+    const next = {
+      ...current,
+      ...(patch || {}),
+      currency: requestedCurrency,
+      valuationRate: safeRate,
+      valuationUpdatedAt: requestedCurrency === cfg.currency
+        ? null
+        : (Object.prototype.hasOwnProperty.call(patch || {}, 'valuationRate') ? new Date().toISOString() : current.valuationUpdatedAt || null),
+      openingBalance,
+      openingBalanceMode: ledgerOpening ? 'ledger' : 'legacy',
+      openingBaseBalance: ledgerOpening
+        ? Number(current.openingBaseBalance || 0)
+        : requestedCurrency === cfg.currency
+          ? openingBalance
+          : Number(patch?.openingBaseBalance ?? openingBalance * safeRate),
+    };
+    try {
+      const committed = await commitEntityChangesV7({
+        namespace: getLedgerNamespace(get().workspaceNamespace, cfg),
+        changes: [{ entityType: 'wallet', id, payload: next }],
+      });
+      if (committed.supported && !committed.ok) return false;
+    } catch (error) {
+      set({ ledgerError: String(error?.message || 'financial_v7_wallet_edit_failed') });
+      return false;
+    }
+    set(state => ({ wallets: normalizeWallets(state.wallets, state.cfg.currency).map(wallet => wallet.id === id ? next : wallet) }));
     await get().saveLocal();
     get().scheduleCloudSync?.('wallet_edit');
     return true;
@@ -660,25 +651,32 @@ export const createManagementSlice = (set, get) => ({
 
   deleteWallet: async (id) => {
     const normalized = normalizeWallets(get().wallets, get().cfg.currency);
-    if (normalized.length <= 1 || !normalized.some(wallet => wallet.id === id)) return false;
+    const currentWallet = normalized.find(wallet => wallet.id === id);
+    if (normalized.length <= 1 || !currentWallet) return false;
     const hasHistory = get().trans.some(tx => tx.walletId === id || tx.fromWalletId === id || tx.toWalletId === id);
     if (hasHistory) return false;
     const fallback = normalized.find(wallet => wallet.id !== id && wallet.id === get().cfg.defaultWalletId)
       || normalized.find(wallet => wallet.id !== id)
       || normalized[0];
-    set(s => ({
-      wallets: normalized.filter(wallet => wallet.id !== id),
+    const nextCommitments = get().commitments.map(item => item.walletId === id ? { ...item, walletId: fallback.id } : item);
+    const changedCommitments = nextCommitments.filter((item, index) => item !== get().commitments[index]);
+    const deletedAt = new Date().toISOString();
+    const committed = await commitEntityChangesV7({
+      namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+      changes: [
+        { entityType: 'wallet', id, deletedAt, payload: { ...currentWallet, deletedAt, status: 'deleted' } },
+        ...changedCommitments.map(payload => ({ entityType: 'commitment', id: payload.id, payload })),
+      ],
+    });
+    if (committed.supported && !committed.ok) return false;
+    const remaining = normalized.filter(wallet => wallet.id !== id);
+    set(state => ({
+      wallets: remaining,
       cfg: {
-        ...s.cfg,
-        defaultWalletId: s.cfg.defaultWalletId === id ? fallback.id : getDefaultWalletId(normalized.filter(wallet => wallet.id !== id), s.cfg.currency, s.cfg.defaultWalletId),
+        ...state.cfg,
+        defaultWalletId: state.cfg.defaultWalletId === id ? fallback.id : getDefaultWalletId(remaining, state.cfg.currency, state.cfg.defaultWalletId),
       },
-      trans: s.trans.map(tx => ({
-        ...tx,
-        walletId: tx.walletId === id ? fallback.id : tx.walletId,
-        fromWalletId: tx.fromWalletId === id ? fallback.id : tx.fromWalletId,
-        toWalletId: tx.toWalletId === id ? fallback.id : tx.toWalletId,
-      })).filter(tx => tx.kind !== 'transfer' || tx.fromWalletId !== tx.toWalletId),
-      commitments: s.commitments.map(item => item.walletId === id ? { ...item, walletId: fallback.id } : item),
+      commitments: nextCommitments,
     }));
     await get().saveLocal({ force: financialDataCount(get()) === 0 });
     get().scheduleCloudSync?.('management_change');
@@ -693,55 +691,49 @@ export const createManagementSlice = (set, get) => ({
     if (hasHistory) return false;
     const remaining = normalized.filter(wallet => !selected.has(wallet.id));
     const fallback = remaining.find(wallet => wallet.id === get().cfg.defaultWalletId) || remaining[0];
-    set(s => ({
+    const nextCommitments = get().commitments.map(item => selected.has(item.walletId) ? { ...item, walletId: fallback.id } : item);
+    const changedCommitments = nextCommitments.filter((item, index) => item !== get().commitments[index]);
+    const deletedAt = new Date().toISOString();
+    const committed = await commitEntityChangesV7({
+      namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+      changes: [
+        ...normalized.filter(wallet => selected.has(wallet.id)).map(wallet => ({ entityType: 'wallet', id: wallet.id, deletedAt, payload: { ...wallet, deletedAt, status: 'deleted' } })),
+        ...changedCommitments.map(payload => ({ entityType: 'commitment', id: payload.id, payload })),
+      ],
+    });
+    if (committed.supported && !committed.ok) return false;
+    set(state => ({
       wallets: remaining,
-      cfg: {
-        ...s.cfg,
-        defaultWalletId: fallback.id,
-      },
-      trans: s.trans
-        .map(tx => ({
-          ...tx,
-          walletId: selected.has(tx.walletId) ? fallback.id : tx.walletId,
-          fromWalletId: selected.has(tx.fromWalletId) ? fallback.id : tx.fromWalletId,
-          toWalletId: selected.has(tx.toWalletId) ? fallback.id : tx.toWalletId,
-        }))
-        .filter(tx => tx.kind !== 'transfer' || tx.fromWalletId !== tx.toWalletId),
-      commitments: s.commitments.map(item => (
-        selected.has(item.walletId) ? { ...item, walletId: fallback.id } : item
-      )),
+      cfg: { ...state.cfg, defaultWalletId: fallback.id },
+      commitments: nextCommitments,
     }));
     await get().saveLocal({ force: financialDataCount(get()) === 0 });
     get().scheduleCloudSync?.('management_change');
     return true;
   },
 
-  setTransCatToOther: async (catId) => {
-    set(s => ({ trans: s.trans.map(t => t.cat === catId ? { ...t, cat: 'other' } : t) }));
-    await get().saveLocal();
-    get().scheduleCloudSync?.('management_change');
+  setTransCatToOther: async () => {
+    // Historical category identity is immutable. Category retirement is handled
+    // by deleteCategoriesMany without rewriting posted transactions.
+    return false;
   },
 
   deleteCategoriesMany: async (ids = []) => {
     const selected = new Set((Array.isArray(ids) ? ids : []).filter(id => id && id !== 'other'));
     if (!selected.size) return false;
-    set(s => {
-      const categoryBudgets = { ...(s.cfg.categoryBudgets || {}) };
-      selected.forEach(id => delete categoryBudgets[id]);
-      const categoryBudgetsByMonth = Object.fromEntries(
-        Object.entries(s.cfg.categoryBudgetsByMonth || {}).map(([month, map]) => {
-          const nextMap = { ...(map || {}) };
-          selected.forEach(id => delete nextMap[id]);
-          return [month, nextMap];
-        }).filter(([, map]) => Object.keys(map).length > 0),
-      );
-      return {
-        cats: s.cats.filter(cat => !selected.has(cat.id)),
-        trans: s.trans.map(item => selected.has(item.cat) ? { ...item, cat: 'other' } : item),
-        commitments: s.commitments.map(item => selected.has(item.cat) ? { ...item, cat: 'other' } : item),
-        cfg: { ...s.cfg, categoryBudgets, categoryBudgetsByMonth },
-      };
+    const archivedAt = new Date().toISOString();
+    const cats = get().cats.map(cat => selected.has(cat.id) ? { ...cat, archivedAt, status: 'archived' } : cat);
+    const commitments = get().commitments.map(item => selected.has(item.cat) ? { ...item, categoryArchived: true } : item);
+    const categoryChanges = cats.filter(cat => selected.has(cat.id)).map(payload => ({ entityType: 'category', id: payload.id, payload }));
+    const commitmentChanges = commitments.filter((item, index) => item !== get().commitments[index]).map(payload => ({ entityType: 'commitment', id: payload.id, payload }));
+    const committed = await commitEntityChangesV7({
+      namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
+      changes: [...categoryChanges, ...commitmentChanges],
     });
+    if (committed.supported && !committed.ok) return false;
+    // Keep historical category IDs and old budget references intact. Archived
+    // categories disappear from new-entry pickers but remain resolvable in history.
+    set({ cats, commitments });
     await get().saveLocal();
     get().scheduleCloudSync?.('management_change');
     return true;

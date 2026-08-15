@@ -134,6 +134,7 @@ const pageCopy = (lang = 'ar') => {
     password: ar ? 'كلمة المرور' : 'Password',
     forgotPassword: ar ? 'نسيت كلمة المرور' : 'Forgot password',
     signOut: ar ? 'تسجيل الخروج من هذا الجهاز' : 'Sign out on this device',
+    signOutSub: ar ? 'يتم فصل جلسة MYFI فقط؛ تبقى بياناتك المالية محفوظة على هذا الجهاز.' : 'Only the MYFI cloud session is disconnected; your financial data stays on this device.',
     signOutOthers: ar ? 'تسجيل الخروج من الجلسات الأخرى' : 'Sign out other sessions',
     signOutOthersSub: ar ? 'يبقى هذا الجهاز مسجلاً بالدخول.' : 'This device stays signed in.',
     thisDevice: ar ? 'هذا الجهاز' : 'This device',
@@ -457,18 +458,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
         onSelect: async (_, option) => {
           const country = option.raw;
           if (!country) return;
-          const currencyPatch = country.currency && CURRENCIES.some(item => item.code === country.currency)
-            ? { currency: country.currency }
-            : {};
-          const result = await setCfg({ country: country.code, ...currencyPatch });
-          if (result?.reason === 'base_currency_locked') {
-            Alert.alert(
-              isAr ? 'تم تغيير الدولة فقط' : 'Country changed only',
-              isAr
-                ? `تم تحديث الدولة، لكن العملة الأساسية بقيت ${cfg.currency} لأن السجل يحتوي بيانات مالية.`
-                : `The country was updated, but the base currency remains ${cfg.currency} because this ledger already contains financial history.`,
-            );
-          }
+          // Country is context only. Base currency is a separate ledger decision.
+          await setCfg({ country: country.code });
         },
       };
     }
@@ -696,7 +687,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
       cloudDeleted = true;
 
       try { await supabase.auth.signOut({ scope: 'local' }); } catch {}
-      await setUser(null);
+      await setUser(null, { preserveWorkspaceOnLogout: false, switchToGuest: true });
       await cleanupDeletedAccountLocalNamespace(localPreservation?.accountNamespace);
       setDeleteAccountOpen(false);
       Alert.alert('', T.deleteAccountDone);
@@ -1296,7 +1287,7 @@ function AccountPage({
 
           <SectionLabel th={th} isAr={isAr} text={T.dangerZone} />
           <MenuGroup th={th}>
-            <MenuRow th={th} isAr={isAr} icon="log-out-outline" iconColor={th.exp} title={T.signOut} danger onPress={onSignOut} />
+            <MenuRow th={th} isAr={isAr} icon="log-out-outline" iconColor={th.exp} title={T.signOut} subtitle={T.signOutSub} danger onPress={onSignOut} />
             <MenuRow th={th} isAr={isAr} icon="trash-outline" iconColor={th.exp} title={T.deleteAccount} subtitle={T.deleteAccountSub} danger onPress={onDeleteAccount} last />
           </MenuGroup>
         </>
@@ -1327,7 +1318,7 @@ function DevicesPage({ th, isAr, T, user, syncState, lastSyncedAt, onSignOutOthe
       {user ? (
         <MenuGroup th={th}>
           <MenuRow th={th} isAr={isAr} icon="shield-outline" title={T.signOutOthers} subtitle={T.signOutOthersSub} danger onPress={onSignOutOthers} />
-          <MenuRow th={th} isAr={isAr} icon="log-out-outline" iconColor={th.exp} title={T.signOut} danger onPress={onSignOut} last />
+          <MenuRow th={th} isAr={isAr} icon="log-out-outline" iconColor={th.exp} title={T.signOut} subtitle={T.signOutSub} danger onPress={onSignOut} last />
         </MenuGroup>
       ) : (
         <View style={[s.noticeCard, { backgroundColor: th.card, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
@@ -1432,7 +1423,7 @@ function SupportPage({ th, isAr, T, onOpenGuide, onOpenContact, onOpenAccount, o
 function GuidePage({ th, isAr, T, onOpenFinancial, onOpenAccount }) {
   const [openGuide, setOpenGuide] = useState('start');
   const guides = [
-    { key: 'start', icon: 'rocket-outline', title: T.gettingStarted, sub: T.gettingStartedSub, steps: isAr ? ['اختر الدولة والعملة الأساسية قبل بدء السجل المالي.', 'بعد أول سجل مالي تبقى العملة الأساسية ثابتة للتقارير، ويمكنك إضافة محافظ بعملات أخرى.', 'كل حركة بعملة مختلفة تحفظ مبلغها وسعر صرفها التاريخي ولا تتغير بتغير سعر المحفظة لاحقاً.'] : ['Choose your country and base currency before starting financial history.', 'After financial history starts, the base currency stays fixed for reporting; you can still add wallets in other currencies.', 'Each foreign-currency transaction keeps its original amount and historical exchange rate; later wallet-rate changes do not rewrite it.'] },
+    { key: 'start', icon: 'rocket-outline', title: T.gettingStarted, sub: T.gettingStartedSub, steps: isAr ? ['اختر الدولة ثم أكد العملة الأساسية بشكل مستقل قبل بدء السجل المالي.', 'بعد أول سجل مالي تبقى العملة الأساسية ثابتة للتقارير، ويمكنك إضافة محافظ بعملات أخرى.', 'كل حركة بعملة مختلفة تحفظ مبلغها وسعر صرفها التاريخي ولا تتغير بتغير سعر المحفظة لاحقاً.'] : ['Choose your country, then confirm the base currency separately before starting financial history.', 'After financial history starts, the base currency stays fixed for reporting; you can still add wallets in other currencies.', 'Each foreign-currency transaction keeps its original amount and historical exchange rate; later wallet-rate changes do not rewrite it.'] },
     { key: 'daily', icon: 'receipt-outline', title: T.dailyMoney, sub: T.dailyMoneySub, steps: isAr ? ['استخدم الإجراءات المباشرة.', 'راجع السجل للتفاصيل.', 'صحح أو كرر الحركة عند الحاجة.'] : ['Use Direct actions.', 'Use History for detail.', 'Edit or duplicate when needed.'] },
     { key: 'planning', icon: 'layers-outline', title: T.planningGuide, sub: T.planningGuideSub, steps: isAr ? ['أضف الدين أو هدف التوفير.', 'اربط الالتزام الشهري عند الحاجة.', 'راجع المتبقي والتقدم من المتابعات.'] : ['Add a debt or saving goal.', 'Link a monthly commitment when needed.', 'Review remaining amounts and progress in Trackers.'] },
     { key: 'reports', icon: 'bar-chart-outline', title: T.reportsGuide, sub: T.reportsGuideSub, steps: isAr ? ['اختر الفترة أولاً.', 'ابدأ بالتدفق النقدي وصافي الدخل.', 'استخدم المقارنة بعد توفر أكثر من فترة.'] : ['Choose the period first.', 'Start with cash flow and net income.', 'Use comparison after multiple periods exist.'] },

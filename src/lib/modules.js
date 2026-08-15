@@ -93,7 +93,12 @@ export const defaultScopeForProfile = (profileType = PROFILE_TYPES.PERSONAL) => 
 export const getActiveScope = (cfg = {}) => {
   if (cfg.profileType === PROFILE_TYPES.PERSONAL) return SCOPES.PERSONAL;
   if (cfg.profileType === PROFILE_TYPES.BUSINESS) return SCOPES.BUSINESS;
-  return SCOPES.ALL;
+  if (cfg.profileType === PROFILE_TYPES.MIXED) {
+    return [SCOPES.PERSONAL, SCOPES.BUSINESS, SCOPES.ALL].includes(cfg.activeScope)
+      ? cfg.activeScope
+      : SCOPES.ALL;
+  }
+  return SCOPES.PERSONAL;
 };
 
 export const getEntryScope = (cfg = {}) => {
