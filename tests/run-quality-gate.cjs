@@ -29,6 +29,7 @@ const staticContracts = [
   'financial-ledger-v7-device-harness.test.cjs',
   'financial-ledger-migration-infrastructure.test.cjs',
   'financial-mutation-sync-e2e-contract.test.cjs',
+  'financial-safety-r02.test.cjs',
   'lifecycle-reset-wallet-search.test.cjs',
   'onboarding-preview.test.cjs',
   'performance-data-lab-v51.test.cjs',

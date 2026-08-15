@@ -1,4 +1,4 @@
-// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
+﻿// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Appearance, BackHandler, I18nManager, Image, Linking, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -357,7 +357,7 @@ function AppRoot() {
       ar ? 'مراجعة دمج البيانات' : 'Review data merge',
       ar
         ? `توجد بيانات محفوظة على هذا الجهاز قبل تسجيل الدخول. إذا وافقت، سيضيف MYFI المعلومات المختلفة فقط، ويدمج المعلومات المكررة حتى لا تظهر مرتين. ${previewLine} سنحفظ نقطة رجوع قبل التنفيذ.`
-        : `Data saved on this device was found before sign-in. If you continue, MYFI will add only different information and merge duplicates so they do not appear twice. ${previewLine} A rollback point will be saved before the change.`,
+        : `Data saved on this device was found before sign-in. If you continue, MYFI will add only different information; duplicates are merged without repetition. ${previewLine} A rollback point will be saved before the change.`,
       [
         {
           text: ar ? 'إبقاؤها منفصلة' : 'Keep separate',
@@ -428,15 +428,9 @@ function AppRoot() {
     conflictPromptOpen.current = true;
     const ar = cfg.lang === 'ar';
     if (syncConflict.type === 'merged_changes' && !syncConflict.cloud) {
-      const count = Number(syncConflict.total || syncConflict.items?.length || 0);
-      Alert.alert(
-        ar ? 'تم دمج تغييرات الأجهزة' : 'Device changes merged',
-        ar
-          ? `تمت إضافة المعلومات المختلفة ودمج المتكرر أو المتعارض البسيط بدون تكرار. عدد البنود التي راجعها النظام: ${count}. راجع السجل والمحافظ إذا تريد التأكد.`
-          : `Different information was added and duplicate or simple overlapping records were merged without repetition. Items reviewed: ${count}. Review history and wallets if you want to verify.`,
-        [{ text: ar ? 'فهمت' : 'Got it', onPress: async () => { await resolveSyncConflict('dismiss'); conflictPromptOpen.current = false; } }],
-        { cancelable: false },
-      );
+      resolveSyncConflict('dismiss').finally(() => {
+        conflictPromptOpen.current = false;
+      });
       return;
     }
     Alert.alert(

@@ -16,7 +16,7 @@ import { rowDirFor, textAlignFor, writingDirectionFor } from '../lib/layout';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
 import { filterByActiveScope, getTransactionDisplayAmount, isExpenseFlow, isIncomeFlow } from '../lib/modules';
 import { getTransactionTagMeta } from '../lib/transactionTags';
-import { getVisibleHistoryTransactions } from '../lib/history';
+import { getVisibleHistoryTransactions, ledgerPageCoversFallback } from '../lib/history';
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import { getTransactionsNewestFirst } from '../lib/transactionIndex';
 import { activeLedgerSupported, getLedgerNamespace, queryLedgerTransactions } from '../lib/activeLedgerRepository';
@@ -300,7 +300,7 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
       // A lagging/mismatched SQLite mirror must never erase rows that are
       // already present in the active UI cache. Keep the compatible result
       // visible until the ledger query catches up.
-      if (!append && visible.length === 0 && filteredFallback.length > 0) {
+      if (!append && !ledgerPageCoversFallback(visible, filteredFallback, 250)) {
         setLedgerQueryOk(false);
         setLedgerCursor(null);
         return;
@@ -474,9 +474,11 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
     const title = isTransfer ? T.walletTransfer : item.title;
     const entryWallet = findWallet(item.walletId);
     const nativeCurrency = String(item.walletCurrency || entryWallet?.currency || cfg.currency).toUpperCase();
-    const nativeAmount = Object.prototype.hasOwnProperty.call(item || {}, 'walletAmount')
-      ? Number(item.walletAmount || 0)
-      : Number(amount || 0);
+    const nativeAmount = isGoalSaving
+      ? -Math.abs(Number(item.allocationWalletAmount ?? item.allocationAmount ?? 0))
+      : Object.prototype.hasOwnProperty.call(item || {}, 'walletAmount')
+        ? Number(item.walletAmount || 0)
+        : Number(amount || 0);
     const fromCurrency = String(item.fromCurrency || fromWallet?.currency || cfg.currency).toUpperCase();
     const toCurrency = String(item.toCurrency || toWallet?.currency || cfg.currency).toUpperCase();
     const transferDisplay = `${formatMoneyNumber(Math.abs(Number(item.transferFromAmount ?? item.transferAmount ?? 0)), fromCurrency, cfg.lang)} ${getSymbol(fromCurrency)} → ${formatMoneyNumber(Math.abs(Number(item.transferToAmount ?? item.transferAmount ?? 0)), toCurrency, cfg.lang)} ${getSymbol(toCurrency)}`;

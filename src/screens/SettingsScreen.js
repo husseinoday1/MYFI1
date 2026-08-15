@@ -454,13 +454,21 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
           leading: item.flag,
           raw: item,
         })),
-        onSelect: (_, option) => {
+        onSelect: async (_, option) => {
           const country = option.raw;
           if (!country) return;
           const currencyPatch = country.currency && CURRENCIES.some(item => item.code === country.currency)
             ? { currency: country.currency }
             : {};
-          setCfg({ country: country.code, ...currencyPatch });
+          const result = await setCfg({ country: country.code, ...currencyPatch });
+          if (result?.reason === 'base_currency_locked') {
+            Alert.alert(
+              isAr ? 'تم تغيير الدولة فقط' : 'Country changed only',
+              isAr
+                ? `تم تحديث الدولة، لكن العملة الأساسية بقيت ${cfg.currency} لأن السجل يحتوي بيانات مالية.`
+                : `The country was updated, but the base currency remains ${cfg.currency} because this ledger already contains financial history.`,
+            );
+          }
         },
       };
     }
@@ -474,7 +482,17 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
           detail: `${item.sym} · ${isAr ? item.name : item.nameEn}`,
           leading: item.sym,
         })),
-        onSelect: value => setCfg({ currency: value }),
+        onSelect: async value => {
+          const result = await setCfg({ currency: value });
+          if (result?.reason === 'base_currency_locked') {
+            Alert.alert(
+              isAr ? 'العملة الأساسية ثابتة' : 'Base currency is locked',
+              isAr
+                ? `السجل يحتوي بيانات مالية، لذلك تبقى العملة الأساسية ${cfg.currency}. يمكنك إضافة محافظ بعملات أخرى بدون تغيير التاريخ.`
+                : `This ledger already contains financial history, so the base currency remains ${cfg.currency}. You can still add wallets in other currencies.`,
+            );
+          }
+        },
       };
     }
     return null;

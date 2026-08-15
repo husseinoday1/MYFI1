@@ -30,3 +30,42 @@ Phase 1 لا تصبح `passed` بالكامل إلا بعد: install/cold start/
 - `tests/financial-ledger-migration-infrastructure.test.cjs`: **PASS** — journal DDL + V7 idempotent adoption + existing `amount_minor` unchanged.
 - `tests/financial-core-phase23-release-gate.cjs`: **PASS**.
 - Full runtime gate في بيئة إعداد الحزمة لم يُعلن PASS لأن snapshot لا يحتوي `node_modules` والـoffline npm cache غير كامل. يجب تشغيله على محطة التطوير ضمن `TEST_RELEASE.ps1`.
+
+
+## R01 real-device findings — 2026-08-15
+
+EAS Preview APK was installed on a real Android device without clearing app data.
+
+Observed PASS:
+- app opened without crash/blank screen;
+- existing wallets, history and balances remained present;
+- income, expense and transfer changed balances as expected;
+- edit/void behavior preserved balances in the tested cases;
+- force-close/reopen preserved data;
+- offline expense survived reopen;
+- reconnect did not create a duplicate transaction;
+- rotation behavior matched the selected MYFI setting.
+
+Observed BLOCKERS / regressions carried into R02:
+- a freshly committed transaction could update balances but intermittently disappear from History / become non-editable because an incomplete SQLite page replaced the UI fallback;
+- goal saving / saving-backed commitment rows displayed zero native amount because `walletAmount=0` was rendered instead of `allocationWalletAmount`;
+- guest merge relabelled imported guest-wallet currency to the current workspace currency;
+- informational merge/conflict alerts could overlap and remove the user's decision window;
+- automatic cloud sync had no bounded scheduled retry after a failed scheduled attempt.
+
+Decision:
+R01 is retained as an evidence checkpoint but Phase 1 is not declared fully passed. The above findings are release blockers for R02.
+
+## R02 — Phase 3 Financial Safety + Phase 4 Invariant Foundation
+
+| Claim ID | Description | Evidence | Status | Test type | Environment | Device | App version | DB schema | Dataset | Result | Failure reason | Decision | Date |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R02-P03-BASE-001 | Base currency cannot change after financial history/opening value exists | `src/store/useStore.js` + `tests/financial-safety-r02.test.cjs` | passed | static contract | Node/source | n/a | 1.0.0 | V7 | source tree | central Store guard blocks currency relabel | device UX pending | verify once on R02 APK | 2026-08-15 |
+| R02-P03-GUEST-001 | Guest→Account import preserves wallet currency | `src/store/slices/useSyncSlice.js` | passed | static contract | Node/source | n/a | 1.0.0 | V7 | source tree | original wallet currency preserved | full device merge pending | no financial reinterpretation allowed | 2026-08-15 |
+| R02-P04-HIST-001 | Incomplete SQLite query cannot hide an already-visible transaction | `ledgerPageCoversFallback()` + History regression test | passed | static/runtime-pure helper | Node | n/a | 1.0.0 | V7 | synthetic IDs | incomplete page rejected | real-device confirmation pending | fallback remains visible until parity | 2026-08-15 |
+| R02-P04-GOAL-001 | Goal saving history uses allocation wallet amount | `HistoryScreen.js` | passed | static contract | Node/source | n/a | 1.0.0 | V7 | source tree | saving amount no longer rendered as zero | device UI pending | verify with direct saving + commitment→goal payment | 2026-08-15 |
+| R02-P04-SYNC-001 | Scheduled sync retries transient failure with bounded backoff | `useSyncSlice.js` | passed | static contract | Node/source | n/a | 1.0.0 | V7 | source tree | 0.7s/3s/10s/30s bounded schedule | network/device test pending | no infinite hot loop | 2026-08-15 |
+| R02-P04-INV-001 | SQLite invariant proof derives balances from authoritative postings | `proveFinancialLedgerInvariantsV7()` | passed | source + native harness contract | Node/source | pending | 1.0.0 | V7 | disposable harness namespace | checks quick_check/FK/postings/transfers/revisions/FX/opening + SUM(postings) | native execution pending | required in R02 device gate | 2026-08-15 |
+
+Architectural conflict retained for a dedicated controlled correction:
+current V7 shadow-migration implementation can mark `source_mode='sqlite'` earlier than the Frozen Master Plan's Phase 8 cutover gate. R02 does not reverse that pointer blindly because the installed device may already contain V7-only writes. No destructive source-mode rollback is performed in this release.

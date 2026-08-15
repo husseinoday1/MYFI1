@@ -866,6 +866,114 @@ export const readFinancialProjectionV7 = async ({ namespace = 'guest', database 
   };
 };
 
+
+export const proveFinancialLedgerInvariantsV7 = async ({ namespace = 'guest', database = null } = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return { supported: false, ok: false, level: 'BLOCKING', issues: [{ code: 'sqlite_unavailable' }], walletBalances: [] };
+  await ensureFinancialLedgerV7(db);
+  const namespaceValue = String(namespace || 'guest');
+  const issues = [];
+
+  const quickRow = await db.getFirstAsync('PRAGMA quick_check');
+  const quickCheck = quickRow ? String(Object.values(quickRow)[0] || '').toLowerCase() : '';
+  if (quickCheck !== 'ok') issues.push({ code: 'sqlite_quick_check_failed' });
+
+  const foreignKeyRows = await db.getAllAsync('PRAGMA foreign_key_check');
+  if ((foreignKeyRows || []).length) issues.push({ code: 'foreign_key_violation', count: foreignKeyRows.length });
+
+  const missingPostings = await db.getFirstAsync(
+    `SELECT COUNT(*) AS n
+       FROM ledger_financial_transactions_v7 tx
+      WHERE tx.namespace=? AND tx.deleted_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM ledger_postings_v7 p
+           WHERE p.namespace=tx.namespace AND p.transaction_id=tx.id
+        )`,
+    namespaceValue,
+  );
+  if (Number(missingPostings?.n || 0)) issues.push({ code: 'transactions_without_postings', count: Number(missingPostings.n) });
+
+  const invalidRevisions = await db.getFirstAsync(
+    `SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7
+      WHERE namespace=? AND revision<1`,
+    namespaceValue,
+  );
+  if (Number(invalidRevisions?.n || 0)) issues.push({ code: 'invalid_transaction_revision', count: Number(invalidRevisions.n) });
+
+  const invalidTransfers = await db.getFirstAsync(
+    `SELECT COUNT(*) AS n FROM (
+       SELECT tx.id,
+              SUM(CASE WHEN p.role='transfer_source' AND p.amount_minor<0 THEN 1 ELSE 0 END) AS sources,
+              SUM(CASE WHEN p.role='transfer_destination' AND p.amount_minor>0 THEN 1 ELSE 0 END) AS destinations
+         FROM ledger_financial_transactions_v7 tx
+         LEFT JOIN ledger_postings_v7 p
+           ON p.namespace=tx.namespace AND p.transaction_id=tx.id
+        WHERE tx.namespace=? AND tx.deleted_at IS NULL AND tx.kind='transfer'
+        GROUP BY tx.id
+       HAVING sources<>1 OR destinations<>1
+     )`,
+    namespaceValue,
+  );
+  if (Number(invalidTransfers?.n || 0)) issues.push({ code: 'invalid_transfer_legs', count: Number(invalidTransfers.n) });
+
+  const unresolvedFx = await db.getFirstAsync(
+    `SELECT COUNT(*) AS n
+       FROM ledger_postings_v7 p
+       JOIN ledger_financial_transactions_v7 tx
+         ON tx.namespace=p.namespace AND tx.id=p.transaction_id
+      WHERE p.namespace=? AND tx.deleted_at IS NULL
+        AND UPPER(p.currency_code)<>UPPER(COALESCE(json_extract(tx.payload_json,'$.baseCurrencyCode'),p.currency_code))
+        AND p.exchange_rate_id IS NULL`,
+    namespaceValue,
+  );
+  if (Number(unresolvedFx?.n || 0)) issues.push({ code: 'UNRESOLVED_FX', count: Number(unresolvedFx.n) });
+
+  const duplicateOpeningRows = await db.getAllAsync(
+    `SELECT p.account_id,COUNT(*) AS n
+       FROM ledger_postings_v7 p
+       JOIN ledger_financial_transactions_v7 tx
+         ON tx.namespace=p.namespace AND tx.id=p.transaction_id
+      WHERE p.namespace=? AND tx.deleted_at IS NULL AND tx.kind='opening_balance'
+      GROUP BY p.account_id
+     HAVING COUNT(*)>1`,
+    namespaceValue,
+  );
+  if ((duplicateOpeningRows || []).length) {
+    issues.push({
+      code: 'duplicate_opening_balance',
+      accounts: duplicateOpeningRows.map(row => ({ accountId: String(row.account_id), count: Number(row.n || 0) })),
+    });
+  }
+
+  const walletBalances = await db.getAllAsync(
+    `SELECT a.id AS account_id,a.currency_code,COALESCE(SUM(
+              CASE WHEN tx.deleted_at IS NULL THEN p.amount_minor ELSE 0 END
+            ),0) AS balance_minor
+       FROM ledger_accounts_v7 a
+       LEFT JOIN ledger_postings_v7 p
+         ON p.namespace=a.namespace AND p.account_id=a.id
+       LEFT JOIN ledger_financial_transactions_v7 tx
+         ON tx.namespace=p.namespace AND tx.id=p.transaction_id
+      WHERE a.namespace=?
+      GROUP BY a.id,a.currency_code
+      ORDER BY a.id`,
+    namespaceValue,
+  );
+
+  return {
+    supported: true,
+    ok: issues.length === 0,
+    level: issues.length ? 'BLOCKING' : 'HEALTHY',
+    quickCheck,
+    issues,
+    walletBalances: (walletBalances || []).map(row => ({
+      accountId: String(row.account_id),
+      currencyCode: String(row.currency_code),
+      balanceMinor: Number(row.balance_minor || 0),
+    })),
+  };
+};
+
 export const getFinancialWorkspaceStateV7 = async ({ namespace = 'guest', database = null } = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return null;

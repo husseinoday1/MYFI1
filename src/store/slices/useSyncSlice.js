@@ -48,6 +48,8 @@ import {
 let syncQueue = Promise.resolve();
 let scheduledSyncTimer = null;
 let scheduledSyncReason = 'local_change';
+let scheduledSyncAttempt = 0;
+const SCHEDULED_SYNC_DELAYS_MS = [700, 3000, 10000, 30000];
 const FRESH_TEST_MODE = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
 const FRESH_TEST_NAMESPACE = 'fresh-test-new-user';
 
@@ -56,6 +58,37 @@ const syncBaseNamespace = namespace => `sync-base:${String(namespace || GUEST_NA
 const SYNC_MAX_ATTEMPTS = 4;
 const SYNC_CLOUD_COLUMNS = 'user_id,trans,debts,goals,wallets,commitments,cats,cfg,revision,updated_at';
 const syncRetryDelay = attempt => new Promise(resolve => setTimeout(resolve, Math.min(600, 120 * (attempt + 1))));
+const normalizeScheduledSyncReason = value => (
+  typeof value === 'object' && value ? String(value.reason || 'local_change') : String(value || 'local_change')
+);
+const armScheduledCloudSync = (get, reason, attempt = 0) => {
+  scheduledSyncReason = normalizeScheduledSyncReason(reason || scheduledSyncReason);
+  scheduledSyncAttempt = Math.max(0, Number(attempt) || 0);
+  if (scheduledSyncTimer) clearTimeout(scheduledSyncTimer);
+  const delay = SCHEDULED_SYNC_DELAYS_MS[Math.min(scheduledSyncAttempt, SCHEDULED_SYNC_DELAYS_MS.length - 1)];
+  scheduledSyncTimer = setTimeout(async () => {
+    scheduledSyncTimer = null;
+    const current = get();
+    if (!current.user || current.cfg.demoMode || !current.workspaceReady || !current.dirty) {
+      scheduledSyncAttempt = 0;
+      return;
+    }
+    let ok = false;
+    try {
+      ok = !!(await current.syncCloud({ reason: scheduledSyncReason }));
+    } catch (error) {
+      console.warn('[STORE] scheduled sync', error);
+    }
+    const latest = get();
+    if (!ok && latest.user && !latest.cfg.demoMode && latest.workspaceReady && latest.dirty
+      && scheduledSyncAttempt < SCHEDULED_SYNC_DELAYS_MS.length - 1) {
+      armScheduledCloudSync(get, scheduledSyncReason, scheduledSyncAttempt + 1);
+      return;
+    }
+    if (ok || !latest.dirty) scheduledSyncAttempt = 0;
+  }, delay);
+  return true;
+};
 const mergeRollbackNamespace = namespace => `merge-rollback:${String(namespace || GUEST_NAMESPACE)}`;
 const resetMarkerKey = namespace => `${RESET_MARKER_PREFIX}:${String(namespace || GUEST_NAMESPACE)}`;
 const readResetMarker = async namespace => parseJson(await AsyncStorage.getItem(resetMarkerKey(namespace)), null);
@@ -354,17 +387,8 @@ export const createSyncSlice = (set, get) => ({
   },
 
   scheduleCloudSync: (reason = 'local_change') => {
-    scheduledSyncReason = reason || scheduledSyncReason;
-    if (scheduledSyncTimer) clearTimeout(scheduledSyncTimer);
-    scheduledSyncTimer = setTimeout(() => {
-      scheduledSyncTimer = null;
-      const current = get();
-      if (!current.user || current.cfg.demoMode || !current.workspaceReady || !current.dirty) return;
-      current.syncCloud({ reason: scheduledSyncReason }).catch(error => {
-        console.warn('[STORE] scheduled sync', error);
-      });
-    }, 700);
-    return true;
+    scheduledSyncAttempt = 0;
+    return armScheduledCloudSync(get, reason, 0);
   },
 
   loadLocal: async (namespace = GUEST_NAMESPACE, { allowLegacy = namespace === GUEST_NAMESPACE } = {}) => {
@@ -1151,7 +1175,7 @@ export const createSyncSlice = (set, get) => ({
         id: mapWallet(item.id),
         name: walletIds.get(item.id) !== item.id ? `${item.name} (${current.cfg.lang === 'ar' ? 'ضيف' : 'Guest'})` : item.name,
         nameEn: walletIds.get(item.id) !== item.id ? `${item.nameEn || item.name} (Guest)` : item.nameEn,
-        currency: current.cfg.currency,
+        currency: item.currency || current.cfg.currency,
       }));
       const guestDebts = guest.debts.map(item => ({ ...item, id: debtIds.get(item.id) || item.id }));
       const guestGoals = guest.goals.map(item => ({ ...item, id: goalIds.get(item.id) || item.id }));

@@ -4,6 +4,7 @@ import { budgetMonthId, getBudgetMapForMonth, normalizeBudgets, setBudgetForMont
 import { GUEST_NAMESPACE } from '../lib/secureVault';
 import { getLedgerNamespace, queueLedgerStateDiff, upsertMonthlyBudgetMap } from '../lib/activeLedgerRepository';
 import {
+  hasCurrencySensitiveFinancialData,
   prepareWalletData,
 } from './domain';
 import { createSyncSlice } from './slices/useSyncSlice';
@@ -71,29 +72,41 @@ export const useStore = create((set, get) => {
     dataHealth: { ok: true, supported: true, issues: [] },
     lastDeletedTransaction: null,
 
-    setCfg: async (patch) => {
+    setCfg: async (patch = {}) => {
+      const current = get();
+      const currentCurrency = String(current.cfg?.currency || 'IQD').toUpperCase();
+      const requestedCurrency = patch.currency == null ? null : String(patch.currency || '').toUpperCase();
+      const baseCurrencyLocked = !!(
+        requestedCurrency
+        && requestedCurrency !== currentCurrency
+        && hasCurrencySensitiveFinancialData(current)
+      );
+      const effectivePatch = baseCurrencyLocked
+        ? { ...patch, currency: currentCurrency }
+        : patch;
       const newCfg = normalizeCfg({
-        ...get().cfg,
-        ...patch,
-        enabledModules: patch.enabledModules
-          ? { ...(get().cfg.enabledModules || {}), ...patch.enabledModules }
-          : get().cfg.enabledModules,
+        ...current.cfg,
+        ...effectivePatch,
+        enabledModules: effectivePatch.enabledModules
+          ? { ...(current.cfg.enabledModules || {}), ...effectivePatch.enabledModules }
+          : current.cfg.enabledModules,
       });
-      if (newCfg.enabledModules?.wallets || patch.defaultWalletId || patch.currency || patch.profileType || patch.activeScope) {
+      if (newCfg.enabledModules?.wallets || effectivePatch.defaultWalletId || effectivePatch.currency || effectivePatch.profileType || effectivePatch.activeScope) {
         const prepared = prepareWalletData({
-          wallets: get().wallets,
-          trans: get().trans,
-          commitments: get().commitments,
+          wallets: current.wallets,
+          trans: current.trans,
+          commitments: current.commitments,
           cfg: newCfg,
         });
         coreSet(prepared);
         await get().saveLocal();
         get().scheduleCloudSync?.('settings_financial');
-        return;
+        return { ok: true, reason: baseCurrencyLocked ? 'base_currency_locked' : null, currencyChanged: !baseCurrencyLocked };
       }
       coreSet({ cfg: newCfg });
       await get().saveLocal();
       get().scheduleCloudSync?.('settings');
+      return { ok: true, reason: baseCurrencyLocked ? 'base_currency_locked' : null, currencyChanged: !baseCurrencyLocked };
     },
 
     setNotif: async (patch) => {

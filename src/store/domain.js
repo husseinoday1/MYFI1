@@ -385,6 +385,12 @@ export const financialDataCount = (snapshot = {}) => (
   + (snapshot.commitments || []).length
 );
 
+export const hasCurrencySensitiveFinancialData = (snapshot = {}) => (
+  financialDataCount(snapshot) > 0
+  || (Array.isArray(snapshot.wallets) ? snapshot.wallets : [])
+    .some(wallet => Number(wallet?.openingBalance || 0) !== 0)
+);
+
 export const snapshotFromState = (state = {}, overrides = {}) => {
   const clean = dedupeWorkspaceData(state);
   return {

@@ -7,6 +7,7 @@ import {
   ensureFinancialLedgerV7,
   readFinancialProjectionV7,
   readPendingLedgerMutationsV7,
+  proveFinancialLedgerInvariantsV7,
 } from '../lib/financialLedgerV7Repository';
 
 const assertHarness = (condition, code) => {
@@ -117,7 +118,7 @@ export async function runFinancialLedgerV7DeviceHarness() {
     }
     assertHarness(constraintRejected, 'sqlite_check_constraint_missing');
 
-    const [projection, pending, foreignKeys, journalMode, busyTimeout, quickCheck, migrationStatus] = await Promise.all([
+    const [projection, pending, foreignKeys, journalMode, busyTimeout, quickCheck, migrationStatus, invariantReport] = await Promise.all([
       readFinancialProjectionV7({ namespace, database: db }),
       readPendingLedgerMutationsV7({ namespace, limit: 20, database: db }),
       db.getFirstAsync('PRAGMA foreign_keys'),
@@ -125,6 +126,7 @@ export async function runFinancialLedgerV7DeviceHarness() {
       db.getFirstAsync('PRAGMA busy_timeout'),
       db.getFirstAsync('PRAGMA quick_check'),
       readLedgerSchemaMigrationStatus(db),
+      proveFinancialLedgerInvariantsV7({ namespace, database: db }),
     ]);
     assertHarness(projection?.transactions?.length === 4, 'transaction_count_mismatch');
     assertHarness(projection?.postings?.length === 6, 'posting_count_mismatch');
@@ -141,6 +143,8 @@ export async function runFinancialLedgerV7DeviceHarness() {
       migrationStatus?.migrations?.some(item => item.migration_id === '0007_financial_ledger_v7_baseline' && item.status === 'completed'),
       'schema_migration_journal_incomplete',
     );
+    assertHarness(invariantReport?.ok && invariantReport?.level === 'HEALTHY', 'financial_invariant_proof_failed');
+    assertHarness(invariantReport?.walletBalances?.length === 2, 'wallet_balance_proof_missing');
 
     await clearFinancialWorkspaceV7({ namespace, database: db });
     const remaining = await db.getFirstAsync(
@@ -163,6 +167,8 @@ export async function runFinancialLedgerV7DeviceHarness() {
       journalMode: String(pragmaValue(journalMode) || '').toLowerCase(),
       busyTimeoutMs: Number(pragmaValue(busyTimeout) || 0),
       quickCheck: String(pragmaValue(quickCheck) || '').toLowerCase(),
+      invariantLevel: invariantReport.level,
+      walletBalanceProofCount: invariantReport.walletBalances.length,
       cleaned,
       durationMs: Date.now() - startedAt,
     };

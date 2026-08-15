@@ -20,7 +20,7 @@ const ledgerDatabase = read('src/lib/ledgerDatabase.js');
 const financialLedger = read('src/lib/financialLedgerV7Repository.js');
 const archiveScreen = read('src/screens/ArchiveScreen.js');
 
-assert.match(history, /visible\.length === 0 && filteredFallback\.length > 0/);
+assert.match(history, /ledgerPageCoversFallback\(visible, filteredFallback, 250\)/);
 assert.match(history, /ledgerRequestRef/);
 assert.match(ledger, /queryV7TransactionPage/);
 assert.match(ledger, /ORDER BY t\.date_iso DESC,t\.occurred_at DESC,t\.id DESC LIMIT \?/);
