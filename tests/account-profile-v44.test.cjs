@@ -19,7 +19,12 @@ assert(settings.includes('signInProfileHint'), 'Signin must explain profile rest
 assert(identity.includes('ensureProfileIdentity'), 'Cloud profile hydration helper missing');
 assert(identity.includes('uploadProfileAvatar'), 'Cloud avatar upload helper missing');
 assert(identity.includes('fetchProfileIdentity'), 'Cloud profile fetch helper missing');
-assert(sync.includes('ensureProfileIdentity(supabase, user, priorIdentity)'), 'New-device profile hydration is not wired');
+assert(
+  sync.includes('const hydrateProfile = async (fallbackIdentity = {}) =>')
+    && sync.includes('ensureProfileIdentity(supabase, user, fallbackIdentity)')
+    && sync.includes('await hydrateProfile(priorIdentity)'),
+  'New-device profile hydration is not wired',
+);
 assert(sync.includes('workspaceNamespaceForSession'), 'User/workspace boundary is not wired');
 assert(boundary.includes('workspace:${id}'), 'Future workspace namespace boundary missing');
 assert(migration.includes('public.profiles'), 'profiles migration missing');

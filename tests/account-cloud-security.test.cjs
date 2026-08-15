@@ -23,7 +23,12 @@ const srcTree = [
 assert(identity.includes("PROFILE_AVATAR_BUCKET = 'myfi-avatars'"), 'Profile avatars need one dedicated bucket');
 assert(identity.includes('fetchProfileIdentity'), 'A connected account must fetch its cloud profile');
 assert(identity.includes('uploadProfileAvatar') && identity.includes('removeProfileAvatar'), 'Avatar must support cloud upload/remove');
-assert(sync.includes('ensureProfileIdentity(supabase, user, priorIdentity)'), 'New-device login must hydrate or seed cloud identity through the account identity boundary');
+assert(
+  sync.includes('const hydrateProfile = async (fallbackIdentity = {}) =>')
+    && sync.includes('ensureProfileIdentity(supabase, user, fallbackIdentity)')
+    && sync.includes('await hydrateProfile(priorIdentity)'),
+  'New-device login must hydrate or seed cloud identity through the account identity boundary',
+);
 assert(identity.includes('const fetched = await fetchProfileIdentity(client, user.id)'), 'The account identity boundary must fetch the cloud profile before seeding it');
 assert(sync.includes('normalizeCfg({ ...get().cfg, ...profile.patch })'), 'Profile hydration must merge into current app config, not replace it');
 assert(constants.includes("avatarPath: ''"), 'Avatar storage path must persist locally for the connected profile');

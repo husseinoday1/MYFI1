@@ -42,6 +42,7 @@ const occurredAtFor = (transaction, dateISO) => {
 const kindFor = transaction => {
   if (transaction?.kind === 'transfer' || transaction?.flowType === 'transfer') return 'transfer';
   if (transaction?.flowType === 'opening_balance' || transaction?.isOpeningBalance) return 'opening_balance';
+  if (transaction?.flowType === 'balance_adjustment' || transaction?.isBalanceAdjustment) return 'balance_adjustment';
   if (transaction?.flowType === 'goal_release' || transaction?.isGoalRelease) return 'goal_release';
   if (transaction?.isGoalSaving) return 'goal_allocation';
   if (transaction?.isDebtOrigin) return 'debt_origin';

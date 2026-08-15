@@ -506,8 +506,9 @@ const v7TransactionMatches = (tx, {
   if (flowType && String(inferFlowType(tx)) !== String(flowType)) return false;
   if (categoryId && String(tx?.cat || 'other') !== String(categoryId)) return false;
   if (walletId && ![tx?.walletId, tx?.fromWalletId, tx?.toWalletId].includes(walletId)) return false;
-  if (transactionClass === 'income' && (tx?.kind === 'transfer' || v7BaseAmount(tx) <= 0)) return false;
-  if (transactionClass === 'expense' && (tx?.kind === 'transfer' || v7BaseAmount(tx) >= 0)) return false;
+  const semanticFlow = inferFlowType(tx);
+  if (transactionClass === 'income' && semanticFlow !== 'income') return false;
+  if (transactionClass === 'expense' && !['expense', 'commitment_payment'].includes(semanticFlow)) return false;
   if (transactionClass === 'transfer' && tx?.kind !== 'transfer') return false;
   if (transactionClass === 'goal' && tx?.flowType !== 'goal_allocation') return false;
   if (transactionClass === 'debt' && !['debt_payment', 'receivable_collection'].includes(tx?.flowType)) return false;
@@ -565,8 +566,8 @@ const queryV7TransactionPage = async (db, {
     params.push(String(walletId));
   }
   const amountExpression = "CAST(COALESCE(json_extract(t.payload_json,'$.baseAmountMinor'),json_extract(t.payload_json,'$.baseAmount'),json_extract(t.payload_json,'$.amt'),0) AS REAL)";
-  if (transactionClass === 'income') clauses.push(`t.kind<>'transfer' AND ${amountExpression}>0`);
-  if (transactionClass === 'expense') clauses.push(`t.kind<>'transfer' AND ${amountExpression}<0`);
+  if (transactionClass === 'income') clauses.push("COALESCE(json_extract(t.payload_json,'$.flowType'),t.kind)='income'");
+  if (transactionClass === 'expense') clauses.push("COALESCE(json_extract(t.payload_json,'$.flowType'),t.kind) IN ('expense','commitment_payment')");
   if (transactionClass === 'transfer') clauses.push("t.kind='transfer'");
   if (transactionClass === 'goal') clauses.push("json_extract(t.payload_json,'$.flowType')='goal_allocation'");
   if (transactionClass === 'debt') clauses.push("json_extract(t.payload_json,'$.flowType') IN ('debt_payment','receivable_collection')");
@@ -645,8 +646,8 @@ export const queryLedgerTransactions = async ({
   if (Number.isInteger(Number(year))) { clauses.push('date_iso LIKE ?'); params.push(`${Number(year)}-%`); }
   if (scope && scope !== 'all') { clauses.push('scope = ?'); params.push(String(scope)); }
   if (flowType) { clauses.push('flow_type = ?'); params.push(String(flowType)); }
-  if (transactionClass === 'income') clauses.push("kind <> 'transfer' AND base_amount_minor > 0");
-  if (transactionClass === 'expense') clauses.push("kind <> 'transfer' AND base_amount_minor < 0");
+  if (transactionClass === 'income') clauses.push("flow_type = 'income'");
+  if (transactionClass === 'expense') clauses.push("flow_type IN ('expense','commitment_payment')");
   if (transactionClass === 'transfer') clauses.push("kind = 'transfer'");
   if (transactionClass === 'goal') clauses.push("flow_type = 'goal_allocation'");
   if (transactionClass === 'debt') clauses.push("flow_type IN ('debt_payment','receivable_collection')");
@@ -698,7 +699,7 @@ export const queryLedgerSummary = async ({ namespace = 'guest', fromDate = null,
     const missing = await directDb.getFirstAsync(
       `SELECT COUNT(*) AS count FROM ledger_financial_transactions_v7 t
         WHERE ${clauses.join(' AND ')}
-          AND t.kind<>'transfer'
+          AND COALESCE(json_extract(t.payload_json,'$.flowType'),t.kind) IN ('income','expense','commitment_payment')
           AND json_extract(t.payload_json,'$.baseAmountMinor') IS NULL`,
       ...params,
     );
@@ -707,8 +708,8 @@ export const queryLedgerSummary = async ({ namespace = 'guest', fromDate = null,
     }
     const row = await directDb.getFirstAsync(
       `SELECT COUNT(*) AS count,
-              SUM(CASE WHEN t.kind='income' THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.baseAmountMinor'),0) AS INTEGER)) ELSE 0 END) AS income_minor,
-              SUM(CASE WHEN t.kind IN ('expense','commitment_payment') THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.baseAmountMinor'),0) AS INTEGER)) ELSE 0 END)
+              SUM(CASE WHEN COALESCE(json_extract(t.payload_json,'$.flowType'),t.kind)='income' THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.baseAmountMinor'),0) AS INTEGER)) ELSE 0 END) AS income_minor,
+              SUM(CASE WHEN COALESCE(json_extract(t.payload_json,'$.flowType'),t.kind) IN ('expense','commitment_payment') THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.baseAmountMinor'),0) AS INTEGER)) ELSE 0 END)
                 + SUM(CASE WHEN t.kind='transfer' THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.feeBaseAmountMinor'),0) AS INTEGER)) ELSE 0 END) AS expense_minor,
               MAX(COALESCE(json_extract(t.payload_json,'$.baseCurrencyCode'),'IQD')) AS base_currency
          FROM ledger_financial_transactions_v7 t
@@ -769,7 +770,7 @@ export const queryLedgerCategorySpend = async ({
     }
     const missing = await directDb.getFirstAsync(
       `SELECT COUNT(*) AS count FROM ledger_financial_transactions_v7 t
-        WHERE ${clauses.join(' AND ')} AND t.kind IN ('expense','commitment_payment')
+        WHERE ${clauses.join(' AND ')} AND COALESCE(json_extract(t.payload_json,'$.flowType'),t.kind) IN ('expense','commitment_payment')
           AND json_extract(t.payload_json,'$.baseAmountMinor') IS NULL`,
       ...params,
     );
@@ -778,14 +779,14 @@ export const queryLedgerCategorySpend = async ({
     }
     const rows = await directDb.getAllAsync(
       `SELECT COALESCE(t.category_id,'other') AS category_id,
-              SUM(CASE WHEN t.kind IN ('expense','commitment_payment')
+              SUM(CASE WHEN COALESCE(json_extract(t.payload_json,'$.flowType'),t.kind) IN ('expense','commitment_payment')
                        THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.baseAmountMinor'),0) AS INTEGER)) ELSE 0 END)
                 + SUM(CASE WHEN t.kind='transfer'
                            THEN ABS(CAST(COALESCE(json_extract(t.payload_json,'$.feeBaseAmountMinor'),0) AS INTEGER)) ELSE 0 END) AS spent_minor,
               MAX(COALESCE(json_extract(t.payload_json,'$.baseCurrencyCode'),'IQD')) AS base_currency
          FROM ledger_financial_transactions_v7 t
         WHERE ${clauses.join(' AND ')}
-          AND (t.kind IN ('expense','commitment_payment') OR (t.kind='transfer' AND COALESCE(json_extract(t.payload_json,'$.feeBaseAmountMinor'),0)<>0))
+          AND (COALESCE(json_extract(t.payload_json,'$.flowType'),t.kind) IN ('expense','commitment_payment') OR (t.kind='transfer' AND COALESCE(json_extract(t.payload_json,'$.feeBaseAmountMinor'),0)<>0))
         GROUP BY COALESCE(t.category_id,'other')
         ORDER BY spent_minor DESC`,
       ...params,

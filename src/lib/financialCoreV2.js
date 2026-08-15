@@ -204,17 +204,27 @@ export const buildTransferCurrencyFields = ({
   const requestedFromBaseRate = Number(fromBaseRate);
   const requestedToBaseRate = Number(toBaseRate);
   const bothForeign = fromCurrency !== base && toCurrency !== base;
-  const resolvedFromBaseRate = fromCurrency === base
+  let resolvedFromBaseRate = fromCurrency === base
     ? 1
     : toCurrency === base
       ? targetAmount / sourceAmount
       : (Number.isFinite(requestedFromBaseRate) && requestedFromBaseRate > 0 ? requestedFromBaseRate : null);
-  const resolvedToBaseRate = toCurrency === base
+  let resolvedToBaseRate = toCurrency === base
     ? 1
     : fromCurrency === base
       ? sourceAmount / targetAmount
       : (Number.isFinite(requestedToBaseRate) && requestedToBaseRate > 0 ? requestedToBaseRate : null);
-  if (bothForeign && (!(resolvedFromBaseRate > 0) || !(resolvedToBaseRate > 0))) {
+
+  // Same-foreign-currency transfers still need one frozen foreign->base
+  // historical snapshot for reporting. Never substitute today's wallet valuation.
+  if (sameCurrency && fromCurrency !== base) {
+    const sharedHistoricalRate = resolvedFromBaseRate || resolvedToBaseRate;
+    if (!(sharedHistoricalRate > 0)) {
+      throw new RangeError('transfer_historical_base_rates_required');
+    }
+    resolvedFromBaseRate = sharedHistoricalRate;
+    resolvedToBaseRate = sharedHistoricalRate;
+  } else if (bothForeign && (!(resolvedFromBaseRate > 0) || !(resolvedToBaseRate > 0))) {
     throw new RangeError('transfer_historical_base_rates_required');
   }
 
@@ -250,7 +260,9 @@ export const buildTransferCurrencyFields = ({
     baseToAmountMinor: moneyToMinor(baseToAmount, base),
     baseAmount: baseFromAmount,
     baseAmountMinor: moneyToMinor(baseFromAmount, base),
-    fxSnapshotSource: bothForeign ? 'user_confirmed_bridge_rates' : (sameCurrency ? 'same_currency' : 'transfer_amounts'),
+    fxSnapshotSource: sameCurrency && fromCurrency !== base
+      ? 'user_confirmed_same_currency_base_rate'
+      : bothForeign ? 'user_confirmed_bridge_rates' : (sameCurrency ? 'same_currency' : 'transfer_amounts'),
   };
 };
 
