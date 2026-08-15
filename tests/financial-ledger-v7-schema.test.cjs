@@ -5,7 +5,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const repository = fs.readFileSync(path.join(root, 'src/lib/financialLedgerV7Repository.js'), 'utf8');
-const schemaMatch = repository.match(/export const ensureFinancialLedgerV7[\s\S]*?await db\.execAsync\(`([\s\S]*?)`\);/);
+const schemaMatch = repository.match(/export const FINANCIAL_LEDGER_V7_SCHEMA_SQL = `([\s\S]*?)`;/);
 assert(schemaMatch, 'V7 schema template was not found');
 
 const db = new DatabaseSync(':memory:');

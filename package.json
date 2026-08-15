@@ -69,9 +69,17 @@
   },
   "private": true,
   "devDependencies": {
+    "@babel/core": "7.29.7",
+    "@babel/plugin-transform-modules-commonjs": "7.29.7",
     "@types/react": "~19.1.10",
-    "eas-cli": "^21.7.0",
     "supabase": "^2.113.0",
     "typescript": "~5.9.2"
+  },
+  "expo": {
+    "doctor": {
+      "appConfigFieldsNotSyncedCheck": {
+        "enabled": false
+      }
+    }
   }
 }

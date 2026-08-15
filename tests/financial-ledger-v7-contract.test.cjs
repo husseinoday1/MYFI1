@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
-const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
+const read = rel => fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n');
 const repository = read('src/lib/financialLedgerV7Repository.js');
 const model = read('src/lib/financialLedgerV7Model.js');
 const transactions = read('src/store/slices/transactionsSlice.js');
@@ -22,7 +22,8 @@ assert(repository.includes('ledger_entities_v7') && repository.includes('ledger_
 assert(repository.includes('withTransactionAsync'), 'Expense header, posting, and outbox must share one SQLite transaction');
 assert(repository.includes('financial_v7_expense_readback_failed'), 'Committed Expense must be read back from Header/Postings before reaching UI state');
 assert(!/ledger_(?:accounts|exchange_rates|financial_transactions|postings|outbox)[\s\S]*?\bREAL\b/.test(repository), 'V7 financial schema must not store money or rates as REAL');
-assert(transactions.indexOf('commitExpenseToFinancialLedgerV7') < transactions.indexOf('set(s => ({\n      trans: [tx, ...s.trans]'), 'Expense must commit to SQLite before updating UI state');
+const addTransBody = transactions.slice(transactions.indexOf('addTrans: async'), transactions.indexOf('duplicateTrans: async'));
+assert(addTransBody.indexOf('await commitExpenseToFinancialLedgerV7') < addTransBody.indexOf('set(s => ({\n      trans: [tx, ...s.trans]'), 'Expense must commit to SQLite before updating UI state');
 assert(mirror.includes('outbox: false') && mirror.includes('storageEngineVersion'), 'V6 compatibility mirror must not duplicate the atomic V7 outbox mutation');
 assert(migration.includes('runFinancialShadowMigrationV7') && migration.includes('shadow_parity_failed'), 'Shadow migration parity gate missing');
 assert(migration.includes('coldArchives') && migration.includes('syntheticMigrationOpening'), 'Cold archive or opening-balance migration missing');

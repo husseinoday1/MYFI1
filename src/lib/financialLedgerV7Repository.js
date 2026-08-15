@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { enqueueLedgerWrite, getLedgerDb } from './ledgerDatabase';
+import { runLedgerSchemaMigrations } from './financialLedgerSchemaMigrations';
 import {
   buildExpenseLedgerCommand,
   buildFinancialLedgerCommand,
@@ -20,190 +21,217 @@ const enqueueWrite = enqueueLedgerWrite;
 
 export const financialLedgerV7Supported = () => Platform.OS !== 'web';
 
-export const ensureFinancialLedgerV7 = async (db) => {
-  if (!db) return false;
-  if (readyDatabases.has(db)) return true;
-  await enqueueWrite(async () => {
-    if (readyDatabases.has(db)) return;
-    await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS ledger_v7_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS ledger_currencies (
-      code TEXT PRIMARY KEY,
-      minor_exponent INTEGER NOT NULL CHECK(minor_exponent BETWEEN 0 AND 6),
-      enabled INTEGER NOT NULL DEFAULT 1
-    );
-    CREATE TABLE IF NOT EXISTS ledger_accounts_v7 (
-      namespace TEXT NOT NULL,
-      id TEXT NOT NULL,
-      name TEXT,
-      account_type TEXT NOT NULL,
-      scope TEXT NOT NULL,
-      currency_code TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      archived_at TEXT,
-      PRIMARY KEY(namespace, id),
-      FOREIGN KEY(currency_code) REFERENCES ledger_currencies(code)
-    );
-    CREATE TABLE IF NOT EXISTS ledger_exchange_rates_v7 (
-      namespace TEXT NOT NULL,
-      id TEXT NOT NULL,
-      base_currency_code TEXT NOT NULL,
-      quote_currency_code TEXT NOT NULL,
-      numerator INTEGER NOT NULL CHECK(numerator > 0),
-      denominator INTEGER NOT NULL CHECK(denominator > 0),
-      rate_date TEXT NOT NULL,
-      source TEXT NOT NULL,
-      captured_at TEXT NOT NULL,
-      PRIMARY KEY(namespace, id),
-      FOREIGN KEY(base_currency_code) REFERENCES ledger_currencies(code),
-      FOREIGN KEY(quote_currency_code) REFERENCES ledger_currencies(code)
-    );
-    CREATE TABLE IF NOT EXISTS ledger_financial_transactions_v7 (
-      namespace TEXT NOT NULL,
-      id TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('posted','voided')),
-      scope TEXT NOT NULL,
-      date_iso TEXT NOT NULL,
-      occurred_at TEXT NOT NULL,
-      category_id TEXT,
-      title TEXT,
-      note TEXT,
-      source_type TEXT,
-      source_id TEXT,
-      idempotency_key TEXT NOT NULL,
-      device_id TEXT NOT NULL,
-      revision INTEGER NOT NULL CHECK(revision > 0),
-      archive_year INTEGER,
-      archived_at TEXT,
-      deleted_at TEXT,
-      payload_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY(namespace, id),
-      UNIQUE(namespace, idempotency_key)
-    );
-    CREATE TABLE IF NOT EXISTS ledger_postings_v7 (
-      namespace TEXT NOT NULL,
-      id TEXT NOT NULL,
-      transaction_id TEXT NOT NULL,
-      account_id TEXT NOT NULL,
-      bucket TEXT NOT NULL CHECK(bucket IN ('physical','reserved')),
-      role TEXT NOT NULL,
-      amount_minor INTEGER NOT NULL CHECK(amount_minor != 0),
-      currency_code TEXT NOT NULL,
-      exchange_rate_id TEXT,
-      created_at TEXT NOT NULL,
-      PRIMARY KEY(namespace, id),
-      FOREIGN KEY(namespace, transaction_id) REFERENCES ledger_financial_transactions_v7(namespace, id) ON DELETE RESTRICT,
-      FOREIGN KEY(namespace, account_id) REFERENCES ledger_accounts_v7(namespace, id) ON DELETE RESTRICT,
-      FOREIGN KEY(namespace, exchange_rate_id) REFERENCES ledger_exchange_rates_v7(namespace, id) ON DELETE RESTRICT,
-      FOREIGN KEY(currency_code) REFERENCES ledger_currencies(code)
-    );
-    CREATE TABLE IF NOT EXISTS ledger_transaction_links_v7 (
-      namespace TEXT NOT NULL,
-      id TEXT NOT NULL,
-      transaction_id TEXT NOT NULL,
-      link_type TEXT NOT NULL,
-      link_id TEXT NOT NULL,
-      relation TEXT NOT NULL,
-      applied_amount_minor INTEGER,
-      currency_code TEXT,
-      created_at TEXT NOT NULL,
-      PRIMARY KEY(namespace, id),
-      FOREIGN KEY(namespace, transaction_id) REFERENCES ledger_financial_transactions_v7(namespace, id) ON DELETE RESTRICT
-    );
-    CREATE TABLE IF NOT EXISTS ledger_entities_v7 (
-      namespace TEXT NOT NULL,
-      entity_type TEXT NOT NULL,
-      id TEXT NOT NULL,
-      revision INTEGER NOT NULL CHECK(revision > 0),
-      deleted_at TEXT,
-      payload_json TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY(namespace, entity_type, id)
-    );
-    CREATE TABLE IF NOT EXISTS ledger_workspace_state_v7 (
-      namespace TEXT PRIMARY KEY,
-      source_mode TEXT NOT NULL CHECK(source_mode IN ('shadow','sqlite')),
-      schema_version INTEGER NOT NULL,
-      shadow_checksum TEXT,
-      shadow_verified_at TEXT,
-      cutover_at TEXT,
-      last_reconciled_at TEXT,
-      payload_json TEXT NOT NULL DEFAULT '{}',
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS ledger_migration_audits_v7 (
-      namespace TEXT NOT NULL,
-      run_id TEXT NOT NULL,
-      source_checksum TEXT NOT NULL,
-      target_checksum TEXT NOT NULL,
-      source_counts_json TEXT NOT NULL,
-      target_counts_json TEXT NOT NULL,
-      differences_json TEXT NOT NULL,
-      exact_match INTEGER NOT NULL CHECK(exact_match IN (0,1)),
-      created_at TEXT NOT NULL,
-      PRIMARY KEY(namespace, run_id)
-    );
-    CREATE TABLE IF NOT EXISTS ledger_outbox_v2 (
-      sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      namespace TEXT NOT NULL,
-      mutation_id TEXT NOT NULL UNIQUE,
-      entity_type TEXT NOT NULL,
-      entity_id TEXT NOT NULL,
-      operation TEXT NOT NULL CHECK(operation IN ('upsert','delete','void')),
-      entity_revision INTEGER NOT NULL,
-      payload_version INTEGER NOT NULL,
-      payload_json TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      attempts INTEGER NOT NULL DEFAULT 0,
-      next_attempt_at TEXT,
-      acknowledged_at TEXT,
-      last_error TEXT
-    );
-    CREATE TABLE IF NOT EXISTS ledger_inbox_v2 (
-      mutation_id TEXT PRIMARY KEY,
-      namespace TEXT NOT NULL,
-      server_sequence INTEGER NOT NULL,
-      received_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS ledger_sync_state_v7 (
-      namespace TEXT PRIMARY KEY,
-      last_server_sequence INTEGER NOT NULL DEFAULT 0,
-      last_success_at TEXT,
-      last_device_id TEXT,
-      updated_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_ledger_v7_tx_date
-      ON ledger_financial_transactions_v7(namespace, deleted_at, archived_at, date_iso DESC, occurred_at DESC, id DESC);
-    CREATE INDEX IF NOT EXISTS idx_ledger_v7_posting_account
-      ON ledger_postings_v7(namespace, account_id, bucket, transaction_id);
-    CREATE INDEX IF NOT EXISTS idx_ledger_v7_links
-      ON ledger_transaction_links_v7(namespace, link_type, link_id, transaction_id);
-    CREATE INDEX IF NOT EXISTS idx_ledger_v7_entities
-      ON ledger_entities_v7(namespace, entity_type, deleted_at, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_ledger_v7_outbox_pending
-      ON ledger_outbox_v2(namespace, acknowledged_at, next_attempt_at, sequence_id);
-  `);
-  // Existing development databases may predate the payload column. The error is
-  // expected on fresh/current databases and is intentionally ignored.
-    try {
+export const FINANCIAL_LEDGER_V7_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS ledger_v7_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ledger_currencies (
+  code TEXT PRIMARY KEY,
+  minor_exponent INTEGER NOT NULL CHECK(minor_exponent BETWEEN 0 AND 6),
+  enabled INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS ledger_accounts_v7 (
+  namespace TEXT NOT NULL,
+  id TEXT NOT NULL,
+  name TEXT,
+  account_type TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  currency_code TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  archived_at TEXT,
+  PRIMARY KEY(namespace, id),
+  FOREIGN KEY(currency_code) REFERENCES ledger_currencies(code)
+);
+CREATE TABLE IF NOT EXISTS ledger_exchange_rates_v7 (
+  namespace TEXT NOT NULL,
+  id TEXT NOT NULL,
+  base_currency_code TEXT NOT NULL,
+  quote_currency_code TEXT NOT NULL,
+  numerator INTEGER NOT NULL CHECK(numerator > 0),
+  denominator INTEGER NOT NULL CHECK(denominator > 0),
+  rate_date TEXT NOT NULL,
+  source TEXT NOT NULL,
+  captured_at TEXT NOT NULL,
+  PRIMARY KEY(namespace, id),
+  FOREIGN KEY(base_currency_code) REFERENCES ledger_currencies(code),
+  FOREIGN KEY(quote_currency_code) REFERENCES ledger_currencies(code)
+);
+CREATE TABLE IF NOT EXISTS ledger_financial_transactions_v7 (
+  namespace TEXT NOT NULL,
+  id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('posted','voided')),
+  scope TEXT NOT NULL,
+  date_iso TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  category_id TEXT,
+  title TEXT,
+  note TEXT,
+  source_type TEXT,
+  source_id TEXT,
+  idempotency_key TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision > 0),
+  archive_year INTEGER,
+  archived_at TEXT,
+  deleted_at TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(namespace, id),
+  UNIQUE(namespace, idempotency_key)
+);
+CREATE TABLE IF NOT EXISTS ledger_postings_v7 (
+  namespace TEXT NOT NULL,
+  id TEXT NOT NULL,
+  transaction_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  bucket TEXT NOT NULL CHECK(bucket IN ('physical','reserved')),
+  role TEXT NOT NULL,
+  amount_minor INTEGER NOT NULL CHECK(amount_minor != 0),
+  currency_code TEXT NOT NULL,
+  exchange_rate_id TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(namespace, id),
+  FOREIGN KEY(namespace, transaction_id) REFERENCES ledger_financial_transactions_v7(namespace, id) ON DELETE RESTRICT,
+  FOREIGN KEY(namespace, account_id) REFERENCES ledger_accounts_v7(namespace, id) ON DELETE RESTRICT,
+  FOREIGN KEY(namespace, exchange_rate_id) REFERENCES ledger_exchange_rates_v7(namespace, id) ON DELETE RESTRICT,
+  FOREIGN KEY(currency_code) REFERENCES ledger_currencies(code)
+);
+CREATE TABLE IF NOT EXISTS ledger_transaction_links_v7 (
+  namespace TEXT NOT NULL,
+  id TEXT NOT NULL,
+  transaction_id TEXT NOT NULL,
+  link_type TEXT NOT NULL,
+  link_id TEXT NOT NULL,
+  relation TEXT NOT NULL,
+  applied_amount_minor INTEGER,
+  currency_code TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(namespace, id),
+  FOREIGN KEY(namespace, transaction_id) REFERENCES ledger_financial_transactions_v7(namespace, id) ON DELETE RESTRICT
+);
+CREATE TABLE IF NOT EXISTS ledger_entities_v7 (
+  namespace TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision > 0),
+  deleted_at TEXT,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(namespace, entity_type, id)
+);
+CREATE TABLE IF NOT EXISTS ledger_workspace_state_v7 (
+  namespace TEXT PRIMARY KEY,
+  source_mode TEXT NOT NULL CHECK(source_mode IN ('shadow','sqlite')),
+  schema_version INTEGER NOT NULL,
+  shadow_checksum TEXT,
+  shadow_verified_at TEXT,
+  cutover_at TEXT,
+  last_reconciled_at TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ledger_migration_audits_v7 (
+  namespace TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  source_checksum TEXT NOT NULL,
+  target_checksum TEXT NOT NULL,
+  source_counts_json TEXT NOT NULL,
+  target_counts_json TEXT NOT NULL,
+  differences_json TEXT NOT NULL,
+  exact_match INTEGER NOT NULL CHECK(exact_match IN (0,1)),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(namespace, run_id)
+);
+CREATE TABLE IF NOT EXISTS ledger_outbox_v2 (
+  sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  namespace TEXT NOT NULL,
+  mutation_id TEXT NOT NULL UNIQUE,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK(operation IN ('upsert','delete','void')),
+  entity_revision INTEGER NOT NULL,
+  payload_version INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  acknowledged_at TEXT,
+  last_error TEXT
+);
+CREATE TABLE IF NOT EXISTS ledger_inbox_v2 (
+  mutation_id TEXT PRIMARY KEY,
+  namespace TEXT NOT NULL,
+  server_sequence INTEGER NOT NULL,
+  received_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ledger_sync_state_v7 (
+  namespace TEXT PRIMARY KEY,
+  last_server_sequence INTEGER NOT NULL DEFAULT 0,
+  last_success_at TEXT,
+  last_device_id TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_v7_tx_date
+  ON ledger_financial_transactions_v7(namespace, deleted_at, archived_at, date_iso DESC, occurred_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_ledger_v7_posting_account
+  ON ledger_postings_v7(namespace, account_id, bucket, transaction_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_v7_links
+  ON ledger_transaction_links_v7(namespace, link_type, link_id, transaction_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_v7_entities
+  ON ledger_entities_v7(namespace, entity_type, deleted_at, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ledger_v7_outbox_pending
+  ON ledger_outbox_v2(namespace, acknowledged_at, next_attempt_at, sequence_id);
+  
+`;
+
+const FINANCIAL_LEDGER_V7_MIGRATION = {
+  migrationId: '0007_financial_ledger_v7_baseline',
+  fromVersion: 0,
+  toVersion: FINANCIAL_LEDGER_SCHEMA_VERSION,
+  signature: [
+    FINANCIAL_LEDGER_V7_SCHEMA_SQL,
+    "ALTER ledger_financial_transactions_v7 payload_json if missing",
+    "ledger_v7_meta schema_version=7",
+  ].join('\n'),
+  apply: async (db) => {
+    await db.execAsync(FINANCIAL_LEDGER_V7_SCHEMA_SQL);
+    const columns = await db.getAllAsync(`PRAGMA table_info(ledger_financial_transactions_v7)`);
+    if (!columns.some(column => column.name === 'payload_json')) {
       await db.execAsync(`ALTER TABLE ledger_financial_transactions_v7 ADD COLUMN payload_json TEXT NOT NULL DEFAULT '{}';`);
-    } catch {}
+    }
     await db.runAsync(
       `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES ('schema_version',?,?)`,
       String(FINANCIAL_LEDGER_SCHEMA_VERSION), new Date().toISOString(),
     );
-    readyDatabases.add(db);
+  },
+};
+
+const financialLedgerHealthCheck = async (db) => {
+  const row = await db.getFirstAsync('PRAGMA quick_check');
+  const result = row ? Object.values(row)[0] : null;
+  if (String(result || '').toLowerCase() !== 'ok') {
+    throw new Error('financial_schema_health_check_failed');
+  }
+  return { ok: true, quickCheck: 'ok' };
+};
+
+export const ensureFinancialLedgerV7 = async (db) => {
+  if (!db) return false;
+  if (readyDatabases.has(db)) return true;
+  await runLedgerSchemaMigrations({
+    database: db,
+    migrations: [FINANCIAL_LEDGER_V7_MIGRATION],
+    appVersion: '1.0.0',
+    healthCheck: financialLedgerHealthCheck,
   });
+  readyDatabases.add(db);
   return true;
 };
 

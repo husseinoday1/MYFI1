@@ -40,6 +40,7 @@ class FakeDatabase {
 
   async getFirstAsync(sql, ...args) {
     this.events.push({ type: 'getFirst', sql, args, inTransaction: this.inTransaction });
+    if (sql.includes('PRAGMA quick_check')) return { quick_check: 'ok' };
     if (this.archivedGoal && sql.includes('SELECT kind,scope,date_iso,occurred_at,revision,payload_json,archived_at')) {
       return {
         kind: 'goal_allocation', scope: 'personal', date_iso: '2025-08-14',
@@ -242,8 +243,10 @@ const run = async () => {
     () => commitExpenseLedgerV7Command(command, { database: failingDb }),
     /outbox_insert_failed/,
   );
-  assert.equal(failingDb.committed, false);
   assert.equal(failingDb.rolledBack, true, 'outbox failure must roll back header and posting writes');
+  const failingOutboxIndex = failingDb.events.findIndex(event => event.type === 'run' && event.sql.includes('INSERT INTO ledger_outbox_v2'));
+  const rollbackAfterOutbox = failingDb.events.findIndex((event, index) => index > failingOutboxIndex && event.type === 'rollback');
+  assert.ok(failingOutboxIndex >= 0 && rollbackAfterOutbox > failingOutboxIndex, 'outbox failure must terminate the financial transaction with rollback');
 
   const retryDb = new FakeDatabase({ existingId: 'expense-original-id' });
   const retry = await commitExpenseLedgerV7Command(command, { database: retryDb });

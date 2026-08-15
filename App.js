@@ -42,6 +42,8 @@ const FORCE_ONBOARDING = process.env.EXPO_PUBLIC_FORCE_ONBOARDING === '1';
 const FRESH_TEST_MODE = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
 const FRESH_TEST_NAMESPACE = 'fresh-test-new-user';
 const INTERNAL_DEMO_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_INTERNAL_DEMO === '1';
+const R01_DEVICE_GATE_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_R01_DEVICE_GATE === '1';
+let r01DeviceGateStarted = false;
 
 const BASE_TABS = [
   { key: 'home', icon: 'home-outline', labelKey: 'home' },
@@ -145,6 +147,15 @@ function AppRoot() {
   const [fontsLoaded, fontError] = useFonts(fontAssets);
   const fontReady = fontsLoaded || !!fontError;
   const systemColorScheme = useColorScheme();
+
+  useEffect(() => {
+    if (!ready || !R01_DEVICE_GATE_ENABLED || r01DeviceGateStarted) return;
+    r01DeviceGateStarted = true;
+    import('./src/dev/financialLedgerV7DeviceHarness')
+      .then(({ runFinancialLedgerV7DeviceHarness }) => runFinancialLedgerV7DeviceHarness())
+      .then(result => console.info('[MYFI:R01_DEVICE_GATE] PASS', JSON.stringify(result)))
+      .catch(error => console.error('[MYFI:R01_DEVICE_GATE] FAIL', String(error?.message || error)));
+  }, [ready]);
 
   useEffect(() => {
     if (cfg.themeMode !== 'system') return undefined;

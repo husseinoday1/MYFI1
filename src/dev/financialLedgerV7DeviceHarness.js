@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { getLedgerDb } from '../lib/ledgerDatabase';
+import { readLedgerSchemaMigrationStatus } from '../lib/financialLedgerSchemaMigrations';
 import {
   clearFinancialWorkspaceV7,
   commitFinancialTransactionV7,
@@ -116,17 +117,30 @@ export async function runFinancialLedgerV7DeviceHarness() {
     }
     assertHarness(constraintRejected, 'sqlite_check_constraint_missing');
 
-    const [projection, pending, foreignKeys] = await Promise.all([
+    const [projection, pending, foreignKeys, journalMode, busyTimeout, quickCheck, migrationStatus] = await Promise.all([
       readFinancialProjectionV7({ namespace, database: db }),
       readPendingLedgerMutationsV7({ namespace, limit: 20, database: db }),
       db.getFirstAsync('PRAGMA foreign_keys'),
+      db.getFirstAsync('PRAGMA journal_mode'),
+      db.getFirstAsync('PRAGMA busy_timeout'),
+      db.getFirstAsync('PRAGMA quick_check'),
+      readLedgerSchemaMigrationStatus(db),
     ]);
     assertHarness(projection?.transactions?.length === 4, 'transaction_count_mismatch');
     assertHarness(projection?.postings?.length === 6, 'posting_count_mismatch');
     assertHarness(projection?.links?.length === 1, 'link_count_mismatch');
     assertHarness(projection?.entities?.some(item => item.entityType === 'goal' && item.id === goalId), 'entity_link_missing');
     assertHarness(pending.length === 4, 'outbox_count_mismatch');
-    assertHarness(Number(foreignKeys?.foreign_keys) === 1, 'foreign_keys_disabled');
+    const pragmaValue = row => row && typeof row === 'object' ? Object.values(row)[0] : null;
+    assertHarness(Number(pragmaValue(foreignKeys)) === 1, 'foreign_keys_disabled');
+    assertHarness(String(pragmaValue(journalMode) || '').toLowerCase() === 'wal', 'wal_not_enabled');
+    assertHarness(Number(pragmaValue(busyTimeout)) >= 5000, 'busy_timeout_too_low');
+    assertHarness(String(pragmaValue(quickCheck) || '').toLowerCase() === 'ok', 'quick_check_failed');
+    assertHarness(Number(migrationStatus?.currentVersion) === 7, 'schema_version_mismatch');
+    assertHarness(
+      migrationStatus?.migrations?.some(item => item.migration_id === '0007_financial_ledger_v7_baseline' && item.status === 'completed'),
+      'schema_migration_journal_incomplete',
+    );
 
     await clearFinancialWorkspaceV7({ namespace, database: db });
     const remaining = await db.getFirstAsync(
@@ -144,6 +158,11 @@ export async function runFinancialLedgerV7DeviceHarness() {
       pendingMutationCount: 4,
       idempotency: true,
       sqliteConstraints: true,
+      schemaVersion: migrationStatus.currentVersion,
+      migrationJournal: true,
+      journalMode: String(pragmaValue(journalMode) || '').toLowerCase(),
+      busyTimeoutMs: Number(pragmaValue(busyTimeout) || 0),
+      quickCheck: String(pragmaValue(quickCheck) || '').toLowerCase(),
       cleaned,
       durationMs: Date.now() - startedAt,
     };
