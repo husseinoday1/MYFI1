@@ -42,11 +42,11 @@ export default function DecisionModal({
             <Text style={[s.message, { color: th.sub, textAlign: 'center' }]}>{message}</Text>
           </View>
           <View style={[s.actions, { flexDirection: direction }]}>
-            <TouchableOpacity disabled={busy} onPress={cancel} style={[s.button, { backgroundColor: th.cardHigh, borderColor: cancelTone || th.border, opacity: busy ? 0.55 : 1 }]}> 
+            <TouchableOpacity disabled={busy} onPress={cancel} style={[s.button, { backgroundColor: th.cardHigh, borderColor: cancelTone || th.border, opacity: busy ? 0.55 : 1 }]}>
               <Ionicons name={cancelIcon} size={18} color={cancelTone || th.sub} />
               <Text style={[s.buttonText, { color: cancelTone || th.sub }]}>{cancelLabel}</Text>
             </TouchableOpacity>
-            <TouchableOpacity disabled={busy} onPress={onConfirm} style={[s.button, { backgroundColor: accent, borderColor: accent, opacity: busy ? 0.65 : 1 }]}> 
+            <TouchableOpacity disabled={busy} onPress={onConfirm} style={[s.button, { backgroundColor: accent, borderColor: accent, opacity: busy ? 0.65 : 1 }]}>
               <Ionicons name={busy ? 'hourglass-outline' : confirmIcon} size={18} color={th.onPrimary} />
               <Text style={[s.buttonText, { color: th.onPrimary }]}>{busy ? '…' : confirmLabel}</Text>
             </TouchableOpacity>

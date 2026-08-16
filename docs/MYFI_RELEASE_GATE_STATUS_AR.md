@@ -174,3 +174,32 @@ Evidence after this refinement:
 - full JS/JSX parse: **PASS (107 files)**.
 - static quality gate: **36 passed / 0 failed / 11 skipped**.
 - full packaging-container gate: **42 passed / 4 failed / 11 skipped**; all four failures are solely `@babel/core` missing from the packaging environment. The workstation installer must prove the expected complete result **46 passed / 0 failed / 11 skipped** before commit.
+
+## R04.1 — Acceptance recovery automated evidence (2026-08-16)
+
+Implementation branch: `r04-p18-001-blocking-ux`.
+
+Completed internal patches:
+- `P18-001` at `5989f61`: initial blocking account/entry UX recovery.
+- `P18-002` at `9650952`: Settings Root routing, direct Home account route, and Android Arabic FX/BiDi component recovery.
+- `P18-003` at `7de630d`: reusable editable wallet FX suggestions, calculated transfer destination amount, feature visibility controls, and direct notification settings.
+- `P04R1-003 / P18-004` at `799243b`: semantic financial history, opening-balance identity, review-first reconciliation, generated-title provenance, and linked tracker names.
+- `P04R1-004 / P18-005` at `ef2f2c6`: MYFI decision windows for merge-result and backup restore, corrected action icons, locally pinned controlled EAS CLI build path, and combined gate contract.
+
+Workstation evidence:
+- `npm run test:gate`: **54 passed / 0 failed / 11 skipped**.
+- `npm run verify:android`: **PASS**, Android Hermes bundle exported successfully (1125 modules); only the pre-existing `@noble/hashes` package-exports fallback warning remains.
+- `npm run build:check`: **PASS**, local `eas-cli/21.7.0` starts through the controlled Windows `os.userInfo()` fallback.
+- `npm run build:apk -- --dry-run`: **PASS**, fixed Android/preview/APK plan.
+- `npm run build:aab -- --dry-run --non-interactive`: **PASS**, fixed Android/production/AAB plan.
+- `git diff --check`: **PASS** after final formatting cleanup.
+
+Safety/result:
+- SQLite schema remains **V7**; no DDL or schema-version change is included.
+- Existing SQLite, SecureStore, vault, archive, and financial rows are not cleared or rewritten by this source update.
+- Phase 6 was **not** started.
+- Static/runtime/build evidence does not claim device acceptance.
+
+Remaining R04.1 release gate:
+- one final physical Android acceptance session only, including Settings-tab/Home-profile routing, Arabic FX/BiDi, D-21 semantic sign/type/color parity, merge-result actions, and backup-restore confirmation;
+- device-only SQLite harness and two-device/cloud staging gates remain pending in their explicitly owned environments.

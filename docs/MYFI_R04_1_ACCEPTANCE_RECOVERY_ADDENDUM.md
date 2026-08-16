@@ -1,8 +1,9 @@
 # MYFI R04.1 — Acceptance Recovery Addendum
 
-Status: ACTIVE
+Status: ACTIVE — AUTOMATED RECOVERY PASS / DEVICE ACCEPTANCE PENDING
 Base: `33cce360a118c54daa88332374da07731e5a0641`
-Branch: `r04-1-acceptance-recovery`
+Implementation branch: `r04-p18-001-blocking-ux`
+Automated recovery evidence through: `ef2f2c6bbe07c71f1e94dd8356338285d0b7abd8`
 
 This addendum does not rewrite the Frozen Master Plan. It records device-proven
 R04 acceptance failures and assigns each item one primary implementation owner.
