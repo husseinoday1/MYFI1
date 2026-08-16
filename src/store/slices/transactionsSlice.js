@@ -321,6 +321,39 @@ export const createTransactionSlice = (set, get) => ({
     }
     const hasAmt = Object.prototype.hasOwnProperty.call(patch, 'amt');
     const ordinaryEntry = !(current.kind === 'transfer' || current.isDebtPayment || current.isGoalSaving || current.isCommitmentPayment || current.isOpeningBalance || current.isBalanceAdjustment);
+    if (ordinaryEntry && hasAmt) {
+      const nextWalletId = safePatch.walletId || current.walletId || getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
+      const selectedWallet = get().wallets.find(item => item.id === nextWalletId) || null;
+      const walletCurrency = String(selectedWallet?.currency || safePatch.walletCurrency || current.walletCurrency || get().cfg.currency || 'IQD').toUpperCase();
+      const baseCurrency = String(get().cfg.currency || 'IQD').toUpperCase();
+      const walletAmount = Number(safePatch.walletAmount ?? safePatch.amt);
+      const explicitRate = Number(safePatch.exchangeRate ?? current.exchangeRate);
+      const resolvedRate = walletCurrency === baseCurrency
+        ? 1
+        : (Number.isFinite(explicitRate) && explicitRate > 0 ? explicitRate : null);
+      if (!Number.isFinite(walletAmount) || walletAmount === 0) return false;
+      if (walletCurrency !== baseCurrency && !resolvedRate) return false;
+      let currencyFields;
+      try {
+        currencyFields = buildCurrencyFields({
+          amount: walletAmount,
+          walletId: nextWalletId,
+          wallets: get().wallets,
+          baseCurrency,
+          exchangeRate: resolvedRate || 1,
+          walletCurrency,
+        });
+      } catch {
+        return false;
+      }
+      Object.assign(safePatch, currencyFields, {
+        walletId: nextWalletId,
+        amt: currencyFields.baseAmount,
+        flowType: Number(currencyFields.walletAmount) >= 0 ? FLOW_TYPES.INCOME : FLOW_TYPES.EXPENSE,
+        rateDate: safePatch.rateDate || current.rateDate || safePatch.dateISO || current.dateISO || today(),
+        rateSource: safePatch.rateSource || current.rateSource || (walletCurrency === baseCurrency ? 'same_currency' : 'user_entered'),
+      });
+    }
     if (ordinaryEntry && hasAmt && !Object.prototype.hasOwnProperty.call(safePatch, 'title') && isGeneratedEntryTitle(current, get().cats)) {
       const nextCategory = get().cats.find(item => item.id === (safePatch.cat || current.cat)) || {};
       safePatch.title = buildGeneratedEntryTitle({
