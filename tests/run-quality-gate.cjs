@@ -25,6 +25,7 @@ const staticContracts = [
   'financial-core-phase1.test.cjs',
   'financial-core-phase23.test.cjs',
   'field-regressions-20260814.test.cjs',
+  'fx-suggestions-p18.test.cjs',
   'financial-ledger-v7-contract.test.cjs',
   'financial-ledger-v7-device-harness.test.cjs',
   'financial-ledger-migration-infrastructure.test.cjs',

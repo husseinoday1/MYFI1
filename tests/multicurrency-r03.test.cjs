@@ -17,12 +17,15 @@ const settings = read('src/screens/SettingsScreen.js');
 const legacySettings = read('src/screens/SettingsLegacyScreen.js');
 const moneySource = read('src/lib/money.js');
 
-assert(!add.includes('setExchangeRate(String(walletRate))'), 'Foreign entry must not silently adopt the current wallet valuation rate.');
+assert(add.includes('buildEntryFxSuggestion') && add.includes("setExchangeRateOrigin('wallet_suggestion')"), 'Foreign entry must prefill an editable wallet-rate suggestion.');
 assert(add.includes("'تأكيد التحويل'") && add.includes("'Confirm transfer'"), 'Cross-currency transfer CTA must be explicit confirmation.');
 assert(add.includes('transferReady') && add.includes('transferValidationMessage'), 'Transfer must have an inline readiness/validation gate.');
 assert(add.includes('transferNeedsBridgeRates') && add.includes('transferFromBaseRate') && add.includes('transferToBaseRate'), 'Foreign-to-foreign transfers must collect historical base bridge rates.');
-assert(add.includes('اقتراح فقط') && add.includes('never applied without your choice'), 'Current wallet valuation must be presented only as an explicit suggestion.');
+assert(add.includes('حفظ الحركة هو تأكيد السعر التاريخي') && add.includes('saving confirms the historical rate'), 'Saving must explicitly confirm the suggested historical rate.');
+assert(add.includes('buildTransferFxSuggestion') && add.includes('Calculated from both wallet rates · editable'), 'Transfer target amount must be calculated from wallet rates and remain editable.');
+assert(add.includes('transferNeedsSharedBaseRate'), 'Same-foreign-currency transfers must collect one historical base snapshot.');
 assert(transactions.includes('fromBaseRate') && transactions.includes('toBaseRate'), 'Transfer write/edit/duplicate paths must preserve historical base bridge rates.');
+assert(transactions.includes('rateSource = null') && transactions.includes("rateSource || (fromWallet?.currency"), 'Transfer must preserve whether a wallet valuation suggestion was confirmed.');
 assert(coreSource.includes("throw new RangeError('transfer_historical_base_rates_required')"), 'Foreign-to-foreign transfers must block without historical base bridge rates.');
 assert(coreSource.includes("fxStatus: 'UNRESOLVED_FX'"), 'Legacy transfers with missing historical bridge rates must be marked unresolved, never guessed.');
 assert(details.includes('Frozen transfer rate') && details.includes('transferSourceText') && details.includes('transferTargetText'), 'Transaction details must expose both transfer legs and frozen FX.');

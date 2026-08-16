@@ -29,6 +29,7 @@ import { CATEGORY_FLOWS, categorySupportsFlow, getCategoriesForFlow, getDefaultC
 import { rowDirFor, textAlignFor } from '../lib/layout';
 import { startLiveSpeechPreview } from '../lib/liveSpeechPreview';
 import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
+import { buildEntryFxSuggestion, buildTransferFxSuggestion } from '../lib/fxSuggestions';
 
 const cleanNumber = parseNumberInput;
 
@@ -229,11 +230,15 @@ export default function AddTransModal({
   const [fromWalletId, setFromWalletId] = useState(firstTransferWallet?.id || defaultWalletId);
   const [toWalletId, setToWalletId] = useState(secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
   const [exchangeRate, setExchangeRate] = useState('');
+  const [exchangeRateOrigin, setExchangeRateOrigin] = useState('none');
   const [entityBaseRate, setEntityBaseRate] = useState('');
   const [transferToAmount, setTransferToAmount] = useState('');
+  const [transferTargetOrigin, setTransferTargetOrigin] = useState('none');
   const [transferFeeAmount, setTransferFeeAmount] = useState('');
   const [transferFromBaseRate, setTransferFromBaseRate] = useState('');
+  const [transferFromRateOrigin, setTransferFromRateOrigin] = useState('none');
   const [transferToBaseRate, setTransferToBaseRate] = useState('');
+  const [transferToRateOrigin, setTransferToRateOrigin] = useState('none');
   const transferTargetWallets = eligibleTransferWallets.filter(wallet => wallet.id !== fromWalletId);
   const canTransfer = modules.wallets && eligibleTransferWallets.length > 1;
   const [smartOpen, setSmartOpen] = useState(false);
@@ -275,11 +280,15 @@ export default function AddTransModal({
     setFromWalletId(firstTransferWallet?.id || defaultWalletId);
     setToWalletId(secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
     setExchangeRate('');
+    setExchangeRateOrigin('none');
     setEntityBaseRate('');
     setTransferToAmount('');
+    setTransferTargetOrigin('none');
     setTransferFeeAmount('');
     setTransferFromBaseRate('');
+    setTransferFromRateOrigin('none');
     setTransferToBaseRate('');
+    setTransferToRateOrigin('none');
     setSmartOpen(false);
     setSmartMode('image');
     setReceiptImageUri(null);
@@ -316,11 +325,15 @@ export default function AddTransModal({
       setFromWalletId(editData.fromWalletId || defaultWalletId);
       setToWalletId(editData.toWalletId || secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
       setExchangeRate(String(editData.transferRate ?? editData.walletBaseRate ?? editData.exchangeRate ?? ''));
+      setExchangeRateOrigin('historical');
       setEntityBaseRate(String(editData.entityBaseRate ?? ''));
       setTransferToAmount(editData.kind === 'transfer' && Number(editData.transferToAmount) > 0 ? String(editData.transferToAmount) : '');
+      setTransferTargetOrigin(editData.kind === 'transfer' ? 'historical' : 'none');
       setTransferFeeAmount(editData.kind === 'transfer' && Number(editData.feeAmount) > 0 ? String(editData.feeAmount) : '');
       setTransferFromBaseRate(editData.kind === 'transfer' && Number(editData.fromBaseRate) > 0 ? String(editData.fromBaseRate) : '');
+      setTransferFromRateOrigin(editData.kind === 'transfer' ? 'historical' : 'none');
       setTransferToBaseRate(editData.kind === 'transfer' && Number(editData.toBaseRate) > 0 ? String(editData.toBaseRate) : '');
+      setTransferToRateOrigin(editData.kind === 'transfer' ? 'historical' : 'none');
       setSmartSource(editData.smartSource || null);
       setExpandedPicker(null);
     } else if (draftData?.smartMode) {
@@ -329,11 +342,15 @@ export default function AddTransModal({
       setCategoryTouched(false);
       setWalletId(defaultWalletId);
       setExchangeRate('');
+      setExchangeRateOrigin('none');
       setEntityBaseRate('');
       setTransferToAmount('');
+      setTransferTargetOrigin('none');
       setTransferFeeAmount('');
       setTransferFromBaseRate('');
+      setTransferFromRateOrigin('none');
       setTransferToBaseRate('');
+      setTransferToRateOrigin('none');
       setSmartMode(draftData.smartMode === 'voice' ? 'voice' : 'image');
       setSmartOpen(true);
       setSmartSource(null);
@@ -368,11 +385,15 @@ export default function AddTransModal({
       setFromWalletId(draftData.fromWalletId || firstTransferWallet?.id || defaultWalletId);
       setToWalletId(draftData.toWalletId || secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
       setExchangeRate(String(draftData.transferRate ?? draftData.walletBaseRate ?? draftData.exchangeRate ?? ''));
+      setExchangeRateOrigin('historical');
       setEntityBaseRate(String(draftData.entityBaseRate ?? ''));
       setTransferToAmount(Number(draftData.transferToAmount) > 0 ? String(draftData.transferToAmount) : '');
+      setTransferTargetOrigin(Number(draftData.transferToAmount) > 0 ? 'historical' : 'none');
       setTransferFeeAmount(Number(draftData.feeAmount) > 0 ? String(draftData.feeAmount) : '');
       setTransferFromBaseRate(Number(draftData.fromBaseRate) > 0 ? String(draftData.fromBaseRate) : '');
+      setTransferFromRateOrigin(Number(draftData.fromBaseRate) > 0 ? 'historical' : 'none');
       setTransferToBaseRate(Number(draftData.toBaseRate) > 0 ? String(draftData.toBaseRate) : '');
+      setTransferToRateOrigin(Number(draftData.toBaseRate) > 0 ? 'historical' : 'none');
       setWalletId(draftMode === 'commitment' ? defaultWalletId : (draftData.walletId || defaultWalletId));
       setSmartSource(draftData.smartSource || null);
       setExpandedPicker(null);
@@ -392,11 +413,15 @@ export default function AddTransModal({
       setFromWalletId(firstTransferWallet?.id || defaultWalletId);
       setToWalletId(secondTransferWallet?.id || firstTransferWallet?.id || defaultWalletId);
       setExchangeRate('');
+      setExchangeRateOrigin('none');
       setEntityBaseRate('');
       setTransferToAmount('');
+      setTransferTargetOrigin('none');
       setTransferFeeAmount('');
       setTransferFromBaseRate('');
+      setTransferFromRateOrigin('none');
       setTransferToBaseRate('');
+      setTransferToRateOrigin('none');
       setSmartSource(null);
       setExpandedPicker(null);
     }
@@ -728,8 +753,11 @@ export default function AddTransModal({
       const targetAmount = crossCurrency ? cleanNumber(transferToAmount) : Math.abs(n);
       if (!transferReady) return;
       const transferRate = crossCurrency ? targetAmount / Math.abs(n) : 1;
-      const fromBaseRate = transferNeedsBridgeRates ? cleanNumber(transferFromBaseRate) : undefined;
-      const toBaseRate = transferNeedsBridgeRates ? cleanNumber(transferToBaseRate) : undefined;
+      const fromBaseRate = transferNeedsHistoricalBaseRates ? cleanNumber(transferFromBaseRate) : undefined;
+      const toBaseRate = transferNeedsBridgeRates
+        ? cleanNumber(transferToBaseRate)
+        : transferNeedsSharedBaseRate ? cleanNumber(transferFromBaseRate) : undefined;
+      const rateSource = transferUsesWalletSuggestion ? 'wallet_valuation_confirmed' : 'user_entered';
       let saved = false;
       if (editData) {
         saved = await editTrans(editData.id, {
@@ -743,6 +771,7 @@ export default function AddTransModal({
           feeAmount: Math.max(0, cleanNumber(transferFeeAmount)),
           fromBaseRate,
           toBaseRate,
+          rateSource,
           fromWalletId,
           toWalletId,
           scope: sourceWallet.scope,
@@ -756,7 +785,7 @@ export default function AddTransModal({
         saved = await addTransfer({
           fromWalletId, toWalletId, amount: n, toAmount: targetAmount,
           exchangeRate: transferRate, feeAmount: Math.max(0, cleanNumber(transferFeeAmount)),
-          fromBaseRate, toBaseRate, dateISO, note,
+          fromBaseRate, toBaseRate, rateSource, dateISO, note,
         });
       }
       if (!saved) {
@@ -832,6 +861,7 @@ export default function AddTransModal({
       cat: categorySupportsFlow(cats.find(item => item.id === cat), entryFlow) ? cat : defaultEntryCat,
       note, recurring, dateISO, walletId,
       exchangeRate: cleanNumber(exchangeRate) || undefined,
+      rateSource: exchangeRateOrigin === 'wallet_suggestion' ? 'wallet_valuation_confirmed' : undefined,
       recurringGroupId: draftData?.recurringGroupId,
       smartSource: effectiveSmartSource,
       ...(!editData ? {
@@ -973,7 +1003,11 @@ export default function AddTransModal({
   const toSym = getSymbol(toCurrency);
   const baseCurrencyCode = String(cfg.currency || 'IQD').toUpperCase();
   const transferCrossCurrency = type === 'transfer' && fromCurrency !== toCurrency;
+  const transferNeedsSharedBaseRate = type === 'transfer'
+    && !transferCrossCurrency
+    && fromCurrency !== baseCurrencyCode;
   const transferNeedsBridgeRates = transferCrossCurrency && fromCurrency !== baseCurrencyCode && toCurrency !== baseCurrencyCode;
+  const transferNeedsHistoricalBaseRates = transferNeedsSharedBaseRate || transferNeedsBridgeRates;
   const transferSourceValue = cleanNumber(amt);
   const transferTargetValue = transferCrossCurrency ? cleanNumber(transferToAmount) : Math.abs(transferSourceValue);
   const transferFeeValue = Math.max(0, cleanNumber(transferFeeAmount));
@@ -982,12 +1016,26 @@ export default function AddTransModal({
     : 1;
   const transferFromBaseRateValue = cleanNumber(transferFromBaseRate);
   const transferToBaseRateValue = cleanNumber(transferToBaseRate);
+  const entryFxSuggestion = buildEntryFxSuggestion({
+    wallet: selectedEntryWallet,
+    baseCurrency: baseCurrencyCode,
+  });
+  const transferFxSuggestion = buildTransferFxSuggestion({
+    fromWallet: selectedFromWallet,
+    toWallet: selectedToWallet,
+    sourceAmount: transferSourceValue,
+    baseCurrency: baseCurrencyCode,
+  });
+  const transferUsesWalletSuggestion = transferTargetOrigin === 'wallet_suggestion'
+    || transferFromRateOrigin === 'wallet_suggestion'
+    || transferToRateOrigin === 'wallet_suggestion';
   const transferReady = type !== 'transfer' || (
     !!selectedFromWallet
     && !!selectedToWallet
     && fromWalletId !== toWalletId
     && transferSourceValue > 0
     && (!transferCrossCurrency || transferTargetValue > 0)
+    && (!transferNeedsSharedBaseRate || transferFromBaseRateValue > 0)
     && (!transferNeedsBridgeRates || (transferFromBaseRateValue > 0 && transferToBaseRateValue > 0))
   );
   const transferValidationMessage = type !== 'transfer' || transferReady
@@ -996,6 +1044,8 @@ export default function AddTransModal({
       ? (cfg.lang === 'ar' ? 'أدخل المبلغ المرسل أولاً.' : 'Enter the amount you are sending first.')
       : transferCrossCurrency && !(transferTargetValue > 0)
         ? (cfg.lang === 'ar' ? `أدخل المبلغ الذي سيصل فعلياً بعملة ${toCurrency} لتثبيت سعر التحويل التاريخي.` : `Enter the amount that will actually arrive in ${toCurrency} to freeze the historical transfer rate.`)
+        : transferNeedsSharedBaseRate && !(transferFromBaseRateValue > 0)
+          ? (cfg.lang === 'ar' ? `أكد سعر ${fromCurrency} مقابل ${baseCurrencyCode} حتى تحفظ التقارير القيمة التاريخية الصحيحة.` : `Confirm ${fromCurrency} against ${baseCurrencyCode} so reports keep the correct historical value.`)
         : transferNeedsBridgeRates && !(transferFromBaseRateValue > 0 && transferToBaseRateValue > 0)
           ? (cfg.lang === 'ar' ? `أكد سعر كل عملة مقابل ${baseCurrencyCode} حتى تحفظ التقارير القيمة التاريخية الصحيحة.` : `Confirm each currency against ${baseCurrencyCode} so reports keep the correct historical value.`)
           : (cfg.lang === 'ar' ? 'راجع المحافظ ومبالغ التحويل.' : 'Review the wallets and transfer amounts.');
@@ -1022,6 +1072,62 @@ export default function AddTransModal({
       setCategoryTouched(false);
     }
   }, [visible, isMoneyEntry, cat, cats, entryFlow, defaultEntryCat]);
+  useEffect(() => {
+    if (!visible || editData || draftData || !needsEntryExchangeRate) return;
+    if (exchangeRateOrigin === 'manual' || exchangeRateOrigin === 'historical') return;
+    if (!(Number(entryFxSuggestion.rate) > 0)) return;
+    const nextRate = String(entryFxSuggestion.rate);
+    if (exchangeRate !== nextRate) setExchangeRate(nextRate);
+    if (exchangeRateOrigin !== 'wallet_suggestion') setExchangeRateOrigin('wallet_suggestion');
+  }, [
+    visible, editData, draftData, needsEntryExchangeRate,
+    entryFxSuggestion.rate, exchangeRate, exchangeRateOrigin,
+  ]);
+  useEffect(() => {
+    if (!visible || editData || draftData || type !== 'transfer' || !transferFxSuggestion.available) return;
+
+    if (transferCrossCurrency
+      && transferTargetOrigin === 'wallet_suggestion'
+      && !(Number(transferFxSuggestion.targetAmount) > 0)
+      && transferToAmount) {
+      setTransferToAmount('');
+    }
+
+    if (transferCrossCurrency
+      && transferTargetOrigin !== 'manual'
+      && transferTargetOrigin !== 'historical'
+      && Number(transferFxSuggestion.targetAmount) > 0) {
+      const nextTarget = String(transferFxSuggestion.targetAmount);
+      if (transferToAmount !== nextTarget) setTransferToAmount(nextTarget);
+      if (transferTargetOrigin !== 'wallet_suggestion') setTransferTargetOrigin('wallet_suggestion');
+    }
+
+    if (transferNeedsHistoricalBaseRates
+      && transferFromRateOrigin !== 'manual'
+      && transferFromRateOrigin !== 'historical'
+      && Number(transferFxSuggestion.fromBaseRate) > 0) {
+      const nextFromRate = String(transferFxSuggestion.fromBaseRate);
+      if (transferFromBaseRate !== nextFromRate) setTransferFromBaseRate(nextFromRate);
+      if (transferFromRateOrigin !== 'wallet_suggestion') setTransferFromRateOrigin('wallet_suggestion');
+    }
+
+    if (transferNeedsBridgeRates
+      && transferToRateOrigin !== 'manual'
+      && transferToRateOrigin !== 'historical'
+      && Number(transferFxSuggestion.toBaseRate) > 0) {
+      const nextToRate = String(transferFxSuggestion.toBaseRate);
+      if (transferToBaseRate !== nextToRate) setTransferToBaseRate(nextToRate);
+      if (transferToRateOrigin !== 'wallet_suggestion') setTransferToRateOrigin('wallet_suggestion');
+    }
+  }, [
+    visible, editData, draftData, type, transferCrossCurrency,
+    transferNeedsHistoricalBaseRates, transferNeedsBridgeRates,
+    transferFxSuggestion.available, transferFxSuggestion.targetAmount,
+    transferFxSuggestion.fromBaseRate, transferFxSuggestion.toBaseRate,
+    transferToAmount, transferTargetOrigin,
+    transferFromBaseRate, transferFromRateOrigin,
+    transferToBaseRate, transferToRateOrigin,
+  ]);
   useEffect(() => {
     if (!visible || categoryTouched || !isMoneyEntry || title.trim().length < 3) return;
     const suggested = suggestCategoryFromHistory(title, trans, {
@@ -1311,7 +1417,7 @@ export default function AddTransModal({
                   })),
                   icon: 'card-outline',
                   tone: selectedDebtReceivable ? th.inc : th.exp,
-                  onChange: value => { setSelDebt(value); setEntityBaseRate(''); setExchangeRate(''); },
+                  onChange: value => { setSelDebt(value); setEntityBaseRate(''); setExchangeRate(''); setExchangeRateOrigin('none'); },
                 })}
               </View>
             )}
@@ -1341,7 +1447,7 @@ export default function AddTransModal({
                   })),
                   icon: 'flag-outline',
                   tone: th.primary,
-                  onChange: value => { setSelGoal(value); setEntityBaseRate(''); setExchangeRate(''); },
+                  onChange: value => { setSelGoal(value); setEntityBaseRate(''); setExchangeRate(''); setExchangeRateOrigin('none'); },
                 })}
               </View>
             )}
@@ -1377,6 +1483,7 @@ export default function AddTransModal({
                     setWalletId(defaultWalletId);
                     setEntityBaseRate('');
                     setExchangeRate('');
+                    setExchangeRateOrigin('none');
                   },
                 })}
               </View>
@@ -1389,7 +1496,7 @@ export default function AddTransModal({
                   <TextInput
                     value={amt}
                     onChangeText={(value) => setAmt(formatNumberInput(value))}
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     placeholder={`0 ${amountSymbol}`}
                     placeholderTextColor={th.faint}
                     style={[s.amountInput, { color: type === 'inc' ? th.inc : type === 'exp' ? th.exp : th.text, textAlign: align }]}
@@ -1419,7 +1526,11 @@ export default function AddTransModal({
                     options: walletOptions,
                     icon: 'wallet-outline',
                     tone: th.primary,
-                    onChange: setWalletId,
+                    onChange: (value) => {
+                      setWalletId(value);
+                      setExchangeRate('');
+                      setExchangeRateOrigin('none');
+                    },
                   }) : null}
                 {renderSelectField({
                   id: 'category',
@@ -1447,8 +1558,11 @@ export default function AddTransModal({
                     const nextTarget = eligibleTransferWallets.find(candidate => candidate.id !== value);
                     setToWalletId(nextTarget?.id || value);
                     setTransferToAmount('');
+                    setTransferTargetOrigin('none');
                     setTransferFromBaseRate('');
+                    setTransferFromRateOrigin('none');
                     setTransferToBaseRate('');
+                    setTransferToRateOrigin('none');
                   },
                 })}
                 {renderSelectField({
@@ -1461,8 +1575,11 @@ export default function AddTransModal({
                   onChange: (value) => {
                     setToWalletId(value);
                     setTransferToAmount('');
+                    setTransferTargetOrigin('none');
                     setTransferFromBaseRate('');
+                    setTransferFromRateOrigin('none');
                     setTransferToBaseRate('');
+                    setTransferToRateOrigin('none');
                   },
                 })}
               </View>
@@ -1475,16 +1592,28 @@ export default function AddTransModal({
                 </Text>
                 <TextInput
                   value={transferToAmount}
-                  onChangeText={(value) => setTransferToAmount(formatNumberInput(value))}
+                  onChangeText={(value) => {
+                    setTransferToAmount(formatNumberInput(value));
+                    setTransferTargetOrigin('manual');
+                  }}
                   keyboardType="decimal-pad"
                   placeholder={`0 ${toSym}`}
                   placeholderTextColor={th.faint}
                   style={[s.inlineInput, { color: th.text, textAlign: align }]}
                 />
-                {cleanNumber(amt) > 0 && cleanNumber(transferToAmount) > 0 ? (
-                  <Text style={[s.selectDetail, { color: th.sub, textAlign: 'left', writingDirection: 'ltr', marginTop: 4 }]}>
-                    {`1 ${fromCurrency} = ${(cleanNumber(transferToAmount) / cleanNumber(amt)).toLocaleString()} ${toCurrency}`}
+                {transferTargetOrigin === 'wallet_suggestion' ? (
+                  <Text style={[s.selectDetail, { color: th.primary, textAlign: align, marginTop: 4, ...weight('800') }]}>
+                    {cfg.lang === 'ar' ? 'محسوب تلقائياً من سعرَي المحفظتين · يمكنك تعديله' : 'Calculated from both wallet rates · editable'}
                   </Text>
+                ) : null}
+                {cleanNumber(amt) > 0 && cleanNumber(transferToAmount) > 0 ? (
+                  <View style={{ marginTop: 4 }}>
+                    <FxEquation
+                      fromCurrency={fromCurrency}
+                      toCurrency={toCurrency}
+                      value={(cleanNumber(transferToAmount) / cleanNumber(amt)).toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                    />
+                  </View>
                 ) : null}
               </View>
             ) : null}
@@ -1498,14 +1627,21 @@ export default function AddTransModal({
                   <FxEquation fromCurrency={fromCurrency} toCurrency={baseCurrencyCode} />
                   <TextInput
                     value={transferFromBaseRate}
-                    onChangeText={(value) => setTransferFromBaseRate(formatNumberInput(value))}
+                    onChangeText={(value) => {
+                      setTransferFromBaseRate(formatNumberInput(value));
+                      setTransferFromRateOrigin('manual');
+                    }}
                     keyboardType="decimal-pad"
                     placeholder={String(selectedFromWallet?.valuationRate || '')}
                     placeholderTextColor={th.faint}
                     style={[s.inlineInput, { color: th.text, textAlign: align }]}
                   />
-                  {Number(selectedFromWallet?.valuationRate || 0) > 0 ? (
-                    <TouchableOpacity onPress={() => setTransferFromBaseRate(String(selectedFromWallet.valuationRate))}>
+                  {transferFromRateOrigin === 'wallet_suggestion' ? (
+                    <Text style={[s.selectDetail, { color: th.primary, textAlign: align, marginTop: 5, ...weight('800') }]}>
+                      {cfg.lang === 'ar' ? 'معبّأ من سعر المحفظة · قابل للتعديل' : 'Filled from wallet rate · editable'}
+                    </Text>
+                  ) : Number(selectedFromWallet?.valuationRate || 0) > 0 ? (
+                    <TouchableOpacity onPress={() => { setTransferFromBaseRate(String(selectedFromWallet.valuationRate)); setTransferFromRateOrigin('wallet_suggestion'); }}>
                       <Text style={[s.selectDetail, { color: th.primary, textAlign: align, marginTop: 5, ...weight('800') }]}>
                         {cfg.lang === 'ar' ? `استخدام سعر المحفظة الحالي: ${selectedFromWallet.valuationRate}` : `Use current wallet rate: ${selectedFromWallet.valuationRate}`}
                       </Text>
@@ -1519,14 +1655,21 @@ export default function AddTransModal({
                   <FxEquation fromCurrency={toCurrency} toCurrency={baseCurrencyCode} />
                   <TextInput
                     value={transferToBaseRate}
-                    onChangeText={(value) => setTransferToBaseRate(formatNumberInput(value))}
+                    onChangeText={(value) => {
+                      setTransferToBaseRate(formatNumberInput(value));
+                      setTransferToRateOrigin('manual');
+                    }}
                     keyboardType="decimal-pad"
                     placeholder={String(selectedToWallet?.valuationRate || '')}
                     placeholderTextColor={th.faint}
                     style={[s.inlineInput, { color: th.text, textAlign: align }]}
                   />
-                  {Number(selectedToWallet?.valuationRate || 0) > 0 ? (
-                    <TouchableOpacity onPress={() => setTransferToBaseRate(String(selectedToWallet.valuationRate))}>
+                  {transferToRateOrigin === 'wallet_suggestion' ? (
+                    <Text style={[s.selectDetail, { color: th.primary, textAlign: align, marginTop: 5, ...weight('800') }]}>
+                      {cfg.lang === 'ar' ? 'معبّأ من سعر المحفظة · قابل للتعديل' : 'Filled from wallet rate · editable'}
+                    </Text>
+                  ) : Number(selectedToWallet?.valuationRate || 0) > 0 ? (
+                    <TouchableOpacity onPress={() => { setTransferToBaseRate(String(selectedToWallet.valuationRate)); setTransferToRateOrigin('wallet_suggestion'); }}>
                       <Text style={[s.selectDetail, { color: th.primary, textAlign: align, marginTop: 5, ...weight('800') }]}>
                         {cfg.lang === 'ar' ? `استخدام سعر المحفظة الحالي: ${selectedToWallet.valuationRate}` : `Use current wallet rate: ${selectedToWallet.valuationRate}`}
                       </Text>
@@ -1534,6 +1677,31 @@ export default function AddTransModal({
                   ) : null}
                 </View>
               </>
+            ) : null}
+
+            {type === 'transfer' && transferNeedsSharedBaseRate ? (
+              <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
+                  {cfg.lang === 'ar' ? `قيمة ${fromCurrency} التاريخية للتقارير` : `Historical ${fromCurrency} reporting value`}
+                </Text>
+                <FxEquation fromCurrency={fromCurrency} toCurrency={baseCurrencyCode} />
+                <TextInput
+                  value={transferFromBaseRate}
+                  onChangeText={(value) => {
+                    setTransferFromBaseRate(formatNumberInput(value));
+                    setTransferFromRateOrigin('manual');
+                  }}
+                  keyboardType="decimal-pad"
+                  placeholder={String(selectedFromWallet?.valuationRate || '')}
+                  placeholderTextColor={th.faint}
+                  style={[s.inlineInput, { color: th.text, textAlign: align }]}
+                />
+                <Text style={[s.selectDetail, { color: transferFromRateOrigin === 'wallet_suggestion' ? th.primary : th.sub, textAlign: align, marginTop: 5 }]}>
+                  {transferFromRateOrigin === 'wallet_suggestion'
+                    ? (cfg.lang === 'ar' ? 'معبّأ من سعر المحفظة · تأكيد التحويل يثبته لهذه الحركة فقط' : 'Filled from wallet rate · confirming freezes it for this transfer only')
+                    : (cfg.lang === 'ar' ? 'هذا السعر خاص بتاريخ التحويل ولا يغيّر سعر المحفظة.' : 'This rate belongs to the transfer date and does not change the wallet rate.')}
+                </Text>
+              </View>
             ) : null}
 
             {type === 'transfer' ? (
@@ -1571,9 +1739,9 @@ export default function AddTransModal({
                   <Text style={{ color: th.text, fontSize: 13, ...weight('900') }}>{transferTargetValue > 0 ? formatNumberInput(String(transferTargetValue)) : '—'} {toSym}</Text>
                 </View>
                 {transferCrossCurrency && transferRateValue > 0 && transferTargetValue > 0 ? (
-                  <Text style={[s.selectDetail, { color: th.primary, textAlign: align, marginTop: 8, ...weight('800') }]}>
-                    {`1 ${fromCurrency} = ${transferRateValue.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${toCurrency}`}
-                  </Text>
+                  <View style={{ marginTop: 8 }}>
+                    <FxEquation fromCurrency={fromCurrency} toCurrency={toCurrency} value={transferRateValue.toLocaleString(undefined, { maximumFractionDigits: 8 })} />
+                  </View>
                 ) : null}
                 <Text style={[s.selectDetail, { color: th.sub, textAlign: align, marginTop: 6 }]}>
                   {cfg.lang === 'ar'
@@ -1618,17 +1786,22 @@ export default function AddTransModal({
                 <FxEquation fromCurrency={entryCurrency} toCurrency={cfg.currency} />
                 <TextInput
                   value={exchangeRate}
-                  onChangeText={(value) => setExchangeRate(formatNumberInput(value))}
+                  onChangeText={(value) => {
+                    setExchangeRate(formatNumberInput(value));
+                    setExchangeRateOrigin('manual');
+                  }}
                   keyboardType="decimal-pad"
                   placeholder={String(selectedEntryWallet?.valuationRate || '')}
                   placeholderTextColor={th.faint}
                   style={[s.inlineInput, { color: th.text, textAlign: align }]}
                 />
                 <Text style={[s.selectDetail, { color: th.sub, textAlign: align, marginTop: 5 }]}>
-                  {cfg.lang === 'ar' ? 'هذا سعر تاريخي خاص بهذه الحركة. سعر المحفظة أدناه اقتراح فقط ولن يُستخدم بدون اختيارك.' : 'This is the historical rate for this transaction. The wallet rate below is only a suggestion and is never applied without your choice.'}
+                  {exchangeRateOrigin === 'wallet_suggestion'
+                    ? (cfg.lang === 'ar' ? 'معبّأ من سعر المحفظة كاقتراح. يمكنك تعديله، وحفظ الحركة هو تأكيد السعر التاريخي.' : 'Filled from the wallet rate as a suggestion. You can edit it; saving confirms the historical rate.')
+                    : (cfg.lang === 'ar' ? 'هذا سعر تاريخي خاص بهذه الحركة ولا يغيّر سعر المحفظة.' : 'This historical rate belongs to this transaction and does not change the wallet rate.')}
                 </Text>
-                {Number(selectedEntryWallet?.valuationRate || 0) > 0 ? (
-                  <TouchableOpacity onPress={() => setExchangeRate(String(selectedEntryWallet.valuationRate))}>
+                {exchangeRateOrigin !== 'wallet_suggestion' && Number(selectedEntryWallet?.valuationRate || 0) > 0 ? (
+                  <TouchableOpacity onPress={() => { setExchangeRate(String(selectedEntryWallet.valuationRate)); setExchangeRateOrigin('wallet_suggestion'); }}>
                     <Text style={[s.selectDetail, { color: th.primary, textAlign: align, marginTop: 5, ...weight('800') }]}>
                       {cfg.lang === 'ar' ? `استخدام سعر المحفظة: ${selectedEntryWallet.valuationRate}` : `Use wallet rate: ${selectedEntryWallet.valuationRate}`}
                     </Text>
@@ -1698,7 +1871,11 @@ export default function AddTransModal({
                   options: walletOptions,
                   icon: 'wallet-outline',
                   tone: th.primary,
-                  onChange: setWalletId,
+                  onChange: (value) => {
+                    setWalletId(value);
+                    setExchangeRate('');
+                    setExchangeRateOrigin('none');
+                  },
                 }) : null}
                 <DateField
                   value={dateISO}
@@ -1720,7 +1897,7 @@ export default function AddTransModal({
                   <TextInput
                     value={amt}
                     onChangeText={(value) => setAmt(formatNumberInput(value))}
-                    keyboardType="numeric"
+                    keyboardType="decimal-pad"
                     placeholder={`0 ${trackerSym}`}
                     placeholderTextColor={th.faint}
                     style={[s.inlineInput, { color: th.text, textAlign: align }]}
@@ -1734,7 +1911,11 @@ export default function AddTransModal({
                     options: walletOptions,
                     icon: 'wallet-outline',
                     tone: th.primary,
-                    onChange: setWalletId,
+                    onChange: (value) => {
+                      setWalletId(value);
+                      setExchangeRate('');
+                      setExchangeRateOrigin('none');
+                    },
                   }) : null}
                   <DateField
                     value={dateISO}

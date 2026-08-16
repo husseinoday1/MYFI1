@@ -15,6 +15,9 @@ assert(!settings.includes('function SettingsPageMenu('), 'Settings-wide dropdown
 assert(!settings.includes('function NestedSettingsMenu('), 'Nested settings navigator must be removed');
 assert(!settings.includes("page === 'advanced'"), 'Advanced intermediate page must be removed');
 assert(settings.includes('<LegacySettingsScreen tabs={tabs} embedded financialOnly financialSection="all" />'), 'Financial configuration must stay on one page');
+assert(settings.includes('<LegacySettingsScreen tabs={tabs} embedded financialOnly financialSection="usage" />'), 'Feature visibility must be reachable directly from Settings Root');
+assert(settings.includes('<LegacySettingsScreen tabs={tabs} embedded financialOnly financialSection="alerts" />'), 'Notifications must be reachable directly from Settings Root');
+assert(settings.includes("onPress={() => onOpen('features')}") && settings.includes("onPress={() => onOpen('notifications')}"), 'Settings Root feature/notification destinations missing');
 assert(legacy.includes('financialOpenSection'), 'Financial page must use inline accordion disclosure');
 assert(legacy.includes('financialAccordionHead'), 'Financial accordion styling missing');
 assert(settings.includes("textAlign: 'center' }]} numberOfLines={1}>{title}</Text>"), 'Subpage headers must be centered');

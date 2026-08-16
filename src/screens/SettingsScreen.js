@@ -58,6 +58,10 @@ const pageCopy = (lang = 'ar') => {
     preferencesSub: ar ? 'اللغة والمظهر' : 'Language and appearance',
     financial: ar ? 'الإعداد المالي' : 'Financial setup',
     financialSub: ar ? 'المحافظ، التصنيفات، الميزانيات والوحدات' : 'Wallets, categories, budgets and modules',
+    featureVisibility: ar ? 'إظهار وإخفاء الميزات' : 'Feature visibility',
+    featureVisibilitySub: ar ? 'اختر الميزات التي تظهر لك من دون حذف بياناتها' : 'Choose which features appear without deleting their data',
+    notifications: ar ? 'الإشعارات والتذكيرات' : 'Notifications & reminders',
+    notificationsSub: ar ? 'التفعيل، الوقت والخصوصية' : 'Enablement, timing and privacy',
     data: ar ? 'البيانات والتخزين' : 'Data & storage',
     dataSub: ar ? 'النسخ الاحتياطي، الاستيراد والأرشيف' : 'Backup, restore and archive',
     security: ar ? 'الخصوصية والأمان' : 'Privacy & security',
@@ -914,6 +918,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
   const screenTitle = page === 'account' ? T.account
     : page === 'devices' ? T.devices
       : page === 'financial' ? T.financial
+        : page === 'features' ? T.featureVisibility
+          : page === 'notifications' ? T.notifications
         : page === 'data' ? T.data
           : page === 'security' ? T.security
             : page === 'support' ? T.helpCenter
@@ -1016,6 +1022,14 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
             counts={dataCounts}
             tabs={tabs}
           />
+        ) : null}
+
+        {page === 'features' ? (
+          <LegacySettingsScreen tabs={tabs} embedded financialOnly financialSection="usage" />
+        ) : null}
+
+        {page === 'notifications' ? (
+          <LegacySettingsScreen tabs={tabs} embedded financialOnly financialSection="alerts" />
         ) : null}
 
         {page === 'support' ? (
@@ -1203,7 +1217,9 @@ function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accou
 
       <SectionLabel th={th} isAr={isAr} text={T.money} />
       <MenuGroup th={th}>
-        <MenuRow th={th} isAr={isAr} icon="wallet-outline" title={T.financial} subtitle={T.financialSub} onPress={onAdvanced} last />
+        <MenuRow th={th} isAr={isAr} icon="wallet-outline" title={T.financial} subtitle={T.financialSub} onPress={onAdvanced} />
+        <MenuRow th={th} isAr={isAr} icon="options-outline" title={T.featureVisibility} subtitle={T.featureVisibilitySub} onPress={() => onOpen('features')} />
+        <MenuRow th={th} isAr={isAr} icon="notifications-outline" title={T.notifications} subtitle={T.notificationsSub} onPress={() => onOpen('notifications')} last />
       </MenuGroup>
 
       <SectionLabel th={th} isAr={isAr} text={T.privacyData} />

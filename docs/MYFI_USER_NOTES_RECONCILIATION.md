@@ -152,3 +152,18 @@ Still owned by later phases rather than duplicated into R04 UI polish:
 The screenshot/user audit about currency meaning is applied beyond individual transactions: Home/Reports may not sum IRR + IQD + USD tracker values as if they were one currency. R04 therefore groups current Debt/Receivable/Goal/Commitment values by immutable entity currency, uses historical base snapshots only where they exist, and refuses a single Net Position when current foreign debt/receivable valuation is not provable. Historical report periods do not pretend that current tracker state is an as-of historical snapshot.
 
 Status: `PASS_STATIC`, device acceptance pending with the single R04 acceptance session.
+
+---
+
+# User clarification reconciliation — 2026-08-16
+
+- “User-controlled” means the user can enable/show or disable/hide optional
+  features, not only approve automation actions.
+- Hiding a feature must be reversible and must not delete or suppress financial
+  truth from History, Reports, export, backup, or restore.
+- Notifications & Reminders belongs as a direct Settings destination. Lock-screen
+  content privacy remains under Security.
+- Device feedback confirmed that asking for the received amount after the wallet
+  valuation rate was already supplied is avoidable duplication. MYFI should
+  calculate it as an editable suggestion and freeze the reviewed result only when
+  the user confirms the transaction.

@@ -183,7 +183,7 @@ export const createTransactionSlice = (set, get) => ({
     });
   },
 
-  addTransfer: async ({ fromWalletId, toWalletId, amount, toAmount = null, exchangeRate = null, feeAmount = 0, fromBaseRate = null, toBaseRate = null, dateISO = today(), note = '' }) => {
+  addTransfer: async ({ fromWalletId, toWalletId, amount, toAmount = null, exchangeRate = null, feeAmount = 0, fromBaseRate = null, toBaseRate = null, rateSource = null, dateISO = today(), note = '' }) => {
     const n = Number(amount);
     const normalizedWallets = normalizeWallets(get().wallets, get().cfg.currency);
     const walletIds = new Set(normalizedWallets.map(wallet => wallet.id));
@@ -231,7 +231,7 @@ export const createTransactionSlice = (set, get) => ({
       dateISO: entryDate,
       ts: Date.now(),
       rateDate: entryDate,
-      rateSource: fromWallet?.currency === toWallet?.currency ? 'same_currency' : 'user_entered',
+      rateSource: rateSource || (fromWallet?.currency === toWallet?.currency ? 'same_currency' : 'user_entered'),
       idempotencyKey: `transfer:${uid()}`,
       balanceWarning: !Number.isFinite(sourceBalance) || (fields.transferFromAmount + fields.feeAmount) > sourceBalance + 0.0001,
     };

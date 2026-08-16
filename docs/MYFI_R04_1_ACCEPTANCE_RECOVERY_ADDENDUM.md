@@ -35,7 +35,23 @@ automated gate and one real-device acceptance session.
 - Explicit historical FX direction, date and source.
 - Clear base-currency valuation without rewriting history.
 - Wallet create/edit UX: currency, opening balance, scope and current valuation.
+- A wallet valuation rate is reused as an editable transaction suggestion; the
+  user must not calculate or enter the same conversion twice.
+- Entering the source amount calculates the destination amount from the two
+  wallet rates when both are available. The user can overwrite any suggestion.
+- Saving/confirming freezes the reviewed rate and amounts for that transaction;
+  later wallet valuation changes never rewrite historical movements.
 - No false single-total aggregation across unrelated native currencies.
+
+### P18-003 — User-Controlled Feature Surface (pre-Phase-6 UX contract only)
+
+- The user controls which optional financial features are shown or hidden.
+- Hiding a feature changes navigation and entry surfaces only. It never deletes
+  entities, transactions, historical totals, backups, or financial evidence.
+- Feature visibility and Notifications & Reminders are direct Settings Root
+  destinations instead of being buried under Account or unrelated privacy pages.
+- Notification content privacy remains under Security as an independent concern.
+- This patch does not start Phase 6 and does not change the SQLite schema.
 
 ### P04R1-003 — Semantic Financial History
 
