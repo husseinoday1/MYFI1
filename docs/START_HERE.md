@@ -1,0 +1,15 @@
+# MYFI — START HERE
+
+Read in this order:
+
+1. `00_MYFI_CANONICAL_AUTHORITY.md`
+2. `01_CORE_AUTHORITY/MYFI_MASTER_PLAN_FROZEN.md`
+3. `01_CORE_AUTHORITY/MYFI_R04_1_ACCEPTANCE_RECOVERY_ADDENDUM.md`
+4. `04_CURRENT_EVIDENCE/MYFI_CURRENT_ACCEPTANCE_DELTA_2026-08-16.md`
+5. `01_CORE_AUTHORITY/MYFI_RELEASE_GATE_STATUS_AR.md`
+6. `01_CORE_AUTHORITY/MYFI_USER_NOTES_RECONCILIATION_CANONICAL_2026-08-16.md`
+7. relevant contracts for the task
+
+Never select an older plan/status file by filename label alone.
+
+Before coding, verify the actual Git branch/HEAD and working tree.

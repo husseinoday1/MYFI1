@@ -1,13 +1,13 @@
 # MYFI — User Notes Reconciliation Status
-## Review date: 2026-08-15
+## Review date: 2026-08-16
 
 Baseline reviewed:
 - Repository: `husseinoday1/MYFI1`
-- Branch: `phase-04-multicurrency-r03`
-- HEAD: `28c7e29e7c1623f83ccb4359bba613f8f2f5cd25`
+- Branch: `r04-p18-001-blocking-ux`
+- HEAD: `ef2f2c6bbe07c71f1e94dd8356338285d0b7abd8`
 
 This file is a quick review companion. The authoritative updated plan is:
-`MYFI_MASTER_PLAN_FROZEN_WITH_USER_AUDIT_ADDENDUM_2026-08-15.md`
+`01_CORE_AUTHORITY/MYFI_MASTER_PLAN_FROZEN.md`
 
 ## Confirmed structurally implemented
 - Three-page onboarding shell.
@@ -167,3 +167,10 @@ Status: `PASS_STATIC`, device acceptance pending with the single R04 acceptance 
   valuation rate was already supplied is avoidable duplication. MYFI should
   calculate it as an editable suggestion and freeze the reviewed result only when
   the user confirms the transaction.
+- A cross-currency transaction flow should not force the user to re-enter the
+  same converted amount after the rate is already known. If the FX/valuation is
+  supplied, the app should derive the amount as an editable suggestion instead
+  of treating the amount prompt as a separate mandatory step.
+- Optional feature visibility is a product control surface, not a hidden
+  automation switch. The Settings Root placement is intentional because the
+  user is deciding what surfaces to show or hide.
