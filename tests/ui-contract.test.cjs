@@ -109,7 +109,7 @@ assert(addModal.includes('const eligibleTransferWallets = transferWalletList;'),
 assert.equal(addModal.includes('walletScope(sourceWallet) !== walletScope(targetWallet)'), false, 'Transfer entry must accept cross-scope wallet pairs');
 assert.equal(addModal.includes('false &&'), false, 'Transaction entry must not keep unreachable disabled JSX blocks');
 assert.equal(addModal.includes('setShowMore'), false, 'Transaction entry must not keep dead More state after the compact redesign');
-assert(addModal.includes("maxHeight: focusedEntry ? '76%' : '82%'"), 'Transaction modal must stay short enough for one-handed entry');
+assert(addModal.includes("maxHeight: '92%'"), 'Transaction modal must provide sufficient keyboard-safe vertical space for financial entry');
 assert(addModal.includes('accessibilityState={{ checked: recurring }}'), 'Monthly recurrence must be directly available in transaction entry');
 assert.equal(settings.includes("{ key: 'recurring', label:"), false, 'Monthly recurrence must remain a core entry capability, not a hideable module');
 assert(newItemModal.includes("id: 'commitment-wallet'") && newItemModal.includes("planDate: ar ? 'تاريخ الدفع' : 'Payment date'"), 'Standalone commitments must select an exact payment date');
@@ -172,7 +172,7 @@ assert(legacySettings.includes('monthNameStyle') && legacySettings.includes('mon
 assert(constants.includes("monthNameStyle: 'system'"), 'Month display preference must follow the phone by default');
 assert(home.includes('formatMonthLabel') && home.includes('cfg.monthNameStyle'), 'Home month labels must follow the global month display preference');
 assert(trackers.includes('const paidThisMonth ='), 'Commitment cards must derive whether the current month was paid');
-assert(trackers.includes('{T.paidMonth}'), 'Commitment cards must show the current-month payment message');
+assert(trackers.includes("if (status === 'paidMonth') return T.paidMonth;") && !trackers.includes('style={[s.paidNotice,'), 'Commitment cards must show paid-this-month once through the status label without a duplicate notice');
 assert(trackers.includes('cycleMonth: tx.commitmentMonth'), 'Commitment trackers must preserve the due cycle for every payment');
 assert(trackers.includes('formatCommitmentDate(payment.date'), 'Commitment payment history must show the actual payment date');
 assert(trackers.includes('T.completionRetention'), 'Completed trackers must explain the seven-day review period');

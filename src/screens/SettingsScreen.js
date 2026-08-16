@@ -6,6 +6,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -1697,6 +1698,11 @@ function AuthModal({
 }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+      >
       <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>
@@ -1714,7 +1720,7 @@ function AuthModal({
               return <TouchableOpacity key={mode} onPress={() => setAuthMode(mode)} style={[s.authTab, { backgroundColor: active ? th.card : 'transparent' }]}><Text style={{ color: active ? th.primary : th.sub, ...weight('900') }}>{mode === 'signin' ? T.signIn : T.signUp}</Text></TouchableOpacity>;
             })}
           </View>
-          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 4 }}>
+          <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 20 }}>
             <Text style={[s.authContextText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
               {authMode === 'signup' ? T.signUpProfileHint : T.signInProfileHint}
             </Text>
@@ -1737,6 +1743,7 @@ function AuthModal({
           </ScrollView>
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import { Keyboard, Modal, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Touchable as TouchableOpacity } from './AppPrimitives';
 import { isISODate, today } from '../utils/calc';
@@ -105,11 +105,12 @@ export default function DateField({
   const todayISO = today();
 
   const openPicker = () => {
+    Keyboard.dismiss();
     const date = parseISO(currentValue);
     setViewDate(new Date(date.getFullYear(), date.getMonth(), 1, 12, 0, 0));
     setYearPageStart(yearPageStartFor(date.getFullYear()));
     setPickerView('calendar');
-    setOpen(true);
+    requestAnimationFrame(() => setOpen(true));
   };
 
   const openYearPicker = () => {

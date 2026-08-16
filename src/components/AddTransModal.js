@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, Modal, TextInput, ScrollView, Alert, Pressable, StyleSheet, Image, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Modal, TextInput, ScrollView, Alert, Pressable, StyleSheet, Image, Keyboard, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -1039,7 +1039,10 @@ export default function AddTransModal({
     return (
       <View style={s.selectFieldBlock}>
         <TouchableOpacity
-          onPress={() => setExpandedPicker(expanded ? null : { id, label, value, options, onChange, icon, tone })}
+          onPress={() => {
+            Keyboard.dismiss();
+            setExpandedPicker(expanded ? null : { id, label, value, options, onChange, icon, tone });
+          }}
           style={[s.selectField, { backgroundColor: th.cardHigh, borderColor: expanded ? th.primary : th.border, flexDirection: rowDir }]}
           accessibilityRole="button"
           accessibilityState={{ expanded }}
@@ -1098,13 +1101,13 @@ export default function AddTransModal({
       >
         <View style={s.dismissArea}>
         <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
-        <View style={[s.sheet, { backgroundColor: th.card, maxHeight: focusedEntry ? '76%' : '82%', paddingBottom: 0 }]}>
+        <View style={[s.sheet, { backgroundColor: th.card, maxHeight: '92%', paddingBottom: 0 }]}>
           <ScrollView
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             nestedScrollEnabled
-            contentContainerStyle={{ paddingBottom: 14 }}
+            contentContainerStyle={{ paddingBottom: 36 + Math.max(insets.bottom, 20) }}
           >
 
             <View style={[s.handle, { backgroundColor: th.cardHigh }]} />
@@ -1468,7 +1471,7 @@ export default function AddTransModal({
                   style={[s.inlineInput, { color: th.text, textAlign: align }]}
                 />
                 {cleanNumber(amt) > 0 && cleanNumber(transferToAmount) > 0 ? (
-                  <Text style={[s.selectDetail, { color: th.sub, textAlign: align, marginTop: 4 }]}>
+                  <Text style={[s.selectDetail, { color: th.sub, textAlign: 'left', writingDirection: 'ltr', marginTop: 4 }]}>
                     {`1 ${fromCurrency} = ${(cleanNumber(transferToAmount) / cleanNumber(amt)).toLocaleString()} ${toCurrency}`}
                   </Text>
                 ) : null}
@@ -1479,7 +1482,10 @@ export default function AddTransModal({
               <>
                 <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
                   <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
-                    {cfg.lang === 'ar' ? `قيمة ${fromCurrency} للتقارير · 1 ${fromCurrency} = ؟ ${baseCurrencyCode}` : `Reporting value · 1 ${fromCurrency} = ? ${baseCurrencyCode}`}
+                    {cfg.lang === 'ar' ? `قيمة ${fromCurrency} للتقارير` : 'Reporting value'}
+                  </Text>
+                  <Text style={{ color: th.sub, fontSize: 11, lineHeight: 16, textAlign: 'left', writingDirection: 'ltr', ...weight('800') }}>
+                    {`1 ${fromCurrency} = ? ${baseCurrencyCode}`}
                   </Text>
                   <TextInput
                     value={transferFromBaseRate}
@@ -1499,7 +1505,10 @@ export default function AddTransModal({
                 </View>
                 <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
                   <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
-                    {cfg.lang === 'ar' ? `قيمة ${toCurrency} للتقارير · 1 ${toCurrency} = ؟ ${baseCurrencyCode}` : `Reporting value · 1 ${toCurrency} = ? ${baseCurrencyCode}`}
+                    {cfg.lang === 'ar' ? `قيمة ${toCurrency} للتقارير` : 'Reporting value'}
+                  </Text>
+                  <Text style={{ color: th.sub, fontSize: 11, lineHeight: 16, textAlign: 'left', writingDirection: 'ltr', ...weight('800') }}>
+                    {`1 ${toCurrency} = ? ${baseCurrencyCode}`}
                   </Text>
                   <TextInput
                     value={transferToBaseRate}
@@ -1575,7 +1584,10 @@ export default function AddTransModal({
             {needsTrackerEntityBaseRate ? (
               <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
                 <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
-                  {cfg.lang === 'ar' ? `سعر المتابعة التاريخي · 1 ${trackerCurrency} = ؟ ${cfg.currency}` : `Tracker historical rate · 1 ${trackerCurrency} = ? ${cfg.currency}`}
+                  {cfg.lang === 'ar' ? 'سعر المتابعة التاريخي' : 'Tracker historical rate'}
+                </Text>
+                <Text style={{ color: th.sub, fontSize: 11, lineHeight: 16, textAlign: 'left', writingDirection: 'ltr', ...weight('800') }}>
+                  {`1 ${trackerCurrency} = ? ${cfg.currency}`}
                 </Text>
                 <TextInput
                   value={entityBaseRate}
@@ -1594,7 +1606,12 @@ export default function AddTransModal({
             {needsEntryExchangeRate ? (
               <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
                 <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
-                  {cfg.lang === 'ar' ? `${isTrackerPayment ? 'سعر محفظة الدفع' : 'سعر الصرف'} · 1 ${entryCurrency} = ؟ ${cfg.currency}` : `${isTrackerPayment ? 'Payment wallet rate' : 'Exchange rate'} · 1 ${entryCurrency} = ? ${cfg.currency}`}
+                  {cfg.lang === 'ar'
+                    ? (isTrackerPayment ? 'سعر محفظة الدفع' : 'سعر الصرف')
+                    : (isTrackerPayment ? 'Payment wallet rate' : 'Exchange rate')}
+                </Text>
+                <Text style={{ color: th.sub, fontSize: 11, lineHeight: 16, textAlign: 'left', writingDirection: 'ltr', ...weight('800') }}>
+                  {`1 ${entryCurrency} = ? ${cfg.currency}`}
                 </Text>
                 <TextInput
                   value={exchangeRate}

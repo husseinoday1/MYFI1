@@ -931,14 +931,6 @@ export default function TrackersLabScreen({
 
               {item.kind === 'monthly' ? (
                 <>
-                  {item.paidThisMonth ? (
-                    <View style={[s.paidNotice, { backgroundColor: th.incBg, borderColor: `${th.inc}55`, flexDirection: rowDir }]}>
-                      <Ionicons name="checkmark-circle" size={16} color={th.inc} />
-                      <Text style={{ color: th.inc, fontSize: 12, lineHeight: 18, ...weight('900'), textAlign: align, flex: 1 }}>
-                        {T.paidMonth}
-                      </Text>
-                    </View>
-                  ) : null}
                 </>
                ) : (
                  <View style={s.progressBlock}>
