@@ -4,7 +4,7 @@ const path = require('node:path');
 
 const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const required = [
-  'MYFI_RELEASE_GATE_STATUS_AR.md',
+  '01_CORE_AUTHORITY/MYFI_RELEASE_GATE_STATUS_AR.md',
   'MYFI_DATA_OWNERSHIP.md',
   'MYFI_FINANCIAL_CONTRACT.md',
   'MYFI_DATE_TIME_CONTRACT.md',
@@ -29,5 +29,5 @@ assert.match(read('MYFI_BACKUP_FORMAT.md'), /semantic_hash_version/);
 assert.match(read('MYFI_SECURITY_THREAT_MODEL.md'), /allowBackup=false/);
 assert.match(read('MYFI_PERFORMANCE_SLO.md'), /quick_check/);
 assert.match(read('MYFI_RELEASE_SCOPE.md'), /Feature freeze/);
-assert.match(read('MYFI_RELEASE_GATE_STATUS_AR.md'), /b438a9e2413a946b7791a7dd76cab36345a57ba5/);
+assert.match(read('01_CORE_AUTHORITY/MYFI_RELEASE_GATE_STATUS_AR.md'), /b438a9e2413a946b7791a7dd76cab36345a57ba5/);
 console.log('MYFI Phase 0 governance/contracts are present and internally anchored.');

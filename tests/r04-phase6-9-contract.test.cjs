@@ -4,8 +4,8 @@ const assert = require('assert');
 const root = path.resolve(__dirname, '..');
 const read = p => fs.readFileSync(path.join(root,p),'utf8');
 
-assert(fs.existsSync(path.join(root,'docs/MYFI_MASTER_PLAN_FROZEN.md')), 'canonical frozen plan missing');
-assert(fs.existsSync(path.join(root,'docs/MYFI_USER_NOTES_RECONCILIATION.md')), 'canonical reconciliation missing');
+assert(fs.existsSync(path.join(root,'docs/01_CORE_AUTHORITY/MYFI_MASTER_PLAN_FROZEN.md')), 'canonical frozen plan missing');
+assert(fs.existsSync(path.join(root,'docs/01_CORE_AUTHORITY/MYFI_USER_NOTES_RECONCILIATION_CANONICAL_2026-08-16.md')), 'canonical reconciliation missing');
 
 const tx = read('src/store/slices/transactionsSlice.js');
 assert(!/Number\.isFinite\(walletRate\)[\s\S]{0,120}\? walletRate/.test(tx), 'foreign transaction command still silently falls back to wallet valuation');
