@@ -14,6 +14,7 @@ import { debtLifecycle, goalLifecycle, reopenCompletionCommitments } from '../..
 import { buildEntityCurrencyFields, normalizeCurrencyCode } from '../../lib/financialCoreV2';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
 import { commandWalletPosition } from '../../lib/financialCommandBalances';
+import { buildTrackerTransactionTitle, TRANSACTION_SEMANTIC_KIND } from '../../lib/transactionSemantics';
 import {
   commitEntityChangesV7,
   commitFinancialTransactionV7,
@@ -243,7 +244,15 @@ export const createTrackersSlice = (set, get) => ({
     const nextDebtBase = { ...debt, payments: [...(debt.payments || []), pay], paid: nextPaid };
     const nextDebt = { ...nextDebtBase, ...debtLifecycle(nextDebtBase, nextPaid, entryDate) };
     const completesDebt = nextDebt.status === 'settled';
-    const title = `${isReceivable ? 'تحصيل دين لي' : 'سداد دين عليّ'} — ${debt ? debt.name : ''}`;
+    const semanticKind = isReceivable
+      ? TRANSACTION_SEMANTIC_KIND.RECEIVABLE_COLLECTION
+      : TRANSACTION_SEMANTIC_KIND.DEBT_PAYMENT;
+    const title = buildTrackerTransactionTitle({
+      kind: semanticKind,
+      entityName: debt.name,
+      commitmentName: transactionMeta.commitmentNameSnapshot,
+      lang: get().cfg.lang,
+    });
     const paymentTx = {
       ...transactionMeta,
       id: uid(), title, amt: currencyFields.baseAmount, ...currencyFields, cat: transactionMeta.cat || 'other', walletId: txWalletId,
@@ -252,6 +261,7 @@ export const createTrackersSlice = (set, get) => ({
       flowType: isReceivable ? FLOW_TYPES.RECEIVABLE_COLLECTION : FLOW_TYPES.DEBT_PAYMENT,
       transactionTag: transactionMeta.transactionTag || (isReceivable ? 'debt_receivable' : 'debt_owed'),
       isDebtPayment: true, debtId, paymentId: payId,
+      titleSource: 'generated', entityNameSnapshot: debt.name, entityTypeSnapshot: isReceivable ? 'receivable' : 'debt',
       debtComponent: 'principal',
       rateDate: transactionMeta.rateDate || entryDate,
       rateSource: transactionMeta.rateSource || currencyFields.fxSnapshotSource,
@@ -453,9 +463,15 @@ export const createTrackersSlice = (set, get) => ({
     const nextGoalBase = { ...goal, savings: [...(goal.savings || []), entry], cur: nextSaved };
     const nextGoal = { ...nextGoalBase, ...goalLifecycle(nextGoalBase, nextSaved, entryDate) };
     const completesGoal = nextGoal.status === 'settled';
+    const savingTitle = buildTrackerTransactionTitle({
+      kind: TRANSACTION_SEMANTIC_KIND.GOAL_ALLOCATION,
+      entityName: goal.name,
+      commitmentName: transactionMeta.commitmentNameSnapshot,
+      lang: get().cfg.lang,
+    });
     const savingTx = {
       ...transactionMeta,
-      id: uid(), title: transactionMeta.title || `توفير — ${goal ? goal.name : ''}`, amt: 0, allocationAmount: n,
+      id: uid(), title: savingTitle, titleSource: 'generated', entityNameSnapshot: goal.name, entityTypeSnapshot: 'goal', amt: 0, allocationAmount: n,
       entityAmount: n, entityCurrencyCode: goal.currencyCode || get().cfg.currency,
       entityBaseRate: allocationCurrency.entityBaseRate, walletBaseRate: allocationCurrency.walletBaseRate,
       allocationBaseAmount: Math.abs(Number(allocationCurrency.baseAmount || 0)),

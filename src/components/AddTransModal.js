@@ -30,6 +30,7 @@ import { rowDirFor, textAlignFor } from '../lib/layout';
 import { startLiveSpeechPreview } from '../lib/liveSpeechPreview';
 import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
 import { buildEntryFxSuggestion, buildTransferFxSuggestion } from '../lib/fxSuggestions';
+import { buildGeneratedEntryTitle, isGeneratedEntryTitle } from '../lib/transactionSemantics';
 
 const cleanNumber = parseNumberInput;
 
@@ -217,6 +218,7 @@ export default function AddTransModal({
 
   const [type,      setType]      = useState(cleanInitialMode);
   const [title,     setTitle]     = useState('');
+  const [titleOrigin, setTitleOrigin] = useState('none');
   const [amt,       setAmt]       = useState('');
   const [cat,       setCat]       = useState('other');
   const [categoryTouched, setCategoryTouched] = useState(false);
@@ -272,7 +274,7 @@ export default function AddTransModal({
   const reset = () => {
     liveSpeechRef.current?.abort?.();
     liveSpeechRef.current = null;
-    setType(cleanInitialMode); setTitle(''); setAmt(''); setCat('other'); setCategoryTouched(false);
+    setType(cleanInitialMode); setTitle(''); setTitleOrigin('none'); setAmt(''); setCat('other'); setCategoryTouched(false);
     setNote(''); setRecurring(false); setDateISO(today());
     setSelDebt(initialDebtId); setSelGoal(initialGoalId);
     setSelCommitment(initialCommitmentId);
@@ -315,7 +317,9 @@ export default function AddTransModal({
       const editType = editData.kind === 'transfer' ? 'transfer' : (editData.amt > 0 ? 'inc' : 'exp');
       setType(editType);
       setAmt(Math.abs(editData.kind === 'transfer' ? (editData.transferFromAmount ?? editData.transferAmount) : (editData.walletAmount ?? editData.amt)).toString());
-      setTitle(editData.title || '');
+      const generatedTitle = isGeneratedEntryTitle(editData, cats);
+      setTitle(generatedTitle ? '' : (editData.title || ''));
+      setTitleOrigin(generatedTitle ? 'generated' : 'user');
       setCat(editData.cat || 'other');
       setCategoryTouched(true);
       setNote(editData.note || '');
@@ -338,7 +342,7 @@ export default function AddTransModal({
       setExpandedPicker(null);
     } else if (draftData?.smartMode) {
       setType(cleanInitialMode);
-      setAmt(''); setTitle(''); setCat('other'); setNote(''); setRecurring(false); setDateISO(today());
+      setAmt(''); setTitle(''); setTitleOrigin('none'); setCat('other'); setNote(''); setRecurring(false); setDateISO(today());
       setCategoryTouched(false);
       setWalletId(defaultWalletId);
       setExchangeRate('');
@@ -371,7 +375,9 @@ export default function AddTransModal({
       ));
       setType(draftMode);
       setAmt(draftAmount > 0 ? String(draftAmount) : '');
-      setTitle(draftData.title || '');
+      const generatedTitle = isGeneratedEntryTitle(draftData, cats);
+      setTitle(generatedTitle ? '' : (draftData.title || ''));
+      setTitleOrigin(generatedTitle ? 'generated' : (draftData.title ? 'user' : 'none'));
       setCat(draftData.cat || 'other');
       setCategoryTouched(true);
       setNote(draftData.note || '');
@@ -407,7 +413,7 @@ export default function AddTransModal({
       setSelDebt(initialDebtId || availableDebts[0]?.id || null);
       setSelGoal(initialGoalId || availableGoals[0]?.id || null);
       setSelCommitment(defaultCommitment?.id || null);
-      setAmt(''); setTitle(''); setCat('other'); setNote(''); setRecurring(false); setDateISO(today());
+      setAmt(''); setTitle(''); setTitleOrigin('none'); setCat('other'); setNote(''); setRecurring(false); setDateISO(today());
       setCategoryTouched(false);
       setWalletId(defaultWalletId);
       setFromWalletId(firstTransferWallet?.id || defaultWalletId);
@@ -482,7 +488,7 @@ export default function AddTransModal({
       setFromWalletId(draft.fromWalletId);
       setToWalletId(draft.toWalletId);
       if (draft.dateISO) setDateISO(draft.dateISO);
-      if (draft.title) setTitle(draft.title);
+      if (draft.title) { setTitle(draft.title); setTitleOrigin('suggested'); }
       return resolved;
     }
 
@@ -494,7 +500,7 @@ export default function AddTransModal({
       ? draft.catId
       : getDefaultCategoryId(cats, draftFlow));
     setCategoryTouched(false);
-    if (draft.title) setTitle(draft.title);
+    if (draft.title) { setTitle(draft.title); setTitleOrigin('suggested'); }
     if (draft.walletId) setWalletId(draft.walletId);
     if (draft.dateISO) setDateISO(draft.dateISO);
 
@@ -857,6 +863,7 @@ export default function AddTransModal({
     );
     const payload = {
       title: finalTitle,
+      titleSource: title.trim() ? (titleOrigin === 'suggested' ? 'suggested' : 'user') : 'generated',
       amt:   type === 'exp' ? -Math.abs(n) : Math.abs(n),
       cat: categorySupportsFlow(cats.find(item => item.id === cat), entryFlow) ? cat : defaultEntryCat,
       note, recurring, dateISO, walletId,
@@ -1059,11 +1066,11 @@ export default function AddTransModal({
   const entryCategories = isMoneyEntry ? getCategoriesForFlow(cats, entryFlow) : cats;
   const defaultEntryCat = getDefaultCategoryId(cats, entryFlow);
   const selectedCat = entryCategories.find(c => c.id === cat) || cats.find(c => c.id === cat) || cats.find(c => c.id === defaultEntryCat) || cats.find(c => c.id === 'other') || cats[0] || {};
-  const defaultTitle = (() => {
-    const catLabel = (cfg.lang === 'ar' ? selectedCat.label : selectedCat.labelEn) || selectedCat.label || selectedCat.labelEn || '';
-    if (type === 'inc') return cfg.lang === 'ar' ? `دخل - ${catLabel || 'عام'}` : `Income - ${catLabel || 'General'}`;
-    return cfg.lang === 'ar' ? `مصروف - ${catLabel || 'عام'}` : `Expense - ${catLabel || 'General'}`;
-  })();
+  const defaultTitle = buildGeneratedEntryTitle({
+    flow: type === 'inc' ? 'income' : 'expense',
+    categoryLabel: (cfg.lang === 'ar' ? selectedCat.label : selectedCat.labelEn) || selectedCat.label || selectedCat.labelEn || '',
+    lang: cfg.lang,
+  });
   useEffect(() => {
     if (!visible || !isMoneyEntry) return;
     const activeCat = cats.find(item => item.id === cat);
@@ -1507,7 +1514,10 @@ export default function AddTransModal({
                     <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>{L.titleField}</Text>
                     <TextInput
                       value={title}
-                      onChangeText={setTitle}
+                      onChangeText={(value) => {
+                        setTitle(value);
+                        setTitleOrigin(value.trim() ? 'user' : 'generated');
+                      }}
                       placeholder={defaultTitle}
                       placeholderTextColor={th.faint}
                       style={[s.inlineInput, { color: th.text, textAlign: align }]}

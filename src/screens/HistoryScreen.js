@@ -21,6 +21,7 @@ import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import { getTransactionsNewestFirst } from '../lib/transactionIndex';
 import { activeLedgerSupported, getLedgerNamespace, queryLedgerTransactions } from '../lib/activeLedgerRepository';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
+import { getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
 
 const copy = (lang) => {
   const ar = lang === 'ar';
@@ -159,7 +160,7 @@ const HistoryControls = ({
 );
 
 export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = () => {} }) {
-  const { trans, debts, goals, wallets, cats, cfg, deleteTrans, deleteTransMany, undoLastTransactionDelete, ledgerReady, workspaceNamespace } = useStore();
+  const { trans, debts, goals, commitments, wallets, cats, cfg, deleteTrans, deleteTransMany, undoLastTransactionDelete, ledgerReady, workspaceNamespace } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
   const T = copy(cfg.lang);
@@ -334,7 +335,9 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
   }, [sqlEnabled, trans, search, typeF, catF, walletF, periodF, dateFrom, dateTo, workspaceNamespace]);
 
   const filtered = ledgerQueryOk ? ledgerRows : filteredFallback;
-  const selectionIds = useMemo(() => filtered.map(item => item.id), [filtered]);
+  const selectionIds = useMemo(() => filtered
+    .filter(item => getTransactionSemanticKind(item) !== TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE)
+    .map(item => item.id), [filtered]);
   const selection = useMultiSelect(selectionIds);
 
   React.useEffect(() => {
@@ -454,9 +457,12 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
     const amount = getTransactionDisplayAmount(item);
     const isTransfer = item.kind === 'transfer';
     const isGoalSaving = !!item.isGoalSaving;
+    const semanticKind = getTransactionSemanticKind(item);
+    const isOpeningBalance = semanticKind === TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE;
+    const isBalanceAdjustment = semanticKind === TRANSACTION_SEMANTIC_KIND.BALANCE_ADJUSTMENT;
     const fromWallet = findWallet(item.fromWalletId);
     const toWallet = findWallet(item.toWalletId);
-    const color = isTransfer || isGoalSaving ? th.primary : amount > 0 ? th.inc : th.exp;
+    const color = isBalanceAdjustment ? th.warn : isOpeningBalance || isTransfer || isGoalSaving ? th.primary : amount > 0 ? th.inc : th.exp;
     const linked = item.isDebtPayment || item.isGoalSaving || item.isCommitmentPayment;
     const debt = item.isDebtPayment ? debts.find(entity => entity.id === item.debtId) : null;
     const goal = item.isGoalSaving ? goals.find(entity => entity.id === item.goalId) : null;
@@ -512,9 +518,9 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
     return (
       <Pressable
         key={item.id}
-        onLongPress={() => selection.toggle(item.id)}
+        onLongPress={isOpeningBalance ? undefined : () => selection.toggle(item.id)}
         onPress={() => {
-          if (selection.selecting) selection.toggle(item.id);
+          if (selection.selecting && !isOpeningBalance) selection.toggle(item.id);
           else setDetails(item);
         }}
         style={[
@@ -531,7 +537,7 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
       >
         <View style={[s.rowMain, { flexDirection: rowDir }]}>
           <View style={[s.iconCell, { backgroundColor: `${color}1F`, borderColor: `${color}66` }]}>
-            <Ionicons name={isTransfer ? 'swap-horizontal-outline' : (cat.icon || 'cube-outline')} size={18} color={color} />
+            <Ionicons name={isOpeningBalance ? 'flag-outline' : isBalanceAdjustment ? 'git-compare-outline' : isTransfer ? 'swap-horizontal-outline' : (cat.icon || 'cube-outline')} size={18} color={color} />
           </View>
           <View style={s.rowContent}>
             <Text style={{ color: th.text, ...weight('900'), fontSize: 14, textAlign: align, writingDirection }} numberOfLines={1}>
@@ -570,7 +576,7 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
           </View>
         </View>
         {selection.selecting ? (
-          <SelectionCheckbox th={th} selected={selection.selected.has(item.id)} onPress={() => selection.toggle(item.id)} />
+          <SelectionCheckbox th={th} selected={selection.selected.has(item.id)} onPress={isOpeningBalance ? undefined : () => selection.toggle(item.id)} />
         ) : null}
       </Pressable>
     );
@@ -660,7 +666,7 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
         search={search}
         setSearch={setSearch}
         selection={{ ...selection, onDelete: confirmDeleteSelected }}
-        filteredCount={filtered.length}
+        filteredCount={selectionIds.length}
         activeFilters={activeFilters}
         openFilters={openFilters}
         typeF={typeF}
@@ -738,10 +744,19 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
         transaction={details}
         cats={cats}
         wallets={wallets}
+        debts={debts}
+        goals={goals}
+        commitments={commitments}
         cfg={cfg}
         onClose={() => setDetails(null)}
-        canEdit={!!details && !(details.isDebtPayment || details.isGoalSaving || details.isCommitmentPayment) && isCurrentMonthTransaction(details)}
-        canDuplicate={!!details}
+        canEdit={!!details && ![
+          TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE,
+          TRANSACTION_SEMANTIC_KIND.BALANCE_ADJUSTMENT,
+        ].includes(getTransactionSemanticKind(details)) && !(details.isDebtPayment || details.isGoalSaving || details.isCommitmentPayment) && isCurrentMonthTransaction(details)}
+        canDuplicate={!!details && ![
+          TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE,
+          TRANSACTION_SEMANTIC_KIND.BALANCE_ADJUSTMENT,
+        ].includes(getTransactionSemanticKind(details))}
         onEdit={() => {
           const target = details;
           setDetails(null);
@@ -799,7 +814,7 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
             amt: target.amt,
           });
         }}
-        onDelete={() => {
+        onDelete={details && getTransactionSemanticKind(details) === TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE ? null : () => {
           const target = details;
           setDetails(null);
           if (target) confirmDeleteRow(target);

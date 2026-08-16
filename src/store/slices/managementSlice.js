@@ -6,6 +6,7 @@ import { buildCurrencyFields, buildEntityCurrencyFields, normalizeCurrencyCode }
 import { financialDataCount, syncCommitmentPaidMonth, uid } from '../domain';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
 import { commandWalletBalance, commandWalletPosition } from '../../lib/financialCommandBalances';
+import { buildBalanceReconciliationPreview, buildTrackerTransactionTitle, TRANSACTION_SEMANTIC_KIND } from '../../lib/transactionSemantics';
 import {
   commitEntityChangesV7,
   commitFinancialTransactionV7,
@@ -358,6 +359,7 @@ export const createManagementSlice = (set, get) => ({
       commitmentMonth: paidMonth,
       commitmentLinkedType: linkedType,
       commitmentLinkedId: linkedId,
+      commitmentNameSnapshot: commitment.name,
       transactionTag: 'commitment',
     };
     const paidCommitment = normalizeCommitments([{
@@ -415,7 +417,15 @@ export const createManagementSlice = (set, get) => ({
     const paymentNativeAmount = Math.abs(Number(currencyFields.walletAmount || 0));
     const paymentTx = {
       id: uid(),
-      title: commitment.name,
+      title: buildTrackerTransactionTitle({
+        kind: TRANSACTION_SEMANTIC_KIND.COMMITMENT_PAYMENT,
+        entityName: commitment.name,
+        lang: get().cfg.lang,
+      }),
+      titleSource: 'generated',
+      entityNameSnapshot: commitment.name,
+      entityTypeSnapshot: 'commitment',
+      commitmentNameSnapshot: commitment.name,
       amt: currencyFields.baseAmount,
       ...currencyFields,
       balanceWarning: !Number.isFinite(paymentAvailable) || paymentNativeAmount > paymentAvailable + 0.0001,
@@ -493,7 +503,12 @@ export const createManagementSlice = (set, get) => ({
     });
     const openingTx = openingBalance === 0 ? null : {
       id: uid(),
-      title: cfg.lang === 'ar' ? 'رصيد افتتاحي' : 'Opening balance',
+      title: buildTrackerTransactionTitle({
+        kind: TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE,
+        entityName: next.name,
+        lang: cfg.lang,
+      }),
+      titleSource: 'generated', walletNameSnapshot: next.name,
       amt: openingFields.baseAmount,
       ...openingFields,
       walletId: next.id,
@@ -536,7 +551,7 @@ export const createManagementSlice = (set, get) => ({
     return next;
   },
 
-  reconcileWalletBalance: async (id, actualBalance, dateISO = today(), note = '', exchangeRate = null) => {
+  reconcileWalletBalance: async (id, actualBalance, dateISO = today(), note = '', exchangeRate = null, review = {}) => {
     const cfg = get().cfg;
     const wallets = normalizeWallets(get().wallets, cfg.currency);
     const wallet = wallets.find(item => item.id === id);
@@ -544,9 +559,17 @@ export const createManagementSlice = (set, get) => ({
     if (!wallet || !Number.isFinite(actual)) return { ok: false, reason: 'invalid_balance' };
     const current = await walletBalanceForManagementCommand(get, id);
     if (!current) return { ok: false, reason: 'wallet_not_found' };
-    const difference = actual - Number(current.balance || 0);
-    const epsilon = 1 / (10 ** 3);
-    if (Math.abs(difference) < epsilon) return { ok: true, noChange: true, difference: 0 };
+    const preview = buildBalanceReconciliationPreview({
+      recordedBalance: current.balance,
+      actualBalance: actual,
+      currency: wallet.currency,
+    });
+    if (!preview.valid) return { ok: false, reason: 'invalid_balance' };
+    const difference = preview.difference;
+    if (preview.status === 'matched') return { ok: true, noChange: true, difference: 0 };
+    if (review?.confirmedUnresolved !== true) {
+      return { ok: false, reason: 'reconciliation_review_required', preview };
+    }
     const explicitRate = Number(exchangeRate);
     if (wallet.currency !== cfg.currency && !(Number.isFinite(explicitRate) && explicitRate > 0)) {
       return { ok: false, reason: 'historical_fx_required' };
@@ -562,7 +585,12 @@ export const createManagementSlice = (set, get) => ({
     });
     const tx = {
       id: uid(),
-      title: cfg.lang === 'ar' ? 'تسوية رصيد' : 'Balance adjustment',
+      title: buildTrackerTransactionTitle({
+        kind: TRANSACTION_SEMANTIC_KIND.BALANCE_ADJUSTMENT,
+        entityName: wallet.name,
+        lang: cfg.lang,
+      }),
+      titleSource: 'generated', walletNameSnapshot: wallet.name,
       amt: fields.baseAmount,
       ...fields,
       walletId: id,
@@ -576,6 +604,8 @@ export const createManagementSlice = (set, get) => ({
       note: String(note || '').trim(),
       reconciliationFrom: Number(current.balance || 0),
       reconciliationTo: actual,
+      reconciliationReviewedAt: review.reviewedAt || new Date().toISOString(),
+      reconciliationReason: String(review.reason || 'unresolved_after_review'),
       rateDate: normalizeDate(dateISO),
       rateSource: wallet.currency === cfg.currency ? 'same_currency' : 'user_entered_reconciliation',
       idempotencyKey: `balance-adjustment:${uid()}`,

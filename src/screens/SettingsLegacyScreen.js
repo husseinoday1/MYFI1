@@ -26,6 +26,7 @@ import { inspectBackupData } from '../lib/backupData';
 import { MONTH_NAME_STYLES, monthStyleLabel } from '../lib/months';
 import { budgetMonthId, getBudgetMapForMonth, getBudgetRows, getBudgetSummary, suggestBudgetsDetailedFromHistory } from '../lib/budgets';
 import { formatMoneyNumber } from '../lib/money';
+import { buildBalanceReconciliationPreview } from '../lib/transactionSemantics';
 import {
   accountIdentityPatch,
   accountPublicId,
@@ -571,6 +572,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
   const [reconcileBalance, setReconcileBalance] = useState('');
   const [reconcileNote, setReconcileNote] = useState('');
   const [reconcileRate, setReconcileRate] = useState('');
+  const [reconcileReviewed, setReconcileReviewed] = useState(false);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [settingsSheet, setSettingsSheet] = useState(null);
   const [countryQuery, setCountryQuery] = useState('');
@@ -1031,6 +1033,25 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
     setReconcileBalance(formatNumberInput(String(wallet?.balance ?? 0)));
     setReconcileNote('');
     setReconcileRate('');
+    setReconcileReviewed(false);
+  };
+
+  const reconciliationPreview = buildBalanceReconciliationPreview({
+    recordedBalance: reconcileWallet?.balance,
+    actualBalance: parseNumberInput(reconcileBalance),
+    currency: reconcileWallet?.currency || cfg.currency,
+  });
+
+  const reviewWalletReconciliation = () => {
+    if (!reconciliationPreview.valid) {
+      Alert.alert('', isAr ? 'اكتب رصيداً صحيحاً.' : 'Enter a valid balance.');
+      return;
+    }
+    if (reconciliationPreview.status === 'matched') {
+      Alert.alert('', isAr ? 'الرصيد المسجل مطابق للرصيد الحقيقي. لا حاجة لإنشاء حركة تسوية.' : 'The recorded and actual balances match. No adjustment is needed.');
+      return;
+    }
+    setReconcileReviewed(true);
   };
 
   const applyWalletReconciliation = async () => {
@@ -1047,7 +1068,18 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
         : `Enter the historical rate for this adjustment: 1 ${reconcileWallet.currency} = ? ${cfg.currency}`);
       return;
     }
-    const result = await reconcileWalletBalance?.(reconcileWallet.id, actual, undefined, reconcileNote, explicitRate);
+    if (!reconcileReviewed) {
+      reviewWalletReconciliation();
+      return;
+    }
+    const result = await reconcileWalletBalance?.(
+      reconcileWallet.id,
+      actual,
+      undefined,
+      reconcileNote,
+      explicitRate,
+      { confirmedUnresolved: true, reason: 'unresolved_after_user_review', reviewedAt: new Date().toISOString() },
+    );
     if (!result?.ok) {
       const fxRequired = result?.reason === 'historical_fx_required';
       Alert.alert('', fxRequired
@@ -1059,6 +1091,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
     setReconcileBalance('');
     setReconcileNote('');
     setReconcileRate('');
+    setReconcileReviewed(false);
     if (!result.noChange) {
       const difference = Number(result.difference || 0);
       Alert.alert('', isAr
@@ -2874,7 +2907,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
           </Text>
           <TextInput
             value={reconcileBalance}
-            onChangeText={(value) => setReconcileBalance(formatNumberInput(value))}
+            onChangeText={(value) => { setReconcileBalance(formatNumberInput(value)); setReconcileReviewed(false); }}
             keyboardType="decimal-pad"
             placeholder={isAr ? 'الرصيد الحقيقي الآن' : 'Actual balance now'}
             placeholderTextColor={th.sub}
@@ -2883,7 +2916,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
           {reconcileWallet && reconcileWallet.currency !== cfg.currency ? (
             <TextInput
               value={reconcileRate}
-              onChangeText={(value) => setReconcileRate(formatNumberInput(value))}
+              onChangeText={(value) => { setReconcileRate(formatNumberInput(value)); setReconcileReviewed(false); }}
               keyboardType="decimal-pad"
               placeholder={isAr ? `السعر التاريخي · 1 ${reconcileWallet.currency} = ؟ ${cfg.currency}` : `Historical rate · 1 ${reconcileWallet.currency} = ? ${cfg.currency}`}
               placeholderTextColor={th.sub}
@@ -2898,10 +2931,26 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
             style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
           />
           <Text style={[s.miniLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
-            {isAr ? 'MYFI يسجل فرق الرصيد كحركة تسوية مستقلة ولا يغيّر التاريخ بصمت.' : 'MYFI records the difference as a separate adjustment and never rewrites history silently.'}
+            {isAr ? 'راجع أولاً إن كان الفرق بسبب حركة ناقصة أو رصيد افتتاحي غير صحيح. أنشئ تسوية فقط إذا بقي الفرق بلا تفسير.' : 'First check whether the difference comes from a missing movement or an incorrect opening balance. Create an adjustment only if the difference remains unexplained.'}
           </Text>
-          <TouchableOpacity onPress={applyWalletReconciliation} style={[s.primaryButton, { backgroundColor: th.primary }]}>
-            <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>{isAr ? 'تسجيل التسوية' : 'Record adjustment'}</Text>
+          {reconciliationPreview.valid ? (
+            <View style={[s.importCard, { backgroundColor: th.cardHigh, borderColor: reconcileReviewed ? th.warn : th.border, marginBottom: 0 }]}>
+              <PreviewStat th={th} label={isAr ? 'الرصيد المسجل' : 'Recorded'} value={`${reconciliationPreview.recordedBalance.toLocaleString()} ${reconcileWallet?.currency || ''}`} />
+              <PreviewStat th={th} label={isAr ? 'الرصيد الحقيقي' : 'Actual'} value={`${reconciliationPreview.actualBalance.toLocaleString()} ${reconcileWallet?.currency || ''}`} />
+              <PreviewStat th={th} label={isAr ? 'الفرق' : 'Difference'} value={`${Number(reconciliationPreview.difference || 0).toLocaleString()} ${reconcileWallet?.currency || ''}`} />
+              {reconcileReviewed ? (
+                <Text style={[s.miniLabel, { color: th.warn, textAlign: isAr ? 'right' : 'left' }]}>
+                  {isAr ? 'إذا تأكدت أن الحركة الناقصة لا يمكن تسجيلها بشكل صحيح، ثبّت الفرق كتسوية مستقلة.' : 'If the missing movement cannot be recorded correctly, confirm the difference as an independent adjustment.'}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+          <TouchableOpacity onPress={reconcileReviewed ? applyWalletReconciliation : reviewWalletReconciliation} style={[s.primaryButton, { backgroundColor: reconcileReviewed ? th.warn : th.primary }]}>
+            <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>
+              {reconcileReviewed
+                ? (isAr ? 'تأكيد الفرق غير المفسر' : 'Confirm unexplained difference')
+                : (isAr ? 'مراجعة الفرق أولاً' : 'Review difference first')}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>

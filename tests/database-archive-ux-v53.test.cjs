@@ -34,7 +34,7 @@ must(history.includes('getTransactionsNewestFirst(getVisibleHistoryTransactions'
 must(history.includes('initialNumToRender={24}') && history.includes('renderLimit') && history.includes('onEndReached'), 'History virtualization/progressive rendering is missing');
 
 // Repeating a movement always opens a reviewed draft, including linked/transfer types.
-must(history.includes('canDuplicate={!!details}'), 'Repeat action is still disabled for selected linked movements');
+must(history.includes('canDuplicate={!!details && ![') && history.includes('TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE') && history.includes('TRANSACTION_SEMANTIC_KIND.BALANCE_ADJUSTMENT'), 'Repeat action must stay available for reviewed movements while protecting opening balances and reconciliations');
 must(history.includes("mode: 'transfer'") && history.includes("mode: 'debt'") && history.includes("mode: 'goal'") && history.includes("mode: 'commitment'"), 'History does not build repeat drafts for all movement types');
 must(!history.includes('duplicateTrans(target.id)'), 'History still performs a silent direct duplicate');
 must(add.includes('const draftMode = normalizeEntryMode('), 'Add transaction modal cannot hydrate typed repeat drafts');

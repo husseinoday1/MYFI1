@@ -22,6 +22,7 @@ import { buildNotificationItems, filterDismissedNotifications, NOTIFICATION_DISM
 import { isRTL, rowDirFor, textAlignFor } from '../lib/layout';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
 import { getTransactionTagMeta } from '../lib/transactionTags';
+import { getSemanticTypeLabel, getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import WalletBalanceCard from '../components/WalletBalanceCard';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
@@ -227,7 +228,9 @@ export default function HomeScreen({
     [financialLedgerV7Cutover, sqlHome, scopedTrans, recentLimit],
   );
   const scopedTransactionIndex = useMemo(() => getTransactionIndex(scopedTrans), [scopedTrans]);
-  const recentSelection = useMultiSelect(recent.map(item => item.id));
+  const recentSelection = useMultiSelect(recent
+    .filter(item => getTransactionSemanticKind(item) !== TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE)
+    .map(item => item.id));
   const defaultWalletId = useMemo(
     () => getDefaultWalletId(scopedWallets.length ? scopedWallets : wallets, cfg.currency, cfg.defaultWalletId),
     [wallets, cfg.currency, cfg.defaultWalletId, cfg.activeScope, cfg.profileType],
@@ -474,6 +477,10 @@ export default function HomeScreen({
     const amount = getTransactionDisplayAmount(t);
     const wallet = findWallet(t.walletId);
     const isTransfer = t.kind === 'transfer';
+    const semanticKind = getTransactionSemanticKind(t);
+    const openingBalance = semanticKind === TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE;
+    const balanceAdjustment = semanticKind === TRANSACTION_SEMANTIC_KIND.BALANCE_ADJUSTMENT;
+    const protectedOpening = openingBalance;
     const fromWallet = findWallet(t.fromWalletId);
     const toWallet = findWallet(t.toWalletId);
     const linked = t.isDebtPayment || t.isGoalSaving || t.isCommitmentPayment;
@@ -481,18 +488,15 @@ export default function HomeScreen({
     const smartBadge = !isTransfer ? describeSmartSource(t.smartSource, cfg.lang) : null;
     const transactionTag = getTransactionTagMeta(t);
     const smartTone = t.smartSource?.mode === 'voice' ? th.warn : t.smartSource?.mode === 'receipt' ? th.primary : th.inc;
-    const editable = !linked && isCurrentMonthTransaction(t);
+    const editable = !linked && !openingBalance && !balanceAdjustment && isCurrentMonthTransaction(t);
     const expanded = expandedRecentId === t.id;
     const transferLabel = cfg.lang === 'ar' ? 'تحويل' : 'Transfer';
     const fromLabel = cfg.lang === 'ar' ? 'من' : 'From';
     const toLabel = cfg.lang === 'ar' ? 'إلى' : 'To';
     const walletLabel = cfg.lang === 'ar' ? 'المحفظة' : 'Wallet';
     const categoryLabel = cfg.lang === 'ar' ? 'التصنيف' : 'Category';
-    const typeText = isTransfer
-      ? transferLabel
-      : amount >= 0
-        ? L.income
-        : L.expense;
+    const typeText = getSemanticTypeLabel(semanticKind, cfg.lang);
+    const semanticColor = balanceAdjustment ? th.warn : openingBalance || isTransfer ? th.primary : amount > 0 ? th.inc : th.exp;
     return (
       <View
         key={t.id}
@@ -506,14 +510,14 @@ export default function HomeScreen({
       >
         <View style={[s.rowShell, { flexDirection: rowDir }]}>
           <Pressable
-            onLongPress={() => recentSelection.toggle(t.id)}
+            onLongPress={protectedOpening ? undefined : () => recentSelection.toggle(t.id)}
             onPress={() => {
-              if (recentSelection.selecting) recentSelection.toggle(t.id);
+              if (recentSelection.selecting && !protectedOpening) recentSelection.toggle(t.id);
             }}
             style={[s.rowMain, { flexDirection: rowDir }]}
           >
-            <View style={[s.catDot, { backgroundColor: `${isTransfer ? th.primary : (cat.color || th.primary)}22`, borderColor: isTransfer ? th.primary : (cat.color || th.primary) }]}>
-              <Ionicons name={isTransfer ? 'swap-horizontal-outline' : (cat.icon || 'cube-outline')} size={18} color={isTransfer ? th.primary : (cat.color || th.primary)} />
+            <View style={[s.catDot, { backgroundColor: `${semanticColor}22`, borderColor: semanticColor }]}>
+              <Ionicons name={openingBalance ? 'flag-outline' : balanceAdjustment ? 'git-compare-outline' : isTransfer ? 'swap-horizontal-outline' : (cat.icon || 'cube-outline')} size={18} color={semanticColor} />
             </View>
             <View style={{ flex: 1, marginHorizontal: 10 }}>
               <View style={[s.titleRow, { flexDirection: rowDir }]}>
@@ -541,7 +545,7 @@ export default function HomeScreen({
                   : `${cfg.lang === 'ar' ? cat.label : cat.labelEn} - ${t.dateISO}${modules.wallets && t.walletId ? ` - ${getWalletLabel(wallet, cfg.lang)}` : ''}${t.recurring ? ` - ${cfg.lang === 'ar' ? 'متكرر' : 'recurring'}` : ''}`}
               </Text>
             </View>
-            <Text style={{ color: isTransfer ? th.primary : amount > 0 ? th.inc : th.exp, ...weight('900'), fontSize: 15 }}>
+            <Text style={{ color: semanticColor, ...weight('900'), fontSize: 15 }}>
               {isTransfer ? fmt(t.transferAmount) : `${amount > 0 ? '+' : '-'}${fmt(amount)}`} {sym}
             </Text>
           </Pressable>
@@ -563,10 +567,10 @@ export default function HomeScreen({
                 title={title}
                 buttonStyle={{ backgroundColor: th.cardHigh, width: 32, height: 32, borderRadius: 10 }}
                 items={[
-                  { label: C.select, icon: 'checkmark-circle-outline', color: th.primary, onPress: () => recentSelection.toggle(t.id) },
+                  !protectedOpening ? { label: C.select, icon: 'checkmark-circle-outline', color: th.primary, onPress: () => recentSelection.toggle(t.id) } : null,
                   { label: cfg.lang === 'ar' ? '\u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644' : 'Details', icon: 'reader-outline', color: th.primary, onPress: () => setDetails(t) },
                   editable ? { label: L.editTrans, icon: 'create-outline', color: th.primary, onPress: () => setEditing(t) } : null,
-                  { label: L.delete, icon: 'trash-outline', color: th.exp, danger: true, onPress: () => confirmDeleteRow(t) },
+                  !protectedOpening ? { label: L.delete, icon: 'trash-outline', color: th.exp, danger: true, onPress: () => confirmDeleteRow(t) } : null,
                 ]}
               />
             </>
@@ -1182,7 +1186,7 @@ export default function HomeScreen({
       </ScrollView>
 
       <AddTransModal visible={!!editing} onClose={() => setEditing(null)} editData={editing} />
-      <TransactionDetailsModal visible={!!details} transaction={details} cats={cats} wallets={wallets} cfg={cfg} onClose={() => setDetails(null)} />
+      <TransactionDetailsModal visible={!!details} transaction={details} cats={cats} wallets={wallets} debts={debts} goals={goals} commitments={commitments} cfg={cfg} onClose={() => setDetails(null)} />
       <AddTransModal visible={!!recurringDraft} onClose={() => setRecurringDraft(null)} draftData={recurringDraft} />
       <NotificationCenterModal
         visible={notificationsOpen}

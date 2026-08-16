@@ -23,6 +23,7 @@ import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatMonthLabel } from '../lib/months';
 import { PRODUCT_FILE_PREFIX, PRODUCT_NAME } from '../lib/productIdentity';
+import { getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
 
 export default function ArchiveScreen() {
   const {
@@ -141,7 +142,9 @@ export default function ArchiveScreen() {
       .filter(month => month.trans.length > 0);
   }, [months, search, displayCats, cfg.monthNameStyle]);
   const filteredTransactionIds = useMemo(
-    () => filteredMonths.flatMap(month => month.trans.map(item => item.id)),
+    () => filteredMonths.flatMap(month => month.trans
+      .filter(item => getTransactionSemanticKind(item) !== TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE)
+      .map(item => item.id)),
     [filteredMonths],
   );
   const selection = useMultiSelect(filteredTransactionIds);
@@ -361,8 +364,8 @@ export default function ArchiveScreen() {
 
   const confirmDeleteTransaction = (t) => {
     if (readOnly) return;
+    if (getTransactionSemanticKind(t) === TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE) return;
     const linked = isLinkedTransaction(t);
-    const editable = !readOnly && !linked && isCurrentMonthTransaction(t);
     Alert.alert(linked ? copy.linkedTitle : L.delete, linked ? copy.linkedBody : L.confirmDel, [
       { text: L.no, style: 'cancel' },
       { text: L.delete, style: 'destructive', onPress: () => deleteTrans(t.id) },
@@ -618,20 +621,28 @@ export default function ArchiveScreen() {
   const renderTransaction = (t) => {
     const cat = displayCats.find(c => c.id === t.cat) || displayCats.find(c => c.id === 'other') || displayCats[0] || {};
     const amount = getTransactionDisplayAmount(t);
-    const color = t.kind === 'transfer' ? th.primary : amount > 0 ? th.inc : th.exp;
+    const semanticKind = getTransactionSemanticKind(t);
+    const isOpeningBalance = semanticKind === TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE;
+    const isBalanceAdjustment = semanticKind === TRANSACTION_SEMANTIC_KIND.BALANCE_ADJUSTMENT;
+    const color = semanticKind === TRANSACTION_SEMANTIC_KIND.TRANSFER || isOpeningBalance
+      ? th.primary
+      : isBalanceAdjustment
+        ? th.warn
+        : amount > 0 ? th.inc : th.exp;
     const linked = isLinkedTransaction(t);
-    const title = t.kind === 'transfer' ? copy.transfer : t.title;
-    const smartBadge = t.kind !== 'transfer' ? describeSmartSource(t.smartSource, cfg.lang) : null;
+    const title = semanticKind === TRANSACTION_SEMANTIC_KIND.TRANSFER ? copy.transfer : t.title;
+    const smartBadge = semanticKind !== TRANSACTION_SEMANTIC_KIND.TRANSFER ? describeSmartSource(t.smartSource, cfg.lang) : null;
     const smartTone = t.smartSource?.mode === 'voice' ? th.warn : t.smartSource?.mode === 'receipt' ? th.primary : th.inc;
     const transactionTag = getTransactionTagMeta(t);
-    const editable = !readOnly && !linked && isCurrentMonthTransaction(t);
+    const editable = !readOnly && !linked && !isOpeningBalance && !isBalanceAdjustment && isCurrentMonthTransaction(t);
 
     return (
       <Pressable
         key={t.id}
-        onLongPress={() => { if (!readOnly) selection.toggle(t.id); }}
+        onLongPress={() => { if (!readOnly && !isOpeningBalance) selection.toggle(t.id); }}
         onPress={() => {
-          if (selection.selecting) selection.toggle(t.id);
+          if (selection.selecting && !isOpeningBalance) selection.toggle(t.id);
+          else if (isOpeningBalance) setDetails(t);
         }}
         style={[
           s.txRow,
@@ -668,11 +679,11 @@ export default function ArchiveScreen() {
             </Text>
           </View>
           <Text style={{ color, ...weight('900'), fontSize: 13 }}>
-            {t.kind === 'transfer' ? '' : amount > 0 ? '+' : '-'}{fmt(amount)} {sym}
+            {semanticKind === TRANSACTION_SEMANTIC_KIND.TRANSFER ? '' : amount > 0 ? '+' : '-'}{fmt(amount)} {sym}
           </Text>
         </View>
         {!readOnly && selection.selecting ? (
-          <SelectionCheckbox th={th} selected={selection.selected.has(t.id)} onPress={() => selection.toggle(t.id)} />
+          <SelectionCheckbox th={th} selected={selection.selected.has(t.id)} onPress={isOpeningBalance ? undefined : () => selection.toggle(t.id)} />
         ) : (
           <ActionMenu
             th={th}
@@ -680,10 +691,10 @@ export default function ArchiveScreen() {
             title={title}
             buttonStyle={{ backgroundColor: th.input, width: 32, height: 32, borderRadius: 10 }}
             items={[
-              !readOnly ? { label: copy.select, icon: 'checkmark-circle-outline', color: th.primary, onPress: () => selection.toggle(t.id) } : null,
+              !readOnly && !isOpeningBalance ? { label: copy.select, icon: 'checkmark-circle-outline', color: th.primary, onPress: () => selection.toggle(t.id) } : null,
               { label: isAr ? '\u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644' : 'Details', icon: 'reader-outline', color: th.primary, onPress: () => setDetails(t) },
               editable ? { label: L.editTrans, icon: 'create-outline', color: th.primary, onPress: () => setEditing(t) } : null,
-              !readOnly ? { label: L.delete, icon: 'trash-outline', color: th.exp, danger: true, onPress: () => confirmDeleteTransaction(t) } : null,
+              !readOnly && !isOpeningBalance ? { label: L.delete, icon: 'trash-outline', color: th.exp, danger: true, onPress: () => confirmDeleteTransaction(t) } : null,
             ]}
           />
         )}

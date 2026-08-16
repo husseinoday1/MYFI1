@@ -10,6 +10,7 @@ import { getTransactionTagMeta } from '../lib/transactionTags';
 import { isRTL, rowDirFor, textAlignFor } from '../lib/layout';
 import { Touchable as TouchableOpacity } from './AppPrimitives';
 import { RADIUS, SHADOW, weight } from '../lib/tokens';
+import { getSemanticTypeLabel, getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
 
 const copy = (lang) => {
   const ar = lang === 'ar';
@@ -35,6 +36,9 @@ const copy = (lang) => {
     income: ar ? '\u062f\u062e\u0644' : 'Income',
     expense: ar ? '\u0645\u0635\u0631\u0648\u0641' : 'Expense',
     saving: ar ? '\u062a\u0648\u0641\u064a\u0631 \u0644\u0647\u062f\u0641' : 'Goal saving',
+    debtEntity: ar ? 'الدين المرتبط' : 'Linked debt',
+    goalEntity: ar ? 'الهدف المرتبط' : 'Linked goal',
+    commitmentEntity: ar ? 'الالتزام المرتبط' : 'Linked commitment',
     linked: ar ? '\u0645\u0631\u062a\u0628\u0637 \u0628\u0645\u062a\u0627\u0628\u0639\u0629' : 'Linked to a tracker',
     recurring: ar ? '\u0645\u062a\u0643\u0631\u0631\u0629' : 'Recurring',
     recordedAs: ar ? '\u0637\u0631\u064a\u0642\u0629 \u0627\u0644\u0625\u062f\u062e\u0627\u0644' : 'Recorded as',
@@ -45,7 +49,7 @@ const copy = (lang) => {
   };
 };
 
-export default function TransactionDetailsModal({ visible, transaction, cats = [], wallets = [], cfg = {}, onClose, canEdit = false, canDuplicate = false, onEdit, onDuplicate, onDelete }) {
+export default function TransactionDetailsModal({ visible, transaction, cats = [], wallets = [], debts = [], goals = [], commitments = [], cfg = {}, onClose, canEdit = false, canDuplicate = false, onEdit, onDuplicate, onDelete }) {
   const th = TH[cfg.theme] || TH.dark;
   const C = copy(cfg.lang);
   const sym = getSymbol(cfg.currency);
@@ -62,10 +66,19 @@ export default function TransactionDetailsModal({ visible, transaction, cats = [
   const amount = getTransactionDisplayAmount(transaction);
   const transfer = transaction.kind === 'transfer';
   const goalSaving = !!transaction.isGoalSaving;
-  const amountColor = transfer || goalSaving ? th.primary : amount >= 0 ? th.inc : th.exp;
-  const typeLabel = transfer ? C.transfer : goalSaving ? C.saving : amount >= 0 ? C.income : C.expense;
+  const semanticKind = getTransactionSemanticKind(transaction);
+  const openingBalance = semanticKind === TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE;
+  const balanceAdjustment = semanticKind === TRANSACTION_SEMANTIC_KIND.BALANCE_ADJUSTMENT;
+  const amountColor = balanceAdjustment ? th.warn : openingBalance || transfer || goalSaving ? th.primary : amount >= 0 ? th.inc : th.exp;
+  const typeLabel = getSemanticTypeLabel(semanticKind, cfg.lang);
   const recordedAs = getTransactionTagMeta(transaction);
   const linked = transaction.isDebtPayment || transaction.isGoalSaving || transaction.isCommitmentPayment;
+  const linkedDebt = transaction.debtId ? debts.find(item => item.id === transaction.debtId) : null;
+  const linkedGoal = transaction.goalId ? goals.find(item => item.id === transaction.goalId) : null;
+  const linkedCommitment = transaction.commitmentId ? commitments.find(item => item.id === transaction.commitmentId) : null;
+  const debtName = linkedDebt?.name || (transaction.entityTypeSnapshot === 'debt' || transaction.entityTypeSnapshot === 'receivable' ? transaction.entityNameSnapshot : null);
+  const goalName = linkedGoal?.name || (transaction.entityTypeSnapshot === 'goal' ? transaction.entityNameSnapshot : null);
+  const commitmentName = linkedCommitment?.name || transaction.commitmentNameSnapshot || (transaction.entityTypeSnapshot === 'commitment' ? transaction.entityNameSnapshot : null);
   const entryWallet = walletMap.get(transaction.walletId);
   const fromWallet = walletMap.get(transaction.fromWalletId);
   const toWallet = walletMap.get(transaction.toWalletId);
@@ -106,7 +119,7 @@ export default function TransactionDetailsModal({ visible, transaction, cats = [
   const detailRows = [
     { label: C.type, value: typeLabel },
     { label: C.date, value: transaction.dateISO || '-' },
-    !transfer ? { label: C.category, value: cfg.lang === 'ar' ? category.label : category.labelEn || category.label } : null,
+    !transfer && !openingBalance && !balanceAdjustment ? { label: C.category, value: cfg.lang === 'ar' ? category.label : category.labelEn || category.label } : null,
     transfer ? { label: C.from, value: getWalletLabel(fromWallet, cfg.lang) } : null,
     transfer ? { label: C.to, value: getWalletLabel(toWallet, cfg.lang) } : null,
     transfer ? { label: C.sent, value: transferSourceText } : null,
@@ -120,6 +133,9 @@ export default function TransactionDetailsModal({ visible, transaction, cats = [
     !transfer && entityRateText ? { label: C.trackerRate, value: entityRateText } : null,
     !transfer && historicalBaseText ? { label: C.historicalBase, value: historicalBaseText } : null,
     !transfer && historicalRateText ? { label: C.historicalRate, value: historicalRateText } : null,
+    debtName ? { label: C.debtEntity, value: debtName } : null,
+    goalName ? { label: C.goalEntity, value: goalName } : null,
+    commitmentName ? { label: C.commitmentEntity, value: commitmentName } : null,
     recordedAs.id !== 'none' ? { label: C.recordedAs, value: cfg.lang === 'ar' ? recordedAs.label : recordedAs.labelEn } : null,
   ].filter(Boolean);
 
@@ -131,7 +147,7 @@ export default function TransactionDetailsModal({ visible, transaction, cats = [
           <View style={[s.handle, { backgroundColor: th.cardHigh }]} />
           <View style={[s.header, { flexDirection: rowDir }]}>
             <View style={[s.icon, { backgroundColor: `${amountColor}1F` }]}>
-              <Ionicons name={transfer ? 'swap-horizontal-outline' : 'receipt-outline'} size={19} color={amountColor} />
+              <Ionicons name={openingBalance ? 'flag-outline' : balanceAdjustment ? 'git-compare-outline' : transfer ? 'swap-horizontal-outline' : 'receipt-outline'} size={19} color={amountColor} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[s.title, { color: th.text, textAlign: align }]} numberOfLines={2}>

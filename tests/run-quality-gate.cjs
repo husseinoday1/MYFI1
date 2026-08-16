@@ -50,6 +50,7 @@ const staticContracts = [
   'runtime-hotfix-v42.test.cjs',
   'settings-navigation-v47.test.cjs',
   'settings-runtime-components-v501.test.cjs',
+  'semantic-history-p18.test.cjs',
   'supabase-sync-hardening-v4.test.cjs',
   'system-identity-v46.test.cjs',
   'terminology-audit.test.cjs',

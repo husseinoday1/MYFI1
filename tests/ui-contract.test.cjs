@@ -369,7 +369,7 @@ const transactionDetails = fs.readFileSync(path.join(srcRoot, 'components', 'Tra
 assert(history.includes('historyToolbar') && history.includes('searchBox') && history.includes('historyFilterAction'), 'History search and advanced filters must share one compact toolbar');
 assert(history.includes('dayCountBadge') && history.includes('rowSignals'), 'History must use compact day-group and transaction-signal hierarchy');
 assert.equal(history.includes("import ActionMenu from '../components/ActionMenu'"), false, 'History ledger rows must not carry a permanent overflow menu');
-assert(history.includes('onLongPress={() => selection.toggle(item.id)}'), 'Long press must preserve fast multi-selection');
+assert(history.includes('onLongPress={isOpeningBalance ? undefined : () => selection.toggle(item.id)}'), 'Long press must preserve fast multi-selection without selecting protected opening balances');
 assert(history.includes('setDetails(item)'), 'Single tap must open transaction details');
 assert(history.includes('canEdit={!!details') && history.includes('canDuplicate={!!details'), 'History must route edit/duplicate eligibility into transaction details');
 assert(transactionDetails.includes('actionRow') && transactionDetails.includes('onEdit') && transactionDetails.includes('onDuplicate') && transactionDetails.includes('onDelete'), 'Transaction details must own edit/duplicate/delete actions');

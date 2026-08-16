@@ -3,6 +3,7 @@ import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
 import { monthKey } from '../../lib/commitments';
 import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
 import { inferTransactionTag } from '../../lib/transactionTags';
+import { buildGeneratedEntryTitle, isGeneratedEntryTitle } from '../../lib/transactionSemantics';
 import {
   capLinkedAmount,
   debtPaidTotal,
@@ -39,9 +40,11 @@ export const createTransactionSlice = (set, get) => ({
     const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
     const cat = get().cats.find(item => item.id === t.cat) || get().cats.find(item => item.id === 'other') || {};
     const catLabel = (get().cfg.lang === 'ar' ? cat.label : cat.labelEn) || cat.label || cat.labelEn || '';
-    const defaultTitle = Number(t.amt || 0) >= 0
-      ? (get().cfg.lang === 'ar' ? `دخل - ${catLabel || 'عام'}` : `Income - ${catLabel || 'General'}`)
-      : (get().cfg.lang === 'ar' ? `مصروف - ${catLabel || 'عام'}` : `Expense - ${catLabel || 'General'}`);
+    const defaultTitle = buildGeneratedEntryTitle({
+      flow: Number(t.amt || 0) >= 0 ? 'income' : 'expense',
+      categoryLabel: catLabel,
+      lang: get().cfg.lang,
+    });
     const walletId = t.walletId || defaultWalletId;
     const selectedWallet = get().wallets.find(item => item.id === walletId) || null;
     const selectedWalletCurrency = String(selectedWallet?.currency || get().cfg.currency || 'IQD').toUpperCase();
@@ -71,6 +74,7 @@ export const createTransactionSlice = (set, get) => ({
       flowType: t.flowType || (Number(t.amt || 0) >= 0 ? FLOW_TYPES.INCOME : FLOW_TYPES.EXPENSE),
       transactionTag: inferTransactionTag(t),
       title: String(t.title || '').trim() || defaultTitle,
+      titleSource: t.titleSource || (String(t.title || '').trim() ? 'user' : 'generated'),
       walletId,
       ...currencyFields,
       rateDate: t.rateDate || t.dateISO || today(),
@@ -316,6 +320,16 @@ export const createTransactionSlice = (set, get) => ({
       safePatch.recurringGroupId = current.recurringGroupId || current.id;
     }
     const hasAmt = Object.prototype.hasOwnProperty.call(patch, 'amt');
+    const ordinaryEntry = !(current.kind === 'transfer' || current.isDebtPayment || current.isGoalSaving || current.isCommitmentPayment || current.isOpeningBalance || current.isBalanceAdjustment);
+    if (ordinaryEntry && hasAmt && !Object.prototype.hasOwnProperty.call(safePatch, 'title') && isGeneratedEntryTitle(current, get().cats)) {
+      const nextCategory = get().cats.find(item => item.id === (safePatch.cat || current.cat)) || {};
+      safePatch.title = buildGeneratedEntryTitle({
+        flow: Number(safePatch.amt) >= 0 ? 'income' : 'expense',
+        categoryLabel: (get().cfg.lang === 'ar' ? nextCategory.label : nextCategory.labelEn) || nextCategory.label || nextCategory.labelEn || '',
+        lang: get().cfg.lang,
+      });
+      safePatch.titleSource = 'generated';
+    }
     const linkedDebt = current.isDebtPayment ? get().debts.find(d => d.id === current.debtId) : null;
     const currentDebtPayment = linkedDebt?.payments?.find(p => p.id === current.paymentId);
     const debtSign = linkedDebt?.direction === 'receivable' ? 1 : -1;
