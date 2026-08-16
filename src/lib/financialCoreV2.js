@@ -51,12 +51,18 @@ export const buildCurrencyFields = ({
   walletId = null,
   wallets = [],
   baseCurrency = 'IQD',
-  exchangeRate = 1,
+  exchangeRate = null,
   walletCurrency = null,
 } = {}) => {
   const base = normalizeCurrencyCode(baseCurrency);
   const native = normalizeCurrencyCode(walletCurrency || walletCurrencyFor(wallets, walletId, base), base);
-  const rate = native === base ? 1 : normalizeExchangeRate(exchangeRate);
+  const requestedRate = Number(exchangeRate);
+  const rate = native === base
+    ? 1
+    : (Number.isFinite(requestedRate) && requestedRate > 0 ? requestedRate : null);
+  if (native !== base && !(rate > 0)) {
+    throw new RangeError('transaction_historical_base_rate_required');
+  }
   const walletAmount = roundCurrency(Number(amount) || 0, native);
   const baseAmount = native === base ? roundCurrency(walletAmount, base) : convertMoney(walletAmount, native, base, rate);
   return {
@@ -341,18 +347,45 @@ export const hydrateLegacyCurrencyFields = (tx = {}, wallets = [], baseCurrency 
       };
     }
   }
-  if (tx.walletCurrency && tx.baseCurrencyCode && Object.prototype.hasOwnProperty.call(tx, 'walletAmount')) return tx;
+  const frozenBase = normalizeCurrencyCode(tx.baseCurrencyCode || base, base);
+  const native = normalizeCurrencyCode(
+    tx.walletCurrency || tx.currencyCode || walletCurrencyFor(wallets, tx.walletId, frozenBase),
+    frozenBase,
+  );
+  const walletAmount = Number(tx.walletAmount ?? tx.amt ?? 0);
+  const explicitRate = Number(tx.exchangeRate);
+  const historicalRate = native === frozenBase
+    ? 1
+    : (Number.isFinite(explicitRate) && explicitRate > 0 ? explicitRate : null);
+
+  if (native !== frozenBase && !(historicalRate > 0)) {
+    // Preserve the legacy record exactly as financial evidence. Missing FX is a
+    // review state, never permission to invent rate=1 or today's wallet valuation.
+    return {
+      ...tx,
+      currencyCode: native,
+      walletCurrency: native,
+      walletAmount,
+      walletAmountMinor: moneyToMinor(walletAmount, native),
+      baseCurrencyCode: frozenBase,
+      exchangeRate: null,
+      fxStatus: 'UNRESOLVED_FX',
+      unresolvedFxReason: 'missing_historical_base_rate',
+    };
+  }
+
   const fields = buildCurrencyFields({
-    amount: tx.walletAmount ?? tx.amt ?? 0,
+    amount: walletAmount,
     walletId: tx.walletId,
     wallets,
-    baseCurrency: tx.baseCurrencyCode || base,
-    exchangeRate: tx.exchangeRate || 1,
-    walletCurrency: tx.walletCurrency || tx.currencyCode,
+    baseCurrency: frozenBase,
+    exchangeRate: historicalRate,
+    walletCurrency: native,
   });
   return {
     ...tx,
     ...fields,
+    fxStatus: 'RESOLVED',
     // Existing app calculations expect amt to represent the workspace/base value.
     amt: fields.baseAmount,
   };

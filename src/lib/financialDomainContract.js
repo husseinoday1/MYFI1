@@ -2,7 +2,7 @@
 // Pre-Phase-6 contract freeze. This module defines financial meaning only.
 // It does not activate SQLite-first writes or perform operational cutover.
 
-export const FINANCIAL_DOMAIN_CONTRACT_VERSION = 'R04-U2-1';
+export const FINANCIAL_DOMAIN_CONTRACT_VERSION = 'R04-U2-2';
 
 export const FINANCIAL_DOMAIN_CONTRACT = Object.freeze({
   scopes: Object.freeze({
@@ -95,11 +95,9 @@ export const FINANCIAL_DOMAIN_CONTRACT = Object.freeze({
   }),
 });
 
-// Explicitly tracked implementation gaps at the cc17b415 checkpoint.
-// These must be closed or safely rejected before Phase 6 is allowed to start.
+// Explicitly tracked implementation gaps after P04U2-002.
+// FX fallback and feature-toggle financial-truth enforcement are now closed.
 export const R04_U2_OPEN_ENFORCEMENT_GAPS = Object.freeze([
-  'foreign_nontransfer_missing_fx_legacy_fallback',
-  'feature_toggle_transaction_filtering_legacy_path',
   'debt_interest_fee_components_not_enforced',
   'explicit_refund_reversal_command_not_implemented',
 ]);

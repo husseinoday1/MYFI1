@@ -214,24 +214,10 @@ export const transactionFeatureEnabled = (tx = {}, cfg = {}) => {
 
 export const filterTransactionsByEnabledFeatures = (items = [], cfg = {}) => {
   const source = Array.isArray(items) ? items : [];
-  const modules = getModules(cfg);
-  const allTransactionFeaturesEnabled = [
-    'wallets',
-    'debtsOwed',
-    'debtsReceivable',
-    'goals',
-    'commitments',
-  ].every(key => modules[key] !== false);
-  if (allTransactionFeaturesEnabled) return source;
-  const key = enabledTransactionFeaturesKey(cfg);
-  const cachedByFeatures = featureFilterCache.get(source);
-  const cached = cachedByFeatures?.get(key);
-  if (cached) return cached;
-  const filtered = source.filter(item => transactionFeatureEnabled(item, cfg));
-  const nextCache = cachedByFeatures || new Map();
-  nextCache.set(key, filtered);
-  if (!cachedByFeatures) featureFilterCache.set(source, nextCache);
-  return filtered;
+  // Feature toggles control entry/navigation surfaces only. Historical financial
+  // truth must remain visible to History, totals, reports, export and backup.
+  // Keep this compatibility API non-destructive while legacy callers retire.
+  return source;
 };
 
 export const filterFeatureEntities = ({

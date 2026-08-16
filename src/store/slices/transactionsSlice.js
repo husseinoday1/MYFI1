@@ -400,25 +400,38 @@ export const createTransactionSlice = (set, get) => ({
             || Math.abs(Number(paymentFields.walletAmount || 0)) > available + 0.0001;
         }
       } else {
-        const currentNativeAmount = Object.prototype.hasOwnProperty.call(current, 'walletAmount') ? Number(current.walletAmount || 0) : Number(current.amt || 0);
-        const requestedNativeAmount = hasAmt
-          ? (Number(safePatch.walletAmount ?? safePatch.amt) < 0 ? -linkedAbsAmt : linkedAbsAmt)
-          : currentNativeAmount;
-        const currencyFields = buildCurrencyFields({
-          amount: requestedNativeAmount,
-          walletId: nextWalletId,
-          wallets: get().wallets,
-          baseCurrency: get().cfg.currency,
-          exchangeRate: safePatch.exchangeRate ?? current.exchangeRate ?? 1,
-          walletCurrency: safePatch.walletCurrency ?? current.walletCurrency ?? current.currencyCode,
-        });
-        Object.assign(safePatch, currencyFields);
-        safePatch.amt = currencyFields.baseAmount;
-        if (Number(currencyFields.walletAmount || 0) < 0) {
-          const position = await walletPositionForCommand(get, nextWalletId, current);
-          const available = Number(position?.availableBalance);
-          safePatch.balanceWarning = !Number.isFinite(available)
-            || Math.abs(Number(currencyFields.walletAmount || 0)) > available + 0.0001;
+        const touchesCurrencyFields = hasAmt
+          || Object.prototype.hasOwnProperty.call(safePatch, 'walletAmount')
+          || Object.prototype.hasOwnProperty.call(safePatch, 'walletId')
+          || Object.prototype.hasOwnProperty.call(safePatch, 'exchangeRate')
+          || Object.prototype.hasOwnProperty.call(safePatch, 'walletCurrency')
+          || Object.prototype.hasOwnProperty.call(safePatch, 'currencyCode');
+        if (touchesCurrencyFields) {
+          const currentNativeAmount = Object.prototype.hasOwnProperty.call(current, 'walletAmount') ? Number(current.walletAmount || 0) : Number(current.amt || 0);
+          const requestedNativeAmount = hasAmt
+            ? (Number(safePatch.walletAmount ?? safePatch.amt) < 0 ? -linkedAbsAmt : linkedAbsAmt)
+            : currentNativeAmount;
+          let currencyFields;
+          try {
+            currencyFields = buildCurrencyFields({
+              amount: requestedNativeAmount,
+              walletId: nextWalletId,
+              wallets: get().wallets,
+              baseCurrency: get().cfg.currency,
+              exchangeRate: safePatch.exchangeRate ?? current.exchangeRate ?? null,
+              walletCurrency: safePatch.walletCurrency ?? current.walletCurrency ?? current.currencyCode,
+            });
+          } catch {
+            return false;
+          }
+          Object.assign(safePatch, currencyFields);
+          safePatch.amt = currencyFields.baseAmount;
+          if (Number(currencyFields.walletAmount || 0) < 0) {
+            const position = await walletPositionForCommand(get, nextWalletId, current);
+            const available = Number(position?.availableBalance);
+            safePatch.balanceWarning = !Number.isFinite(available)
+              || Math.abs(Number(currencyFields.walletAmount || 0)) > available + 0.0001;
+          }
         }
       }
     }

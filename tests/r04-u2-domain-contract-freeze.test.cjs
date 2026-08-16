@@ -17,7 +17,7 @@ const trackerSlice = read('src/store/slices/trackersSlice.js');
 const backup = read('src/lib/backupData.js');
 const workspace = read('src/lib/accountWorkspace.js');
 
-assert(contract.includes("FINANCIAL_DOMAIN_CONTRACT_VERSION = 'R04-U2-1'"), 'U-2 contract version missing');
+assert(contract.includes("FINANCIAL_DOMAIN_CONTRACT_VERSION = 'R04-U2-2'"), 'U-2 contract version missing');
 
 // UPA-01 — Personal/Business scope separation is part of the V7 model.
 assert(model.includes('scope: String(transaction.scope'), 'Transaction scope is not frozen in V7');
@@ -87,8 +87,6 @@ assert(contract.includes('cloudSessionDefinesLocalLedgerExistence: false'), 'Acc
 
 // Known gaps must remain visible until later enforcement patches close them.
 for (const gap of [
-  'foreign_nontransfer_missing_fx_legacy_fallback',
-  'feature_toggle_transaction_filtering_legacy_path',
   'debt_interest_fee_components_not_enforced',
   'explicit_refund_reversal_command_not_implemented',
 ]) {
