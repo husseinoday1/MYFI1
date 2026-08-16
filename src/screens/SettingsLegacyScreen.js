@@ -361,7 +361,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
     cfg, setCfg, user, setUser, resetAll,
     syncing, online, lastSyncError, dirty,
     notif, setNotif, cats, setCats, trans,
-    wallets, addWallet, deleteWallet, deleteWalletsMany, deleteCategoriesMany, reconcileWalletBalance,
+    wallets, addWallet, editWallet, deleteWallet, deleteWalletsMany, deleteCategoriesMany, reconcileWalletBalance,
     debts, goals, commitments,
     exportBackup, importBackup,
     setCategoryBudget, applySuggestedBudgets, copyPreviousMonthBudgets, clearBudgets,
@@ -568,6 +568,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
   const [newWalletCurrencyQuery, setNewWalletCurrencyQuery] = useState('');
   const [newWalletRate, setNewWalletRate] = useState('');
   const [walletModalOpen, setWalletModalOpen] = useState(false);
+  const [rateWallet, setRateWallet] = useState(null);
+  const [rateDraft, setRateDraft] = useState('');
   const [reconcileWallet, setReconcileWallet] = useState(null);
   const [reconcileBalance, setReconcileBalance] = useState('');
   const [reconcileNote, setReconcileNote] = useState('');
@@ -1098,6 +1100,30 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
         ? `تم تسجيل تسوية بقيمة ${difference.toLocaleString()} ${reconcileWallet.currency}.`
         : `Balance adjustment recorded: ${difference.toLocaleString()} ${reconcileWallet.currency}.`);
     }
+  };
+
+
+  const openWalletRateEditor = (wallet) => {
+    if (!wallet) return;
+    if (String(wallet.currency || cfg.currency).toUpperCase() === String(cfg.currency).toUpperCase()) return;
+    setRateWallet(wallet);
+    setRateDraft(String(wallet.valuationRate || ''));
+  };
+
+  const saveWalletRate = async () => {
+    if (!rateWallet) return;
+    const rate = parseNumberInput(rateDraft);
+    if (!(rate > 0)) {
+      Alert.alert('', isAr ? 'اكتب سعر تقييم صالح.' : 'Enter a valid valuation rate.');
+      return;
+    }
+    const ok = await editWallet(rateWallet.id, { valuationRate: rate });
+    if (!ok) {
+      Alert.alert('', isAr ? 'تعذر تحديث سعر تقييم المحفظة.' : 'Could not update the wallet valuation rate.');
+      return;
+    }
+    setRateWallet(null);
+    setRateDraft('');
   };
 
   const confirmDeleteWallet = (wallet) => {
@@ -1946,6 +1972,14 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
                           icon: 'star-outline',
                           color: th.primary,
                           onPress: () => setCfg({ defaultWalletId: wallet.id }),
+                        }
+                      : null,
+                    String(wallet.currency || cfg.currency).toUpperCase() !== String(cfg.currency).toUpperCase()
+                      ? {
+                          label: isAr ? 'تعديل سعر تقييم المحفظة' : 'Edit wallet valuation rate',
+                          icon: 'swap-horizontal-outline',
+                          color: th.primary,
+                          onPress: () => openWalletRateEditor(wallet),
                         }
                       : null,
                     {
@@ -2889,6 +2923,38 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
           />
           <TouchableOpacity onPress={createWallet} style={[s.primaryButton, { backgroundColor: th.primary }]}>
             <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>{T.addWallet}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+
+    <Modal visible={!!rateWallet} transparent animationType="slide" onRequestClose={() => setRateWallet(null)}>
+      <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setRateWallet(null)} />
+        <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>
+          <View style={[s.sheetHeader, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+            <Text style={[s.sheetTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>
+              {isAr ? 'سعر تقييم المحفظة' : 'Wallet valuation rate'}
+            </Text>
+          </View>
+          <Text style={[s.miniLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
+            {rateWallet ? `${getWalletLabel(rateWallet, cfg.lang)} · 1 ${rateWallet.currency} = ? ${cfg.currency}` : ''}
+          </Text>
+          <Text style={{ color: th.sub, fontSize: 11, lineHeight: 18, marginVertical: 8, textAlign: isAr ? 'right' : 'left' }}>
+            {isAr
+              ? 'هذا السعر للتقييم الحالي واقتراح الحركات الجديدة فقط. الحركات التاريخية لا تتغير.'
+              : 'This rate is for current valuation and new-entry suggestions only. Historical transactions never change.'}
+          </Text>
+          <TextInput
+            value={rateDraft}
+            onChangeText={(value) => setRateDraft(formatNumberInput(value))}
+            keyboardType="decimal-pad"
+            placeholder={isAr ? 'اكتب السعر الحالي' : 'Enter current rate'}
+            placeholderTextColor={th.sub}
+            style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: isAr ? 'right' : 'left' }]}
+          />
+          <TouchableOpacity onPress={saveWalletRate} style={[s.primaryButton, { backgroundColor: th.primary, marginTop: 12 }]}>
+            <Text style={{ color: th.onPrimary, fontSize: 13, ...weight('900') }}>{isAr ? 'حفظ السعر' : 'Save rate'}</Text>
           </TouchableOpacity>
         </View>
       </View>

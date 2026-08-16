@@ -241,6 +241,7 @@ export default function AddTransModal({
   const [transferFromRateOrigin, setTransferFromRateOrigin] = useState('none');
   const [transferToBaseRate, setTransferToBaseRate] = useState('');
   const [transferToRateOrigin, setTransferToRateOrigin] = useState('none');
+  const [showTransferAdvanced, setShowTransferAdvanced] = useState(false);
   const transferTargetWallets = eligibleTransferWallets.filter(wallet => wallet.id !== fromWalletId);
   const canTransfer = modules.wallets && eligibleTransferWallets.length > 1;
   const [smartOpen, setSmartOpen] = useState(false);
@@ -274,7 +275,7 @@ export default function AddTransModal({
   const reset = () => {
     liveSpeechRef.current?.abort?.();
     liveSpeechRef.current = null;
-    setType(cleanInitialMode); setTitle(''); setTitleOrigin('none'); setAmt(''); setCat('other'); setCategoryTouched(false);
+    setType(cleanInitialMode); setTitle(''); setTitleOrigin('none'); setAmt(''); setCat('other'); setCategoryTouched(false); setShowTransferAdvanced(false);
     setNote(''); setRecurring(false); setDateISO(today());
     setSelDebt(initialDebtId); setSelGoal(initialGoalId);
     setSelCommitment(initialCommitmentId);
@@ -1715,6 +1716,19 @@ export default function AddTransModal({
             ) : null}
 
             {type === 'transfer' ? (
+              <TouchableOpacity
+                onPress={() => setShowTransferAdvanced(value => !value)}
+                style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border, minHeight: 48, justifyContent: 'center' }]}
+              >
+                <Text style={{ color: th.primary, fontSize: 12, textAlign: align, ...weight('900') }}>
+                  {showTransferAdvanced
+                    ? (cfg.lang === 'ar' ? 'إخفاء التفاصيل الإضافية' : 'Hide extra details')
+                    : (cfg.lang === 'ar' ? 'سعر الصرف والرسوم · تفاصيل إضافية' : 'FX and fees · More details')}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {type === 'transfer' && (showTransferAdvanced || transferNeedsBridgeRates || transferFeeValue > 0) ? (
               <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
                 <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
                   {cfg.lang === 'ar' ? `رسوم التحويل (${fromCurrency}) · اختيارية` : `Transfer fee (${fromCurrency}) · optional`}
@@ -1735,7 +1749,7 @@ export default function AddTransModal({
               </View>
             ) : null}
 
-            {type === 'transfer' ? (
+            {type === 'transfer' && showTransferAdvanced ? (
               <View style={[s.entryField, { backgroundColor: th.input, borderColor: transferReady ? th.border : th.exp }]}>
                 <Text style={[s.fieldLabel, { color: th.text, textAlign: align, ...weight('900') }]}>
                   {cfg.lang === 'ar' ? 'ملخص التحويل قبل التأكيد' : 'Transfer summary before confirmation'}
@@ -1807,8 +1821,8 @@ export default function AddTransModal({
                 />
                 <Text style={[s.selectDetail, { color: th.sub, textAlign: align, marginTop: 5 }]}>
                   {exchangeRateOrigin === 'wallet_suggestion'
-                    ? (cfg.lang === 'ar' ? 'معبّأ من سعر المحفظة كاقتراح. يمكنك تعديله، وحفظ الحركة هو تأكيد السعر التاريخي.' : 'Filled from the wallet rate as a suggestion. You can edit it; saving confirms the historical rate.')
-                    : (cfg.lang === 'ar' ? 'هذا سعر تاريخي خاص بهذه الحركة ولا يغيّر سعر المحفظة.' : 'This historical rate belongs to this transaction and does not change the wallet rate.')}
+                    ? (cfg.lang === 'ar' ? 'سعر المحفظة اقتراح قابل للتعديل؛ حفظ الحركة هو تأكيد السعر التاريخي.' : 'Filled from the wallet rate as a suggestion. You can edit it; saving confirms the historical rate.')
+                    : (cfg.lang === 'ar' ? 'سعر هذه الحركة فقط؛ لا يغيّر سعر المحفظة.' : 'This historical rate belongs to this transaction and does not change the wallet rate.')}
                 </Text>
                 {exchangeRateOrigin !== 'wallet_suggestion' && Number(selectedEntryWallet?.valuationRate || 0) > 0 ? (
                   <TouchableOpacity onPress={() => { setExchangeRate(String(selectedEntryWallet.valuationRate)); setExchangeRateOrigin('wallet_suggestion'); }}>

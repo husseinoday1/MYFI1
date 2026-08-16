@@ -555,11 +555,11 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
             ) : null}
           </View>
           <View style={s.amountBlock}>
-            <Text style={{ color, ...weight('900'), fontSize: 15, textAlign: align }} numberOfLines={1}>
+            <Text style={{ color, ...weight('900'), fontSize: 15, textAlign: isTransfer ? 'left' : align, ...(isTransfer ? { writingDirection: 'ltr' } : {}) }} numberOfLines={1}>
               {isTransfer ? transferDisplay : nativeDisplay}
             </Text>
             {transferFxDisplay ? (
-              <Text style={{ color: th.sub, ...weight('700'), fontSize: 10, lineHeight: 14, textAlign: align }} numberOfLines={1}>
+              <Text style={{ color: th.sub, ...weight('700'), fontSize: 10, lineHeight: 14, textAlign: isTransfer ? 'left' : align, ...(isTransfer ? { writingDirection: 'ltr' } : {}) }} numberOfLines={1}>
                 {transferFxDisplay}
               </Text>
             ) : null}
