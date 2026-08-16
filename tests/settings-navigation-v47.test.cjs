@@ -24,7 +24,7 @@ assert(settings.includes('s.profileNameInput'), 'Profile name edit field must us
 assert(app.includes('const [settingsResetSignal, setSettingsResetSignal] = useState(0);'), 'App settings reset signal missing');
 assert(app.includes('resetSignal={settingsResetSignal}'), 'Settings reset signal not wired to SettingsScreen');
 assert(app.includes("if (item.key === 'settings')"), 'Settings tab must have dedicated root-reset behavior');
-assert(app.includes('setSettingsResetSignal(value => value + 1);'), 'Settings tab must reset to root even when already selected');
+assert(app.includes("setSettingsOpenRequest({ page: 'root', nonce: Date.now() });"), 'Settings tab must issue an explicit root command even when already selected');
 
 for (const [rel, text] of [['src/screens/SettingsScreen.js', settings], ['src/screens/SettingsLegacyScreen.js', legacy], ['App.js', app]]) {
   text.split(/\r?\n/).forEach((line, i) => assert(!/[ \t]+$/.test(line), `${rel}:${i + 1} trailing whitespace`));

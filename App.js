@@ -801,7 +801,9 @@ function AppRoot() {
                 key={item.key}
                 onPress={() => {
                   if (item.key === 'settings') {
-                    setSettingsResetSignal(value => value + 1);
+                    // A bottom-tab entry is an explicit root navigation command.
+                    // Keep it separate from Home's requested subpage route.
+                    setSettingsOpenRequest({ page: 'root', nonce: Date.now() });
                     setTab('settings');
                     return;
                   }

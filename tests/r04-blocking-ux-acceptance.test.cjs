@@ -20,13 +20,14 @@ assert(
   'D-09: Home profile must request Account/Security directly',
 );
 assert(
-  app.includes('setSettingsOpenRequest({ page, nonce: Date.now() });')
+  app.includes("setSettingsOpenRequest({ page, nonce: Date.now() });")
     && app.includes("setTab('settings');"),
   'D-09: App must forward direct settings page request',
 );
 assert(
   settings.includes("const requestedPage = String(openRequest?.page || '').trim();")
-    && settings.includes('setPage(requestedPage);'),
+    && settings.includes('setPage(requestedPage);')
+    && app.includes("setSettingsOpenRequest({ page: 'root', nonce: Date.now() });"),
   'D-09: Settings must consume direct Account/Security request',
 );
 
@@ -65,17 +66,12 @@ assert(
   'D-18: Financial sheet/pickers must preserve usable keyboard space and handoff',
 );
 
-// D-19 — FX/money equation is rendered as a dedicated LTR expression.
-for (const expression of [
-  '`1 ${fromCurrency} = ? ${baseCurrencyCode}`',
-  '`1 ${toCurrency} = ? ${baseCurrencyCode}`',
-  '`1 ${trackerCurrency} = ? ${cfg.currency}`',
-  '`1 ${entryCurrency} = ? ${cfg.currency}`',
-]) {
-  assert(add.includes(expression), `D-19: Missing canonical FX expression ${expression}`);
+// D-19 — FX/money equation is structurally isolated into LTR token nodes.
+assert(add.includes('export const FxEquation'), 'D-19: dedicated FX equation component missing');
+assert(add.includes("flexDirection: 'row'") && add.includes("writingDirection: 'ltr'"), 'D-19: FX equation must use an isolated LTR row');
+for (const currency of ['fromCurrency', 'toCurrency', 'trackerCurrency', 'entryCurrency']) {
+  assert(add.includes(`<FxEquation fromCurrency={${currency}}`), `D-19: Missing FX component for ${currency}`);
 }
-const ltrCount = (add.match(/writingDirection:\s*'ltr'/g) || []).length;
-assert(ltrCount >= 4, 'D-19: FX expressions must use explicit LTR direction');
 
 // D-20 — one paid-this-month presentation only; duplicate action still opens today.
 const paidMonthRefs = (trackers.match(/T\.paidMonth/g) || []).length;

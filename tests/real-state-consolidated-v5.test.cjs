@@ -18,7 +18,7 @@ assert(!settings.includes('function NestedSettingsMenu('), 'Nested navigation dr
 assert(!settings.includes("page === 'advanced'"), 'Advanced settings intermediate page must be removed');
 assert(!settings.includes("openPage('advanced')"), 'Financial settings must not route through Advanced');
 assert(settings.includes('resetSignal = 0'), 'Settings root reset signal must remain');
-assert(app.includes('setSettingsResetSignal(value => value + 1);'), 'Settings tab must still jump directly to Settings root');
+assert(app.includes("setSettingsOpenRequest({ page: 'root', nonce: Date.now() });"), 'Settings tab must still jump directly to Settings root');
 assert(settings.includes('const goBack = () => {'), 'Step-back behavior must remain');
 
 // Financial settings are one screen with inline accordion sections.
