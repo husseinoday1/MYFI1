@@ -11,6 +11,7 @@ const coreSource = read('src/lib/financialCoreV2.js');
 const modelSource = read('src/lib/financialLedgerV7Model.js');
 const activeSource = read('src/lib/activeLedgerRepository.js');
 const moneySource = read('src/lib/money.js');
+const policySource = read('src/lib/financialCommandPolicy.js');
 
 assert(coreSource.includes('user_confirmed_same_currency_base_rate'), 'same-foreign FX snapshot source missing');
 assert(coreSource.includes('const sharedHistoricalRate = resolvedFromBaseRate || resolvedToBaseRate'), 'same-foreign shared historical rate missing');
@@ -35,9 +36,11 @@ if (ts) {
     if (request === './money') return money;
     throw new Error('Unexpected core require: ' + request);
   });
+  const policy = evaluate(policySource, 'financialCommandPolicy.js', require);
   const model = evaluate(modelSource, 'financialLedgerV7Model.js', request => {
     if (request === './money') return money;
     if (request === './financialCoreV2') return core;
+    if (request === './financialCommandPolicy') return policy;
     throw new Error('Unexpected model require: ' + request);
   });
 

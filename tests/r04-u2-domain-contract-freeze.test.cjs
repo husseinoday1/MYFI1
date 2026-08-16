@@ -17,7 +17,7 @@ const trackerSlice = read('src/store/slices/trackersSlice.js');
 const backup = read('src/lib/backupData.js');
 const workspace = read('src/lib/accountWorkspace.js');
 
-assert(contract.includes("FINANCIAL_DOMAIN_CONTRACT_VERSION = 'R04-U2-2'"), 'U-2 contract version missing');
+assert(contract.includes("FINANCIAL_DOMAIN_CONTRACT_VERSION = 'R04-U2-3'"), 'U-2 contract version missing');
 
 // UPA-01 — Personal/Business scope separation is part of the V7 model.
 assert(model.includes('scope: String(transaction.scope'), 'Transaction scope is not frozen in V7');
@@ -85,12 +85,12 @@ assert(workspace.includes('Logout preserves the mounted ledger'), 'Logout ledger
 assert(workspace.includes('preserveCurrent: true'), 'Logout/same-account relogin preserve-current behavior missing');
 assert(contract.includes('cloudSessionDefinesLocalLedgerExistence: false'), 'Account/ledger separation contract missing');
 
-// Known gaps must remain visible until later enforcement patches close them.
-for (const gap of [
-  'debt_interest_fee_components_not_enforced',
-  'explicit_refund_reversal_command_not_implemented',
-]) {
-  assert(contract.includes(`'${gap}'`), `Missing U-2 enforcement-gap inventory item: ${gap}`);
-}
+// P04U2-003 closes the automated financial-domain enforcement inventory.
+const openStart = contract.indexOf('R04_U2_OPEN_ENFORCEMENT_GAPS');
+const openEnd = contract.indexOf(']);', openStart);
+assert(openStart >= 0 && openEnd > openStart, 'U-2 enforcement-gap inventory missing');
+const openBlock = contract.slice(openStart, openEnd);
+assert(!openBlock.includes('debt_interest_fee_components_not_enforced'), 'Debt-component gap remains open');
+assert(!openBlock.includes('explicit_refund_reversal_command_not_implemented'), 'Refund/reversal gap remains open');
 
 console.log('MYFI R04 U-2 domain/storage contract freeze: PASSED');

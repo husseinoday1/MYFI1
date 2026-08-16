@@ -2,7 +2,7 @@
 // Pre-Phase-6 contract freeze. This module defines financial meaning only.
 // It does not activate SQLite-first writes or perform operational cutover.
 
-export const FINANCIAL_DOMAIN_CONTRACT_VERSION = 'R04-U2-2';
+export const FINANCIAL_DOMAIN_CONTRACT_VERSION = 'R04-U2-3';
 
 export const FINANCIAL_DOMAIN_CONTRACT = Object.freeze({
   scopes: Object.freeze({
@@ -20,6 +20,7 @@ export const FINANCIAL_DOMAIN_CONTRACT = Object.freeze({
     interestPolicy: 'explicit_component_required_before_support',
     feePolicy: 'explicit_component_required_before_support',
     currentReleaseComponents: Object.freeze(['principal']),
+    unsupportedComponentBehavior: 'reject_financial_command',
   }),
 
   trackerDeletion: Object.freeze({
@@ -69,7 +70,7 @@ export const FINANCIAL_DOMAIN_CONTRACT = Object.freeze({
   reversals: Object.freeze({
     policy: 'explicit_reference_required',
     silent_sign_flipIsReversal: false,
-    currentRelease: 'not_supported_as_distinct_flow_until_command_model_exists',
+    currentRelease: 'reject_until_explicit_reference_command_exists',
   }),
 
   categories: Object.freeze({
@@ -95,12 +96,9 @@ export const FINANCIAL_DOMAIN_CONTRACT = Object.freeze({
   }),
 });
 
-// Explicitly tracked implementation gaps after P04U2-002.
-// FX fallback and feature-toggle financial-truth enforcement are now closed.
-export const R04_U2_OPEN_ENFORCEMENT_GAPS = Object.freeze([
-  'debt_interest_fee_components_not_enforced',
-  'explicit_refund_reversal_command_not_implemented',
-]);
+// Automated financial-domain enforcement gaps are closed by P04U2-003.
+// R04 still requires the consolidated pre-Phase-6 acceptance stream.
+export const R04_U2_OPEN_ENFORCEMENT_GAPS = Object.freeze([]);
 
 export const isFinancialScope = value => (
   value === 'personal' || value === 'business'

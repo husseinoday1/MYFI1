@@ -1,5 +1,6 @@
 import { currencyFractionDigits } from './money';
 import { moneyToMinor, normalizeCurrencyCode } from './financialCoreV2';
+import { assertFinancialCommandPolicy } from './financialCommandPolicy';
 
 export const FINANCIAL_LEDGER_SCHEMA_VERSION = 7;
 
@@ -128,6 +129,7 @@ export const buildFinancialLedgerCommand = ({
   namespace = 'guest', transaction = {}, wallets = [], baseCurrency = 'IQD', entityChanges = [],
   now = new Date().toISOString(),
 } = {}) => {
+  assertFinancialCommandPolicy(transaction);
   const normalizedNamespace = requireText(namespace, 'namespace');
   const transactionId = requireText(transaction.id, 'transaction_id');
   const dateISO = requireText(transaction.dateISO, 'date_iso');

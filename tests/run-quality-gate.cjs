@@ -36,6 +36,7 @@ const staticContracts = [
   'r04-phase6-9-contract.test.cjs',
   'r04-u2-domain-contract-freeze.test.cjs',
   'r04-u2-fx-feature-truth.test.cjs',
+  'r04-u2-debt-reversal-policy.test.cjs',
   'r04-1-account-lifecycle.test.cjs',
   'lifecycle-reset-wallet-search.test.cjs',
   'onboarding-preview.test.cjs',

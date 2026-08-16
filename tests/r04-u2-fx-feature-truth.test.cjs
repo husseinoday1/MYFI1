@@ -141,7 +141,8 @@ assert(openStart >= 0 && openEnd > openStart, 'U-2 open-gap inventory missing');
 const openBlock = contractSource.slice(openStart, openEnd);
 assert(!openBlock.includes('foreign_nontransfer_missing_fx_legacy_fallback'), 'Closed FX gap still marked open');
 assert(!openBlock.includes('feature_toggle_transaction_filtering_legacy_path'), 'Closed feature-toggle gap still marked open');
-assert(openBlock.includes('debt_interest_fee_components_not_enforced'), 'Debt components gap must remain open');
-assert(openBlock.includes('explicit_refund_reversal_command_not_implemented'), 'Reversal gap must remain open');
+assert(!openBlock.includes('debt_interest_fee_components_not_enforced'), 'Debt component gap must be closed by P04U2-003');
+assert(!openBlock.includes('explicit_refund_reversal_command_not_implemented'), 'Refund/reversal gap must be closed by P04U2-003');
+assert(contractSource.includes("FINANCIAL_DOMAIN_CONTRACT_VERSION = 'R04-U2-3'"), 'P04U2-003 contract version missing');
 
 console.log('MYFI P04U2-002 FX + feature-toggle financial-truth enforcement: PASSED');
