@@ -5,7 +5,7 @@ import { STORAGE, DEF_CATS, DEF_CFG, DEF_NOTIF, LEGACY_STORAGE_KEYS, normalizeCf
 import { calcStats, catSpend } from '../../utils/calc';
 import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
 import { defaultScopeForProfile, getActiveScope, normalizeScope } from '../../lib/modules';
-import { clearVaultSnapshot, GUEST_NAMESPACE, readVaultSnapshot } from '../../lib/secureVault';
+import { clearVaultSnapshot, GUEST_NAMESPACE, readVaultSnapshot, writeVaultSnapshot } from '../../lib/secureVault';
 import { buildFinancialBackup, inspectBackupData, mergeFinancialBackupConfig, sanitizeBackupCategories } from '../../lib/backupData';
 import {
   archivedWalletMovement,
@@ -27,6 +27,7 @@ import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from 
 
 const RESET_MARKER_PREFIX = 'MYFI_INTENTIONAL_RESET_V1';
 const syncBaseNamespace = namespace => `sync-base:${String(namespace || GUEST_NAMESPACE)}`;
+const backupRestoreRollbackNamespace = namespace => `backup-restore-rollback:${String(namespace || GUEST_NAMESPACE)}`;
 const resetMarkerKey = namespace => `${RESET_MARKER_PREFIX}:${String(namespace || GUEST_NAMESPACE)}`;
 
 const stripPerformanceCfg = (cfg = {}) => {
@@ -305,6 +306,16 @@ export const createDataSlice = (set, get) => ({
     return true;
   },
 
+
+  restoreLastBackupRollback: async () => {
+    const namespace = get().workspaceNamespace || GUEST_NAMESPACE;
+    const { snapshot } = await readVaultSnapshot(backupRestoreRollbackNamespace(namespace));
+    if (!snapshot?.backup) return false;
+    const ok = await get().importBackup(JSON.stringify(snapshot.backup), { skipRollbackCheckpoint: true });
+    if (ok) await clearVaultSnapshot(backupRestoreRollbackNamespace(namespace));
+    return !!ok;
+  },
+
   exportBackup: async () => {
     const { trans, debts, goals, wallets, commitments, cats, cfg, workspaceNamespace } = get();
     const coldArchives = await exportColdArchives(
@@ -459,7 +470,7 @@ export const createDataSlice = (set, get) => ({
     return true;
   },
 
-  importBackup: async (jsonStr) => {
+  importBackup: async (jsonStr, options = {}) => {
     let rollback = null;
     try {
       const data = JSON.parse(jsonStr);
@@ -561,6 +572,25 @@ export const createDataSlice = (set, get) => ({
           set({ dirty: true, lastSyncError: 'backup_restore_sync_pending' });
           await get().saveLocal({ force: true, dirty: true });
         }
+      }
+
+      if (!options.skipRollbackCheckpoint && rollback) {
+        const { coldArchiveNamespace: _rollbackNamespace, coldArchives: rollbackColdArchives, ...rollbackState } = rollback;
+        const rollbackBackup = buildFinancialBackup({
+          trans: rollbackState.trans,
+          debts: rollbackState.debts,
+          goals: rollbackState.goals,
+          wallets: rollbackState.wallets,
+          commitments: rollbackState.commitments,
+          cats: rollbackState.cats,
+          coldArchives: rollbackColdArchives,
+          cfg: rollbackState.cfg,
+        });
+        await writeVaultSnapshot(
+          backupRestoreRollbackNamespace(current.workspaceNamespace || GUEST_NAMESPACE),
+          { v: 1, type: 'backup_restore', createdAt: new Date().toISOString(), backup: rollbackBackup },
+          { force: true },
+        );
       }
 
       return true;

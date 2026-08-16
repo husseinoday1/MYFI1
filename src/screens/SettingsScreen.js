@@ -320,6 +320,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
     cats,
     exportBackup,
     importBackup,
+    restoreLastBackupRollback,
     syncCloud,
     enterDemoMode,
     exitDemoMode,
@@ -359,6 +360,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
   const [importPackage, setImportPackage] = useState(null);
   const [fileBusy, setFileBusy] = useState(false);
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false);
+  const [restoreResultOpen, setRestoreResultOpen] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [testDataBusy, setTestDataBusy] = useState(false);
   const emailRef = useRef('');
@@ -843,8 +845,9 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
     setRestoreBusy(true);
     try {
       const ok = await importBackup(JSON.stringify(importPackage.payload.data));
-      Alert.alert('', ok ? T.saved : T.backupInvalid);
+      if (!ok) Alert.alert('', T.backupInvalid);
       if (ok) {
+        setRestoreResultOpen(true);
         setImportPackage(null);
         setRestoreConfirmOpen(false);
       }
@@ -1935,6 +1938,33 @@ function MenuRow({ th, isAr, icon, iconColor, title, subtitle, value, onPress, d
       </View>
       {value ? <Text style={[s.rowValue, { color: th.sub, textAlign: isAr ? 'left' : 'right' }]} numberOfLines={1}>{value}</Text> : null}
       {onPress ? <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={17} color={th.faint} /> : null}
+
+      <DecisionModal
+        visible={restoreResultOpen}
+        lang={cfg.lang}
+        th={th}
+        title={isAr ? 'تمت استعادة النسخة' : 'Backup restored'}
+        message={isAr
+          ? 'تم استبدال البيانات الحالية بمحتوى النسخة. نقطة ما قبل الاستعادة محفوظة ويمكن الرجوع إليها الآن.'
+          : 'The current data was replaced by the backup. The pre-restore point is saved and can be restored now.'}
+        confirmLabel={isAr ? 'إبقاء البيانات' : 'Keep restored data'}
+        cancelLabel={isAr ? 'رجوع لنقطة الحفظ' : 'Roll back'}
+        confirmIcon="checkmark-circle-outline"
+        cancelIcon="arrow-undo-outline"
+        heroIcon="shield-checkmark-outline"
+        onClose={() => setRestoreResultOpen(false)}
+        onConfirm={() => setRestoreResultOpen(false)}
+        onCancel={async () => {
+          const ok = await restoreLastBackupRollback();
+          setRestoreResultOpen(false);
+          Alert.alert(
+            '',
+            ok
+              ? (isAr ? 'عادت البيانات إلى حالتها قبل الاستعادة.' : 'Data returned to the pre-restore state.')
+              : (isAr ? 'لم نجد نقطة رجوع صالحة.' : 'No valid rollback point was found.'),
+          );
+        }}
+      />
     </>
   );
   const rowStyle = [s.menuRow, { borderBottomColor: last ? 'transparent' : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }];

@@ -1,6 +1,6 @@
 ﻿// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, Appearance, BackHandler, I18nManager, Image, Linking, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Alert, AppState, Appearance, BackHandler, I18nManager, Image, Linking, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
@@ -142,6 +142,8 @@ function AppRoot() {
   const [readNotifKeys, setReadNotifKeys] = useState([]);
   const [dismissedNotifKeys, setDismissedNotifKeys] = useState([]);
   const [mergeResult, setMergeResult] = useState(null);
+  const [mergeReviewSeconds, setMergeReviewSeconds] = useState(0);
+  const [pendingMergeDuplicateOnly, setPendingMergeDuplicateOnly] = useState(false);
   const [mergeRollbackBusy, setMergeRollbackBusy] = useState(false);
   const guestPromptOpen = useRef(false);
   const mergeRollbackPromptTimer = useRef(null);
@@ -224,6 +226,24 @@ function AppRoot() {
   useEffect(() => () => {
     if (mergeRollbackPromptTimer.current) clearTimeout(mergeRollbackPromptTimer.current);
   }, []);
+
+
+  useEffect(() => {
+    if (mergeReviewSeconds <= 0) return undefined;
+    const timer = setInterval(() => {
+      setMergeReviewSeconds(value => Math.max(0, value - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [mergeReviewSeconds > 0]);
+
+  const openMergeReviewNow = () => {
+    if (mergeRollbackPromptTimer.current) {
+      clearTimeout(mergeRollbackPromptTimer.current);
+      mergeRollbackPromptTimer.current = null;
+    }
+    setMergeReviewSeconds(0);
+    setMergeResult({ duplicateOnly: pendingMergeDuplicateOnly });
+  };
 
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
@@ -385,8 +405,11 @@ function AppRoot() {
               return;
             }
             if (mergeRollbackPromptTimer.current) clearTimeout(mergeRollbackPromptTimer.current);
+            setPendingMergeDuplicateOnly(result?.reason === 'duplicate_only');
+            setMergeReviewSeconds(30);
             mergeRollbackPromptTimer.current = setTimeout(() => {
               mergeRollbackPromptTimer.current = null;
+              setMergeReviewSeconds(0);
               setMergeResult({ duplicateOnly: result?.reason === 'duplicate_only' });
             }, 30000);
           },
@@ -776,6 +799,39 @@ function AppRoot() {
   return (
     <SafeAreaView edges={['top', 'right', 'left']} style={[{ flex: 1, backgroundColor: th.bg }, dirStyle]}>
       <StatusBar style={statusStyle(th)} />
+
+      {mergeReviewSeconds > 0 ? (
+        <View style={{
+          marginHorizontal: 12,
+          marginTop: 6,
+          marginBottom: 4,
+          paddingHorizontal: 12,
+          paddingVertical: 9,
+          borderRadius: 12,
+          backgroundColor: th.card,
+          borderWidth: 1,
+          borderColor: th.primary,
+          flexDirection: isRtl ? 'row-reverse' : 'row',
+          alignItems: 'center',
+          gap: 10,
+        }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: th.text, fontSize: 12, fontWeight: '800', textAlign: isRtl ? 'right' : 'left' }}>
+              {cfg.lang === 'ar' ? 'تم الدمج · نقطة الرجوع محفوظة' : 'Merge complete · rollback point saved'}
+            </Text>
+            <Text style={{ color: th.sub, fontSize: 10, marginTop: 2, textAlign: isRtl ? 'right' : 'left' }}>
+              {cfg.lang === 'ar'
+                ? `تظهر مراجعة النتيجة خلال ${mergeReviewSeconds} ثانية`
+                : `Review opens in ${mergeReviewSeconds} seconds`}
+            </Text>
+          </View>
+          <Pressable onPress={openMergeReviewNow} hitSlop={8} style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
+            <Text style={{ color: th.primary, fontSize: 11, fontWeight: '900' }}>
+              {cfg.lang === 'ar' ? 'مراجعة الآن' : 'Review now'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <View style={{ flex: 1 }}>
         {INTERNAL_DEMO_ENABLED && cfg.demoMode ? (
