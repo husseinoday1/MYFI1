@@ -39,6 +39,7 @@ const staticContracts = [
   'r04-u2-fx-feature-truth.test.cjs',
   'r04-u2-debt-reversal-policy.test.cjs',
   'r04-blocking-ux-acceptance.test.cjs',
+  'r04-1-critical-ux-build.test.cjs',
   'r04-1-account-lifecycle.test.cjs',
   'lifecycle-reset-wallet-search.test.cjs',
   'onboarding-preview.test.cjs',

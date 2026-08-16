@@ -31,6 +31,7 @@ import { isBiometricSupported, authenticate } from '../lib/biometric';
 import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
 import { inspectBackupData } from '../lib/backupData';
 import AccountDeleteModal from '../components/AccountDeleteModal';
+import DecisionModal from '../components/DecisionModal';
 import { supabase } from '../lib/supabase';
 import { getAuthRedirectUrl } from '../lib/authCallback';
 import {
@@ -357,6 +358,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
   const [backupExportSheet, setBackupExportSheet] = useState(null);
   const [importPackage, setImportPackage] = useState(null);
   const [fileBusy, setFileBusy] = useState(false);
+  const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false);
+  const [restoreBusy, setRestoreBusy] = useState(false);
   const [testDataBusy, setTestDataBusy] = useState(false);
   const emailRef = useRef('');
 
@@ -830,25 +833,26 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
     }
   }, [importPackage]);
 
-  const restoreImport = async () => {
+  const restoreImport = () => {
     if (!importPackage?.payload?.data || !importPreview?.valid) return;
-    Alert.alert(
-      T.importBackup,
-      isAr
-        ? 'سيُنشئ MYFI نقطة رجوع آمنة، ثم يستعيد محتوى النسخة. ملف النسخة نفسه لن يُحذف.'
-        : 'MYFI will create a safe rollback point, then restore this backup. The backup file itself is not deleted.',
-      [
-      { text: T.cancel, style: 'cancel' },
-      {
-        text: isAr ? 'استعادة النسخة الآن' : 'Restore backup now',
-        onPress: async () => {
-          const ok = await importBackup(JSON.stringify(importPackage.payload.data));
-          Alert.alert('', ok ? T.saved : T.backupInvalid);
-          if (ok) setImportPackage(null);
-        },
-      },
-      ],
-    );
+    setRestoreConfirmOpen(true);
+  };
+
+  const confirmRestoreImport = async () => {
+    if (!importPackage?.payload?.data || !importPreview?.valid || restoreBusy) return;
+    setRestoreBusy(true);
+    try {
+      const ok = await importBackup(JSON.stringify(importPackage.payload.data));
+      Alert.alert('', ok ? T.saved : T.backupInvalid);
+      if (ok) {
+        setImportPackage(null);
+        setRestoreConfirmOpen(false);
+      }
+    } catch (error) {
+      Alert.alert('', error?.message || T.backupInvalid);
+    } finally {
+      setRestoreBusy(false);
+    }
   };
 
   const activatePerformanceTier = tier => {
@@ -1172,6 +1176,23 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
         onConfirm={deleteAccountPermanently}
         lang={cfg.lang}
         th={th}
+      />
+
+      <DecisionModal
+        visible={restoreConfirmOpen}
+        lang={cfg.lang}
+        th={th}
+        title={T.importBackup}
+        message={isAr
+          ? 'سيُنشئ MYFI نقطة رجوع آمنة، ثم يستعيد محتوى النسخة. ملف النسخة نفسه لن يُحذف.'
+          : 'MYFI will create a safe rollback point, then restore this backup. The backup file itself is not deleted.'}
+        confirmLabel={isAr ? 'استعادة النسخة الآن' : 'Restore backup now'}
+        cancelLabel={T.cancel}
+        confirmIcon="checkmark-circle-outline"
+        heroIcon="cloud-download-outline"
+        busy={restoreBusy}
+        onClose={() => setRestoreConfirmOpen(false)}
+        onConfirm={confirmRestoreImport}
       />
     </>
   );

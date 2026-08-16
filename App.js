@@ -34,6 +34,7 @@ import NotificationCenterModal from './src/components/NotificationCenterModal';
 import PressableScale from './src/components/PressableScale';
 import AppAlertHost from './src/components/AppAlertHost';
 import PasswordRecoveryModal from './src/components/PasswordRecoveryModal';
+import DecisionModal from './src/components/DecisionModal';
 import { filterByActiveScope, getEntryScope, getModules, normalizeScope, shouldShowTrackersTab } from './src/lib/modules';
 import { handleAuthCallback } from './src/lib/authCallback';
 import { normalizeWallets } from './src/lib/wallets';
@@ -140,6 +141,8 @@ function AppRoot() {
   const [trackerFocus, setTrackerFocus] = useState(null);
   const [readNotifKeys, setReadNotifKeys] = useState([]);
   const [dismissedNotifKeys, setDismissedNotifKeys] = useState([]);
+  const [mergeResult, setMergeResult] = useState(null);
+  const [mergeRollbackBusy, setMergeRollbackBusy] = useState(false);
   const guestPromptOpen = useRef(false);
   const mergeRollbackPromptTimer = useRef(null);
   const conflictPromptOpen = useRef(false);
@@ -384,28 +387,7 @@ function AppRoot() {
             if (mergeRollbackPromptTimer.current) clearTimeout(mergeRollbackPromptTimer.current);
             mergeRollbackPromptTimer.current = setTimeout(() => {
               mergeRollbackPromptTimer.current = null;
-              Alert.alert(
-              result?.reason === 'duplicate_only'
-                ? (ar ? 'تم تنظيف البيانات المكررة' : 'Duplicate data cleaned')
-                : (ar ? 'تم دمج البيانات' : 'Data merged'),
-              result?.reason === 'duplicate_only'
-                ? (ar ? 'كانت البيانات الموجودة على الجهاز مكررة ولا تضيف معلومات جديدة، لذلك تم تنظيف نسخة الضيف بدون تكرار السجل.' : 'The device data was duplicated and added no new information, so the guest copy was cleaned without repeating history.')
-                : (ar ? 'تمت إضافة المختلف ودمج المكرر. إذا لاحظت نتيجة غير مناسبة يمكنك الرجوع إلى حالة ما قبل الدمج الآن.' : 'Different information was added and duplicates were merged. You can roll back to the pre-merge state now if the result is not right.'),
-              [
-                {
-                  text: ar ? 'رجوع' : 'Roll back',
-                  style: 'destructive',
-                  onPress: async () => {
-                    const restored = await restoreLastMergeRollback();
-                    Alert.alert(
-                      restored ? (ar ? 'تم الرجوع' : 'Rolled back') : (ar ? 'تعذر الرجوع' : 'Rollback failed'),
-                      restored ? (ar ? 'عادت البيانات إلى حالتها قبل خطوة الدمج.' : 'Your data is back to the state before the merge.') : (ar ? 'لم نجد نقطة رجوع صالحة لهذه العملية.' : 'No valid rollback point was found for this operation.'),
-                    );
-                  },
-                },
-                { text: ar ? 'إبقاء التغييرات' : 'Keep changes', style: 'cancel' },
-              ],
-              );
+              setMergeResult({ duplicateOnly: result?.reason === 'duplicate_only' });
             }, 30000);
           },
         },
@@ -458,6 +440,31 @@ function AppRoot() {
       { cancelable: false },
     );
   }, [ready, syncConflict, cfg.lang, resolveSyncConflict]);
+
+  const keepMergeChanges = () => {
+    if (!mergeRollbackBusy) setMergeResult(null);
+  };
+
+  const rollbackMergedChanges = async () => {
+    if (mergeRollbackBusy) return;
+    setMergeRollbackBusy(true);
+    try {
+      const restored = await restoreLastMergeRollback();
+      setMergeResult(null);
+      Alert.alert(
+        restored ? (cfg.lang === 'ar' ? 'تم الرجوع' : 'Rolled back') : (cfg.lang === 'ar' ? 'تعذر الرجوع' : 'Rollback failed'),
+        restored ? (cfg.lang === 'ar' ? 'عادت البيانات إلى حالتها قبل خطوة الدمج.' : 'Your data is back to the state before the merge.') : (cfg.lang === 'ar' ? 'لم نجد نقطة رجوع صالحة لهذه العملية.' : 'No valid rollback point was found for this operation.'),
+      );
+    } catch {
+      setMergeResult(null);
+      Alert.alert(
+        cfg.lang === 'ar' ? 'تعذر الرجوع' : 'Rollback failed',
+        cfg.lang === 'ar' ? 'لم نجد نقطة رجوع صالحة لهذه العملية.' : 'No valid rollback point was found for this operation.',
+      );
+    } finally {
+      setMergeRollbackBusy(false);
+    }
+  };
 
   useEffect(() => {
     AsyncStorage.getItem('MYFI_READ_NOTIFICATIONS_V1')
@@ -877,6 +884,28 @@ function AppRoot() {
         onClose={() => setPasswordRecoveryOpen(false)}
         th={th}
         lang={cfg.lang}
+      />
+      <DecisionModal
+        visible={!!mergeResult}
+        lang={cfg.lang}
+        th={th}
+        title={mergeResult?.duplicateOnly
+          ? (cfg.lang === 'ar' ? 'تم تنظيف البيانات المكررة' : 'Duplicate data cleaned')
+          : (cfg.lang === 'ar' ? 'تم دمج البيانات' : 'Data merged')}
+        message={mergeResult?.duplicateOnly
+          ? (cfg.lang === 'ar' ? 'كانت البيانات الموجودة على الجهاز مكررة ولا تضيف معلومات جديدة، لذلك تم تنظيف نسخة الضيف بدون تكرار السجل.' : 'The device data was duplicated and added no new information, so the guest copy was cleaned without repeating history.')
+          : (cfg.lang === 'ar' ? 'تمت إضافة المختلف ودمج المكرر. إذا لاحظت نتيجة غير مناسبة يمكنك الرجوع إلى حالة ما قبل الدمج الآن.' : 'Different information was added and duplicates were merged. You can roll back to the pre-merge state now if the result is not right.')}
+        confirmLabel={cfg.lang === 'ar' ? 'إبقاء التغييرات' : 'Keep changes'}
+        cancelLabel={cfg.lang === 'ar' ? 'رجوع' : 'Roll back'}
+        confirmIcon="checkmark-circle-outline"
+        cancelIcon="arrow-undo-outline"
+        heroIcon="git-merge-outline"
+        cancelTone={th.warn}
+        dismissible={false}
+        busy={mergeRollbackBusy}
+        onConfirm={keepMergeChanges}
+        onCancel={rollbackMergedChanges}
+        onClose={keepMergeChanges}
       />
     </SafeAreaView>
   );

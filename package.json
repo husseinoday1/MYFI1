@@ -28,8 +28,9 @@
     "test:sync:two-client": "node tests/run-financial-mutation-sync-e2e.cjs",
     "test:cloud:managed": "powershell -ExecutionPolicy Bypass -File tests/run-cloud-integration.ps1",
     "verify:android": "expo export --platform android --output-dir dist-android-verify --clear",
-    "build:apk": "node -r ./tools/node-userinfo-fallback.cjs ./node_modules/eas-cli/bin/run build --platform android --profile preview",
-    "build:aab": "node -r ./tools/node-userinfo-fallback.cjs ./node_modules/eas-cli/bin/run build --platform android --profile production"
+    "build:apk": "node tools/run-eas-build.cjs --profile preview",
+    "build:aab": "node tools/run-eas-build.cjs --profile production",
+    "build:check": "node tools/run-eas-build.cjs --profile preview --check"
   },
   "dependencies": {
     "@expo-google-fonts/cairo": "^0.4.2",
@@ -72,6 +73,7 @@
     "@babel/core": "7.29.7",
     "@babel/plugin-transform-modules-commonjs": "7.29.7",
     "@types/react": "~19.1.10",
+    "eas-cli": "21.7.0",
     "supabase": "^2.113.0",
     "typescript": "~5.9.2"
   },

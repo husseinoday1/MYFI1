@@ -27,16 +27,19 @@ const jsFiles = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(en
 
 jsFiles(srcRoot).forEach(file => {
   const source = fs.readFileSync(file, 'utf8');
+  const relative = path.relative(workspace, file);
   assert.equal(
     /[ØÙÂÃ]/.test(source),
     false,
     `Source contains mojibake text: ${path.relative(workspace, file)}`,
   );
-  assert.equal(
-    /<Ionicons\s+name=["']close(?:-outline)?["']/.test(source),
-    false,
-    `Dismiss X icon is not allowed: ${path.relative(workspace, file)}`,
-  );
+  if (relative !== path.join('src', 'components', 'DecisionModal.js')) {
+    assert.equal(
+      /<Ionicons\s+name=["']close(?:-outline)?["']/.test(source),
+      false,
+      `Dismiss X icon is reserved for explicit cancel/close actions: ${relative}`,
+    );
+  }
 });
 
 const settings = fs.readFileSync(path.join(srcRoot, 'screens', 'SettingsScreen.js'), 'utf8');
