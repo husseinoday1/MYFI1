@@ -32,11 +32,14 @@ import {
   commitEntityChangesV7,
   activateFinancialSyncProtocolV2V8,
   readFinancialSyncProtocolV8,
+  inspectFinancialEmptyShellV8,
+  recordFinancialCloudRecoveryV8,
 } from '../../lib/financialLedgerV7Repository';
 import { compareSnapshots, loadNormalizedSnapshot } from '../../lib/normalizedRepository';
 import { syncFinancialMutationsV7 } from '../../lib/financialMutationSync';
 import { syncFinancialMutationsV2 } from '../../lib/financialMutationSyncV2';
 import { bootstrapFinancialLedgerV2 } from '../../lib/financialBootstrapV2';
+import { fetchVerifiedFinancialCloudRecoverySourceV2 } from '../../lib/financialCloudRecoveryV2';
 import {
   GUEST_NAMESPACE,
   clearVaultSnapshot,
@@ -48,6 +51,7 @@ import {
   cloudSnapshot,
   dedupeWorkspaceData,
   financialDataCount,
+  hasCurrencySensitiveFinancialData,
   snapshotFromState,
   stateFromSnapshot,
   uid,
@@ -492,6 +496,244 @@ const findLegacySnapshot = async () => {
 };
 
 
+
+
+const runVerifiedEmptyShellCloudRecoveryV2 = async ({
+  get,
+  set,
+  workspaceNamespace,
+  ledgerNamespace,
+  syncUserId,
+} = {}) => {
+  const current = get();
+  if (!current.user || current.user.id !== syncUserId) {
+    return { attempted: false, ok: false, reason: 'financial_cloud_recovery_session_changed' };
+  }
+  if (current.cfg.demoMode || !current.workspaceReady || !current.financialLedgerV7Cutover) {
+    return { attempted: false, ok: true, reason: 'financial_cloud_recovery_not_eligible' };
+  }
+
+  const wallets = Array.isArray(current.wallets) ? current.wallets : [];
+  const localLooksLikeShell = financialDataCount(current) === 0
+    && !hasCurrencySensitiveFinancialData(current)
+    && wallets.length <= 1;
+  if (!localLooksLikeShell) {
+    return { attempted: false, ok: true, reason: 'financial_cloud_recovery_local_has_data' };
+  }
+
+  const shell = await inspectFinancialEmptyShellV8({ namespace: ledgerNamespace });
+  if (!shell?.supported || !shell.empty) {
+    return {
+      attempted: false,
+      ok: shell?.supported !== false,
+      reason: shell?.reason || 'financial_cloud_recovery_local_not_empty_shell',
+      shell,
+    };
+  }
+
+  set({
+    financialCloudRecoveryV2: {
+      status: 'checking_cloud',
+      workspaceNamespace,
+      ledgerNamespace,
+      startedAt: new Date().toISOString(),
+      error: null,
+    },
+  });
+
+  const source = await fetchVerifiedFinancialCloudRecoverySourceV2({ supabase });
+  if (!source?.ok) {
+    const reason = String(source?.reason || 'financial_cloud_recovery_source_failed');
+    set({
+      financialCloudRecoveryV2: {
+        status: 'failed',
+        workspaceNamespace,
+        ledgerNamespace,
+        error: reason,
+        checkedAt: new Date().toISOString(),
+      },
+    });
+    return { attempted: true, ok: false, reason, source };
+  }
+
+  if (source.mode === 'none') {
+    set({
+      financialCloudRecoveryV2: {
+        status: 'no_cloud_data',
+        workspaceNamespace,
+        ledgerNamespace,
+        checkedAt: new Date().toISOString(),
+        error: null,
+      },
+    });
+    return { attempted: true, ok: true, recovered: false, source };
+  }
+
+  // A finalized V2 ledger must be imported from its verified bootstrap rows.
+  // Never reinterpret it through user_data and never register/bootstrap the
+  // current empty shell over it.
+  if (source.mode === 'v2_bootstrap') {
+    const reason = 'financial_v2_bootstrap_import_required';
+    set({
+      financialCloudRecoveryV2: {
+        status: 'blocked_v2_bootstrap_import',
+        workspaceNamespace,
+        ledgerNamespace,
+        ledgerId: source.ledgerId,
+        restoreEpoch: source.restoreEpoch,
+        bootstrapId: source.bootstrapId,
+        error: reason,
+      },
+    });
+    return { attempted: true, ok: false, blocked: true, reason, source };
+  }
+
+  if (source.mode === 'v2_unbootstrapped') {
+    const reason = 'financial_v2_unbootstrapped_cloud_recovery_required';
+    set({
+      financialCloudRecoveryV2: {
+        status: 'blocked_v2_unbootstrapped',
+        workspaceNamespace,
+        ledgerNamespace,
+        ledgerId: source.ledgerId,
+        restoreEpoch: source.restoreEpoch,
+        error: reason,
+      },
+    });
+    return { attempted: true, ok: false, blocked: true, reason, source };
+  }
+
+  if (source.mode !== 'legacy_snapshot' || !source.snapshot) {
+    return {
+      attempted: true,
+      ok: false,
+      reason: 'financial_cloud_recovery_source_mode_invalid',
+      source,
+    };
+  }
+
+  // If an earlier attempt already reserved a different V2 ledger identity,
+  // do not silently rewrite the immutable local identity. That is a dedicated
+  // identity-adoption recovery path.
+  if (source.reservedLedgerId && source.reservedLedgerId !== shell.ledgerId) {
+    const reason = 'financial_v2_reserved_ledger_identity_adoption_required';
+    set({
+      financialCloudRecoveryV2: {
+        status: 'blocked_reserved_ledger_identity',
+        workspaceNamespace,
+        ledgerNamespace,
+        localLedgerId: shell.ledgerId,
+        cloudLedgerId: source.reservedLedgerId,
+        error: reason,
+      },
+    });
+    return { attempted: true, ok: false, blocked: true, reason, source, shell };
+  }
+
+  set({
+    financialCloudRecoveryV2: {
+      status: 'restoring_verified_legacy_snapshot',
+      workspaceNamespace,
+      ledgerNamespace,
+      sourceHash: source.snapshotHash,
+      cloudRevision: source.cloudRevision,
+      verifiedAt: source.verifiedAt,
+      error: null,
+    },
+  });
+
+  const snapshot = {
+    ...source.snapshot,
+    notif: current.notif || DEF_NOTIF,
+  };
+  const remoteState = stateFromSnapshot(snapshot, current.cfg || DEF_CFG);
+
+  await restoreSnapshotAsOperationalV7({
+    workspaceNamespace,
+    snapshot,
+    fallbackCfg: current.cfg || DEF_CFG,
+  });
+
+  const proof = await proveFinancialLedgerInvariantsV7({ namespace: ledgerNamespace });
+  if (!proof?.ok) {
+    throw new Error('financial_cloud_recovery_invariant_proof_failed');
+  }
+
+  const full = await readFullFinancialStateV7({
+    ledgerNamespace,
+    fallbackState: {
+      ...get(),
+      user: get().user,
+      workspaceNamespace,
+      workspaceReady: true,
+    },
+  });
+  if (!full || !sameWorkspaceData(full, remoteState)) {
+    throw new Error('financial_cloud_recovery_roundtrip_mismatch');
+  }
+
+  const syncedAt = source.cloudUpdatedAt || new Date().toISOString();
+  const canonicalSnapshot = snapshotFromState(full, {
+    dirty: false,
+    cloudRevision: source.cloudRevision,
+    lastSyncedAt: syncedAt,
+  });
+  await writeVaultSnapshot(workspaceNamespace, canonicalSnapshot, { force: true });
+  await writeVaultSnapshot(syncBaseNamespace(workspaceNamespace), canonicalSnapshot, { force: true });
+  await writeResetMarker(workspaceNamespace, {
+    pendingCloudSync: false,
+    cloudRecoveryMode: 'legacy_snapshot',
+    cloudRecoveryRevision: source.cloudRevision,
+  });
+  await recordFinancialCloudRecoveryV8({
+    namespace: ledgerNamespace,
+    mode: 'legacy_snapshot',
+    sourceHash: source.snapshotHash,
+    cloudRevision: source.cloudRevision,
+    cloudUpdatedAt: source.cloudUpdatedAt,
+    verifiedAt: source.verifiedAt,
+  });
+
+  set(state => ({
+    ...full,
+    user: state.user,
+    workspaceNamespace,
+    workspaceReady: true,
+    dirty: false,
+    cloudRevision: source.cloudRevision,
+    lastSyncedAt: syncedAt,
+    online: true,
+    lastSyncError: null,
+    financialLedgerV7Ready: true,
+    financialLedgerV7Cutover: true,
+    ledgerReady: true,
+    ledgerError: null,
+    financialCloudRecoveryV2: {
+      status: 'recovered',
+      workspaceNamespace,
+      ledgerNamespace,
+      mode: 'legacy_snapshot',
+      sourceHash: source.snapshotHash,
+      cloudRevision: source.cloudRevision,
+      cloudUpdatedAt: source.cloudUpdatedAt,
+      verifiedAt: source.verifiedAt,
+      restoredAt: new Date().toISOString(),
+      legacyFinancialCount: source.legacyFinancialCount,
+      walletCount: source.walletCount,
+      error: null,
+    },
+  }));
+
+  return {
+    attempted: true,
+    ok: true,
+    recovered: true,
+    requireV2: true,
+    mode: 'legacy_snapshot',
+    source,
+    proof,
+  };
+};
 
 const runControlledFinancialV2Activation = async ({
   get,
@@ -1499,7 +1741,7 @@ export const createSyncSlice = (set, get) => ({
     if (FRESH_TEST_MODE) return false;
     const queued = syncQueue.then(async () => {
       const syncStartedAt = new Date().toISOString();
-      const initial = get();
+      let initial = get();
       if (!initial.user || initial.cfg.demoMode || !initial.workspaceReady) return false;
       const syncUserId = initial.user.id;
 
@@ -1507,6 +1749,22 @@ export const createSyncSlice = (set, get) => ({
 
       try {
         const namespace = initial.workspaceNamespace || workspaceNamespaceForSession({ user: initial.user });
+        let cloudRecovery = null;
+        if (activeLedgerSupported() && initial.financialLedgerV7Cutover) {
+          cloudRecovery = await runVerifiedEmptyShellCloudRecoveryV2({
+            get,
+            set,
+            workspaceNamespace: namespace,
+            ledgerNamespace: getLedgerNamespace(namespace, initial.cfg),
+            syncUserId,
+          });
+          if (cloudRecovery?.blocked || cloudRecovery?.ok === false) {
+            throw new Error(cloudRecovery?.reason || 'financial_cloud_recovery_blocked');
+          }
+          if (cloudRecovery?.recovered) {
+            initial = get();
+          }
+        }
         const baseNamespace = syncBaseNamespace(namespace);
         const cutoverBridge = !!(activeLedgerSupported() && initial.financialLedgerV7Cutover);
         const readCurrentForSnapshot = async () => {
@@ -1559,8 +1817,14 @@ export const createSyncSlice = (set, get) => ({
             deviceId,
           });
           if (!activationFinancialSync.ok) {
-            // Before the durable activation marker exists, V1 remains the
-            // operational fallback. A failed verification never activates V2.
+            // A ledger just restored from cloud must never drop into V1 on the
+            // same attempt. Its next safe step is verified V2 bootstrap/activation.
+            if (cloudRecovery?.recovered && cloudRecovery?.requireV2) {
+              throw new Error(
+                activationFinancialSync.reason || 'financial_v2_activation_required_after_cloud_recovery'
+              );
+            }
+            // Existing local ledgers retain the pre-activation P19-011 fallback.
             financialV2Active = false;
           } else {
             financialV2Active = true;

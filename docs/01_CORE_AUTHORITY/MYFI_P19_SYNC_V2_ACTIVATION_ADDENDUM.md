@@ -98,3 +98,27 @@ Required before final closure:
 ## Financial/schema impact
 This addendum itself changes no financial data and no schema.
 P19 local schema remains SQLite V8 unless a later reviewed migration explicitly changes it.
+
+
+## P19-012 empty-shell recovery contract
+
+A post-cutover local ledger that is provably an empty shell MUST resolve cloud
+recovery state before P19-011 is allowed to register/bootstrap V2.
+
+For pre-V2 accounts with an existing `user_data` snapshot:
+- the server returns exact snapshot text plus SHA-256;
+- the client verifies SHA-256 before parsing;
+- restore uses the staged operational-cutover replacement path;
+- SQLite invariant proof and semantic round-trip equality are mandatory;
+- a successful recovery must continue toward V2 and must not fall back to V1
+  on the same sync attempt.
+
+A finalized cloud V2 bootstrap is higher authority than `user_data`.
+P19-012 blocks instead of reinterpreting it; direct verified bootstrap import is
+a separate protocol patch.
+
+The generic post-cutover snapshot-pull prohibition remains in force. P19-012 is
+a narrow empty-shell recovery gate, not a reopening of snapshot sync.
+
+For Internal APK testing, EAS quota is not a release dependency: a local Gradle
+APK may be built for device acceptance. This does not certify production signing.

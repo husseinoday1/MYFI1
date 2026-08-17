@@ -868,6 +868,128 @@ export const finalizeFinancialBootstrapStageV8 = async ({
 };
 
 
+
+export const inspectFinancialEmptyShellV8 = async ({
+  namespace = 'guest',
+  database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) {
+    return { supported: false, empty: false, reason: 'sqlite_unavailable' };
+  }
+  await ensureFinancialLedgerV7(db);
+  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const target = identity.namespace;
+
+  const [
+    tx, postings, links, nonWorkspaceEntities,
+    nonWorkspaceV1Outbox, nonWorkspaceV2Outbox,
+    bootstrapStates, importStates, activation, restoreIntent,
+  ] = await Promise.all([
+    db.getFirstAsync(`SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7 WHERE namespace=?`, target),
+    db.getFirstAsync(`SELECT COUNT(*) AS n FROM ledger_postings_v7 WHERE namespace=?`, target),
+    db.getFirstAsync(`SELECT COUNT(*) AS n FROM ledger_transaction_links_v7 WHERE namespace=?`, target),
+    db.getFirstAsync(
+      `SELECT COUNT(*) AS n FROM ledger_entities_v7
+        WHERE namespace=? AND entity_type<>'workspace'`,
+      target,
+    ),
+    db.getFirstAsync(
+      `SELECT COUNT(*) AS n FROM ledger_outbox_v2
+        WHERE namespace=? AND acknowledged_at IS NULL AND entity_type<>'workspace'`,
+      target,
+    ),
+    db.getFirstAsync(
+      `SELECT COUNT(*) AS n FROM ledger_outbox_v3
+        WHERE ledger_id=? AND restore_epoch=?
+          AND acknowledged_at IS NULL
+          AND superseded_by_bootstrap_id IS NULL
+          AND entity_type<>'workspace'`,
+      identity.ledgerId, identity.restoreEpoch,
+    ),
+    db.getFirstAsync(
+      `SELECT COUNT(*) AS n FROM ledger_bootstrap_state_v8
+        WHERE ledger_id=? AND restore_epoch=?`,
+      identity.ledgerId, identity.restoreEpoch,
+    ),
+    db.getFirstAsync(
+      `SELECT COUNT(*) AS n FROM ledger_bootstrap_import_state_v8
+        WHERE ledger_id=? AND restore_epoch=?`,
+      identity.ledgerId, identity.restoreEpoch,
+    ),
+    db.getFirstAsync(
+      `SELECT activated_at FROM ledger_sync_state_v8
+        WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+      identity.ledgerId, identity.restoreEpoch,
+    ),
+    db.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+      restoreIntentMetaKey(target),
+    ),
+  ]);
+
+  const counts = {
+    transactions: Number(tx?.n || 0),
+    postings: Number(postings?.n || 0),
+    links: Number(links?.n || 0),
+    nonWorkspaceEntities: Number(nonWorkspaceEntities?.n || 0),
+    nonWorkspaceV1Outbox: Number(nonWorkspaceV1Outbox?.n || 0),
+    nonWorkspaceV2Outbox: Number(nonWorkspaceV2Outbox?.n || 0),
+    bootstrapStates: Number(bootstrapStates?.n || 0),
+    importStates: Number(importStates?.n || 0),
+  };
+  const empty = Object.values(counts).every(value => value === 0)
+    && !activation?.activated_at
+    && !restoreIntent?.value;
+
+  return {
+    supported: true,
+    empty,
+    namespace: target,
+    ledgerId: identity.ledgerId,
+    restoreEpoch: identity.restoreEpoch,
+    activatedAt: activation?.activated_at || null,
+    restoreIntentActive: !!restoreIntent?.value,
+    counts,
+  };
+};
+
+export const recordFinancialCloudRecoveryV8 = async ({
+  namespace = 'guest',
+  mode,
+  sourceHash = null,
+  cloudRevision = 0,
+  cloudUpdatedAt = null,
+  verifiedAt = null,
+  database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return false;
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  if (!target) throw new Error('financial_cloud_recovery_namespace_required');
+  const payload = {
+    version: 1,
+    namespace: target,
+    mode: String(mode || ''),
+    sourceHash: sourceHash ? String(sourceHash).toLowerCase() : null,
+    cloudRevision: Math.max(0, Number(cloudRevision || 0)),
+    cloudUpdatedAt: cloudUpdatedAt || null,
+    verifiedAt: verifiedAt || null,
+    restoredAt: new Date().toISOString(),
+  };
+  if (payload.sourceHash && !/^[0-9a-f]{64}$/.test(payload.sourceHash)) {
+    throw new Error('financial_cloud_recovery_hash_invalid');
+  }
+  await enqueueWrite(() => db.runAsync(
+    `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+    `cloud_recovery_v2:${target}`,
+    safeJson(payload),
+    payload.restoredAt,
+  ));
+  return payload;
+};
+
 export const readFinancialSyncProtocolV8 = async ({
   namespace = 'guest', database = null,
 } = {}) => {

@@ -30,7 +30,9 @@
     "verify:android": "expo export --platform android --output-dir dist-android-verify --clear",
     "build:apk": "node tools/run-eas-build.cjs --profile preview",
     "build:aab": "node tools/run-eas-build.cjs --profile production",
-    "build:check": "node tools/run-eas-build.cjs --profile preview --check"
+    "build:check": "node tools/run-eas-build.cjs --profile preview --check",
+    "build:apk:local": "powershell -ExecutionPolicy Bypass -File tools/build-local-internal-apk.ps1",
+    "install:apk:local": "powershell -ExecutionPolicy Bypass -File tools/install-local-internal-apk.ps1"
   },
   "dependencies": {
     "@expo-google-fonts/cairo": "^0.4.2",
