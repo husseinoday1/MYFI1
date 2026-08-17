@@ -752,6 +752,14 @@ const runControlledFinancialV2Activation = async ({
   }
 
   const protocol = await readFinancialSyncProtocolV8({ namespace: ledgerNamespace });
+  if (protocol?.requiresV2Recovery) {
+    return {
+      ok: false,
+      reason: 'financial_v2_preactivation_production_cursor_recovery_required',
+      v2RecoveryRequired: true,
+      protocol,
+    };
+  }
   if (protocol?.activeProtocolVersion === 2) {
     // Never fall back to V1 after durable activation, even if evidence metadata
     // later needs repair. The active protocol is still V2 and failures are closed.
@@ -832,9 +840,9 @@ const runControlledFinancialV2Activation = async ({
     },
   }));
 
-  // A clean activation requires an observed quiescent V2 pass. The first pass
-  // may legitimately upload post-bootstrap mutations; a later pass must prove
-  // no pending local mutations and no unseen remote mutations remain.
+  // P19-013 separates a non-mutating shadow preflight from production apply.
+  // Shadow mode may ACK local V2 outbox rows and observe complete cloud commands,
+  // but it MUST NOT mutate the financial ledger or advance the production cursor.
   const shadowPasses = [];
   let validationSync = null;
   for (let pass = 1; pass <= 3; pass += 1) {
@@ -842,6 +850,7 @@ const runControlledFinancialV2Activation = async ({
       supabase,
       namespace: ledgerNamespace,
       deviceId,
+      allowProductionApply: false,
     });
     shadowPasses.push({
       pass,
@@ -923,6 +932,10 @@ const runControlledFinancialV2Activation = async ({
     },
   }));
 
+  // Durable activation is the no-fallback barrier. P19-013 intentionally
+  // commits this boundary BEFORE any production remote apply. If the process
+  // crashes afterwards, the next launch sees protocol V2 and can only resume
+  // through the V2 production cursor; it can never fall back to V1.
   const activated = await activateFinancialSyncProtocolV2V8({
     namespace: ledgerNamespace,
     bootstrapId: bootstrap.bootstrapId,
@@ -945,10 +958,112 @@ const runControlledFinancialV2Activation = async ({
     );
   }
 
+  const failAfterActivation = (reason, patch = {}) => {
+    const message = String(reason || 'financial_v2_production_apply_recovery_required');
+    set({
+      financialSyncProtocol: 2,
+      financialMutationSyncProtocol: 2,
+      financialSyncV2Activation: {
+        status: 'active_recovery_required',
+        workspaceNamespace,
+        ledgerNamespace,
+        ledgerId: activated.ledgerId,
+        restoreEpoch: activated.restoreEpoch,
+        bootstrapId: bootstrap.bootstrapId,
+        manifestHash: bootstrap.manifestHash,
+        readbackVerifiedAt: readback.verifiedAt,
+        shadowValidatedAt,
+        validationCursor: Number(validationSync.cursor || 0),
+        activatedAt: activated.activatedAt,
+        error: message,
+        ...patch,
+      },
+    });
+    return {
+      ok: false,
+      reason: message,
+      v2RecoveryRequired: true,
+      activated,
+      bootstrap,
+      readbackVerification: readback,
+      shadowValidation: {
+        ok: true,
+        validatedAt: shadowValidatedAt,
+        cursor: Number(validationSync.cursor || 0),
+        passes: shadowPasses,
+      },
+      ...patch,
+    };
+  };
+
+  set(state => ({
+    financialSyncProtocol: 2,
+    financialMutationSyncProtocol: 2,
+    financialSyncV2Activation: {
+      ...(state.financialSyncV2Activation || {}),
+      status: 'applying_v2_production',
+      activatedAt: activated.activatedAt,
+      error: null,
+    },
+  }));
+
+  // Re-read from the production cursor. Commands already observed in shadow
+  // mode are deliberately downloaded again. Exact local cloud echoes are
+  // no-op ACKs; true remote commands are CAS-preflighted and applied one whole
+  // command per SQLite transaction together with inbox + production cursor.
+  const productionPasses = [];
+  let productionSync = null;
+  for (let pass = 1; pass <= 3; pass += 1) {
+    const result = await syncFinancialMutationsV2({
+      supabase,
+      namespace: ledgerNamespace,
+      deviceId,
+      allowProductionApply: true,
+    });
+    productionPasses.push({
+      pass,
+      ok: !!result?.ok,
+      uploaded: Number(result?.uploaded || 0),
+      downloaded: Number(result?.downloaded || 0),
+      applied: Number(result?.applied || 0),
+      pendingAfterSync: Number(result?.pendingAfterSync || 0),
+      cursor: Number(result?.cursor || 0),
+      hasMore: result?.hasMore === true,
+      reason: result?.reason || null,
+    });
+    if (!result?.ok) {
+      return failAfterActivation(
+        result?.reason || 'financial_v2_production_apply_failed',
+        { financialMutationSyncV2: result || null, productionPasses },
+      );
+    }
+    const quiescent = Number(result.pendingAfterSync || 0) === 0
+      && Number(result.uploaded || 0) === 0
+      && Number(result.downloaded || 0) === 0
+      && result.hasMore !== true;
+    if (quiescent) {
+      productionSync = result;
+      break;
+    }
+    if (get().user?.id !== syncUserId) {
+      return failAfterActivation(
+        'financial_v2_activation_session_changed_after_commit',
+        { financialMutationSyncV2: result, productionPasses },
+      );
+    }
+  }
+
+  if (!productionSync) {
+    return failAfterActivation(
+      'financial_v2_production_apply_not_quiescent',
+      { productionPasses },
+    );
+  }
+
   set({
     financialSyncProtocol: 2,
     financialMutationSyncProtocol: 2,
-    financialMutationSyncV2: validationSync,
+    financialMutationSyncV2: productionSync,
     financialSyncV2Activation: {
       status: 'active',
       workspaceNamespace,
@@ -960,8 +1075,11 @@ const runControlledFinancialV2Activation = async ({
       readbackVerifiedAt: readback.verifiedAt,
       shadowValidatedAt,
       validationCursor: Number(validationSync.cursor || 0),
+      productionCursor: Number(productionSync.cursor || 0),
       activatedAt: activated.activatedAt,
+      productionQuiescentAt: new Date().toISOString(),
       shadowPasses,
+      productionPasses,
       error: null,
     },
   });
@@ -970,12 +1088,17 @@ const runControlledFinancialV2Activation = async ({
     ok: true,
     bootstrap,
     readbackVerification: readback,
-    sync: validationSync,
+    sync: productionSync,
     shadowValidation: {
       ok: true,
       validatedAt: shadowValidatedAt,
       cursor: Number(validationSync.cursor || 0),
       passes: shadowPasses,
+    },
+    productionCatchup: {
+      ok: true,
+      cursor: Number(productionSync.cursor || 0),
+      passes: productionPasses,
     },
     activated,
     protocol: {
@@ -983,6 +1106,7 @@ const runControlledFinancialV2Activation = async ({
       activeProtocolVersion: 2,
     },
   };
+
 };
 
 export const createSyncSlice = (set, get) => ({
@@ -1817,6 +1941,11 @@ export const createSyncSlice = (set, get) => ({
             deviceId,
           });
           if (!activationFinancialSync.ok) {
+            if (activationFinancialSync?.v2RecoveryRequired || financialProtocol?.requiresV2Recovery) {
+              throw new Error(
+                activationFinancialSync.reason || 'financial_v2_production_apply_recovery_required'
+              );
+            }
             // A ledger just restored from cloud must never drop into V1 on the
             // same attempt. Its next safe step is verified V2 bootstrap/activation.
             if (cloudRecovery?.recovered && cloudRecovery?.requireV2) {
@@ -1842,6 +1971,7 @@ export const createSyncSlice = (set, get) => ({
                 supabase,
                 namespace: ledgerSyncNamespace,
                 deviceId,
+                allowProductionApply: true,
               }))
             : await syncFinancialMutationsV7({
                 supabase,
@@ -1932,6 +2062,7 @@ export const createSyncSlice = (set, get) => ({
                     supabase,
                     namespace: getLedgerNamespace(namespace, finalState.cfg),
                     deviceId,
+                    allowProductionApply: true,
                   })
                 : await syncFinancialMutationsV7({
                     supabase,

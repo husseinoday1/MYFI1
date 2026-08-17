@@ -8,7 +8,7 @@ function Fail([string]$Message) {
   exit 1
 }
 
-$Apk = Join-Path $ProjectPath "dist-local\MYFI-P19-012-internal.apk"
+$Apk = Join-Path $ProjectPath "dist-local\MYFI-P19-013-internal.apk"
 if (-not (Test-Path $Apk)) { Fail "APK not found. Run npm run build:apk:local first." }
 
 $candidates = @(

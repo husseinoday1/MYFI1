@@ -54,3 +54,10 @@ cursor and activated_at.
 
 Signed-in destructive reset/restore stays interlocked until real-device V2
 restore/activation acceptance closes that gate.
+
+<!-- P19_012_013_RECOVERY_ATOMIC_APPLY_CONTRACT -->
+## P19-012/P19-013 recovery and atomic V2 apply contract
+
+A provably empty post-cutover local shell must resolve verified cloud recovery before a new V2 bootstrap can represent that shell. A legacy compatibility snapshot may be used only through the P19-012 read-only recovery source, with SHA-256 verification before parse, staged SQLite replacement, invariant proof, and semantic round-trip proof. Finalized V2 bootstrap state is higher authority and must use a dedicated bootstrap import path.
+
+P19-013 removes P19-009's temporary V7 remote-apply reuse. V2 shadow validation is non-mutating. The durable `activated_at` marker is the no-fallback boundary and is committed with the verified shadow cursor, while the production cursor remains independent. Production commands are then re-read from the production cursor and applied with full CAS preflight. A complete command plus all financial writes, V3 inbox `applied` state, and production cursor advance are one SQLite transaction. Monetary/entity conflicts do not merge and do not advance the production cursor. Exact local echoes are permitted only when the immutable local V3 outbox mutation matches the cloud mutation exactly.

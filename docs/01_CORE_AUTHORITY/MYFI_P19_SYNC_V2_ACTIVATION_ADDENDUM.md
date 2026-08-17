@@ -122,3 +122,22 @@ a narrow empty-shell recovery gate, not a reopening of snapshot sync.
 
 For Internal APK testing, EAS quota is not a release dependency: a local Gradle
 APK may be built for device acceptance. This does not certify production signing.
+
+<!-- P19_013_ATOMIC_V2_REMOTE_APPLY -->
+## P19-013 — Atomic Protocol V2 remote apply
+
+P19-013 supersedes only the temporary P19-009 remote-apply implementation. It does not rewrite the Frozen Master Plan.
+
+Required production invariant:
+- shadow validation is non-mutating and advances only the shadow command cursor;
+- the durable V2 activation marker is the no-fallback barrier;
+- production remote apply is permitted only after that barrier;
+- every complete V2 command is CAS-preflighted before any financial write;
+- a command, its linked financial rows, V3 inbox `applied` status, and production command cursor commit atomically in one SQLite transaction;
+- exact local cloud echoes are no-op acknowledgements only;
+- stale/equal-but-foreign monetary revisions do not merge and fail closed;
+- account currency/type/scope, currency minor exponent, historical FX identity/value, posting/account currency, and transaction idempotency are invariant checks;
+- a conflict records V3 inbox conflict evidence and does not advance the production cursor;
+- after durable V2 activation, V1 fallback is forbidden even if production catch-up requires recovery.
+
+SQLite remains V8. P19-013 introduces no DDL and no financial-value migration.

@@ -112,6 +112,7 @@ export const syncFinancialMutationsV2 = async ({
   deviceId = '',
   database = null,
   maxPages = 200,
+  allowProductionApply = false,
 } = {}) => {
   if (!supabase?.rpc) return { supported: false, ok: false, reason: 'supabase_unavailable' };
   const identity = await ensureLedgerSyncIdentityV8({ namespace, database });
@@ -153,6 +154,7 @@ export const syncFinancialMutationsV2 = async ({
   let cursor = await getLedgerSyncCursorV8({
     ledgerId: identity.ledgerId,
     restoreEpoch: identity.restoreEpoch,
+    shadow: allowProductionApply !== true,
     database,
   });
   let uploaded = 0;
@@ -212,11 +214,24 @@ export const syncFinancialMutationsV2 = async ({
         restoreEpoch: identity.restoreEpoch,
         mutations: response.remoteMutations,
         deviceId,
+        allowProductionApply,
         database,
       });
-      if (!applied.ok) throw new Error(applied.reason || 'financial_v2_remote_apply_failed');
+      if (!applied.ok) {
+        return {
+          supported: true,
+          ok: false,
+          reason: applied.reason || 'financial_v2_remote_apply_failed',
+          conflicts: applied.conflicts || [],
+          uploaded,
+          downloaded,
+          cursor,
+          pages,
+          applyMode: allowProductionApply ? 'production' : 'shadow',
+        };
+      }
 
-      downloaded += Number(applied.applied || 0);
+      downloaded += Number(applied.processed ?? applied.applied ?? 0);
       cursor = Math.max(cursor, Number(applied.cursor || response.latestSequence || 0));
       hasMore = response.hasMore;
       pages += 1;
@@ -239,6 +254,7 @@ export const syncFinancialMutationsV2 = async ({
       cursor,
       pages,
       hasMore: false,
+      applyMode: allowProductionApply ? 'production' : 'shadow',
       pendingAfterSync: (await readPendingLedgerMutationsV8({
         namespace,
         ledgerId: identity.ledgerId,

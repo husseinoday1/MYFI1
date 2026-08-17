@@ -1000,7 +1000,8 @@ export const readFinancialSyncProtocolV8 = async ({
   await ensureFinancialLedgerV7(db);
   const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
   const row = await db.getFirstAsync(
-    `SELECT activated_at,last_success_at,last_server_sequence
+    `SELECT activated_at,last_success_at,last_shadow_success_at,
+            shadow_last_server_sequence,last_server_sequence
        FROM ledger_sync_state_v8
       WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
     identity.ledgerId, identity.restoreEpoch,
@@ -1018,7 +1019,10 @@ export const readFinancialSyncProtocolV8 = async ({
     activeProtocolVersion: row?.activated_at ? 2 : 1,
     activatedAt: row?.activated_at || null,
     lastSuccessAt: row?.last_success_at || null,
+    lastShadowSuccessAt: row?.last_shadow_success_at || null,
+    shadowLastServerSequence: Math.max(0, Number(row?.shadow_last_server_sequence || 0)),
     lastServerSequence: Math.max(0, Number(row?.last_server_sequence || 0)),
+    requiresV2Recovery: !row?.activated_at && Math.max(0, Number(row?.last_server_sequence || 0)) > 0,
     activationEvidence,
     activationEvidenceValid: !!(
       !row?.activated_at
@@ -1101,7 +1105,7 @@ export const activateFinancialSyncProtocolV2V8 = async ({
     }
 
     const existing = await db.getFirstAsync(
-      `SELECT activated_at,last_server_sequence,last_success_at
+      `SELECT activated_at,shadow_last_server_sequence,last_server_sequence,last_success_at
          FROM ledger_sync_state_v8
         WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
       identity.ledgerId, identity.restoreEpoch,
@@ -1117,6 +1121,9 @@ export const activateFinancialSyncProtocolV2V8 = async ({
         activeProtocolVersion: 2,
         activatedAt: String(existing.activated_at),
       };
+    }
+    if (Math.max(0, Number(existing?.last_server_sequence || 0)) > 0) {
+      throw new Error('financial_v2_preactivation_production_cursor_recovery_required');
     }
 
     const now = new Date().toISOString();
@@ -1143,10 +1150,12 @@ export const activateFinancialSyncProtocolV2V8 = async ({
     );
     await db.runAsync(
       `INSERT INTO ledger_sync_state_v8
-       (ledger_id,restore_epoch,last_server_sequence,last_success_at,last_device_id,activated_at,updated_at)
-       VALUES (?,?,?,?,NULL,?,?)
+       (ledger_id,restore_epoch,shadow_last_server_sequence,last_shadow_success_at,
+        last_server_sequence,last_success_at,last_device_id,activated_at,updated_at)
+       VALUES (?,?,?,?,0,NULL,NULL,?,?)
        ON CONFLICT(ledger_id,restore_epoch) DO UPDATE SET
-         last_server_sequence=MAX(ledger_sync_state_v8.last_server_sequence,excluded.last_server_sequence),
+         shadow_last_server_sequence=MAX(ledger_sync_state_v8.shadow_last_server_sequence,excluded.shadow_last_server_sequence),
+         last_shadow_success_at=excluded.last_shadow_success_at,
          activated_at=COALESCE(ledger_sync_state_v8.activated_at,excluded.activated_at),
          updated_at=excluded.updated_at`,
       identity.ledgerId, identity.restoreEpoch, cursor, shadowAt, now, now,
@@ -1157,13 +1166,16 @@ export const activateFinancialSyncProtocolV2V8 = async ({
     );
 
     const activated = await db.getFirstAsync(
-      `SELECT activated_at,last_server_sequence FROM ledger_sync_state_v8
+      `SELECT activated_at,shadow_last_server_sequence,last_server_sequence FROM ledger_sync_state_v8
         WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
       identity.ledgerId, identity.restoreEpoch,
     );
     if (!activated?.activated_at) throw new Error('financial_v2_activation_compare_and_set_failed');
-    if (Number(activated.last_server_sequence || 0) < cursor) {
-      throw new Error('financial_v2_activation_cursor_regressed');
+    if (Number(activated.shadow_last_server_sequence || 0) < cursor) {
+      throw new Error('financial_v2_activation_shadow_cursor_regressed');
+    }
+    if (Number(activated.last_server_sequence || 0) !== 0) {
+      throw new Error('financial_v2_activation_production_cursor_not_zero');
     }
 
     return {
@@ -1246,21 +1258,481 @@ export const failLedgerMutationV8 = async ({
 };
 
 export const getLedgerSyncCursorV8 = async ({
-  ledgerId, restoreEpoch, database = null,
+  ledgerId, restoreEpoch, shadow = false, database = null,
 } = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return 0;
   await ensureFinancialLedgerV7(db);
   const row = await db.getFirstAsync(
-    `SELECT last_server_sequence FROM ledger_sync_state_v8
+    `SELECT shadow_last_server_sequence,last_server_sequence FROM ledger_sync_state_v8
       WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
     String(ledgerId), Number(restoreEpoch),
   );
-  return Math.max(0, Number(row?.last_server_sequence || 0));
+  return Math.max(0, Number(
+    shadow ? row?.shadow_last_server_sequence : row?.last_server_sequence
+  ) || 0);
+};
+
+const v2RemoteConflict = (code, item, extra = {}) => ({
+  code: String(code || 'financial_v2_remote_cas_conflict'),
+  mutationId: String(item?.mutationId || ''),
+  commandId: String(item?.commandId || ''),
+  commandSequence: Number(item?.commandSequence || 0),
+  entityType: String(item?.entityType || ''),
+  entityId: String(item?.entityId || ''),
+  revision: Number(item?.revision || 0),
+  baseRevision: Number(item?.baseRevision || 0),
+  ...extra,
+});
+
+const v2Require = (condition, code) => {
+  if (!condition) throw new Error(String(code || 'financial_v2_remote_payload_invalid'));
+};
+
+const v2ExactLocalEcho = async (db, identity, item) => {
+  const local = await db.getFirstAsync(
+    `SELECT command_id,entity_type,entity_id,operation,revision,base_revision,
+            protocol_version,minimum_supported_version,payload_schema_version,payload_json
+       FROM ledger_outbox_v3
+      WHERE ledger_id=? AND restore_epoch=? AND mutation_id=? LIMIT 1`,
+    identity.ledgerId, identity.restoreEpoch, item.mutationId,
+  );
+  if (!local) return false;
+  return String(local.command_id || '') === item.commandId
+    && String(local.entity_type || '') === item.entityType
+    && String(local.entity_id || '') === item.entityId
+    && String(local.operation || '') === item.operation
+    && Number(local.revision || 0) === item.revision
+    && Number(local.base_revision || 0) === item.baseRevision
+    && Number(local.protocol_version || 0) === item.protocolVersion
+    && Number(local.minimum_supported_version || 0) === item.minimumSupportedVersion
+    && Number(local.payload_schema_version || 0) === item.payloadSchemaVersion
+    && canonicalSyncValue(parseJson(local.payload_json, null)) === canonicalSyncValue(item.payload ?? null);
+};
+
+const v2CurrentRevision = async (db, namespace, item) => {
+  if (item.entityType === 'financial_transaction') {
+    const row = await db.getFirstAsync(
+      `SELECT revision FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
+      namespace, item.entityId,
+    );
+    return Math.max(0, Number(row?.revision || 0));
+  }
+  const row = await db.getFirstAsync(
+    `SELECT revision FROM ledger_entities_v7 WHERE namespace=? AND entity_type=? AND id=? LIMIT 1`,
+    namespace, item.entityType, item.entityId,
+  );
+  return Math.max(0, Number(row?.revision || 0));
+};
+
+const v2AssertUniqueIds = (items, code) => {
+  const seen = new Set();
+  for (const item of items || []) {
+    const id = String(item?.id || '').trim();
+    v2Require(!!id && !seen.has(id), code);
+    seen.add(id);
+  }
+};
+
+const v2ValidateFinancialTransactionPayload = async (db, namespace, item) => {
+  const payload = item.payload || {};
+  if (item.operation === 'void' || item.operation === 'delete') {
+    if (payload.transactionId != null) {
+      v2Require(String(payload.transactionId) === item.entityId, 'financial_v2_remote_transaction_identity_invalid');
+    }
+    v2Require(item.baseRevision > 0, 'financial_v2_remote_target_missing');
+    return { kind: 'transaction_terminal', payload };
+  }
+
+  const archiveMode = payload.transactionId != null
+    && payload.archiveYear != null
+    && !payload.transaction
+    && !payload.originalTransaction;
+  if (archiveMode) {
+    v2Require(String(payload.transactionId) === item.entityId, 'financial_v2_remote_transaction_identity_invalid');
+    v2Require(Number.isSafeInteger(Number(payload.archiveYear)), 'financial_v2_remote_archive_invalid');
+    v2Require(item.baseRevision > 0, 'financial_v2_remote_target_missing');
+    return { kind: 'transaction_archive', payload };
+  }
+
+  const header = payload.transaction;
+  const original = payload.originalTransaction;
+  v2Require(header && original, 'financial_v2_remote_transaction_payload_invalid');
+  v2Require(String(header.id || '') === item.entityId, 'financial_v2_remote_transaction_identity_invalid');
+  if (original.id != null) {
+    v2Require(String(original.id) === item.entityId, 'financial_v2_remote_transaction_identity_invalid');
+  }
+  if (header.revision != null) {
+    v2Require(Number(header.revision) === item.revision, 'financial_v2_remote_transaction_revision_invalid');
+  }
+  v2Require(!!String(header.idempotencyKey || '').trim(), 'financial_v2_remote_idempotency_key_missing');
+
+  const currencies = Array.isArray(payload.currencies) ? payload.currencies : [];
+  const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+  const rates = Array.isArray(payload.exchangeRates) ? payload.exchangeRates : [];
+  const postings = Array.isArray(payload.postings) ? payload.postings : [];
+  const links = Array.isArray(payload.links) ? payload.links : [];
+  v2AssertUniqueIds(accounts, 'financial_v2_remote_account_duplicate');
+  v2AssertUniqueIds(rates, 'financial_v2_remote_fx_duplicate');
+  v2AssertUniqueIds(postings, 'financial_v2_remote_posting_duplicate');
+  v2AssertUniqueIds(links, 'financial_v2_remote_link_duplicate');
+
+  const currencyByCode = new Map();
+  for (const currency of currencies) {
+    const code = String(currency?.code || '').trim();
+    const minorExponent = Number(currency?.minorExponent);
+    v2Require(!!code && Number.isSafeInteger(minorExponent) && minorExponent >= 0 && minorExponent <= 6,
+      'financial_v2_remote_currency_payload_invalid');
+    const key = code.toUpperCase();
+    v2Require(!currencyByCode.has(key), 'financial_v2_remote_currency_duplicate');
+    currencyByCode.set(key, { code, minorExponent });
+    const existing = await db.getFirstAsync(
+      `SELECT code,minor_exponent FROM ledger_currencies WHERE upper(code)=upper(?) LIMIT 1`, code,
+    );
+    if (existing && Number(existing.minor_exponent) !== minorExponent) {
+      throw new Error('financial_v2_remote_currency_identity_conflict');
+    }
+  }
+
+  const accountById = new Map();
+  for (const account of accounts) {
+    const id = String(account?.id || '').trim();
+    const accountType = String(account?.accountType || '').trim();
+    const scope = String(account?.scope || '').trim();
+    const currencyCode = String(account?.currencyCode || '').trim();
+    v2Require(id && accountType && scope && currencyCode, 'financial_v2_remote_account_payload_invalid');
+    accountById.set(id, { ...account, id, accountType, scope, currencyCode });
+    const existing = await db.getFirstAsync(
+      `SELECT account_type,scope,currency_code FROM ledger_accounts_v7 WHERE namespace=? AND id=? LIMIT 1`,
+      namespace, id,
+    );
+    if (existing && (
+      String(existing.account_type) !== accountType
+      || String(existing.scope) !== scope
+      || String(existing.currency_code).toUpperCase() !== currencyCode.toUpperCase()
+    )) {
+      throw new Error('financial_v2_remote_account_identity_conflict');
+    }
+    if (!existing) {
+      const currency = await db.getFirstAsync(
+        `SELECT code FROM ledger_currencies WHERE upper(code)=upper(?) LIMIT 1`, currencyCode,
+      );
+      v2Require(!!currency || currencyByCode.has(currencyCode.toUpperCase()),
+        'financial_v2_remote_account_currency_missing');
+    }
+  }
+
+  const rateById = new Map();
+  for (const rate of rates) {
+    const id = String(rate?.id || '').trim();
+    const base = String(rate?.baseCurrencyCode || '').trim();
+    const quote = String(rate?.quoteCurrencyCode || '').trim();
+    const numerator = Number(rate?.numerator);
+    const denominator = Number(rate?.denominator);
+    const rateDate = String(rate?.rateDate || '').trim();
+    const source = String(rate?.source || '').trim();
+    v2Require(id && base && quote && numerator > 0 && denominator > 0 && rateDate && source,
+      'financial_v2_remote_fx_payload_invalid');
+    rateById.set(id, { ...rate, id, baseCurrencyCode: base, quoteCurrencyCode: quote, numerator, denominator, rateDate, source });
+    const existing = await db.getFirstAsync(
+      `SELECT base_currency_code,quote_currency_code,numerator,denominator,rate_date,source
+         FROM ledger_exchange_rates_v7 WHERE namespace=? AND id=? LIMIT 1`,
+      namespace, id,
+    );
+    if (existing && (
+      String(existing.base_currency_code).toUpperCase() !== base.toUpperCase()
+      || String(existing.quote_currency_code).toUpperCase() !== quote.toUpperCase()
+      || Number(existing.numerator) !== numerator
+      || Number(existing.denominator) !== denominator
+      || String(existing.rate_date) !== rateDate
+      || String(existing.source) !== source
+    )) {
+      throw new Error('financial_v2_remote_fx_identity_conflict');
+    }
+  }
+
+  for (const posting of postings) {
+    const postingId = String(posting?.id || '').trim();
+    const transactionId = String(posting?.transactionId || '').trim();
+    const accountId = String(posting?.accountId || '').trim();
+    const currencyCode = String(posting?.currencyCode || '').trim();
+    v2Require(postingId && transactionId === item.entityId && accountId && currencyCode
+      && Number(posting?.amountMinor) !== 0, 'financial_v2_remote_posting_payload_invalid');
+    const conflictingPosting = await db.getFirstAsync(
+      `SELECT transaction_id FROM ledger_postings_v7 WHERE namespace=? AND id=? LIMIT 1`,
+      namespace, postingId,
+    );
+    if (conflictingPosting && String(conflictingPosting.transaction_id) !== item.entityId) {
+      throw new Error('financial_v2_remote_posting_identity_conflict');
+    }
+    let account = accountById.get(accountId);
+    if (!account) {
+      const existingAccount = await db.getFirstAsync(
+        `SELECT account_type AS accountType,scope,currency_code AS currencyCode
+           FROM ledger_accounts_v7 WHERE namespace=? AND id=? LIMIT 1`,
+        namespace, accountId,
+      );
+      v2Require(!!existingAccount, 'financial_v2_remote_posting_account_missing');
+      account = existingAccount;
+    }
+    if (String(account.currencyCode || '').toUpperCase() !== currencyCode.toUpperCase()) {
+      throw new Error('financial_v2_remote_posting_account_currency_mismatch');
+    }
+    const rateId = String(posting?.exchangeRateId || '').trim();
+    if (rateId) {
+      const existingRate = await db.getFirstAsync(
+        `SELECT id FROM ledger_exchange_rates_v7 WHERE namespace=? AND id=? LIMIT 1`,
+        namespace, rateId,
+      );
+      v2Require(!!existingRate || rateById.has(rateId), 'financial_v2_remote_posting_fx_missing');
+    }
+  }
+
+  for (const link of links) {
+    v2Require(String(link?.transactionId || '') === item.entityId,
+      'financial_v2_remote_link_transaction_mismatch');
+    const conflictingLink = await db.getFirstAsync(
+      `SELECT transaction_id FROM ledger_transaction_links_v7 WHERE namespace=? AND id=? LIMIT 1`,
+      namespace, String(link.id),
+    );
+    if (conflictingLink && String(conflictingLink.transaction_id) !== item.entityId) {
+      throw new Error('financial_v2_remote_link_identity_conflict');
+    }
+  }
+
+  const idempotencyCollision = await db.getFirstAsync(
+    `SELECT id FROM ledger_financial_transactions_v7
+      WHERE namespace=? AND idempotency_key=? AND id<>? LIMIT 1`,
+    namespace, String(header.idempotencyKey), item.entityId,
+  );
+  if (idempotencyCollision?.id) throw new Error('financial_v2_remote_idempotency_conflict');
+
+  return {
+    kind: 'transaction_upsert', payload, header, original,
+    currencies, accounts, rates, postings, links,
+  };
+};
+
+const v2ValidateDomainEntityPayload = (item) => {
+  const source = item.payload || {};
+  v2Require(String(source.entityType || '') === item.entityType, 'financial_v2_remote_entity_type_mismatch');
+  v2Require(String(source.id || '') === item.entityId, 'financial_v2_remote_entity_id_mismatch');
+  if (source.revision != null) {
+    v2Require(Number(source.revision) === item.revision, 'financial_v2_remote_entity_revision_mismatch');
+  }
+  if (source.baseRevision != null) {
+    v2Require(Number(source.baseRevision) === item.baseRevision, 'financial_v2_remote_entity_base_revision_mismatch');
+  }
+  if (item.operation === 'delete') {
+    v2Require(!!source.deletedAt, 'financial_v2_remote_entity_delete_tombstone_missing');
+  }
+  return { kind: 'domain_entity', source };
+};
+
+const v2PreflightMutation = async (db, identity, item) => {
+  if (await v2ExactLocalEcho(db, identity, item)) {
+    const currentRevision = await v2CurrentRevision(db, identity.namespace, item);
+    if (currentRevision < item.revision) {
+      throw Object.assign(new Error('financial_v2_exact_echo_local_state_missing'), {
+        conflict: v2RemoteConflict('financial_v2_exact_echo_local_state_missing', item, { currentRevision }),
+      });
+    }
+    return { item, kind: 'exact_local_echo', echo: true, currentRevision };
+  }
+  const currentRevision = await v2CurrentRevision(db, identity.namespace, item);
+  if (currentRevision !== item.baseRevision) {
+    throw Object.assign(new Error('financial_v2_remote_cas_conflict'), {
+      conflict: v2RemoteConflict('financial_v2_remote_cas_conflict', item, { currentRevision }),
+    });
+  }
+  if (item.entityType === 'financial_transaction') {
+    return { item, echo: false, currentRevision, ...(await v2ValidateFinancialTransactionPayload(db, identity.namespace, item)) };
+  }
+  return { item, echo: false, currentRevision, ...v2ValidateDomainEntityPayload(item) };
+};
+
+const v2ApplyFinancialTransactionPlan = async (db, namespace, plan, deviceId) => {
+  const { item, payload } = plan;
+  const now = new Date().toISOString();
+  if (plan.kind === 'transaction_terminal') {
+    const deletedAt = payload.deletedAt || payload.voidedAt || now;
+    const existing = await db.getFirstAsync(
+      `SELECT payload_json FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
+      namespace, item.entityId,
+    );
+    if (!existing) throw new Error('financial_v2_remote_target_missing');
+    const result = await db.runAsync(
+      `UPDATE ledger_financial_transactions_v7
+          SET status='voided',deleted_at=?,revision=?,payload_json=?,updated_at=?
+        WHERE namespace=? AND id=? AND revision=?`,
+      deletedAt, item.revision,
+      safeJson({ ...(parseJson(existing.payload_json, {}) || {}), status: 'voided', deletedAt, revision: item.revision }),
+      deletedAt, namespace, item.entityId, item.baseRevision,
+    );
+    if (Number(result?.changes || 0) !== 1) throw new Error('financial_v2_remote_cas_commit_failed');
+    return 1;
+  }
+
+  if (plan.kind === 'transaction_archive') {
+    const archivedAt = payload.archivedAt || now;
+    const existing = await db.getFirstAsync(
+      `SELECT payload_json FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
+      namespace, item.entityId,
+    );
+    if (!existing) throw new Error('financial_v2_remote_target_missing');
+    const result = await db.runAsync(
+      `UPDATE ledger_financial_transactions_v7
+          SET archive_year=?,archived_at=?,revision=?,payload_json=?,updated_at=?
+        WHERE namespace=? AND id=? AND revision=?`,
+      Number(payload.archiveYear), archivedAt, item.revision,
+      safeJson({ ...(parseJson(existing.payload_json, {}) || {}), archiveYear: Number(payload.archiveYear), archivedAt, revision: item.revision }),
+      archivedAt, namespace, item.entityId, item.baseRevision,
+    );
+    if (Number(result?.changes || 0) !== 1) throw new Error('financial_v2_remote_cas_commit_failed');
+    return 1;
+  }
+
+  for (const currency of plan.currencies) {
+    await db.runAsync(
+      `INSERT OR IGNORE INTO ledger_currencies(code,minor_exponent,enabled) VALUES (?,?,1)`,
+      currency.code, currency.minorExponent,
+    );
+  }
+  for (const account of plan.accounts) await upsertAccount(db, { ...account, namespace });
+  for (const rate of plan.rates) {
+    await db.runAsync(
+      `INSERT OR IGNORE INTO ledger_exchange_rates_v7
+       (namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      namespace, rate.id, rate.baseCurrencyCode, rate.quoteCurrencyCode,
+      rate.numerator, rate.denominator, rate.rateDate, rate.source, rate.capturedAt || now,
+    );
+  }
+
+  await db.runAsync(`DELETE FROM ledger_transaction_links_v7 WHERE namespace=? AND transaction_id=?`, namespace, item.entityId);
+  await db.runAsync(`DELETE FROM ledger_postings_v7 WHERE namespace=? AND transaction_id=?`, namespace, item.entityId);
+
+  const header = { ...plan.header, namespace, revision: item.revision };
+  const persistedPayload = safeJson({ ...plan.original, revision: item.revision });
+  if (item.baseRevision === 0) {
+    await db.runAsync(
+      `INSERT INTO ledger_financial_transactions_v7
+       (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
+        idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      namespace, header.id, header.kind, header.status || 'posted', header.scope || 'personal', header.dateISO,
+      header.occurredAt, header.categoryId, header.title, header.note, header.sourceType, header.sourceId,
+      header.idempotencyKey, header.deviceId || deviceId || 'remote-device', item.revision,
+      header.archiveYear, header.archivedAt, header.deletedAt, persistedPayload,
+      header.createdAt || now, header.updatedAt || now,
+    );
+  } else {
+    const result = await db.runAsync(
+      `UPDATE ledger_financial_transactions_v7 SET
+         kind=?,status=?,scope=?,date_iso=?,occurred_at=?,category_id=?,title=?,note=?,source_type=?,source_id=?,
+         idempotency_key=?,device_id=?,revision=?,archive_year=?,archived_at=?,deleted_at=?,payload_json=?,updated_at=?
+       WHERE namespace=? AND id=? AND revision=?`,
+      header.kind, header.status || 'posted', header.scope || 'personal', header.dateISO,
+      header.occurredAt, header.categoryId, header.title, header.note, header.sourceType, header.sourceId,
+      header.idempotencyKey, header.deviceId || deviceId || 'remote-device', item.revision,
+      header.archiveYear, header.archivedAt, header.deletedAt, persistedPayload, header.updatedAt || now,
+      namespace, item.entityId, item.baseRevision,
+    );
+    if (Number(result?.changes || 0) !== 1) throw new Error('financial_v2_remote_cas_commit_failed');
+  }
+
+  for (const posting of plan.postings) {
+    await db.runAsync(
+      `INSERT INTO ledger_postings_v7
+       (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      namespace, posting.id, posting.transactionId, posting.accountId, posting.bucket,
+      posting.role, posting.amountMinor, posting.currencyCode, posting.exchangeRateId, posting.createdAt || now,
+    );
+  }
+  for (const link of plan.links) {
+    await db.runAsync(
+      `INSERT INTO ledger_transaction_links_v7
+       (namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      namespace, link.id, link.transactionId, link.linkType, link.linkId,
+      link.relation, link.appliedAmountMinor, link.currencyCode, link.createdAt || now,
+    );
+  }
+  return 1;
+};
+
+const v2ApplyDomainEntityPlan = async (db, namespace, plan) => {
+  const { item, source } = plan;
+  const now = new Date().toISOString();
+  const createdAt = source.createdAt || now;
+  const updatedAt = source.updatedAt || now;
+  const payloadJson = safeJson(source.payload ?? null);
+  if (item.baseRevision === 0) {
+    await db.runAsync(
+      `INSERT INTO ledger_entities_v7
+       (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      namespace, item.entityType, item.entityId, item.revision,
+      source.deletedAt || null, payloadJson, createdAt, updatedAt,
+    );
+    return 1;
+  }
+  const result = await db.runAsync(
+    `UPDATE ledger_entities_v7 SET revision=?,deleted_at=?,payload_json=?,updated_at=?
+      WHERE namespace=? AND entity_type=? AND id=? AND revision=?`,
+    item.revision, source.deletedAt || null, payloadJson, updatedAt,
+    namespace, item.entityType, item.entityId, item.baseRevision,
+  );
+  if (Number(result?.changes || 0) !== 1) throw new Error('financial_v2_remote_cas_commit_failed');
+  return 1;
+};
+
+const v2WriteInboxCommand = async (db, identity, group, status, now) => {
+  for (const item of group) {
+    await db.runAsync(
+      `INSERT INTO ledger_inbox_v3
+       (ledger_id,restore_epoch,mutation_id,command_id,command_sequence,server_sequence,received_at,apply_status,applied_at)
+       VALUES (?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(ledger_id,restore_epoch,mutation_id) DO UPDATE SET
+         command_id=excluded.command_id,
+         command_sequence=excluded.command_sequence,
+         server_sequence=excluded.server_sequence,
+         received_at=excluded.received_at,
+         apply_status=CASE
+           WHEN ledger_inbox_v3.apply_status='applied' THEN 'applied'
+           WHEN ledger_inbox_v3.apply_status='conflict' THEN 'conflict'
+           ELSE excluded.apply_status
+         END,
+         applied_at=CASE WHEN excluded.apply_status='applied' THEN excluded.applied_at ELSE ledger_inbox_v3.applied_at END`,
+      identity.ledgerId, identity.restoreEpoch, item.mutationId, item.commandId,
+      item.commandSequence, item.serverSequence, now, status, status === 'applied' ? now : null,
+    );
+  }
+};
+
+const v2WriteConflictInbox = async (db, identity, group) => {
+  const now = new Date().toISOString();
+  await db.withTransactionAsync(async () => {
+    for (const item of group) {
+      await db.runAsync(
+        `INSERT INTO ledger_inbox_v3
+         (ledger_id,restore_epoch,mutation_id,command_id,command_sequence,server_sequence,received_at,apply_status,applied_at)
+         VALUES (?,?,?,?,?,?,?,'conflict',NULL)
+         ON CONFLICT(ledger_id,restore_epoch,mutation_id) DO UPDATE SET
+           command_id=excluded.command_id,command_sequence=excluded.command_sequence,
+           server_sequence=excluded.server_sequence,received_at=excluded.received_at,
+           apply_status=CASE WHEN ledger_inbox_v3.apply_status='applied' THEN 'applied' ELSE 'conflict' END`,
+        identity.ledgerId, identity.restoreEpoch, item.mutationId, item.commandId,
+        item.commandSequence, item.serverSequence, now,
+      );
+    }
+  });
 };
 
 export const applyRemoteLedgerMutationsV8 = async ({
-  namespace = 'guest', ledgerId, restoreEpoch, mutations = [], deviceId = '', database = null,
+  namespace = 'guest', ledgerId, restoreEpoch, mutations = [], deviceId = '',
+  allowProductionApply = false, database = null,
 } = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return { supported:false,ok:false,reason:'sqlite_unavailable' };
@@ -1289,7 +1761,7 @@ export const applyRemoteLedgerMutationsV8 = async ({
     protocolVersion: Number(item.protocolVersion || item.protocol_version || 0),
     minimumSupportedVersion: Number(item.minimumSupportedVersion || item.minimum_supported_version || 0),
     payloadSchemaVersion: Number(item.payloadSchemaVersion || item.payload_schema_version || 0),
-    payload: item.payload || parseJson(item.payload_json, null),
+    payload: item.payload ?? parseJson(item.payload_json, null),
   })).filter(item => item.mutationId && item.serverSequence > 0);
 
   for (const item of normalized) {
@@ -1298,6 +1770,7 @@ export const applyRemoteLedgerMutationsV8 = async ({
         || !item.commandId
         || item.commandSequence <= 0 || item.commandMutationCount <= 0
         || !item.entityType || !item.entityId
+        || !['upsert','delete','void'].includes(item.operation)
         || item.revision <= 0 || item.baseRevision < 0
         || item.revision !== item.baseRevision + 1
         || item.protocolVersion !== 2
@@ -1308,7 +1781,13 @@ export const applyRemoteLedgerMutationsV8 = async ({
   }
 
   const commandGroups = new Map();
+  const sequenceOwners = new Map();
   for (const item of normalized) {
+    const priorOwner = sequenceOwners.get(item.commandSequence);
+    if (priorOwner && priorOwner !== item.commandId) {
+      return { supported:true,ok:false,reason:'financial_v2_remote_command_sequence_collision' };
+    }
+    sequenceOwners.set(item.commandSequence, item.commandId);
     const key = String(item.commandSequence) + ':' + item.commandId;
     const group = commandGroups.get(key) || [];
     group.push(item);
@@ -1332,65 +1811,136 @@ export const applyRemoteLedgerMutationsV8 = async ({
     }
   }
 
-  const unread = [];
-  for (const item of normalized.sort((a,b)=>(
+  const shadowMode = allowProductionApply !== true;
+  const sorted = normalized.sort((a,b)=>(
     a.commandSequence-b.commandSequence || a.serverSequence-b.serverSequence
-  ))) {
-    const received = await db.getFirstAsync(
-      `SELECT mutation_id FROM ledger_inbox_v3
-        WHERE ledger_id=? AND restore_epoch=? AND mutation_id=? LIMIT 1`,
-      identity.ledgerId, identity.restoreEpoch, item.mutationId,
-    );
-    if (!received?.mutation_id) unread.push(item);
+  ));
+  let cursor = await getLedgerSyncCursorV8({
+    ledgerId: identity.ledgerId, restoreEpoch: identity.restoreEpoch,
+    shadow: shadowMode, database: db,
+  });
+  if (!sorted.length) {
+    return { supported:true,ok:true,applied:0,processed:0,cursor,shadow:shadowMode };
   }
 
-  if (unread.length) {
-    const legacyApply = await applyRemoteLedgerMutationsV7({
-      namespace,
-      deviceId,
-      database: db,
-      mutations: unread.map(item => ({
-        mutationId: item.mutationId,
-        serverSequence: item.serverSequence,
-        entityType: item.entityType,
-        entityId: item.entityId,
-        operation: item.operation,
-        entityRevision: item.revision,
-        payload: item.payload,
-      })),
-    });
-    if (!legacyApply.ok) return legacyApply;
-  }
+  return enqueueWrite(async () => {
+    let applied = 0;
+    let processed = 0;
+    const orderedGroups = [...commandGroups.values()].sort((a,b) => (
+      a[0].commandSequence - b[0].commandSequence
+    ));
 
-  const cursor = normalized.reduce((value,item)=>Math.max(value,item.commandSequence),await getLedgerSyncCursorV8({
-    ledgerId: identity.ledgerId, restoreEpoch: identity.restoreEpoch, database: db,
-  }));
-  await enqueueWrite(() => db.withTransactionAsync(async () => {
-    const now = new Date().toISOString();
-    for (const item of normalized) {
-      await db.runAsync(
-        `INSERT OR IGNORE INTO ledger_inbox_v3
-         (ledger_id,restore_epoch,mutation_id,command_id,command_sequence,server_sequence,received_at,apply_status,applied_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
-        identity.ledgerId, identity.restoreEpoch, item.mutationId, item.commandId,
-        item.commandSequence, item.serverSequence, now, 'applied', now,
-      );
+    for (const group of orderedGroups) {
+      const commandSequence = Number(group[0].commandSequence);
+      if (commandSequence <= cursor) {
+        processed += group.length;
+        continue;
+      }
+
+      const statuses = [];
+      for (const item of group) {
+        const inbox = await db.getFirstAsync(
+          `SELECT apply_status FROM ledger_inbox_v3
+            WHERE ledger_id=? AND restore_epoch=? AND mutation_id=? LIMIT 1`,
+          identity.ledgerId, identity.restoreEpoch, item.mutationId,
+        );
+        statuses.push(String(inbox?.apply_status || ''));
+      }
+      if (statuses.some(status => status === 'conflict')) {
+        return {
+          supported:true,ok:false,reason:'financial_v2_remote_command_conflict_pending',
+          conflicts: group.map(item => v2RemoteConflict('financial_v2_remote_command_conflict_pending', item)),
+          applied,processed,cursor,shadow:shadowMode,
+        };
+      }
+      if (!shadowMode && statuses.every(status => status === 'applied')) {
+        cursor = Math.max(cursor, commandSequence);
+        processed += group.length;
+        continue;
+      }
+      const populated = statuses.filter(Boolean);
+      if (populated.length && populated.length !== group.length) {
+        return { supported:true,ok:false,reason:'financial_v2_remote_inbox_partial_command',applied,processed,cursor,shadow:shadowMode };
+      }
+
+      const plans = [];
+      try {
+        for (const item of group) plans.push(await v2PreflightMutation(db, identity, item));
+      } catch (error) {
+        await v2WriteConflictInbox(db, identity, group);
+        const conflict = error?.conflict || v2RemoteConflict(error?.message || 'financial_v2_remote_cas_conflict', group[0]);
+        return {
+          supported:true,ok:false,reason:String(error?.message || 'financial_v2_remote_cas_conflict'),
+          conflicts:[conflict],applied,processed,cursor,shadow:shadowMode,
+        };
+      }
+
+      if (shadowMode) {
+        const now = new Date().toISOString();
+        await db.withTransactionAsync(async () => {
+          await v2WriteInboxCommand(db, identity, group, 'observed', now);
+          await db.runAsync(
+            `INSERT INTO ledger_sync_state_v8
+             (ledger_id,restore_epoch,shadow_last_server_sequence,last_shadow_success_at,last_device_id,updated_at)
+             VALUES (?,?,?,?,?,?)
+             ON CONFLICT(ledger_id,restore_epoch) DO UPDATE SET
+               shadow_last_server_sequence=MAX(ledger_sync_state_v8.shadow_last_server_sequence,excluded.shadow_last_server_sequence),
+               last_shadow_success_at=excluded.last_shadow_success_at,last_device_id=excluded.last_device_id,updated_at=excluded.updated_at`,
+            identity.ledgerId, identity.restoreEpoch, commandSequence, now, String(deviceId || ''), now,
+          );
+        });
+        processed += group.length;
+        cursor = Math.max(cursor, commandSequence);
+        continue;
+      }
+
+      const now = new Date().toISOString();
+      let commandApplied = 0;
+      try {
+        await db.withTransactionAsync(async () => {
+          for (const plan of plans) {
+            if (plan.echo) continue;
+            if (plan.item.entityType === 'financial_transaction') {
+              commandApplied += await v2ApplyFinancialTransactionPlan(db, identity.namespace, plan, deviceId);
+            } else {
+              commandApplied += await v2ApplyDomainEntityPlan(db, identity.namespace, plan);
+            }
+          }
+          await v2WriteInboxCommand(db, identity, group, 'applied', now);
+          await db.runAsync(
+            `INSERT INTO ledger_sync_state_v8
+             (ledger_id,restore_epoch,shadow_last_server_sequence,last_server_sequence,
+              last_shadow_success_at,last_success_at,last_device_id,updated_at)
+             VALUES (?,?,?,?,?,?,?,?)
+             ON CONFLICT(ledger_id,restore_epoch) DO UPDATE SET
+               shadow_last_server_sequence=MAX(ledger_sync_state_v8.shadow_last_server_sequence,excluded.shadow_last_server_sequence),
+               last_server_sequence=MAX(ledger_sync_state_v8.last_server_sequence,excluded.last_server_sequence),
+               last_shadow_success_at=excluded.last_shadow_success_at,last_success_at=excluded.last_success_at,
+               last_device_id=excluded.last_device_id,updated_at=excluded.updated_at`,
+            identity.ledgerId, identity.restoreEpoch, commandSequence, commandSequence,
+            now, now, String(deviceId || ''), now,
+          );
+        });
+        applied += commandApplied;
+      } catch (error) {
+        return {
+          supported:true,ok:false,reason:String(error?.message || 'financial_v2_remote_atomic_apply_failed'),
+          conflicts:[v2RemoteConflict(error?.message || 'financial_v2_remote_atomic_apply_failed', group[0])],
+          applied,processed,cursor,shadow:false,
+        };
+      }
+      processed += group.length;
+      cursor = Math.max(cursor, commandSequence);
     }
-    await db.runAsync(
-      `INSERT INTO ledger_sync_state_v8
-       (ledger_id,restore_epoch,last_server_sequence,last_success_at,last_device_id,updated_at)
-       VALUES (?,?,?,?,?,?)
-       ON CONFLICT(ledger_id,restore_epoch) DO UPDATE SET
-         last_server_sequence=MAX(ledger_sync_state_v8.last_server_sequence,excluded.last_server_sequence),
-         last_success_at=excluded.last_success_at,last_device_id=excluded.last_device_id,updated_at=excluded.updated_at`,
-      identity.ledgerId, identity.restoreEpoch, cursor, now, String(deviceId || ''), now,
-    );
-  }));
 
-  return { supported:true,ok:true,applied:unread.length,cursor };
+    const observedCursor = sorted.reduce((value,item)=>Math.max(value,item.commandSequence),cursor);
+    cursor = Math.max(cursor, observedCursor);
+    return { supported:true,ok:true,applied,processed,cursor,shadow:shadowMode };
+  });
 };
 
-const insertCurrency = (db, item) => db.runAsync(
+const insertCurrency =
+ (db, item) => db.runAsync(
   `INSERT INTO ledger_currencies(code,minor_exponent,enabled) VALUES (?,?,1)
    ON CONFLICT(code) DO UPDATE SET minor_exponent=excluded.minor_exponent,enabled=1`,
   item.code, item.minorExponent,

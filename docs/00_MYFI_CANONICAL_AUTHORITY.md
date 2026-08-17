@@ -252,3 +252,19 @@ Permanent sync invariants introduced by this overlay are also recorded in:
 
 The addendum/evidence cannot by themselves close Phase 9; newer real-device
 evidence retains higher precedence than automated/static evidence.
+
+<!-- P19_012_013_AUTHORITY_REGISTRATION -->
+## P19-012/P19-013 Authority Registration — 2026-08-18
+
+The Frozen Master Plan remains frozen.
+
+Active P19 overlay remains:
+- `docs/01_CORE_AUTHORITY/MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM.md`, now including the P19-012 empty-shell recovery and P19-013 atomic V2 remote-apply rules.
+
+Current P19-013 execution evidence:
+- `docs/04_CURRENT_EVIDENCE/MYFI_P19_013_ATOMIC_V2_REMOTE_APPLY_2026-08-18.md`.
+
+Permanent recovery/sync invariants are recorded in:
+- `docs/MYFI_SYNC_PROTOCOL.md`.
+
+P19-013 automated evidence cannot close real-device acceptance. Production V2 use remains blocked until the reviewed APK is installed and the device recovery/sync acceptance is executed without conflict, cursor regression, financial-value drift, or fallback.

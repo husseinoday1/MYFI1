@@ -48,7 +48,7 @@ if (-not (Test-Path $SourceApk)) { Fail "Release APK not found: $SourceApk" }
 
 $OutputDir = Join-Path $ProjectPath "dist-local"
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
-$OutputApk = Join-Path $OutputDir "MYFI-P19-012-internal.apk"
+$OutputApk = Join-Path $OutputDir "MYFI-P19-013-internal.apk"
 Copy-Item $SourceApk $OutputApk -Force
 $Hash = (Get-FileHash $OutputApk -Algorithm SHA256).Hash.ToLowerInvariant()
 
