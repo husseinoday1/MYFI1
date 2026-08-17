@@ -1,6 +1,8 @@
 // MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
 // MYFI_PERFORMANCE_DATA_PERSISTENCE_V5_1_1
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import SQLiteStorage from 'expo-sqlite/kv-store';
 import { mergeWorkspaceStates, sameWorkspaceData } from '../multiDeviceSync';
 import { supabase } from '../../lib/supabase';
 import { STORAGE, DEF_CATS, DEF_CFG, DEF_NOTIF, LEGACY_STORAGE_KEYS, normalizeCfg } from '../../lib/constants';
@@ -58,7 +60,17 @@ const FRESH_TEST_NAMESPACE = 'fresh-test-new-user';
 const RESET_MARKER_PREFIX = 'MYFI_INTENTIONAL_RESET_V1';
 const ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY = 'MYFI_ACTIVE_LOCAL_LEDGER_NAMESPACE_V1';
 const ACTIVE_LOCAL_LEDGER_CONTEXT_KEY = 'MYFI_ACTIVE_LOCAL_LEDGER_CONTEXT_V1';
+const ACTIVE_LOCAL_LEDGER_CONTEXT_VERSION = 2;
 const R04_OPERATIONAL_CUTOVER_ENABLED = true;
+
+// P19-001: the active local ledger identity must be durable without network or
+// Supabase session resolution. Native platforms use SQLite KV as the primary
+// pointer store; AsyncStorage is retained only as a rollback/migration mirror.
+const activeLedgerIdentityStorage = Platform.OS === 'web' ? AsyncStorage : SQLiteStorage;
+const activeLedgerIdentityKeys = [
+  ACTIVE_LOCAL_LEDGER_CONTEXT_KEY,
+  ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY,
+];
 
 const localIdentityFromState = state => accountIdentityPatch({
   displayName: state?.cfg?.displayName || state?.cfg?.name,
@@ -69,45 +81,116 @@ const localIdentityFromState = state => accountIdentityPatch({
 });
 
 const parseLedgerContext = raw => {
-  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+  try {
+    return { value: raw ? JSON.parse(raw) : {}, corrupt: false };
+  } catch {
+    return { value: {}, corrupt: true };
+  }
+};
+
+const readActiveLedgerIdentityRows = async storage => {
+  if (typeof storage?.multiGet === 'function') {
+    return storage.multiGet(activeLedgerIdentityKeys);
+  }
+  return Promise.all(activeLedgerIdentityKeys.map(async key => [key, await storage.getItem(key)]));
+};
+
+const writeActiveLedgerIdentityRows = async (storage, rows) => {
+  if (typeof storage?.multiSet === 'function') {
+    await storage.multiSet(rows);
+    return;
+  }
+  await Promise.all(rows.map(([key, value]) => storage.setItem(key, value)));
+};
+
+const decodeActiveLocalLedgerRows = rows => {
+  const values = Array.isArray(rows) ? rows : [];
+  const contextRaw = values.find(([key]) => key === ACTIVE_LOCAL_LEDGER_CONTEXT_KEY)?.[1] || null;
+  const legacyNamespaceRaw = values.find(([key]) => key === ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY)?.[1] || null;
+  const parsedResult = parseLedgerContext(contextRaw);
+  const parsed = parsedResult.value;
+  const namespace = String(parsed.namespace || legacyNamespaceRaw || GUEST_NAMESPACE).trim() || GUEST_NAMESPACE;
+  const linkedUserId = String(parsed.linkedUserId || accountIdFromWorkspaceNamespace(namespace) || '').trim() || null;
+  const identity = accountIdentityPatch(parsed.identity || {});
+  return {
+    context: { namespace, linkedUserId, identity },
+    hasValue: !!(contextRaw || legacyNamespaceRaw),
+    corrupt: parsedResult.corrupt && !legacyNamespaceRaw,
+  };
+};
+
+const buildActiveLocalLedgerPayload = ({ namespace, linkedUserId = null, identity = {}, updatedAt = null } = {}) => {
+  const value = String(namespace || GUEST_NAMESPACE).trim() || GUEST_NAMESPACE;
+  const linked = String(linkedUserId || accountIdFromWorkspaceNamespace(value) || '').trim() || null;
+  return {
+    version: ACTIVE_LOCAL_LEDGER_CONTEXT_VERSION,
+    namespace: value,
+    linkedUserId: linked,
+    identity: accountIdentityPatch(identity || {}),
+    updatedAt: updatedAt || new Date().toISOString(),
+  };
+};
+
+const persistActiveLocalLedgerContext = async (storage, context = {}) => {
+  const payload = buildActiveLocalLedgerPayload(context);
+  await writeActiveLedgerIdentityRows(storage, [
+    [ACTIVE_LOCAL_LEDGER_CONTEXT_KEY, JSON.stringify(payload)],
+    [ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY, payload.namespace],
+  ]);
+  return payload;
 };
 
 const readActiveLocalLedgerContext = async () => {
+  let primaryRows = null;
+  let primaryError = null;
   try {
-    const rows = await AsyncStorage.multiGet([
-      ACTIVE_LOCAL_LEDGER_CONTEXT_KEY,
-      ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY,
-    ]);
-    const contextRaw = rows.find(([key]) => key === ACTIVE_LOCAL_LEDGER_CONTEXT_KEY)?.[1] || null;
-    const legacyNamespaceRaw = rows.find(([key]) => key === ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY)?.[1] || null;
-    const parsed = parseLedgerContext(contextRaw);
-    const namespace = String(parsed.namespace || legacyNamespaceRaw || GUEST_NAMESPACE).trim() || GUEST_NAMESPACE;
-    const linkedUserId = String(parsed.linkedUserId || accountIdFromWorkspaceNamespace(namespace) || '').trim() || null;
-    const identity = accountIdentityPatch(parsed.identity || {});
-    return { namespace, linkedUserId, identity };
-  } catch {
-    return { namespace: GUEST_NAMESPACE, linkedUserId: null, identity: {} };
+    primaryRows = await readActiveLedgerIdentityRows(activeLedgerIdentityStorage);
+  } catch (error) {
+    primaryError = error;
   }
+
+  const primary = primaryRows ? decodeActiveLocalLedgerRows(primaryRows) : null;
+  if (primary?.hasValue && !primary.corrupt) return primary.context;
+
+  if (activeLedgerIdentityStorage !== AsyncStorage) {
+    let legacyRows = null;
+    let legacyError = null;
+    try {
+      legacyRows = await readActiveLedgerIdentityRows(AsyncStorage);
+    } catch (error) {
+      legacyError = error;
+    }
+    const legacy = legacyRows ? decodeActiveLocalLedgerRows(legacyRows) : null;
+    if (legacy?.hasValue && !legacy.corrupt) {
+      // One-time/native repair path. Failure to repair the primary pointer is
+      // non-destructive; the legacy pointer still lets the correct ledger mount.
+      try { await persistActiveLocalLedgerContext(activeLedgerIdentityStorage, legacy.context); } catch {}
+      return legacy.context;
+    }
+    if (primaryError && legacyError) throw new Error('active_local_ledger_context_unavailable');
+    if (primaryError && !legacy?.hasValue) throw new Error('active_local_ledger_context_unavailable');
+    if (primary?.corrupt || legacy?.corrupt) throw new Error('active_local_ledger_context_corrupt');
+  } else {
+    if (primaryError) throw new Error('active_local_ledger_context_unavailable');
+    if (primary?.corrupt) throw new Error('active_local_ledger_context_corrupt');
+  }
+
+  // A genuinely fresh install has no pointer in either store and starts Guest.
+  return { namespace: GUEST_NAMESPACE, linkedUserId: null, identity: {} };
 };
 
 const writeActiveLocalLedgerContext = async ({ namespace, linkedUserId = null, identity = {} } = {}) => {
   if (FRESH_TEST_MODE) return;
-  const value = String(namespace || GUEST_NAMESPACE).trim() || GUEST_NAMESPACE;
-  const linked = String(linkedUserId || accountIdFromWorkspaceNamespace(value) || '').trim() || null;
-  const payload = {
-    version: 1,
-    namespace: value,
-    linkedUserId: linked,
-    identity: accountIdentityPatch(identity || {}),
-    updatedAt: new Date().toISOString(),
-  };
-  try {
-    await AsyncStorage.multiSet([
-      [ACTIVE_LOCAL_LEDGER_CONTEXT_KEY, JSON.stringify(payload)],
-      [ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY, value],
-    ]);
-  } catch {
-    try { await AsyncStorage.setItem(ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY, value); } catch {}
+  const payload = await persistActiveLocalLedgerContext(activeLedgerIdentityStorage, {
+    namespace,
+    linkedUserId,
+    identity,
+  });
+
+  // Keep the V1 AsyncStorage mirror during the transition so rollback to the
+  // previous app build does not lose the selected local ledger namespace.
+  if (activeLedgerIdentityStorage !== AsyncStorage) {
+    try { await persistActiveLocalLedgerContext(AsyncStorage, payload); } catch {}
   }
 };
 

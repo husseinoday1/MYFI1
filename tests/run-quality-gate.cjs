@@ -45,6 +45,7 @@ const staticContracts = [
   'onboarding-preview.test.cjs',
   'performance-data-lab-v51.test.cjs',
   'performance-data-persistence-v511.test.cjs',
+  'p19-001-offline-ledger-identity.test.cjs',
   'phase00-governance.test.cjs',
   'product-readiness-batch7.test.cjs',
   'real-state-consolidated-v5.test.cjs',
