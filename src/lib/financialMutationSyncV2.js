@@ -4,6 +4,7 @@ import {
   ensureLedgerSyncIdentityV8,
   failLedgerMutationV8,
   getLedgerSyncCursorV8,
+  readFinancialSyncProtocolV8,
   readLedgerRestoreIntentV8,
   readPendingLedgerMutationsV8,
 } from './financialLedgerV7Repository';
@@ -117,6 +118,19 @@ export const syncFinancialMutationsV2 = async ({
   if (!supabase?.rpc) return { supported: false, ok: false, reason: 'supabase_unavailable' };
   const identity = await ensureLedgerSyncIdentityV8({ namespace, database });
   if (!identity?.ledgerId) return { supported: true, ok: false, reason: 'financial_v2_local_identity_missing' };
+
+  if (allowProductionApply === true) {
+    const protocol = await readFinancialSyncProtocolV8({ namespace, database });
+    if (protocol?.activeProtocolVersion !== 2 || !protocol?.activatedAt) {
+      return {
+        supported: true,
+        ok: false,
+        reason: 'financial_v2_production_apply_before_activation',
+        ledgerId: identity.ledgerId,
+        restoreEpoch: identity.restoreEpoch,
+      };
+    }
+  }
 
   let cloud;
   try {

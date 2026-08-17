@@ -27,6 +27,8 @@ for (const token of [
   'financial_v2_remote_command_duplicate_entity',
   'shadow_last_server_sequence',
   'last_server_sequence',
+  'financial_v2_production_apply_before_activation',
+  'SELECT activated_at FROM ledger_sync_state_v8',
   'db.withTransactionAsync',
 ]) assert(v8.includes(token), `missing V2 apply-body token: ${token}`);
 
@@ -56,6 +58,8 @@ for (const token of [
   'allowProductionApply,',
   "applyMode: allowProductionApply ? 'production' : 'shadow'",
   'applied.processed ?? applied.applied',
+  'readFinancialSyncProtocolV8',
+  'financial_v2_production_apply_before_activation',
 ]) assert(client.includes(token), `missing V2 client mode token: ${token}`);
 
 for (const token of [
@@ -73,6 +77,11 @@ const productionIndex = sync.indexOf("status: 'applying_v2_production'", activat
 const productionCallIndex = sync.indexOf('allowProductionApply: true', productionIndex);
 assert(activationIndex >= 0 && productionIndex > activationIndex && productionCallIndex > productionIndex,
   'durable activation must precede production remote apply');
+
+const clientBarrierIndex = client.indexOf("if (allowProductionApply === true)");
+const clientCloudIndex = client.indexOf('cloud = await resolveCloudLedgerV2');
+assert(clientBarrierIndex >= 0 && clientCloudIndex > clientBarrierIndex,
+  'production sync must verify durable activation before cloud I/O');
 
 assert(repo.includes('financial_v2_activation_production_cursor_not_zero'));
 assert(repo.includes('shadow_last_server_sequence=MAX'));

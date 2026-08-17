@@ -1744,6 +1744,18 @@ export const applyRemoteLedgerMutationsV8 = async ({
     return { supported:true,ok:false,reason:'financial_v2_remote_identity_mismatch' };
   }
 
+  const shadowMode = allowProductionApply !== true;
+  if (!shadowMode) {
+    const activation = await db.getFirstAsync(
+      `SELECT activated_at FROM ledger_sync_state_v8
+        WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+      identity.ledgerId, identity.restoreEpoch,
+    );
+    if (!activation?.activated_at) {
+      return { supported:true,ok:false,reason:'financial_v2_production_apply_before_activation' };
+    }
+  }
+
   const normalized = (Array.isArray(mutations) ? mutations : []).map(item => ({
     ...item,
     ledgerId: String(item.ledgerId || item.ledger_id || ''),
@@ -1811,7 +1823,6 @@ export const applyRemoteLedgerMutationsV8 = async ({
     }
   }
 
-  const shadowMode = allowProductionApply !== true;
   const sorted = normalized.sort((a,b)=>(
     a.commandSequence-b.commandSequence || a.serverSequence-b.serverSequence
   ));
