@@ -30,9 +30,13 @@ import {
   clearFinancialWorkspaceV7,
   proveFinancialLedgerInvariantsV7,
   commitEntityChangesV7,
+  activateFinancialSyncProtocolV2V8,
+  readFinancialSyncProtocolV8,
 } from '../../lib/financialLedgerV7Repository';
 import { compareSnapshots, loadNormalizedSnapshot } from '../../lib/normalizedRepository';
 import { syncFinancialMutationsV7 } from '../../lib/financialMutationSync';
+import { syncFinancialMutationsV2 } from '../../lib/financialMutationSyncV2';
+import { bootstrapFinancialLedgerV2 } from '../../lib/financialBootstrapV2';
 import {
   GUEST_NAMESPACE,
   clearVaultSnapshot,
@@ -488,6 +492,257 @@ const findLegacySnapshot = async () => {
 };
 
 
+
+const runControlledFinancialV2Activation = async ({
+  get,
+  set,
+  workspaceNamespace,
+  ledgerNamespace,
+  syncUserId,
+  deviceId,
+} = {}) => {
+  const current = get();
+  if (!current.user || current.user.id !== syncUserId) {
+    return { ok: false, reason: 'financial_v2_activation_session_changed' };
+  }
+  if (current.cfg.demoMode || !current.workspaceReady || !current.financialLedgerV7Cutover) {
+    return { ok: false, reason: 'financial_v2_activation_not_eligible' };
+  }
+
+  const protocol = await readFinancialSyncProtocolV8({ namespace: ledgerNamespace });
+  if (protocol?.activeProtocolVersion === 2) {
+    // Never fall back to V1 after durable activation, even if evidence metadata
+    // later needs repair. The active protocol is still V2 and failures are closed.
+    return {
+      ok: true,
+      alreadyActive: true,
+      protocol,
+      sync: null,
+    };
+  }
+
+  const failBeforeActivation = (reason, patch = {}) => {
+    const message = String(reason || 'financial_v2_activation_failed_before_commit');
+    set({
+      financialSyncV2Activation: {
+        status: 'failed_before_activation',
+        workspaceNamespace,
+        ledgerNamespace,
+        error: message,
+        checkedAt: new Date().toISOString(),
+        ...patch,
+      },
+    });
+    return { ok: false, reason: message, ...patch };
+  };
+
+  set({
+    financialSyncV2Activation: {
+      status: 'bootstrapping',
+      workspaceNamespace,
+      ledgerNamespace,
+      startedAt: new Date().toISOString(),
+      error: null,
+    },
+  });
+
+  const bootstrap = await bootstrapFinancialLedgerV2({
+    supabase,
+    namespace: ledgerNamespace,
+    deviceId,
+  });
+  if (!bootstrap?.ok) {
+    return failBeforeActivation(
+      bootstrap?.reason || 'financial_v2_bootstrap_failed',
+      { bootstrap },
+    );
+  }
+
+  const readback = bootstrap.readbackVerification;
+  if (!readback?.ok
+      || readback.ledgerId !== bootstrap.ledgerId
+      || readback.restoreEpoch !== bootstrap.restoreEpoch
+      || readback.bootstrapId !== bootstrap.bootstrapId
+      || readback.manifestHash !== bootstrap.manifestHash
+      || Number(readback.readBackRowCount) !== Number(bootstrap.expectedRowCount)) {
+    return failBeforeActivation(
+      readback?.reason || 'financial_v2_bootstrap_readback_not_verified',
+      { bootstrap, readbackVerification: readback || null },
+    );
+  }
+
+  if (get().user?.id !== syncUserId) {
+    return failBeforeActivation(
+      'financial_v2_activation_session_changed',
+      { bootstrap, readbackVerification: readback },
+    );
+  }
+
+  set(state => ({
+    financialSyncV2Activation: {
+      ...(state.financialSyncV2Activation || {}),
+      status: 'validating_v2_shadow',
+      bootstrapId: bootstrap.bootstrapId,
+      manifestHash: bootstrap.manifestHash,
+      expectedRowCount: bootstrap.expectedRowCount,
+      readbackVerifiedAt: readback.verifiedAt,
+      error: null,
+    },
+  }));
+
+  // A clean activation requires an observed quiescent V2 pass. The first pass
+  // may legitimately upload post-bootstrap mutations; a later pass must prove
+  // no pending local mutations and no unseen remote mutations remain.
+  const shadowPasses = [];
+  let validationSync = null;
+  for (let pass = 1; pass <= 3; pass += 1) {
+    const result = await syncFinancialMutationsV2({
+      supabase,
+      namespace: ledgerNamespace,
+      deviceId,
+    });
+    shadowPasses.push({
+      pass,
+      ok: !!result?.ok,
+      uploaded: Number(result?.uploaded || 0),
+      downloaded: Number(result?.downloaded || 0),
+      pendingAfterSync: Number(result?.pendingAfterSync || 0),
+      cursor: Number(result?.cursor || 0),
+      hasMore: result?.hasMore === true,
+      reason: result?.reason || null,
+    });
+
+    if (!result?.ok) {
+      return failBeforeActivation(
+        result?.reason || 'financial_v2_shadow_validation_failed',
+        {
+          bootstrap,
+          readbackVerification: readback,
+          financialMutationSyncV2: result || null,
+          shadowPasses,
+        },
+      );
+    }
+
+    const quiescent = Number(result.pendingAfterSync || 0) === 0
+      && Number(result.uploaded || 0) === 0
+      && Number(result.downloaded || 0) === 0
+      && result.hasMore !== true;
+    if (quiescent) {
+      validationSync = result;
+      break;
+    }
+
+    if (get().user?.id !== syncUserId) {
+      return failBeforeActivation(
+        'financial_v2_activation_session_changed',
+        {
+          bootstrap,
+          readbackVerification: readback,
+          financialMutationSyncV2: result,
+          shadowPasses,
+        },
+      );
+    }
+  }
+
+  if (!validationSync) {
+    return failBeforeActivation(
+      'financial_v2_activation_shadow_not_quiescent',
+      {
+        bootstrap,
+        readbackVerification: readback,
+        shadowPasses,
+      },
+    );
+  }
+
+  if (get().user?.id !== syncUserId) {
+    return failBeforeActivation(
+      'financial_v2_activation_session_changed',
+      {
+        bootstrap,
+        readbackVerification: readback,
+        financialMutationSyncV2: validationSync,
+        shadowPasses,
+      },
+    );
+  }
+
+  const shadowValidatedAt = new Date().toISOString();
+  set(state => ({
+    financialSyncV2Activation: {
+      ...(state.financialSyncV2Activation || {}),
+      status: 'activating',
+      shadowValidatedAt,
+      validationCursor: Number(validationSync.cursor || 0),
+      shadowPasses,
+      error: null,
+    },
+  }));
+
+  const activated = await activateFinancialSyncProtocolV2V8({
+    namespace: ledgerNamespace,
+    bootstrapId: bootstrap.bootstrapId,
+    manifestHash: bootstrap.manifestHash,
+    readbackVerifiedAt: readback.verifiedAt,
+    shadowValidatedAt,
+    validationCursor: Number(validationSync.cursor || 0),
+  });
+
+  if (!activated?.ok || activated.activeProtocolVersion !== 2) {
+    return failBeforeActivation(
+      activated?.reason || 'financial_v2_activation_local_commit_failed',
+      {
+        bootstrap,
+        readbackVerification: readback,
+        financialMutationSyncV2: validationSync,
+        shadowPasses,
+        activated,
+      },
+    );
+  }
+
+  set({
+    financialSyncProtocol: 2,
+    financialMutationSyncProtocol: 2,
+    financialMutationSyncV2: validationSync,
+    financialSyncV2Activation: {
+      status: 'active',
+      workspaceNamespace,
+      ledgerNamespace,
+      ledgerId: activated.ledgerId,
+      restoreEpoch: activated.restoreEpoch,
+      bootstrapId: bootstrap.bootstrapId,
+      manifestHash: bootstrap.manifestHash,
+      readbackVerifiedAt: readback.verifiedAt,
+      shadowValidatedAt,
+      validationCursor: Number(validationSync.cursor || 0),
+      activatedAt: activated.activatedAt,
+      shadowPasses,
+      error: null,
+    },
+  });
+
+  return {
+    ok: true,
+    bootstrap,
+    readbackVerification: readback,
+    sync: validationSync,
+    shadowValidation: {
+      ok: true,
+      validatedAt: shadowValidatedAt,
+      cursor: Number(validationSync.cursor || 0),
+      passes: shadowPasses,
+    },
+    activated,
+    protocol: {
+      ...activated,
+      activeProtocolVersion: 2,
+    },
+  };
+};
+
 export const createSyncSlice = (set, get) => ({
   previewNormalizedCloud: async ({ baseline } = {}) => {
     const current = get();
@@ -828,6 +1083,25 @@ export const createSyncSlice = (set, get) => ({
       set({ dataHealth: result, ledgerError: String(error?.message || error || 'health_check_failed') });
       return result;
     }
+  },
+
+  activateFinancialSyncV2: async () => {
+    if (FRESH_TEST_MODE) return { ok: false, reason: 'fresh_test_disabled' };
+    const queued = syncQueue.then(async () => {
+      const current = get();
+      if (!current.user || current.cfg.demoMode || !current.workspaceReady || !current.financialLedgerV7Cutover) {
+        return { ok: false, reason: 'financial_v2_activation_not_eligible' };
+      }
+      const syncUserId = current.user.id;
+      const workspaceNamespace = current.workspaceNamespace || workspaceNamespaceForSession({ user: current.user });
+      const ledgerNamespace = getLedgerNamespace(workspaceNamespace, current.cfg);
+      const deviceId = await getOrCreateDeviceId();
+      return runControlledFinancialV2Activation({
+        get, set, workspaceNamespace, ledgerNamespace, syncUserId, deviceId,
+      });
+    });
+    syncQueue = queued.catch(() => false);
+    return queued;
   },
 
   scheduleCloudSync: (reason = 'local_change') => {
@@ -1268,12 +1542,52 @@ export const createSyncSlice = (set, get) => ({
         const outboxAtStart = activeLedgerSupported() && !cutoverBridge ? await drainLedgerOutbox(namespace, 1000) : [];
         const outboxHighWater = outboxAtStart.length ? Number(outboxAtStart[outboxAtStart.length - 1]?.id || 0) : 0;
         const deviceId = await getOrCreateDeviceId();
+        const ledgerSyncNamespace = getLedgerNamespace(namespace, initial.cfg);
+        let financialProtocol = activeLedgerSupported() && initial.financialLedgerV7Cutover
+          ? await readFinancialSyncProtocolV8({ namespace: ledgerSyncNamespace })
+          : null;
+        let financialV2Active = financialProtocol?.activeProtocolVersion === 2;
+        let activationFinancialSync = null;
+
+        if (activeLedgerSupported() && initial.financialLedgerV7Cutover && !financialV2Active) {
+          activationFinancialSync = await runControlledFinancialV2Activation({
+            get,
+            set,
+            workspaceNamespace: namespace,
+            ledgerNamespace: ledgerSyncNamespace,
+            syncUserId,
+            deviceId,
+          });
+          if (!activationFinancialSync.ok) {
+            // Before the durable activation marker exists, V1 remains the
+            // operational fallback. A failed verification never activates V2.
+            financialV2Active = false;
+          } else {
+            financialV2Active = true;
+            financialProtocol = activationFinancialSync.protocol || {
+              activeProtocolVersion: 2,
+              activatedAt: activationFinancialSync.activated?.activatedAt || null,
+            };
+          }
+        }
+
         let financialMutationSync = null;
         if (activeLedgerSupported() && initial.financialLedgerV7Cutover) {
-          financialMutationSync = await syncFinancialMutationsV7({
-            supabase,
-            namespace: getLedgerNamespace(namespace, initial.cfg),
-            deviceId,
+          financialMutationSync = financialV2Active
+            ? (activationFinancialSync?.sync || await syncFinancialMutationsV2({
+                supabase,
+                namespace: ledgerSyncNamespace,
+                deviceId,
+              }))
+            : await syncFinancialMutationsV7({
+                supabase,
+                namespace: ledgerSyncNamespace,
+                deviceId,
+              });
+          set({
+            financialMutationSyncProtocol: financialV2Active ? 2 : 1,
+            financialSyncProtocol: financialV2Active ? 2 : 1,
+            ...(financialV2Active ? { financialMutationSyncV2: financialMutationSync } : {}),
           });
           if (financialMutationSync.ok && financialMutationSync.downloaded > 0) {
             const v7Workspace = await readFinancialWorkspaceV7({
@@ -1349,10 +1663,27 @@ export const createSyncSlice = (set, get) => ({
               throw new Error(workspaceCommit.reason || 'financial_v7_sync_workspace_metadata_failed');
             }
             if (Number(workspaceCommit.changed || 0) > 0) {
-              const bridged = await syncFinancialMutationsV7({
-                supabase, namespace: getLedgerNamespace(namespace, finalState.cfg), deviceId,
+              const bridged = financialV2Active
+                ? await syncFinancialMutationsV2({
+                    supabase,
+                    namespace: getLedgerNamespace(namespace, finalState.cfg),
+                    deviceId,
+                  })
+                : await syncFinancialMutationsV7({
+                    supabase,
+                    namespace: getLedgerNamespace(namespace, finalState.cfg),
+                    deviceId,
+                  });
+              if (!bridged?.ok) {
+                throw new Error(bridged?.reason || (
+                  financialV2Active ? 'financial_v2_bridge_sync_failed' : 'financial_v1_bridge_sync_failed'
+                ));
+              }
+              set({
+                financialMutationSync: bridged,
+                financialMutationSyncProtocol: financialV2Active ? 2 : 1,
+                ...(financialV2Active ? { financialMutationSyncV2: bridged } : {}),
               });
-              set({ financialMutationSync: bridged });
             }
             finalState = await readCurrentForSnapshot();
             finalState = {

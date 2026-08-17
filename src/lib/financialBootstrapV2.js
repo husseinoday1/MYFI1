@@ -90,6 +90,178 @@ const normalizeBootstrapResponse = data => {
   };
 };
 
+
+const normalizeBootstrapRowsPage = data => {
+  const value = Array.isArray(data) ? data[0] : data;
+  if (!value || typeof value !== 'object') {
+    throw new Error('financial_v2_bootstrap_readback_response_invalid');
+  }
+  return {
+    ledgerId: String(value.ledgerId ?? value.ledger_id ?? ''),
+    restoreEpoch: Number(value.restoreEpoch ?? value.restore_epoch ?? 0),
+    bootstrapId: String(value.bootstrapId ?? value.bootstrap_id ?? ''),
+    manifestHash: String(value.manifestHash ?? value.manifest_hash ?? '').toLowerCase(),
+    expectedRowCount: Number(value.expectedRowCount ?? value.expected_row_count ?? 0),
+    rows: Array.isArray(value.rows) ? value.rows : [],
+    nextOrdinal: Number(value.nextOrdinal ?? value.next_ordinal ?? 0),
+    hasMore: value.hasMore === true || value.has_more === true,
+  };
+};
+
+export const verifyFinancialBootstrapReadbackV2 = async ({
+  supabase,
+  ledgerId,
+  restoreEpoch,
+  bootstrapId,
+  manifestHash,
+  expectedRowCount,
+  pageSize = 200,
+  maxPages = 10000,
+} = {}) => {
+  if (!supabase?.rpc) {
+    return { supported: false, ok: false, reason: 'supabase_unavailable' };
+  }
+
+  const expectedLedger = String(ledgerId || '').trim();
+  const expectedEpoch = Number(restoreEpoch);
+  const expectedBootstrap = String(bootstrapId || '').trim();
+  const expectedManifest = String(manifestHash || '').trim().toLowerCase();
+  const expectedCount = Number(expectedRowCount);
+
+  if (!expectedLedger
+      || expectedEpoch <= 0
+      || !expectedBootstrap
+      || !/^[0-9a-f]{64}$/.test(expectedManifest)
+      || !Number.isSafeInteger(expectedCount)
+      || expectedCount < 0) {
+    return {
+      supported: true,
+      ok: false,
+      reason: 'financial_v2_bootstrap_readback_request_invalid',
+    };
+  }
+
+  const safePageSize = Math.max(1, Math.min(200, Number(pageSize) || 200));
+  const pageBudget = Math.max(1, Math.min(10000, Number(maxPages) || 10000));
+  let afterOrdinal = 0;
+  let pages = 0;
+  let hasMore = true;
+  const rowHashes = [];
+  const seenRowKeys = new Set();
+
+  try {
+    while (hasMore && pages < pageBudget) {
+      const beforeOrdinal = afterOrdinal;
+      const { data, error } = await supabase.rpc('get_financial_bootstrap_rows_v2', {
+        p_ledger_id: expectedLedger,
+        p_restore_epoch: expectedEpoch,
+        p_after_ordinal: afterOrdinal,
+        p_limit: safePageSize,
+      });
+      if (error) throw error;
+
+      const page = normalizeBootstrapRowsPage(data);
+      if (page.ledgerId !== expectedLedger
+          || page.restoreEpoch !== expectedEpoch
+          || page.bootstrapId !== expectedBootstrap
+          || page.manifestHash !== expectedManifest
+          || page.expectedRowCount !== expectedCount) {
+        throw new Error('financial_v2_bootstrap_readback_identity_mismatch');
+      }
+
+      for (const raw of page.rows) {
+        const ordinal = Number(raw?.ordinal ?? raw?.row_ordinal ?? 0);
+        const rowType = String(raw?.rowType ?? raw?.row_type ?? '');
+        const rowKey = String(raw?.rowKey ?? raw?.row_key ?? '');
+        const rowHash = String(raw?.rowHash ?? raw?.row_hash ?? '').toLowerCase();
+        const payloadText = String(raw?.payloadText ?? raw?.payload_text ?? '');
+
+        if (!Number.isSafeInteger(ordinal)
+            || ordinal !== afterOrdinal + 1
+            || !rowType
+            || !rowKey
+            || !/^[0-9a-f]{64}$/.test(rowHash)
+            || !payloadText) {
+          throw new Error('financial_v2_bootstrap_readback_row_invalid');
+        }
+
+        // JSON syntax must survive the server round-trip. The cryptographic hash
+        // is computed from the exact text returned by the server.
+        JSON.parse(payloadText);
+
+        const uniqueKey = `${rowType}\n${rowKey}`;
+        if (seenRowKeys.has(uniqueKey)) {
+          throw new Error('financial_v2_bootstrap_readback_duplicate_row');
+        }
+        seenRowKeys.add(uniqueKey);
+
+        const computedHash = String(
+          await sha256Hex(`${rowType}\n${rowKey}\n${payloadText}`),
+        ).toLowerCase();
+        if (computedHash !== rowHash) {
+          throw new Error('financial_v2_bootstrap_readback_row_hash_mismatch');
+        }
+
+        rowHashes.push(rowHash);
+        afterOrdinal = ordinal;
+      }
+
+      if (page.nextOrdinal !== afterOrdinal) {
+        throw new Error('financial_v2_bootstrap_readback_cursor_mismatch');
+      }
+
+      hasMore = page.hasMore;
+      pages += 1;
+      if (hasMore && afterOrdinal <= beforeOrdinal) {
+        throw new Error('financial_v2_bootstrap_readback_cursor_stalled');
+      }
+    }
+
+    if (hasMore) {
+      throw new Error('financial_v2_bootstrap_readback_page_budget_exhausted');
+    }
+    if (rowHashes.length !== expectedCount
+        || (expectedCount > 0 && afterOrdinal !== expectedCount)
+        || (expectedCount === 0 && afterOrdinal !== 0)) {
+      throw new Error('financial_v2_bootstrap_readback_row_count_mismatch');
+    }
+
+    const computedManifest = String(
+      await sha256Hex(rowHashes.join('\n')),
+    ).toLowerCase();
+    if (computedManifest !== expectedManifest) {
+      throw new Error('financial_v2_bootstrap_readback_manifest_mismatch');
+    }
+
+    return {
+      supported: true,
+      ok: true,
+      ledgerId: expectedLedger,
+      restoreEpoch: expectedEpoch,
+      bootstrapId: expectedBootstrap,
+      manifestHash: expectedManifest,
+      expectedRowCount: expectedCount,
+      readBackRowCount: rowHashes.length,
+      pages,
+      finalOrdinal: afterOrdinal,
+      verifiedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      supported: true,
+      ok: false,
+      reason: String(error?.message || 'financial_v2_bootstrap_readback_failed'),
+      ledgerId: expectedLedger,
+      restoreEpoch: expectedEpoch,
+      bootstrapId: expectedBootstrap,
+      expectedRowCount: expectedCount,
+      readBackRowCount: rowHashes.length,
+      pages,
+      finalOrdinal: afterOrdinal,
+    };
+  }
+};
+
 export const bootstrapFinancialLedgerV2 = async ({
   supabase,
   namespace = 'guest',
@@ -135,6 +307,16 @@ export const bootstrapFinancialLedgerV2 = async ({
     if (!exact) {
       return { supported: true, ok: false, reason: 'financial_v2_bootstrap_finalized_identity_conflict' };
     }
+    const expectedCount = Number(previousState.expected_row_count || 0);
+    const readbackVerification = await verifyFinancialBootstrapReadbackV2({
+      supabase,
+      ledgerId: identity.ledgerId,
+      restoreEpoch: identity.restoreEpoch,
+      bootstrapId: cloud.bootstrapId,
+      manifestHash: cloud.bootstrapManifestHash,
+      expectedRowCount: expectedCount,
+    });
+    if (!readbackVerification.ok) return readbackVerification;
     return {
       supported: true,
       ok: true,
@@ -143,6 +325,8 @@ export const bootstrapFinancialLedgerV2 = async ({
       restoreEpoch: identity.restoreEpoch,
       bootstrapId: cloud.bootstrapId,
       manifestHash: cloud.bootstrapManifestHash,
+      expectedRowCount: expectedCount,
+      readbackVerification,
     };
   }
 
@@ -175,6 +359,17 @@ export const bootstrapFinancialLedgerV2 = async ({
       const exact = cloud.bootstrapId === state.bootstrap_id
         && String(cloud.bootstrapManifestHash || '').toLowerCase() === built.manifestHash;
       if (!exact) throw new Error('financial_v2_bootstrap_cloud_already_finalized_conflict');
+      const readbackVerification = await verifyFinancialBootstrapReadbackV2({
+        supabase,
+        ledgerId: identity.ledgerId,
+        restoreEpoch: identity.restoreEpoch,
+        bootstrapId: state.bootstrap_id,
+        manifestHash: built.manifestHash,
+        expectedRowCount: built.expectedRowCount,
+      });
+      if (!readbackVerification.ok) {
+        throw new Error(readbackVerification.reason || 'financial_v2_bootstrap_readback_failed');
+      }
       await finalizeFinancialBootstrapStageV8({
         ledgerId: identity.ledgerId,
         restoreEpoch: identity.restoreEpoch,
@@ -191,6 +386,7 @@ export const bootstrapFinancialLedgerV2 = async ({
         bootstrapId: state.bootstrap_id,
         manifestHash: built.manifestHash,
         expectedRowCount: built.expectedRowCount,
+        readbackVerification,
       };
     }
 
@@ -250,6 +446,18 @@ export const bootstrapFinancialLedgerV2 = async ({
       throw new Error('financial_v2_bootstrap_finalize_response_mismatch');
     }
 
+    const readbackVerification = await verifyFinancialBootstrapReadbackV2({
+      supabase,
+      ledgerId: identity.ledgerId,
+      restoreEpoch: identity.restoreEpoch,
+      bootstrapId: state.bootstrap_id,
+      manifestHash: built.manifestHash,
+      expectedRowCount: built.expectedRowCount,
+    });
+    if (!readbackVerification.ok) {
+      throw new Error(readbackVerification.reason || 'financial_v2_bootstrap_readback_failed');
+    }
+
     await finalizeFinancialBootstrapStageV8({
       ledgerId: identity.ledgerId,
       restoreEpoch: identity.restoreEpoch,
@@ -267,6 +475,7 @@ export const bootstrapFinancialLedgerV2 = async ({
       bootstrapId: state.bootstrap_id,
       manifestHash: built.manifestHash,
       expectedRowCount: built.expectedRowCount,
+      readbackVerification,
     };
   } catch (error) {
     if (state?.bootstrap_id) {

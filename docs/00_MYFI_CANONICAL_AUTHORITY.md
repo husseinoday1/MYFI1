@@ -234,3 +234,21 @@ The following documents are authoritative additions to the frozen plan:
 - `docs/04_CURRENT_EVIDENCE/MYFI_R04_1_DEVICE_ACCEPTANCE_CLOSURE_2026-08-17.md` — closure evidence for R04.1 real-device acceptance.
 
 R04.1 is CLOSED after P18-009 automated acceptance and the 2026-08-17 real-device PASS. The frozen master plan remains frozen; the multi-currency policy is an addendum and MUST be applied by subsequent relevant phases.
+
+
+<!-- P19_011_AUTHORITY_REGISTRATION -->
+## P19 Sync V2 Authority Registration — 2026-08-17
+
+The Frozen Master Plan remains frozen and is not rewritten by P19.
+
+Active P19 overlay:
+- `docs/01_CORE_AUTHORITY/MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM.md`
+
+Current P19 execution evidence:
+- `docs/04_CURRENT_EVIDENCE/MYFI_P19_001_011_SYNC_V2_EXECUTION_EVIDENCE_2026-08-17.md`
+
+Permanent sync invariants introduced by this overlay are also recorded in:
+- `docs/MYFI_SYNC_PROTOCOL.md`
+
+The addendum/evidence cannot by themselves close Phase 9; newer real-device
+evidence retains higher precedence than automated/static evidence.

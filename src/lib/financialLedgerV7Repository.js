@@ -867,6 +867,197 @@ export const finalizeFinancialBootstrapStageV8 = async ({
   }));
 };
 
+
+export const readFinancialSyncProtocolV8 = async ({
+  namespace = 'guest', database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return {
+    supported: false, activeProtocolVersion: 1, activatedAt: null,
+  };
+  await ensureFinancialLedgerV7(db);
+  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const row = await db.getFirstAsync(
+    `SELECT activated_at,last_success_at,last_server_sequence
+       FROM ledger_sync_state_v8
+      WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+    identity.ledgerId, identity.restoreEpoch,
+  );
+  const evidenceRow = await db.getFirstAsync(
+    `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+    `sync_v2_activation_evidence:${identity.namespace}`,
+  );
+  const activationEvidence = parseJson(evidenceRow?.value, null);
+  return {
+    supported: true,
+    namespace: identity.namespace,
+    ledgerId: identity.ledgerId,
+    restoreEpoch: identity.restoreEpoch,
+    activeProtocolVersion: row?.activated_at ? 2 : 1,
+    activatedAt: row?.activated_at || null,
+    lastSuccessAt: row?.last_success_at || null,
+    lastServerSequence: Math.max(0, Number(row?.last_server_sequence || 0)),
+    activationEvidence,
+    activationEvidenceValid: !!(
+      !row?.activated_at
+      || (
+        activationEvidence
+        && String(activationEvidence.ledgerId || '') === identity.ledgerId
+        && Number(activationEvidence.restoreEpoch || 0) === identity.restoreEpoch
+        && String(activationEvidence.bootstrapId || '')
+        && /^[0-9a-f]{64}$/.test(String(activationEvidence.manifestHash || '').toLowerCase())
+        && Number.isFinite(Date.parse(String(activationEvidence.readbackVerifiedAt || '')))
+        && Number.isFinite(Date.parse(String(activationEvidence.shadowValidatedAt || '')))
+      )
+    ),
+  };
+};
+
+export const activateFinancialSyncProtocolV2V8 = async ({
+  namespace = 'guest',
+  bootstrapId,
+  manifestHash,
+  readbackVerifiedAt,
+  shadowValidatedAt,
+  validationCursor = 0,
+  database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  if (!target) throw new Error('financial_v2_activation_namespace_required');
+
+  const expectedBootstrapId = String(bootstrapId || '').trim();
+  const expectedManifest = String(manifestHash || '').trim().toLowerCase();
+  const readbackAt = String(readbackVerifiedAt || '').trim();
+  const shadowAt = String(shadowValidatedAt || '').trim();
+  const cursor = Number(validationCursor);
+
+  if (!expectedBootstrapId
+      || !/^[0-9a-f]{64}$/.test(expectedManifest)
+      || !Number.isFinite(Date.parse(readbackAt))
+      || !Number.isFinite(Date.parse(shadowAt))
+      || !Number.isSafeInteger(cursor)
+      || cursor < 0) {
+    throw new Error('financial_v2_activation_evidence_invalid');
+  }
+
+  return enqueueWrite(async () => db.withTransactionAsync(async () => {
+    const identity = await ensureShadowLedgerSyncIdentityV8(db, target);
+    const restoreIntent = await db.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+      restoreIntentMetaKey(identity.namespace),
+    );
+    if (restoreIntent?.value) throw new Error('financial_v2_activation_restore_intent_active');
+
+    const bootstrap = await db.getFirstAsync(
+      `SELECT bootstrap_id,manifest_hash,status,finalized_at
+         FROM ledger_bootstrap_state_v8
+        WHERE namespace=? AND ledger_id=? AND restore_epoch=?
+        ORDER BY created_at DESC LIMIT 1`,
+      identity.namespace, identity.ledgerId, identity.restoreEpoch,
+    );
+    if (!bootstrap?.bootstrap_id
+        || bootstrap.status !== 'finalized'
+        || String(bootstrap.bootstrap_id) !== expectedBootstrapId
+        || String(bootstrap.manifest_hash || '').toLowerCase() !== expectedManifest
+        || !bootstrap.finalized_at) {
+      throw new Error('financial_v2_activation_bootstrap_not_finalized');
+    }
+
+    const pending = await db.getFirstAsync(
+      `SELECT COUNT(*) AS n
+         FROM ledger_outbox_v3
+        WHERE ledger_id=? AND restore_epoch=?
+          AND acknowledged_at IS NULL
+          AND superseded_by_bootstrap_id IS NULL`,
+      identity.ledgerId, identity.restoreEpoch,
+    );
+    if (Number(pending?.n || 0) !== 0) {
+      throw new Error('financial_v2_activation_pending_outbox');
+    }
+
+    const existing = await db.getFirstAsync(
+      `SELECT activated_at,last_server_sequence,last_success_at
+         FROM ledger_sync_state_v8
+        WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+      identity.ledgerId, identity.restoreEpoch,
+    );
+    if (existing?.activated_at) {
+      return {
+        supported: true,
+        ok: true,
+        idempotent: true,
+        namespace: identity.namespace,
+        ledgerId: identity.ledgerId,
+        restoreEpoch: identity.restoreEpoch,
+        activeProtocolVersion: 2,
+        activatedAt: String(existing.activated_at),
+      };
+    }
+
+    const now = new Date().toISOString();
+    const activationEvidence = {
+      version: 1,
+      namespace: identity.namespace,
+      ledgerId: identity.ledgerId,
+      restoreEpoch: identity.restoreEpoch,
+      bootstrapId: expectedBootstrapId,
+      manifestHash: expectedManifest,
+      readbackVerifiedAt: readbackAt,
+      shadowValidatedAt: shadowAt,
+      validationCursor: cursor,
+      activatedAt: now,
+    };
+
+    // Evidence and activation marker are committed atomically. There is no
+    // intermediate durable state where V2 is active without verification proof.
+    await db.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+      `sync_v2_activation_evidence:${identity.namespace}`,
+      safeJson(activationEvidence),
+      now,
+    );
+    await db.runAsync(
+      `INSERT INTO ledger_sync_state_v8
+       (ledger_id,restore_epoch,last_server_sequence,last_success_at,last_device_id,activated_at,updated_at)
+       VALUES (?,?,?,?,NULL,?,?)
+       ON CONFLICT(ledger_id,restore_epoch) DO UPDATE SET
+         last_server_sequence=MAX(ledger_sync_state_v8.last_server_sequence,excluded.last_server_sequence),
+         activated_at=COALESCE(ledger_sync_state_v8.activated_at,excluded.activated_at),
+         updated_at=excluded.updated_at`,
+      identity.ledgerId, identity.restoreEpoch, cursor, shadowAt, now, now,
+    );
+    await db.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+      `active_sync_protocol:${identity.namespace}`, '2', now,
+    );
+
+    const activated = await db.getFirstAsync(
+      `SELECT activated_at,last_server_sequence FROM ledger_sync_state_v8
+        WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+      identity.ledgerId, identity.restoreEpoch,
+    );
+    if (!activated?.activated_at) throw new Error('financial_v2_activation_compare_and_set_failed');
+    if (Number(activated.last_server_sequence || 0) < cursor) {
+      throw new Error('financial_v2_activation_cursor_regressed');
+    }
+
+    return {
+      supported: true,
+      ok: true,
+      idempotent: false,
+      namespace: identity.namespace,
+      ledgerId: identity.ledgerId,
+      restoreEpoch: identity.restoreEpoch,
+      activeProtocolVersion: 2,
+      activatedAt: String(activated.activated_at),
+      activationEvidence,
+    };
+  }));
+};
+
 export const readPendingLedgerMutationsV8 = async ({
   namespace = 'guest', ledgerId, restoreEpoch, limit = 100, database = null,
 } = {}) => {

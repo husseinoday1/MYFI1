@@ -52,8 +52,19 @@ for (const token of ['bootstrapId','bootstrapManifestHash','bootstrappedAt']) {
   assert(syncV2.includes(token), `cloud ledger normalization missing: ${token}`);
 }
 
-assert(!syncSlice.includes('bootstrapFinancialLedgerV2'),
-  'P19-010 must remain inactive and must not wire bootstrap into normal sync yet');
+const p19011ContractPath = path.join(root,'tests/p19-011-controlled-v2-activation.test.cjs');
+const p19011Present = fs.existsSync(p19011ContractPath);
+if (!p19011Present) {
+  assert(!syncSlice.includes('bootstrapFinancialLedgerV2'),
+    'P19-010 must remain inactive before the dedicated P19-011 activation phase');
+} else {
+  assert(syncSlice.includes('bootstrapFinancialLedgerV2'),
+    'P19-011 must wire the verified bootstrap only through controlled activation');
+  assert(syncSlice.includes('runControlledFinancialV2Activation'));
+  assert(syncSlice.includes('readbackVerification'));
+  assert(syncSlice.includes('validating_v2_shadow'));
+  assert(syncSlice.includes('financialV2Active'));
+}
 assert(gate.includes('p19-010-v2-bootstrap-protocol.test.cjs'),
   'P19-010 contract is not registered in quality gate');
 
