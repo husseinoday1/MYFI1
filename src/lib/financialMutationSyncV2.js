@@ -82,6 +82,9 @@ const normalizeLedgerRegistration = data => {
     protocolVersion: Number(value.protocolVersion ?? value.protocol_version ?? 0),
     minimumSupportedVersion: Number(value.minimumSupportedVersion ?? value.minimum_supported_version ?? 0),
     status: String(value.status || ''),
+    bootstrapId: String(value.bootstrapId ?? value.bootstrap_id ?? ''),
+    bootstrapManifestHash: String(value.bootstrapManifestHash ?? value.bootstrap_manifest_hash ?? '').toLowerCase(),
+    bootstrappedAt: value.bootstrappedAt ?? value.bootstrapped_at ?? null,
   };
 };
 

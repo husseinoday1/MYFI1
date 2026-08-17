@@ -54,6 +54,7 @@ const staticContracts = [
   'p19-007-destructive-restore-interlock.test.cjs',
   'p19-008-restore-epoch-handshake.test.cjs',
   'p19-009-sync-v2-client.test.cjs',
+  'p19-010-v2-bootstrap-protocol.test.cjs',
   'phase00-governance.test.cjs',
   'product-readiness-batch7.test.cjs',
   'real-state-consolidated-v5.test.cjs',

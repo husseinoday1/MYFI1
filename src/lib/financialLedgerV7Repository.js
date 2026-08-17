@@ -600,6 +600,273 @@ export const abortLedgerRestoreEpochV8 = async ({ namespace = 'guest', database 
   return true;
 };
 
+
+export const readFinancialBootstrapStateV8 = async ({
+  namespace = 'guest', ledgerId = null, restoreEpoch = null, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return null;
+  await ensureFinancialLedgerV7(db);
+  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const targetLedgerId = String(ledgerId || identity.ledgerId);
+  const targetEpoch = Math.max(1, Number(restoreEpoch || identity.restoreEpoch));
+  return db.getFirstAsync(
+    `SELECT * FROM ledger_bootstrap_state_v8
+      WHERE namespace=? AND ledger_id=? AND restore_epoch=?
+      ORDER BY created_at DESC LIMIT 1`,
+    identity.namespace, targetLedgerId, targetEpoch,
+  );
+};
+
+export const createFinancialBootstrapStageV8 = async ({
+  namespace = 'guest', database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  if (!target) throw new Error('financial_v2_bootstrap_namespace_required');
+
+  return enqueueWrite(async () => db.withTransactionAsync(async () => {
+    const identity = await ensureShadowLedgerSyncIdentityV8(db, target);
+    const restoreIntent = await db.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+      restoreIntentMetaKey(target),
+    );
+    if (restoreIntent?.value) throw new Error('financial_v2_bootstrap_restore_intent_active');
+
+    const existing = await db.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_state_v8
+        WHERE namespace=? AND ledger_id=? AND restore_epoch=?
+        ORDER BY created_at DESC LIMIT 1`,
+      identity.namespace, identity.ledgerId, identity.restoreEpoch,
+    );
+    if (existing?.bootstrap_id) return existing;
+
+    const idRow = await db.getFirstAsync(
+      `SELECT 'bootstrap-' || lower(hex(randomblob(16))) AS bootstrap_id`,
+    );
+    const bootstrapId = String(idRow?.bootstrap_id || '').trim();
+    if (!bootstrapId) throw new Error('financial_v2_bootstrap_id_generation_failed');
+    const stageNamespace = `bootstrap-stage:${identity.ledgerId}:${identity.restoreEpoch}:${bootstrapId}`;
+
+    const checkpointRow = await db.getFirstAsync(
+      `SELECT COALESCE(MAX(sequence_id),0) AS n
+         FROM ledger_outbox_v3
+        WHERE ledger_id=? AND restore_epoch=? AND superseded_by_bootstrap_id IS NULL`,
+      identity.ledgerId, identity.restoreEpoch,
+    );
+    const checkpoint = Math.max(0, Number(checkpointRow?.n || 0));
+
+    await db.runAsync(
+      `INSERT INTO ledger_accounts_v7
+       (namespace,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at)
+       SELECT ?,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at
+         FROM ledger_accounts_v7 WHERE namespace=?`,
+      stageNamespace, identity.namespace,
+    );
+    await db.runAsync(
+      `INSERT INTO ledger_exchange_rates_v7
+       (namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)
+       SELECT ?,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at
+         FROM ledger_exchange_rates_v7 WHERE namespace=?`,
+      stageNamespace, identity.namespace,
+    );
+    await db.runAsync(
+      `INSERT INTO ledger_financial_transactions_v7
+       (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
+        idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)
+       SELECT ?,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
+              idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at
+         FROM ledger_financial_transactions_v7 WHERE namespace=?`,
+      stageNamespace, identity.namespace,
+    );
+    await db.runAsync(
+      `INSERT INTO ledger_postings_v7
+       (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
+       SELECT ?,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at
+         FROM ledger_postings_v7 WHERE namespace=?`,
+      stageNamespace, identity.namespace,
+    );
+    await db.runAsync(
+      `INSERT INTO ledger_transaction_links_v7
+       (namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)
+       SELECT ?,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at
+         FROM ledger_transaction_links_v7 WHERE namespace=?`,
+      stageNamespace, identity.namespace,
+    );
+    await db.runAsync(
+      `INSERT INTO ledger_entities_v7
+       (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
+       SELECT ?,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at
+         FROM ledger_entities_v7 WHERE namespace=?`,
+      stageNamespace, identity.namespace,
+    );
+    await db.runAsync(
+      `INSERT INTO ledger_workspace_state_v7
+       (namespace,source_mode,schema_version,shadow_checksum,shadow_verified_at,cutover_at,
+        last_reconciled_at,payload_json,updated_at)
+       SELECT ?,source_mode,schema_version,shadow_checksum,shadow_verified_at,cutover_at,
+              last_reconciled_at,payload_json,updated_at
+         FROM ledger_workspace_state_v7 WHERE namespace=?`,
+      stageNamespace, identity.namespace,
+    );
+
+    const now = new Date().toISOString();
+    await db.runAsync(
+      `INSERT INTO ledger_bootstrap_state_v8
+       (namespace,ledger_id,restore_epoch,bootstrap_id,stage_namespace,checkpoint_outbox_sequence,
+        status,expected_row_count,manifest_hash,created_at,finalized_at,last_error)
+       VALUES (?,?,?,?,?,?,'staged',NULL,NULL,?,NULL,NULL)`,
+      identity.namespace, identity.ledgerId, identity.restoreEpoch,
+      bootstrapId, stageNamespace, checkpoint, now,
+    );
+
+    return db.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_state_v8
+        WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=? LIMIT 1`,
+      identity.ledgerId, identity.restoreEpoch, bootstrapId,
+    );
+  }));
+};
+
+export const readFinancialBootstrapStageRowsV8 = async ({
+  stageNamespace, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const stage = String(stageNamespace || '').trim();
+  if (!stage.startsWith('bootstrap-stage:')) throw new Error('financial_v2_bootstrap_stage_namespace_invalid');
+
+  const currencies = await db.getAllAsync(
+    `SELECT code,minor_exponent,enabled FROM ledger_currencies ORDER BY code`,
+  );
+  const accounts = await db.getAllAsync(
+    `SELECT * FROM ledger_accounts_v7 WHERE namespace=? ORDER BY id`, stage,
+  );
+  const exchangeRates = await db.getAllAsync(
+    `SELECT * FROM ledger_exchange_rates_v7 WHERE namespace=? ORDER BY id`, stage,
+  );
+  const transactions = await db.getAllAsync(
+    `SELECT * FROM ledger_financial_transactions_v7 WHERE namespace=? ORDER BY id`, stage,
+  );
+  const postings = await db.getAllAsync(
+    `SELECT * FROM ledger_postings_v7 WHERE namespace=? ORDER BY id`, stage,
+  );
+  const links = await db.getAllAsync(
+    `SELECT * FROM ledger_transaction_links_v7 WHERE namespace=? ORDER BY id`, stage,
+  );
+  const entities = await db.getAllAsync(
+    `SELECT * FROM ledger_entities_v7 WHERE namespace=? ORDER BY entity_type,id`, stage,
+  );
+  const workspaceState = await db.getFirstAsync(
+    `SELECT * FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1`, stage,
+  );
+  return { currencies, accounts, exchangeRates, transactions, postings, links, entities, workspaceState };
+};
+
+export const setFinancialBootstrapStageManifestV8 = async ({
+  ledgerId, restoreEpoch, bootstrapId, manifestHash, expectedRowCount, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const hash = String(manifestHash || '').toLowerCase();
+  const count = Number(expectedRowCount);
+  if (!/^[0-9a-f]{64}$/.test(hash) || !Number.isSafeInteger(count) || count < 0) {
+    throw new Error('financial_v2_bootstrap_manifest_invalid');
+  }
+  await enqueueWrite(() => db.runAsync(
+    `UPDATE ledger_bootstrap_state_v8
+        SET expected_row_count=?,manifest_hash=?,status='staged',last_error=NULL
+      WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=?
+        AND status IN ('staged','uploading','failed')`,
+    count, hash, String(ledgerId), Number(restoreEpoch), String(bootstrapId),
+  ));
+  const row = await db.getFirstAsync(
+    `SELECT * FROM ledger_bootstrap_state_v8
+      WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=? LIMIT 1`,
+    String(ledgerId), Number(restoreEpoch), String(bootstrapId),
+  );
+  if (!row?.bootstrap_id) throw new Error('financial_v2_bootstrap_state_missing');
+  return row;
+};
+
+export const markFinancialBootstrapUploadingV8 = async ({
+  ledgerId, restoreEpoch, bootstrapId, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return false;
+  await ensureFinancialLedgerV7(db);
+  await enqueueWrite(() => db.runAsync(
+    `UPDATE ledger_bootstrap_state_v8 SET status='uploading',last_error=NULL
+      WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=?
+        AND status IN ('staged','uploading','failed')`,
+    String(ledgerId), Number(restoreEpoch), String(bootstrapId),
+  ));
+  return true;
+};
+
+export const failFinancialBootstrapStageV8 = async ({
+  ledgerId, restoreEpoch, bootstrapId, error, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return false;
+  await ensureFinancialLedgerV7(db);
+  await enqueueWrite(() => db.runAsync(
+    `UPDATE ledger_bootstrap_state_v8 SET status='failed',last_error=?
+      WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=? AND status<>'finalized'`,
+    String(error || 'financial_v2_bootstrap_failed').slice(0,500),
+    String(ledgerId), Number(restoreEpoch), String(bootstrapId),
+  ));
+  return true;
+};
+
+export const finalizeFinancialBootstrapStageV8 = async ({
+  ledgerId, restoreEpoch, bootstrapId, manifestHash, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const hash = String(manifestHash || '').toLowerCase();
+
+  return enqueueWrite(async () => db.withTransactionAsync(async () => {
+    const state = await db.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_state_v8
+        WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=? LIMIT 1`,
+      String(ledgerId), Number(restoreEpoch), String(bootstrapId),
+    );
+    if (!state?.bootstrap_id) throw new Error('financial_v2_bootstrap_state_missing');
+    if (String(state.manifest_hash || '').toLowerCase() !== hash) {
+      throw new Error('financial_v2_bootstrap_finalize_manifest_mismatch');
+    }
+    if (state.status === 'finalized') return state;
+
+    const now = new Date().toISOString();
+    await db.runAsync(
+      `UPDATE ledger_outbox_v3
+          SET superseded_by_bootstrap_id=?,superseded_at=?,last_error=NULL
+        WHERE ledger_id=? AND restore_epoch=?
+          AND sequence_id<=? AND superseded_by_bootstrap_id IS NULL`,
+      String(bootstrapId), now, String(ledgerId), Number(restoreEpoch),
+      Math.max(0, Number(state.checkpoint_outbox_sequence || 0)),
+    );
+    await clearFinancialNamespaceRows(db, String(state.stage_namespace));
+    await db.runAsync(
+      `UPDATE ledger_bootstrap_state_v8
+          SET status='finalized',finalized_at=?,last_error=NULL
+        WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=?`,
+      now, String(ledgerId), Number(restoreEpoch), String(bootstrapId),
+    );
+    return db.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_state_v8
+        WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=? LIMIT 1`,
+      String(ledgerId), Number(restoreEpoch), String(bootstrapId),
+    );
+  }));
+};
+
 export const readPendingLedgerMutationsV8 = async ({
   namespace = 'guest', ledgerId, restoreEpoch, limit = 100, database = null,
 } = {}) => {
@@ -615,6 +882,7 @@ export const readPendingLedgerMutationsV8 = async ({
   const rows = await db.getAllAsync(
     `SELECT * FROM ledger_outbox_v3
       WHERE namespace=? AND ledger_id=? AND restore_epoch=? AND acknowledged_at IS NULL
+        AND superseded_by_bootstrap_id IS NULL
         AND (next_attempt_at IS NULL OR next_attempt_at<=?)
       ORDER BY sequence_id LIMIT ?`,
     identity.namespace, targetLedgerId, targetEpoch, new Date().toISOString(),
