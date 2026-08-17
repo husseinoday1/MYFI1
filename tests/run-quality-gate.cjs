@@ -47,6 +47,7 @@ const staticContracts = [
   'performance-data-persistence-v511.test.cjs',
   'p19-001-offline-ledger-identity.test.cjs',
   'p19-002-sync-client-failclosed.test.cjs',
+  'p19-003-sync-rpc-ack-hardening.test.cjs',
   'phase00-governance.test.cjs',
   'product-readiness-batch7.test.cjs',
   'real-state-consolidated-v5.test.cjs',

@@ -101,6 +101,20 @@ const normalized = value => {
   assert(duplicateRows.response.ok, `Mutation uniqueness read failed (${duplicateRows.response.status}).`);
   assert(Array.isArray(duplicateRows.body) && duplicateRows.body.length === 1, 'Idempotent retry created duplicate rows.');
 
+  const conflictingReuse = await requestJson(`${baseUrl}/rest/v1/rpc/sync_financial_mutations_v1`, {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      p_mutations: [{
+        ...mutationA,
+        payload: { ...mutationA.payload, saved: 999999 },
+      }],
+      p_after_sequence: pulledA.latest,
+      p_device_id: deviceA,
+      p_limit: 500,
+    }),
+  });
+  assert(!conflictingReuse.response.ok, 'Conflicting reuse of a mutation ID was accepted by the server.');
+
   const invalid = await requestJson(`${baseUrl}/rest/v1/rpc/sync_financial_mutations_v1`, {
     method: 'POST', headers,
     body: JSON.stringify({
@@ -114,6 +128,7 @@ const normalized = value => {
 
   console.log('two-client-mutation-ordering: ok');
   console.log('mutation-idempotency: ok');
+  console.log('mutation-id-conflict: ok');
   console.log('mutation-validation: ok');
 })().catch(error => {
   console.error(error.message);
