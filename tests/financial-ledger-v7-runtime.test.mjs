@@ -23,6 +23,7 @@ class FakeDatabase {
     this.currentEntityRevision = currentEntityRevision;
     this.archivedGoal = archivedGoal;
     this.events = [];
+    this.shadowId = 0;
     this.inTransaction = false;
     this.committed = false;
     this.rolledBack = false;
@@ -41,6 +42,14 @@ class FakeDatabase {
   async getFirstAsync(sql, ...args) {
     this.events.push({ type: 'getFirst', sql, args, inTransaction: this.inTransaction });
     if (sql.includes('PRAGMA quick_check')) return { quick_check: 'ok' };
+    if (sql.includes("SELECT 'cmd2-'")) return { id: 'cmd2-runtime-' + (++this.shadowId) };
+    if (sql.includes("SELECT 'mut2-'")) return { id: 'mut2-runtime-' + (++this.shadowId) };
+    if (sql.includes('FROM ledger_sync_identity_v8')) {
+      return {
+        namespace: 'user:test', ledger_id: 'ledger-runtime-test', restore_epoch: 1,
+        protocol_version: 2, minimum_supported_version: 2,
+      };
+    }
     if (this.archivedGoal && sql.includes('SELECT kind,scope,date_iso,occurred_at,revision,payload_json,archived_at')) {
       return {
         kind: 'goal_allocation', scope: 'personal', date_iso: '2025-08-14',
@@ -293,6 +302,21 @@ const run = async () => {
   ));
   const replacementPayload = JSON.parse(replacementOutbox.args[7]);
   assert.equal(replacementPayload.entities[0].revision, 9, 'embedded entity revision must advance past SQLite');
+  assert.equal(replacementPayload.entities[0].baseRevision, 8, 'embedded entity must retain its V2 base revision');
+  const replacementShadowRows = replacementDb.events.filter(event => (
+    event.type === 'run' && event.sql.includes('INSERT INTO ledger_outbox_v3')
+  ));
+  assert.equal(replacementShadowRows.length, 2, 'transaction + linked entity must both enter V2 shadow outbox');
+  assert.equal(
+    replacementShadowRows[0].args[4],
+    replacementShadowRows[1].args[4],
+    'transaction + linked entity must share one atomic V2 command_id',
+  );
+  assert.deepEqual(
+    replacementShadowRows.map(event => [event.args[5], event.args[8], event.args[9]]),
+    [['financial_transaction', 6, 5], ['debt', 9, 8]],
+    'V2 revisions/base revisions must be sequential for both transaction and linked entity',
+  );
 
   const entityDb = new FakeDatabase({ currentEntityRevision: 12 });
   const entityResult = await commitEntityChangesV7({

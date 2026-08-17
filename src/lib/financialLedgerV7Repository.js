@@ -496,42 +496,168 @@ const prepareLocalEntity = async (db, entity) => {
     `SELECT revision FROM ledger_entities_v7 WHERE namespace=? AND entity_type=? AND id=? LIMIT 1`,
     entity.namespace, entity.entityType, entity.id,
   );
+  const currentRevision = Math.max(0, Number(current?.revision || 0));
   return {
     ...entity,
-    revision: Math.max(1, Number(entity.revision || 0), Number(current?.revision || 0) + 1),
+    revision: currentRevision + 1,
+    baseRevision: currentRevision,
   };
 };
 
-const insertEntityOutbox = (db, entity) => db.runAsync(
-  `INSERT OR IGNORE INTO ledger_outbox_v2
-   (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
-   VALUES (?,?,?,?,?,?,?,?,?)`,
-  entity.namespace, `${entity.namespace}:${entity.entityType}:${entity.id}:revision:${entity.revision}`,
-  entity.entityType, entity.id, entity.deletedAt ? 'delete' : 'upsert', entity.revision,
-  FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson(entity), entity.updatedAt,
-);
+const ensureShadowLedgerSyncIdentityV8 = async (db, namespace) => {
+  const value = String(namespace || '').trim();
+  if (!value) throw new Error('ledger_sync_identity_namespace_required');
+  let row = await db.getFirstAsync(
+    `SELECT namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version
+       FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
+    value,
+  );
+  if (!row) {
+    const now = new Date().toISOString();
+    await db.runAsync(
+      `INSERT OR IGNORE INTO ledger_sync_identity_v8
+       (namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version,created_at,updated_at)
+       VALUES (?,'ledger-' || lower(hex(randomblob(16))),1,2,2,?,?)`,
+      value, now, now,
+    );
+    row = await db.getFirstAsync(
+      `SELECT namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version
+         FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
+      value,
+    );
+  }
+  if (!row?.ledger_id) throw new Error('ledger_sync_identity_creation_failed');
+  return {
+    namespace: String(row.namespace),
+    ledgerId: String(row.ledger_id),
+    restoreEpoch: Math.max(1, Number(row.restore_epoch || 1)),
+    protocolVersion: Math.max(2, Number(row.protocol_version || 2)),
+    minimumSupportedVersion: Math.max(1, Number(row.minimum_supported_version || 2)),
+  };
+};
 
-const insertFinancialTransactionOutbox = (db, command) => {
+const createShadowCommandIdV2 = async db => {
+  const row = await db.getFirstAsync(`SELECT 'cmd2-' || lower(hex(randomblob(16))) AS id`);
+  const value = String(row?.id || '').trim();
+  if (!value) throw new Error('financial_v2_command_id_generation_failed');
+  return value;
+};
+
+const createShadowMutationIdV2 = async db => {
+  const row = await db.getFirstAsync(`SELECT 'mut2-' || lower(hex(randomblob(16))) AS id`);
+  const value = String(row?.id || '').trim();
+  if (!value) throw new Error('financial_v2_mutation_id_generation_failed');
+  return value;
+};
+
+const insertShadowMutationV2 = async (db, {
+  namespace, commandId, entityType, entityId, operation = 'upsert',
+  revision, baseRevision, payload, createdAt,
+} = {}) => {
+  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const mutationId = await createShadowMutationIdV2(db);
+  const nextRevision = Number(revision);
+  const priorRevision = Number(baseRevision);
+  if (!Number.isSafeInteger(nextRevision) || !Number.isSafeInteger(priorRevision)
+      || nextRevision <= 0 || priorRevision < 0 || nextRevision !== priorRevision + 1) {
+    throw new Error('financial_v2_local_revision_invalid');
+  }
+  await db.runAsync(
+    `INSERT INTO ledger_outbox_v3
+     (namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,operation,
+      revision,base_revision,protocol_version,minimum_supported_version,payload_schema_version,
+      payload_json,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    identity.namespace, identity.ledgerId, identity.restoreEpoch, mutationId, String(commandId),
+    String(entityType), String(entityId), String(operation), nextRevision, priorRevision,
+    identity.protocolVersion, identity.minimumSupportedVersion, FINANCIAL_LEDGER_SCHEMA_VERSION,
+    safeJson(payload), String(createdAt || new Date().toISOString()),
+  );
+  return mutationId;
+};
+
+const financialTransactionV1Payload = command => ({
+  schemaVersion: command.schemaVersion,
+  transaction: command.header,
+  originalTransaction: command.originalTransaction,
+  currencies: command.currencies || [],
+  accounts: command.accounts || [command.account].filter(Boolean),
+  postings: command.postings || [command.posting].filter(Boolean),
+  exchangeRates: command.exchangeRates || [command.exchangeRate].filter(Boolean),
+  links: command.links || [],
+  entities: command.entities || [],
+});
+
+const financialTransactionShadowPayload = command => ({
+  schemaVersion: command.schemaVersion,
+  transaction: command.header,
+  originalTransaction: command.originalTransaction,
+  currencies: command.currencies || [],
+  accounts: command.accounts || [command.account].filter(Boolean),
+  postings: command.postings || [command.posting].filter(Boolean),
+  exchangeRates: command.exchangeRates || [command.exchangeRate].filter(Boolean),
+  links: command.links || [],
+});
+
+const insertEntityOutbox = async (db, entity, { commandId = null } = {}) => {
+  const shadowCommandId = commandId || await createShadowCommandIdV2(db);
+  await db.runAsync(
+    `INSERT OR IGNORE INTO ledger_outbox_v2
+     (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    entity.namespace, `${entity.namespace}:${entity.entityType}:${entity.id}:revision:${entity.revision}`,
+    entity.entityType, entity.id, entity.deletedAt ? 'delete' : 'upsert', entity.revision,
+    FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson(entity), entity.updatedAt,
+  );
+  await insertShadowMutationV2(db, {
+    namespace: entity.namespace,
+    commandId: shadowCommandId,
+    entityType: entity.entityType,
+    entityId: entity.id,
+    operation: entity.deletedAt ? 'delete' : 'upsert',
+    revision: entity.revision,
+    baseRevision: entity.baseRevision,
+    payload: entity,
+    createdAt: entity.updatedAt,
+  });
+};
+
+const insertFinancialTransactionOutbox = async (db, command, { commandId = null } = {}) => {
   const mutation = command.mutation;
-  return db.runAsync(
+  const shadowCommandId = commandId || await createShadowCommandIdV2(db);
+  await db.runAsync(
     `INSERT INTO ledger_outbox_v2
      (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
      VALUES (?,?,?,?,?,?,?,?,?)`,
     mutation.namespace, mutation.mutationId, mutation.entityType, mutation.entityId,
     mutation.operation, mutation.entityRevision, mutation.payloadVersion,
-    safeJson({
-      schemaVersion: command.schemaVersion,
-      transaction: command.header,
-      originalTransaction: command.originalTransaction,
-      currencies: command.currencies || [],
-      accounts: command.accounts || [command.account].filter(Boolean),
-      postings: command.postings || [command.posting].filter(Boolean),
-      exchangeRates: command.exchangeRates || [command.exchangeRate].filter(Boolean),
-      links: command.links || [],
-      entities: command.entities || [],
-    }),
+    safeJson(financialTransactionV1Payload(command)),
     mutation.createdAt,
   );
+  await insertShadowMutationV2(db, {
+    namespace: mutation.namespace,
+    commandId: shadowCommandId,
+    entityType: mutation.entityType,
+    entityId: mutation.entityId,
+    operation: mutation.operation,
+    revision: mutation.entityRevision,
+    baseRevision: mutation.entityRevision - 1,
+    payload: financialTransactionShadowPayload(command),
+    createdAt: mutation.createdAt,
+  });
+  for (const entity of command.entities || []) {
+    await insertShadowMutationV2(db, {
+      namespace: entity.namespace || mutation.namespace,
+      commandId: shadowCommandId,
+      entityType: entity.entityType,
+      entityId: entity.id,
+      operation: entity.deletedAt ? 'delete' : 'upsert',
+      revision: entity.revision,
+      baseRevision: entity.baseRevision,
+      payload: entity,
+      createdAt: entity.updatedAt || mutation.createdAt,
+    });
+  }
 };
 
 const readFinancialTransaction = async (db, namespace, transactionId) => {
@@ -597,6 +723,13 @@ export const commitFinancialLedgerV7Command = async (command, { database = null,
       if (existing?.id) {
         const persisted = await readFinancialTransaction(db, command.header.namespace, String(existing.id));
         result = { supported: true, ok: true, idempotent: true, transactionId: String(existing.id), persisted };
+        return;
+      }
+      if (Number(command.header.revision || 0) !== 1) {
+        result = {
+          supported: true, ok: false, reason: 'nonsequential_transaction_revision',
+          currentRevision: 0, requestedRevision: Number(command.header.revision || 0),
+        };
         return;
       }
 
@@ -695,12 +828,23 @@ export const replaceFinancialTransactionV7 = async ({
         `SELECT revision FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
         namespace, transaction.id,
       );
-      if (currentTransaction && command.header.revision <= Number(currentTransaction.revision || 0)) {
+      const currentRevision = Math.max(0, Number(currentTransaction?.revision || 0));
+      if (currentTransaction && command.header.revision <= currentRevision) {
         result = {
           supported: true,
           ok: false,
           reason: 'stale_transaction_revision',
-          currentRevision: Number(currentTransaction.revision || 0),
+          currentRevision,
+          requestedRevision: command.header.revision,
+        };
+        return;
+      }
+      if (command.header.revision !== currentRevision + 1) {
+        result = {
+          supported: true,
+          ok: false,
+          reason: 'nonsequential_transaction_revision',
+          currentRevision,
           requestedRevision: command.header.revision,
         };
         return;
@@ -786,6 +930,7 @@ export const voidFinancialTransactionsV7 = async ({
   return enqueueWrite(async () => {
     let changed = 0;
     await db.withTransactionAsync(async () => {
+      const shadowCommandId = await createShadowCommandIdV2(db);
       for (const id of ids) {
         const row = await db.getFirstAsync(
           `SELECT revision,payload_json,deleted_at FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
@@ -807,6 +952,11 @@ export const voidFinancialTransactionsV7 = async ({
           namespace, `${namespace}:${id}:void:${revision}`, 'financial_transaction', id, 'void', revision,
           FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson({ transactionId: id, revision, deletedAt: now }), now,
         );
+        await insertShadowMutationV2(db, {
+          namespace, commandId: shadowCommandId, entityType: 'financial_transaction', entityId: id,
+          operation: 'void', revision, baseRevision: revision - 1,
+          payload: { transactionId: id, revision, deletedAt: now }, createdAt: now,
+        });
         changed += 1;
       }
       for (const item of Array.isArray(entityChanges) ? entityChanges : []) {
@@ -817,7 +967,7 @@ export const voidFinancialTransactionsV7 = async ({
           payload: item.payload ?? null, createdAt: String(item.createdAt || now), updatedAt: String(item.updatedAt || now),
         });
         await upsertEntity(db, entity);
-        await insertEntityOutbox(db, entity);
+        await insertEntityOutbox(db, entity, { commandId: shadowCommandId });
       }
     });
     return { supported: true, ok: true, changed };
@@ -839,6 +989,7 @@ export const archiveFinancialTransactionsV7 = async ({
     let changed = 0;
     let releasedAllocations = 0;
     await db.withTransactionAsync(async () => {
+      const shadowCommandId = await createShadowCommandIdV2(db);
       for (const id of ids) {
         const row = await db.getFirstAsync(
           `SELECT kind,scope,date_iso,occurred_at,revision,payload_json,archived_at
@@ -867,6 +1018,12 @@ export const archiveFinancialTransactionsV7 = async ({
           'upsert', revision, FINANCIAL_LEDGER_SCHEMA_VERSION,
           safeJson({ transactionId: id, archiveYear: targetYear, archivedAt, revision }), archivedAt,
         );
+        await insertShadowMutationV2(db, {
+          namespace, commandId: shadowCommandId, entityType: 'financial_transaction', entityId: id,
+          operation: 'upsert', revision, baseRevision: revision - 1,
+          payload: { transactionId: id, archiveYear: targetYear, archivedAt, revision },
+          createdAt: archivedAt,
+        });
         const original = parseJson(row.payload_json, {}) || {};
         if ((row.kind === 'goal_allocation' || original.isGoalSaving) && !original.allocationReleased) {
           const releaseId = `v7-archive-release:${id}`;
@@ -933,7 +1090,7 @@ export const archiveFinancialTransactionsV7 = async ({
                 },
               });
               await insertCommandWithoutOutbox(db, releaseCommand);
-              await insertFinancialTransactionOutbox(db, releaseCommand);
+              await insertFinancialTransactionOutbox(db, releaseCommand, { commandId: shadowCommandId });
               releasedAllocations += 1;
             }
           }
@@ -949,7 +1106,7 @@ export const archiveFinancialTransactionsV7 = async ({
           updatedAt: String(item.updatedAt || archivedAt),
         });
         await upsertEntity(db, entity);
-        await insertEntityOutbox(db, entity);
+        await insertEntityOutbox(db, entity, { commandId: shadowCommandId });
       }
     });
     const row = await db.getFirstAsync(
@@ -986,6 +1143,7 @@ export const commitEntityChangesV7 = async ({ namespace = 'guest', changes = [],
   return enqueueWrite(async () => {
     let changed = 0;
     await db.withTransactionAsync(async () => {
+      const shadowCommandId = await createShadowCommandIdV2(db);
       for (const entity of entities) {
         const current = await db.getFirstAsync(
           `SELECT revision,deleted_at,payload_json FROM ledger_entities_v7
@@ -997,7 +1155,7 @@ export const commitEntityChangesV7 = async ({ namespace = 'guest', changes = [],
         if (current && sameDeletedState && canonicalJson(currentPayload) === canonicalJson(entity.payload)) continue;
         const prepared = await prepareLocalEntity(db, entity);
         await upsertEntity(db, prepared);
-        await insertEntityOutbox(db, prepared);
+        await insertEntityOutbox(db, prepared, { commandId: shadowCommandId });
         changed += 1;
       }
     });
