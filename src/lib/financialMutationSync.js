@@ -41,7 +41,7 @@ export const normalizeFinancialMutationSyncResponse = data => {
 };
 
 export const syncFinancialMutationsV7 = async ({
-  supabase, namespace = 'guest', deviceId = '', database = null, maxPages = 4,
+  supabase, namespace = 'guest', deviceId = '', database = null, maxPages = 200,
 } = {}) => {
   if (!supabase?.rpc) return { supported: false, ok: false, reason: 'supabase_unavailable' };
   const pending = await readPendingLedgerMutationsV7({ namespace, limit: 500, database });
@@ -50,8 +50,11 @@ export const syncFinancialMutationsV7 = async ({
   let uploaded = 0;
   let downloaded = 0;
   let pages = 0;
+  let remoteHasMore = false;
+  const pageBudget = Math.max(1, Math.min(200, Number(maxPages) || 200));
   try {
-    while (pages < Math.max(1, Number(maxPages) || 4)) {
+    while (pages < pageBudget) {
+      const cursorBeforePage = cursor;
       const { data, error } = await supabase.rpc('sync_financial_mutations_v1', {
         p_mutations: outgoing,
         p_after_sequence: cursor,
@@ -60,6 +63,7 @@ export const syncFinancialMutationsV7 = async ({
       });
       if (error) throw error;
       const response = normalizeFinancialMutationSyncResponse(data);
+      remoteHasMore = !!response.hasMore;
       const accepted = response.acceptedMutationIds.filter(id => outgoing.some(item => item.mutationId === id));
       if (accepted.length) {
         await acknowledgeLedgerMutationsV7({ mutationIds: accepted, database });
@@ -73,10 +77,24 @@ export const syncFinancialMutationsV7 = async ({
       cursor = Math.max(cursor, Number(applied.cursor || response.latestSequence || 0));
       pages += 1;
       outgoing = [];
-      if (!response.hasMore) break;
+      if (!remoteHasMore) break;
+      if (cursor <= cursorBeforePage) {
+        return {
+          supported: true, ok: false, reason: 'financial_mutation_sync_cursor_stalled',
+          uploaded, downloaded, cursor, pages, hasMore: true,
+          pendingAfterSync: (await readPendingLedgerMutationsV7({ namespace, limit: 1, database })).length,
+        };
+      }
+    }
+    if (remoteHasMore) {
+      return {
+        supported: true, ok: false, reason: 'financial_mutation_sync_page_budget_exhausted',
+        uploaded, downloaded, cursor, pages, hasMore: true,
+        pendingAfterSync: (await readPendingLedgerMutationsV7({ namespace, limit: 1, database })).length,
+      };
     }
     return {
-      supported: true, ok: true, uploaded, downloaded, cursor, pages,
+      supported: true, ok: true, uploaded, downloaded, cursor, pages, hasMore: false,
       pendingAfterSync: (await readPendingLedgerMutationsV7({ namespace, limit: 1, database })).length,
     };
   } catch (error) {
@@ -85,7 +103,7 @@ export const syncFinancialMutationsV7 = async ({
     }
     return {
       supported: true, ok: false, reason: String(error?.message || 'financial_mutation_sync_failed'),
-      uploaded, downloaded, cursor, pages,
+      uploaded, downloaded, cursor, pages, hasMore: remoteHasMore,
     };
   }
 };

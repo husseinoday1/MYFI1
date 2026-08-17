@@ -1092,6 +1092,34 @@ export const getLedgerSyncCursorV7 = async ({ namespace = 'guest', database = nu
   return Math.max(0, Number(row?.last_server_sequence || 0));
 };
 
+const canonicalSyncValue = value => {
+  const visit = item => {
+    if (Array.isArray(item)) return item.map(visit);
+    if (!item || typeof item !== 'object') return item;
+    return Object.keys(item).sort().reduce((result, key) => {
+      if (item[key] !== undefined) result[key] = visit(item[key]);
+      return result;
+    }, {});
+  };
+  return JSON.stringify(visit(value));
+};
+
+const canonicalSyncTransactionValue = value => {
+  const {
+    updatedAt, revision, idempotencyKey, sqliteCommittedAt, storageEngineVersion,
+    ...financialValue
+  } = value || {};
+  return canonicalSyncValue(financialValue);
+};
+
+const remoteRevisionConflict = (entityType, entityId, revision) => (
+  new Error('financial_mutation_revision_conflict:' + String(entityType) + ':' + String(entityId) + ':' + Number(revision))
+);
+
+const remoteTargetMissing = (entityType, entityId) => (
+  new Error('financial_mutation_target_missing:' + String(entityType) + ':' + String(entityId))
+);
+
 export const applyRemoteLedgerMutationsV7 = async ({
   namespace = 'guest', mutations = [], deviceId = '', database = null,
 } = {}) => {
@@ -1122,10 +1150,18 @@ export const applyRemoteLedgerMutationsV7 = async ({
           const commandPayload = row.payload || {};
           if (row.operation === 'void' || row.operation === 'delete') {
             const existing = await db.getFirstAsync(
-              `SELECT revision,payload_json FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
+              `SELECT revision,payload_json,status,deleted_at
+                 FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
               namespace, row.entityId,
             );
-            if (existing && row.entityRevision >= Number(existing.revision || 0)) {
+            if (!existing) throw remoteTargetMissing('financial_transaction', row.entityId);
+            const currentRevision = Number(existing.revision || 0);
+            if (row.entityRevision < currentRevision) {
+              // Stale remote history is observed and cursor-acknowledged, never applied.
+            } else if (row.entityRevision === currentRevision) {
+              const alreadyVoided = String(existing.status || '') === 'voided' || !!existing.deleted_at;
+              if (!alreadyVoided) throw remoteRevisionConflict('financial_transaction', row.entityId, row.entityRevision);
+            } else {
               const deletedAt = commandPayload.deletedAt || new Date().toISOString();
               await db.runAsync(
                 `UPDATE ledger_financial_transactions_v7
@@ -1139,10 +1175,19 @@ export const applyRemoteLedgerMutationsV7 = async ({
             }
           } else if (commandPayload.archiveYear && commandPayload.transactionId) {
             const existing = await db.getFirstAsync(
-              `SELECT revision,payload_json FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
+              `SELECT revision,payload_json,archive_year,archived_at
+                 FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
               namespace, row.entityId,
             );
-            if (existing && row.entityRevision >= Number(existing.revision || 0)) {
+            if (!existing) throw remoteTargetMissing('financial_transaction', row.entityId);
+            const currentRevision = Number(existing.revision || 0);
+            if (row.entityRevision < currentRevision) {
+              // Stale archive mutation: no-op.
+            } else if (row.entityRevision === currentRevision) {
+              const sameArchive = Number(existing.archive_year || 0) === Number(commandPayload.archiveYear || 0)
+                && !!existing.archived_at;
+              if (!sameArchive) throw remoteRevisionConflict('financial_transaction', row.entityId, row.entityRevision);
+            } else {
               const archivedAt = commandPayload.archivedAt || new Date().toISOString();
               await db.runAsync(
                 `UPDATE ledger_financial_transactions_v7
@@ -1158,11 +1203,46 @@ export const applyRemoteLedgerMutationsV7 = async ({
               applied += 1;
             }
           } else if (commandPayload.transaction && commandPayload.originalTransaction) {
+            const header = { ...commandPayload.transaction, namespace, revision: row.entityRevision };
             const current = await db.getFirstAsync(
-              `SELECT revision FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
+              `SELECT revision,payload_json,status,archive_year,archived_at,deleted_at
+                 FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
               namespace, row.entityId,
             );
-            if (!current || row.entityRevision >= Number(current.revision || 0)) {
+            const currentRevision = Number(current?.revision || 0);
+            let applyTransaction = !current || row.entityRevision > currentRevision;
+            if (current && row.entityRevision === currentRevision) {
+              const sameFinancialValue = canonicalSyncTransactionValue(parseJson(current.payload_json, null))
+                === canonicalSyncTransactionValue(commandPayload.originalTransaction);
+              const sameStatus = String(current.status || 'posted') === String(header.status || 'posted');
+              const sameArchiveYear = Number(current.archive_year || 0) === Number(header.archiveYear || 0);
+              const sameDeletedState = String(current.deleted_at || '') === String(header.deletedAt || '');
+              if (!(sameFinancialValue && sameStatus && sameArchiveYear && sameDeletedState)) {
+                throw remoteRevisionConflict('financial_transaction', row.entityId, row.entityRevision);
+              }
+              for (const sourceEntity of commandPayload.entities || []) {
+                const localEntity = await db.getFirstAsync(
+                  `SELECT revision,deleted_at,payload_json FROM ledger_entities_v7
+                    WHERE namespace=? AND entity_type=? AND id=? LIMIT 1`,
+                  namespace, String(sourceEntity.entityType || ''), String(sourceEntity.id || ''),
+                );
+                const incomingEntityRevision = Math.max(1, Number(sourceEntity.revision || 1));
+                const sameEntity = localEntity
+                  && Number(localEntity.revision || 0) === incomingEntityRevision
+                  && String(localEntity.deleted_at || '') === String(sourceEntity.deletedAt || '')
+                  && canonicalSyncValue(parseJson(localEntity.payload_json, null)) === canonicalSyncValue(sourceEntity.payload ?? null);
+                if (!sameEntity) {
+                  throw remoteRevisionConflict(
+                    String(sourceEntity.entityType || 'entity'),
+                    String(sourceEntity.id || ''),
+                    incomingEntityRevision,
+                  );
+                }
+              }
+              applyTransaction = false;
+            }
+            if (current && row.entityRevision < currentRevision) applyTransaction = false;
+            if (applyTransaction) {
               for (const currency of commandPayload.currencies || []) await insertCurrency(db, currency);
               for (const sourceAccount of commandPayload.accounts || []) {
                 await upsertAccount(db, { ...sourceAccount, namespace });
@@ -1182,7 +1262,6 @@ export const applyRemoteLedgerMutationsV7 = async ({
                   rate.numerator, rate.denominator, rate.rateDate, rate.source, rate.capturedAt,
                 );
               }
-              const header = { ...commandPayload.transaction, namespace, revision: row.entityRevision };
               await db.runAsync(
                 `INSERT INTO ledger_financial_transactions_v7
                  (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
@@ -1236,11 +1315,24 @@ export const applyRemoteLedgerMutationsV7 = async ({
             createdAt: row.payload?.createdAt || new Date().toISOString(),
             updatedAt: row.payload?.updatedAt || new Date().toISOString(),
           };
-          await upsertEntity(db, {
-            ...sourceEntity, namespace, entityType: row.entityType, id: row.entityId,
-            revision: row.entityRevision,
-          });
-          applied += 1;
+          const currentEntity = await db.getFirstAsync(
+            `SELECT revision,deleted_at,payload_json FROM ledger_entities_v7
+              WHERE namespace=? AND entity_type=? AND id=? LIMIT 1`,
+            namespace, row.entityType, row.entityId,
+          );
+          const currentRevision = Number(currentEntity?.revision || 0);
+          if (currentEntity && row.entityRevision === currentRevision) {
+            const sameEntity = String(currentEntity.deleted_at || '') === String(sourceEntity.deletedAt || '')
+              && canonicalSyncValue(parseJson(currentEntity.payload_json, null))
+                === canonicalSyncValue(sourceEntity.payload ?? null);
+            if (!sameEntity) throw remoteRevisionConflict(row.entityType, row.entityId, row.entityRevision);
+          } else if (!currentEntity || row.entityRevision > currentRevision) {
+            await upsertEntity(db, {
+              ...sourceEntity, namespace, entityType: row.entityType, id: row.entityId,
+              revision: row.entityRevision,
+            });
+            applied += 1;
+          }
         }
         await db.runAsync(
           `INSERT OR IGNORE INTO ledger_inbox_v2(mutation_id,namespace,server_sequence,received_at) VALUES (?,?,?,?)`,
