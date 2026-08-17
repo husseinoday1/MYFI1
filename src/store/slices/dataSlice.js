@@ -172,6 +172,20 @@ export const createDataSlice = (set, get) => ({
 
   resetAll: async () => {
     const current = get();
+    if (current.user && current.financialLedgerV7Cutover) {
+      // V1 cloud history has no restore epoch. Deleting the local ledger now
+      // could allow old cloud mutations/snapshots to resurrect it on reconnect.
+      // P19-008 replaces this interlock with the V2 restore-epoch handshake.
+      set({
+        lastSyncError: 'local_reset_requires_protocol_v2',
+        restoreSafety: {
+          status: 'restore_interlock_active',
+          operation: 'delete_local_data',
+          checkedAt: new Date().toISOString(),
+        },
+      });
+      return false;
+    }
     const namespace = current.workspaceNamespace || 'guest';
     const wallets = normalizeWallets([], current.cfg.currency);
     const defaultWalletId = getDefaultWalletId(wallets, current.cfg.currency, null);
@@ -591,6 +605,17 @@ export const createDataSlice = (set, get) => ({
       const restoredCollections = Number(data.v || 0) >= 10 ? data.financialData : data;
 
       const current = get();
+      if (current.user && current.financialLedgerV7Cutover) {
+        set({
+          lastSyncError: 'backup_restore_requires_protocol_v2',
+          restoreSafety: {
+            status: 'restore_interlock_active',
+            operation: 'backup_restore',
+            checkedAt: new Date().toISOString(),
+          },
+        });
+        return false;
+      }
       const coldArchiveNamespace = getColdArchiveNamespace(
         current.workspaceNamespace || GUEST_NAMESPACE,
         current.cfg,

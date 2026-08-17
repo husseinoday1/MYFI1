@@ -351,11 +351,15 @@ const restoreSnapshotAsOperationalV7 = async ({ workspaceNamespace = GUEST_NAMES
   if (!snapshot || !activeLedgerSupported()) return false;
   const state = stateFromSnapshot(snapshot, fallbackCfg);
   const ledgerNamespace = getLedgerNamespace(workspaceNamespace, state.cfg || fallbackCfg);
-  await clearFinancialWorkspaceV7({ namespace: ledgerNamespace });
+  // P19-007: never clear the active ledger first. Operational cutover stages
+  // the replacement, verifies checksum/metrics/health, then promotes it inside
+  // one SQLite transaction. Until promotion succeeds the current ledger stays.
   const restored = await runFinancialOperationalCutoverV7({
     namespace: ledgerNamespace,
     workspace: state,
     coldArchives: [],
+    forceReplace: true,
+    resetPendingOutbox: true,
   });
   if (!restored?.ok || !restored?.cutover) {
     throw new Error(restored?.reason || 'financial_v7_snapshot_restore_failed');

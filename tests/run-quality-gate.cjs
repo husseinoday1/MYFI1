@@ -51,6 +51,7 @@ const staticContracts = [
   'p19-004-local-ledger-id-v8.test.cjs',
   'p19-005-cloud-sync-v2-shadow.test.cjs',
   'p19-006-local-v2-shadow-dualwrite.test.cjs',
+  'p19-007-destructive-restore-interlock.test.cjs',
   'phase00-governance.test.cjs',
   'product-readiness-batch7.test.cjs',
   'real-state-consolidated-v5.test.cjs',
