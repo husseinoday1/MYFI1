@@ -462,6 +462,144 @@ export const readLedgerSyncIdentityV8 = async ({ namespace = 'guest', database =
   } : null;
 };
 
+const restoreIntentMetaKey = namespace => `restore_intent:${String(namespace || 'guest')}`;
+
+export const readLedgerRestoreIntentV8 = async ({ namespace = 'guest', database = null } = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return null;
+  await ensureFinancialLedgerV7(db);
+  const row = await db.getFirstAsync(
+    `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+    restoreIntentMetaKey(namespace),
+  );
+  return parseJson(row?.value, null);
+};
+
+export const beginLedgerRestoreEpochV8 = async ({
+  namespace = 'guest', operation = 'controlled_recovery', database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return null;
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  if (!target) throw new Error('restore_epoch_namespace_required');
+  if (!['backup_restore','delete_local_data','controlled_recovery'].includes(operation)) {
+    throw new Error('restore_epoch_operation_invalid');
+  }
+
+  return enqueueWrite(async () => db.withTransactionAsync(async () => {
+    const identity = await ensureShadowLedgerSyncIdentityV8(db, target);
+    const key = restoreIntentMetaKey(target);
+    const existingRow = await db.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+      key,
+    );
+    const existing = parseJson(existingRow?.value, null);
+    if (existing) {
+      const valid = String(existing.ledgerId || '') === identity.ledgerId
+        && Number(existing.fromEpoch || 0) === identity.restoreEpoch
+        && Number(existing.toEpoch || 0) === identity.restoreEpoch + 1
+        && String(existing.operation || '') === operation;
+      if (!valid) throw new Error('restore_epoch_intent_conflict');
+      return existing;
+    }
+
+    const now = new Date().toISOString();
+    const intent = {
+      version: 1,
+      namespace: target,
+      ledgerId: identity.ledgerId,
+      fromEpoch: identity.restoreEpoch,
+      toEpoch: identity.restoreEpoch + 1,
+      operation,
+      status: 'pending_server_advance',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+      key, safeJson(intent), now,
+    );
+    return intent;
+  }));
+};
+
+export const commitLedgerRestoreEpochV8 = async ({
+  namespace = 'guest', expectedFromEpoch, toEpoch, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return null;
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  const key = restoreIntentMetaKey(target);
+
+  return enqueueWrite(async () => db.withTransactionAsync(async () => {
+    const intentRow = await db.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+      key,
+    );
+    const intent = parseJson(intentRow?.value, null);
+    if (!intent) throw new Error('restore_epoch_commit_without_intent');
+
+    const identity = await db.getFirstAsync(
+      `SELECT namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version
+         FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
+      target,
+    );
+    if (!identity?.ledger_id) throw new Error('restore_epoch_identity_missing');
+
+    const from = Number(expectedFromEpoch ?? intent.fromEpoch);
+    const next = Number(toEpoch ?? intent.toEpoch);
+    if (String(intent.ledgerId) !== String(identity.ledger_id)
+        || Number(identity.restore_epoch) !== from
+        || Number(intent.fromEpoch) !== from
+        || Number(intent.toEpoch) !== next
+        || next !== from + 1) {
+      throw new Error('restore_epoch_commit_conflict');
+    }
+
+    const now = new Date().toISOString();
+    const updated = await db.runAsync(
+      `UPDATE ledger_sync_identity_v8
+          SET restore_epoch=?,updated_at=?
+        WHERE namespace=? AND ledger_id=? AND restore_epoch=?`,
+      next, now, target, String(identity.ledger_id), from,
+    );
+    if (Number(updated?.changes || 0) !== 1) {
+      throw new Error('restore_epoch_local_compare_and_swap_failed');
+    }
+
+    // Start the new epoch with an empty cursor. Old outbox/inbox rows stay as
+    // immutable evidence under the superseded epoch and are never selected as
+    // current-epoch transport.
+    await db.runAsync(
+      `INSERT OR IGNORE INTO ledger_sync_state_v8
+       (ledger_id,restore_epoch,last_server_sequence,last_success_at,last_device_id,updated_at)
+       VALUES (?,?,0,NULL,NULL,?)`,
+      String(identity.ledger_id), next, now,
+    );
+    await db.runAsync(`DELETE FROM ledger_v7_meta WHERE key=?`, key);
+    return {
+      namespace: target,
+      ledgerId: String(identity.ledger_id),
+      fromEpoch: from,
+      restoreEpoch: next,
+      protocolVersion: Math.max(2, Number(identity.protocol_version || 2)),
+    };
+  }));
+};
+
+export const abortLedgerRestoreEpochV8 = async ({ namespace = 'guest', database = null } = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return false;
+  await ensureFinancialLedgerV7(db);
+  await enqueueWrite(() => db.runAsync(
+    `DELETE FROM ledger_v7_meta WHERE key=?`,
+    restoreIntentMetaKey(namespace),
+  ));
+  return true;
+};
+
 const insertCurrency = (db, item) => db.runAsync(
   `INSERT INTO ledger_currencies(code,minor_exponent,enabled) VALUES (?,?,1)
    ON CONFLICT(code) DO UPDATE SET minor_exponent=excluded.minor_exponent,enabled=1`,
