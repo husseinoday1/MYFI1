@@ -1,6 +1,6 @@
 # MYFI R04.1 — Acceptance Recovery Addendum
 
-Status: ACTIVE — AUTOMATED RECOVERY PASS / DEVICE ACCEPTANCE PENDING
+Status: CLOSED — automated recovery and real-device acceptance passed on 2026-08-17.
 Base: `33cce360a118c54daa88332374da07731e5a0641`
 Implementation branch: `r04-p18-001-blocking-ux`
 Automated recovery evidence through: `ef2f2c6bbe07c71f1e94dd8356338285d0b7abd8`
@@ -91,3 +91,17 @@ Every device-reported failure follows:
 `device before-evidence → regression contract/test → fix → automated after-evidence → final device acceptance`
 
 Static string presence alone is never sufficient to close a device-dependent behavior.
+
+
+<!-- R04_1_CLOSURE_2026_08_17 -->
+## R04.1 Closure — 2026-08-17
+
+- **Status:** CLOSED.
+- **Automated final blocker gate:** PASS (P18-009).
+- **Real-device acceptance:** PASS, user-confirmed.
+- **Accepted device scope:** fresh backup round-trip and rollback; locale-correct Arabic/English transfer direction; actual editable foreign FX equation value.
+- **Financial history rewritten:** NO.
+- **SQLite/schema migration:** NO.
+- **SecureStore reset/clear:** NO.
+- **Existing-user financial data preserved:** YES.
+- **Phase 6 restriction from R04.1:** released by this closure; subsequent work remains governed by canonical authority and the multi-currency policy addendum.

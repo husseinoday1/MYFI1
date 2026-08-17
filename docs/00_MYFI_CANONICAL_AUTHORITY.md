@@ -224,3 +224,13 @@ Do not resurrect a superseded file merely because an older chat summary or memor
 “Frozen”, “REV2”, “Final”, “Source of Truth” or “approved”.
 
 Only a newer explicit user-approved canonical authority file may supersede this one.
+
+<!-- P18_010_AUTHORITY_REGISTRATION -->
+## Authority Registration — 2026-08-17
+
+The following documents are authoritative additions to the frozen plan:
+
+- `docs/01_CORE_AUTHORITY/MYFI_MULTI_CURRENCY_FINANCIAL_POLICY_ADDENDUM.md` — canonical policy for multi-currency financial calculation, historical FX, current valuation, transfers, budgets, debts/goals, Base Currency, and future Display Currency.
+- `docs/04_CURRENT_EVIDENCE/MYFI_R04_1_DEVICE_ACCEPTANCE_CLOSURE_2026-08-17.md` — closure evidence for R04.1 real-device acceptance.
+
+R04.1 is CLOSED after P18-009 automated acceptance and the 2026-08-17 real-device PASS. The frozen master plan remains frozen; the multi-currency policy is an addendum and MUST be applied by subsequent relevant phases.

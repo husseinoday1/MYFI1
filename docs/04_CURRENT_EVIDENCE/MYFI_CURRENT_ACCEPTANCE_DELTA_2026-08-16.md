@@ -97,3 +97,13 @@ Before any next release/phase transition:
 2. reconcile this delta with `01_CORE_AUTHORITY/MYFI_RELEASE_GATE_STATUS_AR.md`;
 3. update device evidence;
 4. follow the Frozen Master Plan / active addendum gate order.
+
+<!-- R04_1_FINAL_DELTA_2026_08_17 -->
+## Final R04.1 Delta — 2026-08-17
+
+- P18-009 automated final blockers: PASS.
+- Real-device acceptance: PASS.
+- R04.1: CLOSED.
+- Phase 6 R04.1 hold: RELEASED after closure documentation gates/commit.
+- New canonical policy added: `MYFI_MULTI_CURRENCY_FINANCIAL_POLICY_ADDENDUM.md`.
+- No financial data rewrite, schema migration, SecureStore reset, or existing-user data loss is introduced by this documentation package.
