@@ -600,6 +600,215 @@ export const abortLedgerRestoreEpochV8 = async ({ namespace = 'guest', database 
   return true;
 };
 
+export const readPendingLedgerMutationsV8 = async ({
+  namespace = 'guest', ledgerId, restoreEpoch, limit = 100, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return [];
+  await ensureFinancialLedgerV7(db);
+  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const targetLedgerId = String(ledgerId || identity.ledgerId);
+  const targetEpoch = Math.max(1, Number(restoreEpoch || identity.restoreEpoch));
+  if (targetLedgerId !== identity.ledgerId || targetEpoch !== identity.restoreEpoch) {
+    throw new Error('financial_v2_pending_identity_mismatch');
+  }
+  const rows = await db.getAllAsync(
+    `SELECT * FROM ledger_outbox_v3
+      WHERE namespace=? AND ledger_id=? AND restore_epoch=? AND acknowledged_at IS NULL
+        AND (next_attempt_at IS NULL OR next_attempt_at<=?)
+      ORDER BY sequence_id LIMIT ?`,
+    identity.namespace, targetLedgerId, targetEpoch, new Date().toISOString(),
+    Math.max(1, Math.min(500, Number(limit) || 100)),
+  );
+  return rows.map(row => ({ ...row, payload: parseJson(row.payload_json, null) }));
+};
+
+export const acknowledgeLedgerMutationsV8 = async ({
+  ledgerId, restoreEpoch, mutationIds = [], database = null,
+} = {}) => {
+  const ids = [...new Set((Array.isArray(mutationIds) ? mutationIds : []).filter(Boolean).map(String))];
+  if (!ids.length) return 0;
+  const db = database || await getLedgerDb();
+  if (!db) return 0;
+  await ensureFinancialLedgerV7(db);
+  const now = new Date().toISOString();
+  let changed = 0;
+  await enqueueWrite(() => db.withTransactionAsync(async () => {
+    for (const id of ids) {
+      const result = await db.runAsync(
+        `UPDATE ledger_outbox_v3
+            SET acknowledged_at=?,last_error=NULL
+          WHERE ledger_id=? AND restore_epoch=? AND mutation_id=? AND acknowledged_at IS NULL`,
+        now, String(ledgerId), Number(restoreEpoch), id,
+      );
+      changed += Number(result?.changes || 0);
+    }
+  }));
+  return changed;
+};
+
+export const failLedgerMutationV8 = async ({
+  ledgerId, restoreEpoch, mutationId, error, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db || !mutationId) return false;
+  await ensureFinancialLedgerV7(db);
+  const retryAt = new Date(Date.now() + 60_000).toISOString();
+  await enqueueWrite(() => db.runAsync(
+    `UPDATE ledger_outbox_v3
+        SET attempts=attempts+1,next_attempt_at=?,last_error=?
+      WHERE ledger_id=? AND restore_epoch=? AND mutation_id=?`,
+    retryAt, String(error || 'sync_failed').slice(0,500),
+    String(ledgerId), Number(restoreEpoch), String(mutationId),
+  ));
+  return true;
+};
+
+export const getLedgerSyncCursorV8 = async ({
+  ledgerId, restoreEpoch, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return 0;
+  await ensureFinancialLedgerV7(db);
+  const row = await db.getFirstAsync(
+    `SELECT last_server_sequence FROM ledger_sync_state_v8
+      WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+    String(ledgerId), Number(restoreEpoch),
+  );
+  return Math.max(0, Number(row?.last_server_sequence || 0));
+};
+
+export const applyRemoteLedgerMutationsV8 = async ({
+  namespace = 'guest', ledgerId, restoreEpoch, mutations = [], deviceId = '', database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return { supported:false,ok:false,reason:'sqlite_unavailable' };
+  await ensureFinancialLedgerV7(db);
+  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const targetLedgerId = String(ledgerId || identity.ledgerId);
+  const targetEpoch = Math.max(1, Number(restoreEpoch || identity.restoreEpoch));
+  if (targetLedgerId !== identity.ledgerId || targetEpoch !== identity.restoreEpoch) {
+    return { supported:true,ok:false,reason:'financial_v2_remote_identity_mismatch' };
+  }
+
+  const normalized = (Array.isArray(mutations) ? mutations : []).map(item => ({
+    ...item,
+    ledgerId: String(item.ledgerId || item.ledger_id || ''),
+    restoreEpoch: Number(item.restoreEpoch || item.restore_epoch || 0),
+    mutationId: String(item.mutationId || item.mutation_id || ''),
+    serverSequence: Number(item.serverSequence || item.server_sequence || 0),
+    commandId: String(item.commandId || item.command_id || ''),
+    commandSequence: Number(item.commandSequence || item.command_sequence || 0),
+    commandMutationCount: Number(item.commandMutationCount || item.command_mutation_count || 0),
+    entityType: String(item.entityType || item.entity_type || ''),
+    entityId: String(item.entityId || item.entity_id || ''),
+    operation: String(item.operation || 'upsert'),
+    revision: Number(item.revision || 0),
+    baseRevision: Number(item.baseRevision ?? item.base_revision ?? -1),
+    protocolVersion: Number(item.protocolVersion || item.protocol_version || 0),
+    minimumSupportedVersion: Number(item.minimumSupportedVersion || item.minimum_supported_version || 0),
+    payloadSchemaVersion: Number(item.payloadSchemaVersion || item.payload_schema_version || 0),
+    payload: item.payload || parseJson(item.payload_json, null),
+  })).filter(item => item.mutationId && item.serverSequence > 0);
+
+  for (const item of normalized) {
+    if (item.ledgerId !== identity.ledgerId
+        || item.restoreEpoch !== identity.restoreEpoch
+        || !item.commandId
+        || item.commandSequence <= 0 || item.commandMutationCount <= 0
+        || !item.entityType || !item.entityId
+        || item.revision <= 0 || item.baseRevision < 0
+        || item.revision !== item.baseRevision + 1
+        || item.protocolVersion !== 2
+        || item.minimumSupportedVersion < 1 || item.minimumSupportedVersion > 2
+        || item.payloadSchemaVersion <= 0) {
+      return { supported:true,ok:false,reason:'financial_v2_remote_mutation_invalid' };
+    }
+  }
+
+  const commandGroups = new Map();
+  for (const item of normalized) {
+    const key = String(item.commandSequence) + ':' + item.commandId;
+    const group = commandGroups.get(key) || [];
+    group.push(item);
+    commandGroups.set(key, group);
+  }
+  for (const group of commandGroups.values()) {
+    const expectedCount = Number(group[0]?.commandMutationCount || 0);
+    if (!expectedCount || group.length !== expectedCount
+        || group.some(item => item.commandMutationCount !== expectedCount
+          || item.commandSequence !== group[0].commandSequence
+          || item.commandId !== group[0].commandId)) {
+      return { supported:true,ok:false,reason:'financial_v2_remote_command_incomplete' };
+    }
+    const entityKeys = new Set();
+    for (const item of group) {
+      const entityKey = item.entityType + ':' + item.entityId;
+      if (entityKeys.has(entityKey)) {
+        return { supported:true,ok:false,reason:'financial_v2_remote_command_duplicate_entity' };
+      }
+      entityKeys.add(entityKey);
+    }
+  }
+
+  const unread = [];
+  for (const item of normalized.sort((a,b)=>(
+    a.commandSequence-b.commandSequence || a.serverSequence-b.serverSequence
+  ))) {
+    const received = await db.getFirstAsync(
+      `SELECT mutation_id FROM ledger_inbox_v3
+        WHERE ledger_id=? AND restore_epoch=? AND mutation_id=? LIMIT 1`,
+      identity.ledgerId, identity.restoreEpoch, item.mutationId,
+    );
+    if (!received?.mutation_id) unread.push(item);
+  }
+
+  if (unread.length) {
+    const legacyApply = await applyRemoteLedgerMutationsV7({
+      namespace,
+      deviceId,
+      database: db,
+      mutations: unread.map(item => ({
+        mutationId: item.mutationId,
+        serverSequence: item.serverSequence,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        operation: item.operation,
+        entityRevision: item.revision,
+        payload: item.payload,
+      })),
+    });
+    if (!legacyApply.ok) return legacyApply;
+  }
+
+  const cursor = normalized.reduce((value,item)=>Math.max(value,item.commandSequence),await getLedgerSyncCursorV8({
+    ledgerId: identity.ledgerId, restoreEpoch: identity.restoreEpoch, database: db,
+  }));
+  await enqueueWrite(() => db.withTransactionAsync(async () => {
+    const now = new Date().toISOString();
+    for (const item of normalized) {
+      await db.runAsync(
+        `INSERT OR IGNORE INTO ledger_inbox_v3
+         (ledger_id,restore_epoch,mutation_id,command_id,command_sequence,server_sequence,received_at,apply_status,applied_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+        identity.ledgerId, identity.restoreEpoch, item.mutationId, item.commandId,
+        item.commandSequence, item.serverSequence, now, 'applied', now,
+      );
+    }
+    await db.runAsync(
+      `INSERT INTO ledger_sync_state_v8
+       (ledger_id,restore_epoch,last_server_sequence,last_success_at,last_device_id,updated_at)
+       VALUES (?,?,?,?,?,?)
+       ON CONFLICT(ledger_id,restore_epoch) DO UPDATE SET
+         last_server_sequence=MAX(ledger_sync_state_v8.last_server_sequence,excluded.last_server_sequence),
+         last_success_at=excluded.last_success_at,last_device_id=excluded.last_device_id,updated_at=excluded.updated_at`,
+      identity.ledgerId, identity.restoreEpoch, cursor, now, String(deviceId || ''), now,
+    );
+  }));
+
+  return { supported:true,ok:true,applied:unread.length,cursor };
+};
+
 const insertCurrency = (db, item) => db.runAsync(
   `INSERT INTO ledger_currencies(code,minor_exponent,enabled) VALUES (?,?,1)
    ON CONFLICT(code) DO UPDATE SET minor_exponent=excluded.minor_exponent,enabled=1`,
