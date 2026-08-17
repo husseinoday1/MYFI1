@@ -8,6 +8,7 @@ import {
 } from './financialLedgerV7Model';
 
 const readyDatabases = new WeakSet();
+export const FINANCIAL_SQLITE_SCHEMA_VERSION = 8;
 
 const safeJson = value => {
   try { return JSON.stringify(value ?? null); } catch { return 'null'; }
@@ -191,6 +192,127 @@ CREATE INDEX IF NOT EXISTS idx_ledger_v7_outbox_pending
   
 `;
 
+export const FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL = `
+CREATE TABLE IF NOT EXISTS ledger_sync_identity_v8 (
+  namespace TEXT PRIMARY KEY,
+  ledger_id TEXT NOT NULL UNIQUE,
+  restore_epoch INTEGER NOT NULL DEFAULT 1 CHECK(restore_epoch > 0),
+  protocol_version INTEGER NOT NULL DEFAULT 2 CHECK(protocol_version = 2),
+  minimum_supported_version INTEGER NOT NULL DEFAULT 2 CHECK(minimum_supported_version BETWEEN 1 AND 2),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(namespace, ledger_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_sync_identity_v8_ledger_id
+  ON ledger_sync_identity_v8(ledger_id);
+
+CREATE TABLE IF NOT EXISTS ledger_outbox_v3 (
+  sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  namespace TEXT NOT NULL,
+  ledger_id TEXT NOT NULL,
+  restore_epoch INTEGER NOT NULL CHECK(restore_epoch > 0),
+  mutation_id TEXT NOT NULL,
+  command_id TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK(operation IN ('upsert','delete','void')),
+  revision INTEGER NOT NULL CHECK(revision > 0),
+  base_revision INTEGER NOT NULL CHECK(base_revision >= 0),
+  protocol_version INTEGER NOT NULL DEFAULT 2 CHECK(protocol_version = 2),
+  minimum_supported_version INTEGER NOT NULL DEFAULT 2 CHECK(minimum_supported_version BETWEEN 1 AND 2),
+  payload_schema_version INTEGER NOT NULL CHECK(payload_schema_version > 0),
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  acknowledged_at TEXT,
+  last_error TEXT,
+  superseded_by_bootstrap_id TEXT,
+  superseded_at TEXT,
+  CHECK(revision = base_revision + 1),
+  UNIQUE(ledger_id, restore_epoch, mutation_id),
+  FOREIGN KEY(namespace, ledger_id)
+    REFERENCES ledger_sync_identity_v8(namespace, ledger_id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_outbox_v3_pending
+  ON ledger_outbox_v3(ledger_id, restore_epoch, acknowledged_at, next_attempt_at, sequence_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_outbox_v3_command
+  ON ledger_outbox_v3(ledger_id, restore_epoch, command_id, sequence_id);
+
+CREATE TABLE IF NOT EXISTS ledger_inbox_v3 (
+  ledger_id TEXT NOT NULL,
+  restore_epoch INTEGER NOT NULL CHECK(restore_epoch > 0),
+  mutation_id TEXT NOT NULL,
+  command_id TEXT NOT NULL,
+  command_sequence INTEGER NOT NULL CHECK(command_sequence > 0),
+  server_sequence INTEGER NOT NULL CHECK(server_sequence > 0),
+  received_at TEXT NOT NULL,
+  apply_status TEXT NOT NULL DEFAULT 'observed' CHECK(apply_status IN ('observed','applied','conflict')),
+  applied_at TEXT,
+  PRIMARY KEY(ledger_id, restore_epoch, mutation_id),
+  FOREIGN KEY(ledger_id) REFERENCES ledger_sync_identity_v8(ledger_id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_inbox_v3_sequence
+  ON ledger_inbox_v3(ledger_id, restore_epoch, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_ledger_inbox_v3_command
+  ON ledger_inbox_v3(ledger_id, restore_epoch, command_sequence, command_id, server_sequence);
+
+CREATE TABLE IF NOT EXISTS ledger_bootstrap_state_v8 (
+  namespace TEXT NOT NULL,
+  ledger_id TEXT NOT NULL,
+  restore_epoch INTEGER NOT NULL CHECK(restore_epoch > 0),
+  bootstrap_id TEXT NOT NULL,
+  stage_namespace TEXT NOT NULL,
+  checkpoint_outbox_sequence INTEGER NOT NULL DEFAULT 0 CHECK(checkpoint_outbox_sequence >= 0),
+  status TEXT NOT NULL CHECK(status IN ('staged','uploading','finalized','failed','aborted')),
+  expected_row_count INTEGER CHECK(expected_row_count IS NULL OR expected_row_count >= 0),
+  manifest_hash TEXT,
+  created_at TEXT NOT NULL,
+  finalized_at TEXT,
+  last_error TEXT,
+  PRIMARY KEY(ledger_id, restore_epoch, bootstrap_id),
+  FOREIGN KEY(namespace, ledger_id)
+    REFERENCES ledger_sync_identity_v8(namespace, ledger_id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_bootstrap_state_v8_status
+  ON ledger_bootstrap_state_v8(ledger_id, restore_epoch, status, created_at);
+
+CREATE TABLE IF NOT EXISTS ledger_bootstrap_import_state_v8 (
+  namespace TEXT NOT NULL,
+  ledger_id TEXT NOT NULL,
+  restore_epoch INTEGER NOT NULL CHECK(restore_epoch > 0),
+  bootstrap_id TEXT NOT NULL,
+  stage_namespace TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('downloading','verifying','finalized','failed','aborted')),
+  expected_row_count INTEGER NOT NULL CHECK(expected_row_count >= 0),
+  expected_manifest_hash TEXT NOT NULL,
+  last_cloud_row_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_cloud_row_sequence >= 0),
+  created_at TEXT NOT NULL,
+  verified_at TEXT,
+  finalized_at TEXT,
+  last_error TEXT,
+  PRIMARY KEY(ledger_id, restore_epoch, bootstrap_id),
+  FOREIGN KEY(namespace, ledger_id)
+    REFERENCES ledger_sync_identity_v8(namespace, ledger_id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_bootstrap_import_state_v8_status
+  ON ledger_bootstrap_import_state_v8(ledger_id, restore_epoch, status, created_at);
+
+CREATE TABLE IF NOT EXISTS ledger_sync_state_v8 (
+  ledger_id TEXT NOT NULL,
+  restore_epoch INTEGER NOT NULL CHECK(restore_epoch > 0),
+  shadow_last_server_sequence INTEGER NOT NULL DEFAULT 0 CHECK(shadow_last_server_sequence >= 0),
+  last_server_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_server_sequence >= 0),
+  last_shadow_success_at TEXT,
+  last_success_at TEXT,
+  activated_at TEXT,
+  last_device_id TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(ledger_id, restore_epoch),
+  FOREIGN KEY(ledger_id) REFERENCES ledger_sync_identity_v8(ledger_id) ON DELETE RESTRICT
+);
+`;
+
 const FINANCIAL_LEDGER_V7_MIGRATION = {
   migrationId: '0007_financial_ledger_v7_baseline',
   fromVersion: 0,
@@ -213,6 +335,49 @@ const FINANCIAL_LEDGER_V7_MIGRATION = {
   },
 };
 
+const FINANCIAL_LEDGER_V8_SYNC_IDENTITY_MIGRATION = {
+  migrationId: '0008_sync_identity_v2',
+  fromVersion: FINANCIAL_LEDGER_SCHEMA_VERSION,
+  toVersion: FINANCIAL_SQLITE_SCHEMA_VERSION,
+  signature: [
+    FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL,
+    'backfill immutable ledger ids for existing namespaces',
+    'create shadow protocol-v2 outbox inbox and cursor state',
+    'ledger_v7_meta sqlite_schema_version=8 sync_protocol_version=2',
+  ].join('\n'),
+  apply: async (db) => {
+    await db.execAsync(FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL);
+    const now = new Date().toISOString();
+    await db.runAsync(
+      `INSERT OR IGNORE INTO ledger_sync_identity_v8
+       (namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version,created_at,updated_at)
+       SELECT namespace,
+              'ledger-' || lower(hex(randomblob(16))),
+              1,2,2,?,?
+         FROM (
+           SELECT namespace FROM ledger_workspace_state_v7
+           UNION SELECT namespace FROM ledger_financial_transactions_v7
+           UNION SELECT namespace FROM ledger_entities_v7
+           UNION SELECT namespace FROM ledger_accounts_v7
+           UNION SELECT namespace FROM ledger_outbox_v2
+           UNION SELECT namespace FROM ledger_sync_state_v7
+         )
+        WHERE namespace IS NOT NULL AND trim(namespace) <> ''`,
+      now, now,
+    );
+    await db.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at)
+       VALUES ('sqlite_schema_version',?,?)`,
+      String(FINANCIAL_SQLITE_SCHEMA_VERSION), now,
+    );
+    await db.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at)
+       VALUES ('sync_protocol_version','2',?)`,
+      now,
+    );
+  },
+};
+
 const financialLedgerHealthCheck = async (db) => {
   const row = await db.getFirstAsync('PRAGMA quick_check');
   const result = row ? Object.values(row)[0] : null;
@@ -227,12 +392,74 @@ export const ensureFinancialLedgerV7 = async (db) => {
   if (readyDatabases.has(db)) return true;
   await runLedgerSchemaMigrations({
     database: db,
-    migrations: [FINANCIAL_LEDGER_V7_MIGRATION],
+    migrations: [FINANCIAL_LEDGER_V7_MIGRATION, FINANCIAL_LEDGER_V8_SYNC_IDENTITY_MIGRATION],
     appVersion: '1.0.0',
     healthCheck: financialLedgerHealthCheck,
   });
   readyDatabases.add(db);
   return true;
+};
+
+export const ensureLedgerSyncIdentityV8 = async ({
+  namespace = 'guest', database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return null;
+  await ensureFinancialLedgerV7(db);
+  const value = String(namespace || '').trim();
+  if (!value) throw new Error('ledger_sync_identity_namespace_required');
+
+  return enqueueWrite(async () => {
+    let row = await db.getFirstAsync(
+      `SELECT namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version,created_at,updated_at
+         FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
+      value,
+    );
+    if (!row) {
+      const now = new Date().toISOString();
+      await db.runAsync(
+        `INSERT OR IGNORE INTO ledger_sync_identity_v8
+         (namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version,created_at,updated_at)
+         VALUES (?,'ledger-' || lower(hex(randomblob(16))),1,2,2,?,?)`,
+        value, now, now,
+      );
+      row = await db.getFirstAsync(
+        `SELECT namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version,created_at,updated_at
+           FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
+        value,
+      );
+    }
+    if (!row?.ledger_id) throw new Error('ledger_sync_identity_creation_failed');
+    return {
+      namespace: String(row.namespace),
+      ledgerId: String(row.ledger_id),
+      restoreEpoch: Math.max(1, Number(row.restore_epoch || 1)),
+      protocolVersion: Math.max(2, Number(row.protocol_version || 2)),
+      minimumSupportedVersion: Math.max(1, Number(row.minimum_supported_version || 2)),
+      createdAt: String(row.created_at || ''),
+      updatedAt: String(row.updated_at || ''),
+    };
+  });
+};
+
+export const readLedgerSyncIdentityV8 = async ({ namespace = 'guest', database = null } = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return null;
+  await ensureFinancialLedgerV7(db);
+  const row = await db.getFirstAsync(
+    `SELECT namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version,created_at,updated_at
+       FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
+    String(namespace || 'guest'),
+  );
+  return row ? {
+    namespace: String(row.namespace),
+    ledgerId: String(row.ledger_id),
+    restoreEpoch: Math.max(1, Number(row.restore_epoch || 1)),
+    protocolVersion: Math.max(2, Number(row.protocol_version || 2)),
+    minimumSupportedVersion: Math.max(1, Number(row.minimum_supported_version || 2)),
+    createdAt: String(row.created_at || ''),
+    updatedAt: String(row.updated_at || ''),
+  } : null;
 };
 
 const insertCurrency = (db, item) => db.runAsync(

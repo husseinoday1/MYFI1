@@ -330,7 +330,7 @@ const run = async () => {
   assert.equal(releasePosting.args[5], 'release');
   assert.equal(releasePosting.args[6], -25000000, 'archive must release the reserved posting atomically');
   assert.equal(
-    archiveDb.events.filter(event => event.type === 'run' && event.sql.includes('ledger_outbox_v2')).length,
+    archiveDb.events.filter(event => event.type === 'run' && /INSERT(?: OR IGNORE)? INTO ledger_outbox_v2/.test(event.sql)).length,
     2,
     'archive and its hidden release must both be mutation-synced',
   );
