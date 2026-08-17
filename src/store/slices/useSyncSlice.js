@@ -1170,30 +1170,11 @@ export const createSyncSlice = (set, get) => ({
             });
             return canonicalState;
           }
-          const ledgerNamespace = getLedgerNamespace(namespace, canonicalState.cfg || session.cfg);
-          const reconciled = await reconcileFinancialWorkspaceV7({
-            namespace: ledgerNamespace,
-            workspace: canonicalState,
-          });
-          if (reconciled.supported && !reconciled.ok) {
-            throw new Error(reconciled.reason || 'financial_v7_sync_reconcile_failed');
-          }
-          const boundedWorkspace = await readFinancialWorkspaceV7({
-            namespace: ledgerNamespace, includeArchived: false, transactionLimit: 2000,
-          });
-          if (!boundedWorkspace) throw new Error('financial_v7_sync_bounded_reload_failed');
-          const bounded = stateFromFinancialV7(boundedWorkspace, canonicalState.cfg || session.cfg);
-          set({
-            ...bounded,
-            user: session.user,
-            workspaceNamespace: namespace,
-            workspaceReady: true,
-            financialLedgerV7Ready: true,
-            financialLedgerV7Cutover: true,
-            financialLedgerV7Checksum: session.financialLedgerV7Checksum || null,
-            ...statePatch,
-          });
-          return canonicalState;
+          // V7 is the financial authority after operational cutover. The legacy
+          // user_data snapshot is compatibility output only; absence in that
+          // snapshot is NOT a financial delete instruction. Remote financial
+          // changes must arrive through explicit V7 mutations/tombstones.
+          throw new Error('financial_v7_snapshot_pull_forbidden');
         };
         // Capture a high-water mark. Mutations created while this network sync is
         // in flight get larger ids and are never accidentally acknowledged.
@@ -1226,8 +1207,13 @@ export const createSyncSlice = (set, get) => ({
           } else {
             set({ financialMutationSync });
           }
-          // Snapshot sync below intentionally remains active as the rollback
-          // bridge until mutation sync has passed a real two-device release gate.
+          if (!financialMutationSync.ok) {
+            // Never fall back to snapshot pull after V7 cutover. Snapshot
+            // absence previously generated local void/delete mutations.
+            throw new Error(financialMutationSync.reason || 'financial_v7_mutation_sync_required');
+          }
+          // Snapshot sync remains only as a compatibility mirror OUTPUT after
+          // V7 cutover. Financial pull authority is the mutation protocol.
         }
         const { snapshot: baseSnapshot } = await readVaultSnapshot(baseNamespace);
         let baseState = baseSnapshot
@@ -1388,10 +1374,21 @@ export const createSyncSlice = (set, get) => ({
               get().cfg,
             );
 
-            if (!baseState) {
-              // First run after this upgrade: neither phone has a safe common
-              // merge base yet. Union both sides so current divergent data is
-              // preserved, then establish a base after the successful push.
+            if (cutoverBridge) {
+              // Financial snapshot PULL is forbidden after V7 cutover. Mutation
+              // sync above has already applied explicit remote upserts/deletes.
+              // Compare the compatibility snapshot only; if it is stale or
+              // incomplete, fall through and PUSH the full V7 projection.
+              const currentV7 = await readCurrentForSnapshot();
+              if (sameWorkspaceData(currentV7, remoteState)) {
+                return persistSynced({
+                  revision: cloudRevision,
+                  syncedAt: cloud.updated_at || new Date().toISOString(),
+                  syncConflict: null,
+                });
+              }
+            } else if (!baseState) {
+              // Pre-cutover compatibility path only.
               const applied = await applyMergedState({ remoteState, cloudRevision });
               if (!applied) return false;
 
@@ -1584,13 +1581,14 @@ export const createSyncSlice = (set, get) => ({
     const guestWalletsToImport = guest.wallets.filter(item => {
       if (!item?.id) return false;
       if (Number(item.openingBalance || 0) !== 0) return true;
-      if (!referencedGuestWalletIds.has(item.id)) return false;
-      const existing = current.wallets.find(wallet => wallet.id === item.id);
-      if (!existing) return true;
-      // Same technical ID does not mean the same financial account. A guest IRR
-      // wallet must not be collapsed into an account IQD wallet during sign-in.
-      return String(existing.currency || current.cfg.currency).toUpperCase()
-        !== String(item.currency || guest.cfg.currency).toUpperCase();
+      // Same technical ID does not mean the same financial account. Currency
+      // remains owned by the Guest wallet (item.currency || guest.cfg.currency).
+      // A wallet referenced by Guest financial history is a real financial
+      // account even when its technical default ID/name/currency matches a
+      // wallet in the signed-in namespace. Different namespaces must never
+      // collapse ownership. remapIds() below assigns a fresh ID on collision.
+      if (referencedGuestWalletIds.has(item.id)) return true;
+      return false;
     });
 
     const walletIds = remapIds(guestWalletsToImport, current.wallets);

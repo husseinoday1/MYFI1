@@ -223,7 +223,12 @@ const isGuestNamedWallet = wallet => (
   || /\(Guest\)\s*$/i.test(String(wallet?.nameEn || ''))
 );
 
-const walletKey = wallet => [
+const stableEntityKey = item => {
+  const id = String(item?.id || '').trim();
+  return id ? `id:${id}` : '';
+};
+
+const walletKey = wallet => stableEntityKey(wallet) || [
   cleanTextKey(wallet?.name || wallet?.nameEn),
   cleanTextKey(wallet?.type),
   cleanTextKey(wallet?.scope),
@@ -269,6 +274,8 @@ const dedupeWallets = (wallets = []) => dedupeWalletsWithAliases(wallets).wallet
 
 const transactionKey = item => {
   if (!item) return '';
+  const stable = stableEntityKey(item);
+  if (stable) return stable;
   const transfer = item.kind === 'transfer';
   return [
     transfer ? 'transfer' : cleanTextKey(item.flowType || item.kind),
@@ -291,13 +298,13 @@ const transactionKey = item => {
   ].join('|');
 };
 
-const paymentKey = item => [
+const paymentKey = item => stableEntityKey(item) || [
   itemDateKey(item),
   amountKey(item?.amt),
   cleanTextKey(item?.note),
 ].join('|');
 
-const debtKey = item => [
+const debtKey = item => stableEntityKey(item) || [
   cleanTextKey(item?.direction || 'owed'),
   cleanTextKey(item?.title || item?.name),
   amountKey(item?.total),
@@ -306,7 +313,7 @@ const debtKey = item => [
   cleanTextKey(item?.scope),
 ].join('|');
 
-const goalKey = item => [
+const goalKey = item => stableEntityKey(item) || [
   cleanTextKey(item?.title || item?.name),
   amountKey(item?.target),
   cleanTextKey(item?.currencyCode || item?.currency),
@@ -314,7 +321,7 @@ const goalKey = item => [
   cleanTextKey(item?.scope),
 ].join('|');
 
-const commitmentKey = item => [
+const commitmentKey = item => stableEntityKey(item) || [
   cleanTextKey(item?.title || item?.name),
   amountKey(item?.amt),
   cleanTextKey(item?.currencyCode || item?.currency),

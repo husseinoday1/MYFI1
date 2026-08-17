@@ -331,9 +331,18 @@ const duplicateGuestData = dedupeWorkspaceData({
   commitments: [],
   cats: [{ id: 'other', label: 'Other' }],
 });
-assert.equal(duplicateGuestData.wallets.length, 1, 'same guest/account wallet must collapse into one wallet');
-assert.equal(duplicateGuestData.trans.length, 1, 'same transaction imported through a duplicate wallet must collapse into one transaction');
-assert.equal(duplicateGuestData.trans[0].walletId, 'wallet-main', 'deduped transactions must point at the surviving wallet');
+assert.equal(duplicateGuestData.wallets.length, 2, 'different stable wallet IDs must remain distinct even when human-visible wallet properties match');
+assert.deepEqual(
+  duplicateGuestData.wallets.map(item => item.id).sort(),
+  ['wallet-guest', 'wallet-main'],
+  'account and Guest wallets must retain separate stable identities',
+);
+assert.equal(duplicateGuestData.trans.length, 2, 'different stable transaction IDs must not be silently collapsed by content');
+assert.deepEqual(
+  duplicateGuestData.trans.map(item => item.walletId).sort(),
+  ['wallet-guest', 'wallet-main'],
+  'transactions must remain attached to their own surviving wallet IDs',
+);
 
 const annualReport = buildFinancialReport({
   trans: [
