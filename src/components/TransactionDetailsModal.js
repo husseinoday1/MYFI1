@@ -98,6 +98,7 @@ export default function TransactionDetailsModal({ visible, transaction, cats = [
   const amountText = `${amount >= 0 ? '+' : '-'}${formatMoneyNumber(Math.abs(nativeAmount), nativeCurrency, cfg.lang)} ${getSymbol(nativeCurrency)}`;
   const transferSourceText = `${formatMoneyNumber(sourceAmount, fromCurrency, cfg.lang)} ${getSymbol(fromCurrency)}`;
   const transferTargetText = `${formatMoneyNumber(targetAmount, toCurrency, cfg.lang)} ${getSymbol(toCurrency)}`;
+  const transferArrow = cfg.lang === 'ar' ? '←' : '→';
   const transferRateText = sourceAmount > 0 && targetAmount > 0 && directRate > 0
     ? `1 ${fromCurrency} = ${directRate.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${toCurrency}`
     : '-';
@@ -160,9 +161,15 @@ export default function TransactionDetailsModal({ visible, transaction, cats = [
             <Text style={{ color: th.sub, fontSize: 12, ...weight('800'), textAlign: 'center' }}>{C.amount}</Text>
             {transfer ? (
               <View style={{ marginTop: 5, gap: 5 }}>
-                <Text style={[s.transferAmountValue, { color: amountColor, textAlign: 'center' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.62}>
-                  {transferSourceText} → {transferTargetText}
+                <View style={{ flexDirection: cfg.lang === 'ar' ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                <Text style={[s.transferAmountValue, { color: amountColor, writingDirection: 'ltr' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.62}>
+                  {transferSourceText}
                 </Text>
+                <Text style={[s.transferAmountValue, { color: amountColor }]}>{transferArrow}</Text>
+                <Text style={[s.transferAmountValue, { color: amountColor, writingDirection: 'ltr' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.62}>
+                  {transferTargetText}
+                </Text>
+              </View>
                 {fromCurrency !== toCurrency ? (
                   <Text style={{ color: th.sub, fontSize: 11, ...weight('800'), textAlign: 'center' }}>{transferRateText}</Text>
                 ) : null}

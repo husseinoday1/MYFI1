@@ -321,9 +321,121 @@ export const createDataSlice = (set, get) => ({
     const coldArchives = await exportColdArchives(
       getColdArchiveNamespace(workspaceNamespace || GUEST_NAMESPACE, cfg),
     );
-    return JSON.stringify(buildFinancialBackup({
+    const backup = buildFinancialBackup({
       trans, debts, goals, wallets, commitments, cats, coldArchives, cfg,
-    }));
+    });
+
+    const positiveRate = value => {
+      const n = Number(value);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+    const deriveRate = (baseAmount, nativeAmount) => {
+      const baseValue = Math.abs(Number(baseAmount));
+      const nativeValue = Math.abs(Number(nativeAmount));
+      return Number.isFinite(baseValue) && Number.isFinite(nativeValue) && baseValue > 0 && nativeValue > 0
+        ? baseValue / nativeValue
+        : null;
+    };
+    const repairFrozenFx = (transaction, walletList = []) => {
+      if (!transaction || typeof transaction !== 'object') return transaction;
+      const next = { ...transaction };
+      const baseCurrency = String(next.baseCurrencyCode || backup.financialConfig?.currency || cfg.currency || 'IQD').toUpperCase();
+      const walletCurrency = walletId => String(
+        walletList.find(wallet => wallet?.id === walletId)?.currency || baseCurrency
+      ).toUpperCase();
+
+      if (next.kind === 'transfer') {
+        const fromCurrency = String(next.fromCurrency || walletCurrency(next.fromWalletId)).toUpperCase();
+        const toCurrency = String(next.toCurrency || walletCurrency(next.toWalletId)).toUpperCase();
+        const sourceAmount = Math.abs(Number(next.transferFromAmount ?? next.transferAmount ?? 0));
+        const targetAmount = Math.abs(Number(next.transferToAmount ?? next.transferAmount ?? 0));
+        const directRate = positiveRate(next.transferRate ?? next.exchangeRate)
+          || (sourceAmount > 0 && targetAmount > 0 ? targetAmount / sourceAmount : null);
+
+        let fromBaseRate = positiveRate(next.fromBaseRate)
+          || deriveRate(next.baseFromAmount ?? next.baseAmount, sourceAmount);
+        let toBaseRate = positiveRate(next.toBaseRate)
+          || deriveRate(next.baseToAmount, targetAmount);
+
+        if (fromCurrency === toCurrency && fromCurrency !== baseCurrency) {
+          fromBaseRate = fromBaseRate || toBaseRate;
+          toBaseRate = toBaseRate || fromBaseRate;
+        } else if (fromCurrency !== baseCurrency && toCurrency !== baseCurrency && directRate) {
+          if (!fromBaseRate && toBaseRate) fromBaseRate = directRate * toBaseRate;
+          if (!toBaseRate && fromBaseRate) toBaseRate = fromBaseRate / directRate;
+        }
+
+        if (fromCurrency !== baseCurrency && fromBaseRate) next.fromBaseRate = fromBaseRate;
+        if (toCurrency !== baseCurrency && toBaseRate) next.toBaseRate = toBaseRate;
+
+        const sourceResolved = fromCurrency === baseCurrency || positiveRate(next.fromBaseRate);
+        const targetResolved = toCurrency === baseCurrency || positiveRate(next.toBaseRate);
+        if (sourceResolved && targetResolved) {
+          next.fxStatus = 'RESOLVED';
+          next.unresolvedFxReason = null;
+          if (next.fromBaseRate !== transaction.fromBaseRate || next.toBaseRate !== transaction.toBaseRate) {
+            next.fxResolutionSource = next.fxResolutionSource || 'backup_derived_from_frozen_amounts';
+          }
+        }
+        return next;
+      }
+
+      const nativeCurrency = String(
+        next.walletCurrency
+        || next.currencyCode
+        || walletCurrency(next.walletId)
+      ).toUpperCase();
+
+      if (nativeCurrency !== baseCurrency && !positiveRate(next.exchangeRate)) {
+        const derived = deriveRate(next.baseAmount ?? next.amt, next.walletAmount);
+        if (derived) {
+          next.exchangeRate = derived;
+          next.fxStatus = 'RESOLVED';
+          next.unresolvedFxReason = null;
+          next.fxResolutionSource = next.fxResolutionSource || 'backup_derived_from_frozen_amounts';
+        }
+      }
+      return next;
+    };
+
+    const repairCollection = (collection, walletList) => (
+      Array.isArray(collection) ? collection.map(item => repairFrozenFx(item, walletList)) : collection
+    );
+
+    if (backup.financialData && typeof backup.financialData === 'object') {
+      const walletList = Array.isArray(backup.financialData.wallets) ? backup.financialData.wallets : wallets;
+      backup.financialData = {
+        ...backup.financialData,
+        trans: repairCollection(backup.financialData.trans, walletList),
+      };
+    } else {
+      backup.trans = repairCollection(backup.trans, backup.wallets || wallets);
+    }
+
+    if (Array.isArray(backup.coldArchives)) {
+      backup.coldArchives = backup.coldArchives.map(archive => {
+        const archiveWallets = Array.isArray(archive?.data?.wallets)
+          ? archive.data.wallets
+          : (backup.financialData?.wallets || backup.wallets || wallets);
+        return {
+          ...archive,
+          data: archive?.data
+            ? {
+                ...archive.data,
+                trans: repairCollection(archive.data.trans, archiveWallets),
+              }
+            : archive?.data,
+        };
+      });
+    }
+
+    const serialized = JSON.stringify(backup);
+    const roundTrip = JSON.parse(serialized);
+    const validation = inspectBackupData(roundTrip);
+    if (!validation.valid) {
+      throw new Error(`backup_export_preflight_failed:${validation.errors[0] || 'invalid_backup'}`);
+    }
+    return serialized;
   },
 
   buildYearArchive: (year, requestedScope = null) => {

@@ -34,6 +34,11 @@ import { buildGeneratedEntryTitle, isGeneratedEntryTitle } from '../lib/transact
 
 const cleanNumber = parseNumberInput;
 
+const displayFxValue = value => {
+  const n = cleanNumber(value);
+  return n > 0 ? n.toLocaleString(undefined, { maximumFractionDigits: 8 }) : '?';
+};
+
 // Keep Arabic explanatory copy outside the equation. Android's BiDi resolver can
 // reorder a mixed Arabic/Latin Text node even when writingDirection is LTR.
 export const FxEquation = ({ fromCurrency, toCurrency, value = '?' }) => (
@@ -1638,7 +1643,7 @@ export default function AddTransModal({
                   <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
                     {cfg.lang === 'ar' ? `قيمة ${fromCurrency} للتقارير` : 'Reporting value'}
                   </Text>
-                  <FxEquation fromCurrency={fromCurrency} toCurrency={baseCurrencyCode} />
+                  <FxEquation fromCurrency={fromCurrency} toCurrency={baseCurrencyCode} value={displayFxValue(transferFromBaseRate)} />
                   <TextInput
                     value={transferFromBaseRate}
                     onChangeText={(value) => {
@@ -1666,7 +1671,7 @@ export default function AddTransModal({
                   <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
                     {cfg.lang === 'ar' ? `قيمة ${toCurrency} للتقارير` : 'Reporting value'}
                   </Text>
-                  <FxEquation fromCurrency={toCurrency} toCurrency={baseCurrencyCode} />
+                  <FxEquation fromCurrency={toCurrency} toCurrency={baseCurrencyCode} value={displayFxValue(transferToBaseRate)} />
                   <TextInput
                     value={transferToBaseRate}
                     onChangeText={(value) => {
@@ -1698,7 +1703,7 @@ export default function AddTransModal({
                 <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
                   {cfg.lang === 'ar' ? `قيمة ${fromCurrency} التاريخية للتقارير` : `Historical ${fromCurrency} reporting value`}
                 </Text>
-                <FxEquation fromCurrency={fromCurrency} toCurrency={baseCurrencyCode} />
+                <FxEquation fromCurrency={fromCurrency} toCurrency={baseCurrencyCode} value={displayFxValue(transferFromBaseRate)} />
                 <TextInput
                   value={transferFromBaseRate}
                   onChangeText={(value) => {
@@ -1788,7 +1793,7 @@ export default function AddTransModal({
                 <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
                   {cfg.lang === 'ar' ? 'سعر المتابعة التاريخي' : 'Tracker historical rate'}
                 </Text>
-                <FxEquation fromCurrency={trackerCurrency} toCurrency={cfg.currency} />
+                <FxEquation fromCurrency={trackerCurrency} toCurrency={cfg.currency} value={displayFxValue(entityBaseRate)} />
                 <TextInput
                   value={entityBaseRate}
                   onChangeText={(value) => setEntityBaseRate(formatNumberInput(value))}
@@ -1807,10 +1812,10 @@ export default function AddTransModal({
               <View style={[s.entryField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
                 <Text style={[s.fieldLabel, { color: th.sub, textAlign: align }]}>
                   {cfg.lang === 'ar'
-                    ? (isTrackerPayment ? 'سعر محفظة الدفع' : 'سعر الصرف')
-                    : (isTrackerPayment ? 'Payment wallet rate' : 'Exchange rate')}
+                    ? (isTrackerPayment ? 'سعر محفظة الدفع' : 'سعر الصرف لهذه الحركة · قابل للتعديل')
+                    : (isTrackerPayment ? 'Payment wallet rate' : 'Exchange rate · editable')}
                 </Text>
-                <FxEquation fromCurrency={entryCurrency} toCurrency={cfg.currency} />
+                <FxEquation fromCurrency={entryCurrency} toCurrency={cfg.currency} value={displayFxValue(exchangeRate)} />
                 <TextInput
                   value={exchangeRate}
                   onChangeText={(value) => {

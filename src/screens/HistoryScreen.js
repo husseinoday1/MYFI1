@@ -491,7 +491,9 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
     const transferToAmount = Math.abs(Number(item.transferToAmount ?? item.transferAmount ?? 0));
     const transferRate = Number(item.transferRate ?? item.exchangeRate ?? (transferFromAmount > 0 ? transferToAmount / transferFromAmount : 0));
     const transferFee = Math.abs(Number(item.feeAmount || 0));
-    const transferDisplay = `${formatMoneyNumber(transferFromAmount, fromCurrency, cfg.lang)} ${getSymbol(fromCurrency)} → ${formatMoneyNumber(transferToAmount, toCurrency, cfg.lang)} ${getSymbol(toCurrency)}`;
+    const transferSourceDisplay = `${formatMoneyNumber(transferFromAmount, fromCurrency, cfg.lang)} ${getSymbol(fromCurrency)}`;
+    const transferTargetDisplay = `${formatMoneyNumber(transferToAmount, toCurrency, cfg.lang)} ${getSymbol(toCurrency)}`;
+    const transferArrow = cfg.lang === 'ar' ? '←' : '→';
     const transferFxDisplay = isTransfer && fromCurrency !== toCurrency && transferRate > 0
       ? `${cfg.lang === 'ar' ? 'السعر' : 'Rate'} 1 ${fromCurrency} = ${transferRate.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${toCurrency}${transferFee > 0 ? ` · ${cfg.lang === 'ar' ? 'رسوم' : 'Fee'} ${formatMoneyNumber(transferFee, fromCurrency, cfg.lang)} ${getSymbol(fromCurrency)}` : ''}`
       : isTransfer && transferFee > 0
@@ -510,7 +512,9 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
       ? `${cfg.lang === 'ar' ? 'قيمة المتابعة' : 'Tracker amount'}: ${formatMoneyNumber(entityAmount, entityCurrency, cfg.lang)} ${getSymbol(entityCurrency)}`
       : '';
     const walletLabel = isTransfer
-      ? `${getWalletLabel(fromWallet, cfg.lang)} → ${getWalletLabel(toWallet, cfg.lang)}`
+      ? (cfg.lang === 'ar'
+          ? `${getWalletLabel(toWallet, cfg.lang)} ← ${getWalletLabel(fromWallet, cfg.lang)}`
+          : `${getWalletLabel(fromWallet, cfg.lang)} → ${getWalletLabel(toWallet, cfg.lang)}`)
       : getWalletLabel(entryWallet, cfg.lang);
     const categoryLabel = isTransfer ? T.transfer : (cfg.lang === 'ar' ? cat.label : cat.labelEn);
     const metaLabel = [categoryLabel, walletLabel].filter(Boolean).join(' · ');
@@ -555,11 +559,23 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
             ) : null}
           </View>
           <View style={s.amountBlock}>
-            <Text style={{ color, ...weight('900'), fontSize: 15, textAlign: isTransfer ? 'left' : align, ...(isTransfer ? { writingDirection: 'ltr' } : {}) }} numberOfLines={1}>
-              {isTransfer ? transferDisplay : nativeDisplay}
-            </Text>
+            {isTransfer ? (
+              <View style={{ flexDirection: cfg.lang === 'ar' ? 'row-reverse' : 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 4 }}>
+                <Text style={{ color, ...weight('900'), fontSize: 15, writingDirection: 'ltr' }} numberOfLines={1}>
+                  {transferSourceDisplay}
+                </Text>
+                <Text style={{ color, ...weight('900'), fontSize: 15 }}>{transferArrow}</Text>
+                <Text style={{ color, ...weight('900'), fontSize: 15, writingDirection: 'ltr' }} numberOfLines={1}>
+                  {transferTargetDisplay}
+                </Text>
+              </View>
+            ) : (
+              <Text style={{ color, ...weight('900'), fontSize: 15, textAlign: align }} numberOfLines={1}>
+                {nativeDisplay}
+              </Text>
+            )}
             {transferFxDisplay ? (
-              <Text style={{ color: th.sub, ...weight('700'), fontSize: 10, lineHeight: 14, textAlign: isTransfer ? 'left' : align, ...(isTransfer ? { writingDirection: 'ltr' } : {}) }} numberOfLines={1}>
+              <Text style={{ color: th.sub, ...weight('700'), fontSize: 10, lineHeight: 14, textAlign: align, writingDirection: 'ltr' }} numberOfLines={1}>
                 {transferFxDisplay}
               </Text>
             ) : null}
