@@ -170,7 +170,14 @@ export const createDataSlice = (set, get) => ({
     }
   },
 
-  resetAll: async () => {
+  resetAll: async (options = {}) => {
+    // P19-015A2: destructive local reset owns the maintenance barrier.
+    if (!options?.maintenanceOwned) {
+      return get().runFinancialMaintenance(
+        'local_financial_reset',
+        () => get().resetAll({ maintenanceOwned: true }),
+      );
+    }
     const current = get();
     if (current.user && current.financialLedgerV7Cutover) {
       // V1 cloud history has no restore epoch. Deleting the local ledger now
@@ -481,7 +488,14 @@ export const createDataSlice = (set, get) => ({
     };
   },
 
-  commitYearArchive: async (year, packageChecksum = '', requestedScope = null) => {
+  commitYearArchive: async (year, packageChecksum = '', requestedScope = null, options = {}) => {
+    // P19-015A2: archive moves hot/cold financial state under one maintenance barrier.
+    if (!options?.maintenanceOwned) {
+      return get().runFinancialMaintenance(
+        'year_archive',
+        () => get().commitYearArchive(year, packageChecksum, requestedScope, { maintenanceOwned: true }),
+      );
+    }
     const targetYear = Number(year);
     if (!Number.isInteger(targetYear) || targetYear >= new Date().getFullYear()) return false;
     const current = get();
@@ -597,6 +611,13 @@ export const createDataSlice = (set, get) => ({
   },
 
   importBackup: async (jsonStr, options = {}) => {
+    // P19-015A2: backup restore owns the maintenance barrier.
+    if (!options?.maintenanceOwned) {
+      return get().runFinancialMaintenance(
+        'backup_restore',
+        () => get().importBackup(jsonStr, { ...(options || {}), maintenanceOwned: true }),
+      );
+    }
     let rollback = null;
     try {
       const data = JSON.parse(jsonStr);
@@ -684,7 +705,7 @@ export const createDataSlice = (set, get) => ({
           ledgerError: null,
           dirty: true,
         });
-        await get().loadLocal(restoredState.workspaceNamespace || GUEST_NAMESPACE, { allowLegacy: false });
+        await get().loadLocal(restoredState.workspaceNamespace || GUEST_NAMESPACE, { allowLegacy: false, maintenanceOwned: true }); // P19-015A2 backup restore reload
         set({ dirty: true });
       } else {
         await get().saveLocal({ force: true, dirty: true });
@@ -739,7 +760,7 @@ export const createDataSlice = (set, get) => ({
         try {
           await replaceColdArchives(coldArchiveNamespace, coldArchives || []);
           if (activeLedgerSupported() && stateRollback.financialLedgerV7Cutover) {
-            await get().loadLocal(stateRollback.workspaceNamespace || get().workspaceNamespace || GUEST_NAMESPACE, { allowLegacy: false });
+            await get().loadLocal(stateRollback.workspaceNamespace || get().workspaceNamespace || GUEST_NAMESPACE, { allowLegacy: false, maintenanceOwned: true }); // P19-015A2 rollback reload
           } else {
             await get().saveLocal({ force: true });
           }

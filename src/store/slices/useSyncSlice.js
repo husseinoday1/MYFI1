@@ -3,6 +3,12 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SQLiteStorage from 'expo-sqlite/kv-store';
+import { flushLedgerWrites } from '../../lib/ledgerDatabase';
+import {
+  getFinancialMaintenanceSnapshot,
+  isFinancialMaintenanceBlocked,
+  runFinancialMaintenanceTask,
+} from '../../lib/financialMaintenanceBarrier';
 import { mergeWorkspaceStates, sameWorkspaceData } from '../multiDeviceSync';
 import { supabase } from '../../lib/supabase';
 import { STORAGE, DEF_CATS, DEF_CFG, DEF_NOTIF, LEGACY_STORAGE_KEYS, normalizeCfg } from '../../lib/constants';
@@ -224,11 +230,19 @@ const normalizeScheduledSyncReason = value => (
 const armScheduledCloudSync = (get, reason, attempt = 0) => {
   scheduledSyncReason = normalizeScheduledSyncReason(reason || scheduledSyncReason);
   scheduledSyncAttempt = Math.max(0, Number(attempt) || 0);
+  // P19-015A2: do not start scheduled sync while maintenance is pending/active.
+  if (isFinancialMaintenanceBlocked()) {
+    if (scheduledSyncTimer) clearTimeout(scheduledSyncTimer);
+    scheduledSyncTimer = null;
+    return false;
+  }
   if (scheduledSyncTimer) clearTimeout(scheduledSyncTimer);
   const delay = SCHEDULED_SYNC_DELAYS_MS[Math.min(scheduledSyncAttempt, SCHEDULED_SYNC_DELAYS_MS.length - 1)];
   scheduledSyncTimer = setTimeout(async () => {
     scheduledSyncTimer = null;
     const current = get();
+    // P19-015A2: a timer that fired after a maintenance request must stand down.
+    if (isFinancialMaintenanceBlocked()) return;
     if (!current.user || current.cfg.demoMode || !current.workspaceReady || !current.dirty) {
       scheduledSyncAttempt = 0;
       return;
@@ -1110,6 +1124,34 @@ const runControlledFinancialV2Activation = async ({
 };
 
 export const createSyncSlice = (set, get) => ({
+  // P19-015A2: shared store-level maintenance owner. Requests become pending
+  // synchronously, scheduled sync is cancelled, in-flight sync is drained,
+  // and A1's SQLite writer queue is quiet before the critical section starts.
+  runFinancialMaintenance: async (reason, task, options = {}) => {
+    if (typeof task !== 'function') throw new Error('financial_maintenance_task_required');
+    const normalizedReason = String(reason || 'financial_maintenance');
+    if (scheduledSyncTimer) {
+      clearTimeout(scheduledSyncTimer);
+      scheduledSyncTimer = null;
+    }
+    return runFinancialMaintenanceTask({
+      reason: normalizedReason,
+      beforeEnter: async () => {
+        if (options.insideSync !== true) await syncQueue.catch(() => false);
+        await flushLedgerWrites();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await flushLedgerWrites();
+      },
+      afterExit: async () => {
+        if (options.resumeSync === false) return;
+        const current = get();
+        if (current.user && !current.cfg.demoMode && current.workspaceReady && current.dirty) {
+          armScheduledCloudSync(get, options.resumeSyncReason || normalizedReason, 0);
+        }
+      },
+    }, task);
+  },
+
   previewNormalizedCloud: async ({ baseline } = {}) => {
     const current = get();
     if (!normalizedPreviewEnabled) return { ok: false, reason: 'disabled' };
@@ -1183,7 +1225,24 @@ export const createSyncSlice = (set, get) => ({
     return { ok: true, namespace, linkedUserId };
   },
 
-  setUser: async (user, { preserveWorkspaceOnLogout = true, switchToGuest = false } = {}) => {
+  setUser: async (user, options = {}) => {
+    const {
+      preserveWorkspaceOnLogout = true,
+      switchToGuest = false,
+      maintenanceOwned = false,
+    } = options || {};
+    // P19-015A2: serialize every auth/account workspace transition with local
+    // loading, migration, recovery and cutover.
+    if (!maintenanceOwned) {
+      const reason = user
+        ? 'session_login_transition'
+        : switchToGuest ? 'session_guest_transition' : 'session_logout_transition';
+      return get().runFinancialMaintenance(
+        reason,
+        () => get().setUser(user, { ...(options || {}), maintenanceOwned: true }),
+        { resumeSync: false },
+      );
+    }
     if (FRESH_TEST_MODE) {
       set({
         user: user || null,
@@ -1260,7 +1319,7 @@ export const createSyncSlice = (set, get) => ({
         syncConflict: null,
         lastSyncError: null,
       });
-      await get().loadLocal(GUEST_NAMESPACE, { allowLegacy: false });
+      await get().loadLocal(GUEST_NAMESPACE, { allowLegacy: false, maintenanceOwned: true }); // P19-015A2 guest transition
       await writeActiveLocalLedgerContext({
         namespace: GUEST_NAMESPACE,
         linkedUserId: null,
@@ -1326,7 +1385,7 @@ export const createSyncSlice = (set, get) => ({
       lastSyncError: null,
       guestTransferPreview: null,
     });
-    await get().loadLocal(transition.namespace, { allowLegacy: false });
+    await get().loadLocal(transition.namespace, { allowLegacy: false, maintenanceOwned: true }); // P19-015A2 account transition
     await writeActiveLocalLedgerContext({
       namespace: transition.namespace,
       linkedUserId: nextUserId,
@@ -1359,7 +1418,15 @@ export const createSyncSlice = (set, get) => ({
   },
   setOnline: (v)    => set({ online: v }),
 
-  activateFinancialV7Cutover: async () => {
+  activateFinancialV7Cutover: async (options = {}) => {
+    // P19-015A2: canonical cutover is a maintenance operation.
+    if (!options?.maintenanceOwned) {
+      return get().runFinancialMaintenance(
+        'canonical_cutover',
+        () => get().activateFinancialV7Cutover({ maintenanceOwned: true }),
+        { resumeSync: false },
+      );
+    }
     const current = get();
     if (!R04_OPERATIONAL_CUTOVER_ENABLED || current.cfg.demoMode || !activeLedgerSupported()) {
       return { supported: false, ok: false, cutover: false, reason: 'cutover_disabled' };
@@ -1453,7 +1520,10 @@ export const createSyncSlice = (set, get) => ({
 
   activateFinancialSyncV2: async () => {
     if (FRESH_TEST_MODE) return { ok: false, reason: 'fresh_test_disabled' };
+    // P19-015A2: protocol activation must not start during maintenance.
+    if (isFinancialMaintenanceBlocked()) return { ok: false, reason: 'financial_maintenance_active' };
     const queued = syncQueue.then(async () => {
+      if (isFinancialMaintenanceBlocked()) return { ok: false, reason: 'financial_maintenance_active' };
       const current = get();
       if (!current.user || current.cfg.demoMode || !current.workspaceReady || !current.financialLedgerV7Cutover) {
         return { ok: false, reason: 'financial_v2_activation_not_eligible' };
@@ -1476,6 +1546,15 @@ export const createSyncSlice = (set, get) => ({
   },
 
   loadLocal: async (requestedNamespace = null, options = {}) => {
+    // P19-015A2: local load owns schema/cutover maintenance unless an outer
+    // account/restore operation already owns the same barrier.
+    if (!options?.maintenanceOwned) {
+      return get().runFinancialMaintenance(
+        requestedNamespace ? 'local_load' : 'startup_local_load',
+        () => get().loadLocal(requestedNamespace, { ...(options || {}), maintenanceOwned: true }),
+        { resumeSync: false },
+      );
+    }
     const namespace = requestedNamespace || await readActiveLocalLedgerNamespace();
     const allowLegacy = Object.prototype.hasOwnProperty.call(options || {}, 'allowLegacy')
       ? !!options.allowLegacy
@@ -1631,7 +1710,8 @@ export const createSyncSlice = (set, get) => ({
             dataHealth: health,
           }));
           if (R04_OPERATIONAL_CUTOVER_ENABLED && migration?.ok && migration?.migrationReady === true) {
-            await get().activateFinancialV7Cutover();
+            // P19-015A2 auto-cutover reuses outer maintenance.
+            await get().activateFinancialV7Cutover({ maintenanceOwned: true });
           }
         } catch (ledgerError) {
           console.warn('[LEDGER] bootstrap', ledgerError);
@@ -1664,11 +1744,19 @@ export const createSyncSlice = (set, get) => ({
     return success;
   },
 
-  clearAndResetVault: async () => {
+  clearAndResetVault: async (options = {}) => {
+    // P19-015A2: vault reset is a maintenance operation.
+    if (!options?.maintenanceOwned) {
+      return get().runFinancialMaintenance(
+        'vault_reset',
+        () => get().clearAndResetVault({ maintenanceOwned: true }),
+        { resumeSync: false },
+      );
+    }
     const namespace = get().workspaceNamespace || GUEST_NAMESPACE;
     try {
       await clearVaultSnapshot(namespace);
-      await get().loadLocal(namespace, { allowLegacy: false });
+      await get().loadLocal(namespace, { allowLegacy: false, maintenanceOwned: true }); // P19-015A2 vault reset
       set({ vaultUnreadable: false, lastSyncError: null, vaultError: null, vaultRecovery: null });
       return true;
     } catch (e) {
@@ -1863,7 +1951,10 @@ export const createSyncSlice = (set, get) => ({
 
   syncCloud: async (options = {}) => {
     if (FRESH_TEST_MODE) return false;
+    // P19-015A2: cloud sync must stand down while maintenance is requested/active.
+    if (isFinancialMaintenanceBlocked()) return false;
     const queued = syncQueue.then(async () => {
+      if (isFinancialMaintenanceBlocked()) return false;
       const syncStartedAt = new Date().toISOString();
       let initial = get();
       if (!initial.user || initial.cfg.demoMode || !initial.workspaceReady) return false;
@@ -1875,13 +1966,21 @@ export const createSyncSlice = (set, get) => ({
         const namespace = initial.workspaceNamespace || workspaceNamespaceForSession({ user: initial.user });
         let cloudRecovery = null;
         if (activeLedgerSupported() && initial.financialLedgerV7Cutover) {
-          cloudRecovery = await runVerifiedEmptyShellCloudRecoveryV2({
-            get,
-            set,
-            workspaceNamespace: namespace,
-            ledgerNamespace: getLedgerNamespace(namespace, initial.cfg),
-            syncUserId,
-          });
+          // P19-015A2: cloud recovery temporarily owns the maintenance barrier.
+          // If another maintenance request arrived while this sync was in-flight,
+          // abort this sync so that request can drain syncQueue and proceed.
+          if (getFinancialMaintenanceSnapshot().blocked) return false;
+          cloudRecovery = await get().runFinancialMaintenance(
+            'cloud_recovery',
+            () => runVerifiedEmptyShellCloudRecoveryV2({
+              get,
+              set,
+              workspaceNamespace: namespace,
+              ledgerNamespace: getLedgerNamespace(namespace, initial.cfg),
+              syncUserId,
+            }),
+            { insideSync: true, resumeSync: false },
+          );
           if (cloudRecovery?.blocked || cloudRecovery?.ok === false) {
             throw new Error(cloudRecovery?.reason || 'financial_cloud_recovery_blocked');
           }
@@ -2333,7 +2432,14 @@ export const createSyncSlice = (set, get) => ({
     return get().syncCloud({ reason: 'pull' });
   },
 
-  transferGuestToCurrent: async () => {
+  transferGuestToCurrent: async (options = {}) => {
+    // P19-015A2: guest merge owns the maintenance barrier.
+    if (!options?.maintenanceOwned) {
+      return get().runFinancialMaintenance(
+        'guest_workspace_merge',
+        () => get().transferGuestToCurrent({ maintenanceOwned: true }),
+      );
+    }
     const currentUi = get();
     if (!currentUi.user) return false;
     const namespace = workspaceNamespaceForSession({ user: currentUi.user });
@@ -2507,7 +2613,14 @@ export const createSyncSlice = (set, get) => ({
 
   dismissGuestTransfer: () => set({ pendingGuestTransfer: false, guestTransferPreview: null }),
 
-  restoreLastMergeRollback: async () => {
+  restoreLastMergeRollback: async (options = {}) => {
+    // P19-015A2: merge rollback is a financial restore.
+    if (!options?.maintenanceOwned) {
+      return get().runFinancialMaintenance(
+        'merge_rollback_restore',
+        () => get().restoreLastMergeRollback({ maintenanceOwned: true }),
+      );
+    }
     const current = get();
     const namespace = current.workspaceNamespace || workspaceNamespaceForSession({ user: current.user });
     const { snapshot: rollback } = await readVaultSnapshot(mergeRollbackNamespace(namespace));

@@ -38,6 +38,10 @@ import DecisionModal from './src/components/DecisionModal';
 import { filterByActiveScope, getEntryScope, getModules, normalizeScope, shouldShowTrackersTab } from './src/lib/modules';
 import { handleAuthCallback } from './src/lib/authCallback';
 import { normalizeWallets } from './src/lib/wallets';
+import {
+  getFinancialMaintenanceSnapshot,
+  subscribeFinancialMaintenance,
+} from './src/lib/financialMaintenanceBarrier';
 
 const FORCE_ONBOARDING = process.env.EXPO_PUBLIC_FORCE_ONBOARDING === '1';
 const FRESH_TEST_MODE = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
@@ -150,9 +154,14 @@ function AppRoot() {
   const conflictPromptOpen = useRef(false);
   const handledAuthUrls = useRef(new Set());
   const lockBackgroundAt = useRef(null);
+  const authTransitionQueue = useRef(Promise.resolve());
+  const [financialMaintenance, setFinancialMaintenance] = useState(() => getFinancialMaintenanceSnapshot());
   const [fontsLoaded, fontError] = useFonts(fontAssets);
   const fontReady = fontsLoaded || !!fontError;
   const systemColorScheme = useColorScheme();
+
+  // P19-015A2: subscribe the shell to the process-wide maintenance barrier.
+  useEffect(() => subscribeFinancialMaintenance(setFinancialMaintenance), []);
 
   useEffect(() => {
     if (!ready || !R01_DEVICE_GATE_ENABLED || r01DeviceGateStarted) return;
@@ -281,39 +290,68 @@ function AppRoot() {
   );
   const preferredTab = visibleTabs.some(item => item.key === cfg.startTab) ? cfg.startTab : 'home';
 
+  // P19-015A2: startup barrier. Local SQLite mounting/migration completes before
+  // any Supabase session transition is allowed to switch the active workspace.
+  // Auth callbacks are then serialized through one promise queue.
   useEffect(() => {
+    let active = true;
+    let authSubscription = null;
+
+    const queueAuthTransition = nextUser => {
+      const queued = authTransitionQueue.current.then(
+        () => setUser(nextUser),
+        () => setUser(nextUser),
+      );
+      authTransitionQueue.current = queued.catch(() => undefined);
+      return queued;
+    };
+
     (async () => {
       if (FRESH_TEST_MODE) {
         await clearVaultSnapshot(FRESH_TEST_NAMESPACE);
         await loadLocal(FRESH_TEST_NAMESPACE, { allowLegacy: false });
+        if (!active) return;
         setShowOnboard(true);
         setReady(true);
         return;
       }
 
       await loadLocal();
+      if (!active) return;
+
+      const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+        queueAuthTransition(session?.user ?? null).catch(error => {
+          console.warn('[MYFI:STARTUP_AUTH_TRANSITION]', String(error?.message || error || 'auth_transition_failed'));
+        });
+      });
+      authSubscription = listener?.subscription || null;
+
+      try {
+        const { data } = await supabase.auth.getSession();
+        await queueAuthTransition(data?.session?.user ?? null);
+      } catch (error) {
+        console.warn('[MYFI:STARTUP_SESSION]', String(error?.message || error || 'session_read_failed'));
+        await queueAuthTransition(null);
+      }
+
+      await authTransitionQueue.current.catch(() => undefined);
+      if (!active) return;
       const completed = await AsyncStorage.getItem(STORAGE.ONBOARD);
       setShowOnboard(FORCE_ONBOARDING || completed !== 'true');
       setReady(true);
-    })();
-
-    if (FRESH_TEST_MODE) return undefined;
-
-    supabase.auth.getSession()
-      .then(({ data }) => {
-        if (data?.session?.user) setUser(data.session.user);
-      })
-      .catch(() => setUser(null));
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? null);
+    })().catch(error => {
+      console.error('[MYFI:STARTUP_BARRIER]', String(error?.message || error || 'startup_failed'));
+      if (active) setReady(true);
     });
 
-    return () => listener.subscription.unsubscribe();
+    return () => {
+      active = false;
+      authSubscription?.unsubscribe?.();
+    };
   }, [loadLocal, setUser]);
 
   useEffect(() => {
-    if (FRESH_TEST_MODE) return undefined;
+    if (FRESH_TEST_MODE || !ready) return undefined;
     let active = true;
     const processUrl = async (url) => {
       if (!url || handledAuthUrls.current.has(url)) return;
@@ -351,7 +389,7 @@ function AppRoot() {
       active = false;
       subscription.remove();
     };
-  }, [cfg.lang, setUser]);
+  }, [ready, cfg.lang, setUser]); // P19-015A2 auth URL startup barrier
 
   useEffect(() => {
     if (!ready || !user || !workspaceReady) return;
@@ -598,6 +636,23 @@ function AppRoot() {
         <Text style={s.splashTitle}>MYFI</Text>
         <Text style={s.splashSubtitle}>
           {cfg.lang === 'ar' ? 'أموالك بوضوح' : 'Your finances, clearly'}
+        </Text>
+      </View>
+    );
+  }
+
+  if (financialMaintenance.blocked) {
+    return (
+      <View style={s.splash}>
+        <StatusBar style="light" />
+        <Ionicons name="shield-checkmark-outline" size={42} color="#159A6A" />
+        <Text style={s.splashTitle}>
+          {cfg.lang === 'ar' ? 'جاري تأمين البيانات' : 'Securing financial data'}
+        </Text>
+        <Text style={[s.splashSubtitle, { textAlign: 'center', maxWidth: 320 }]}>
+          {cfg.lang === 'ar'
+            ? 'تتوقف الكتابة والمزامنة مؤقتاً حتى تكتمل العملية بأمان.'
+            : 'Writes and sync are temporarily paused until this operation completes safely.'}
         </Text>
       </View>
     );
