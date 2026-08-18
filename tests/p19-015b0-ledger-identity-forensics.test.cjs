@@ -1,0 +1,11 @@
+const fs=require('node:fs');const path=require('node:path');const assert=require('node:assert/strict');
+const root=path.resolve(process.argv[2]||path.join(__dirname,'..'));const read=r=>fs.readFileSync(path.join(root,r),'utf8');
+const diag=read('src/dev/p19LocalSqliteDiagnostics.js');const settings=read('src/screens/SettingsScreen.js');const sync=read('src/store/slices/useSyncSlice.js');const gate=read('tests/run-quality-gate.cjs');
+assert.match(diag,/P19-015B0_LEDGER_IDENTITY_FORENSICS/);assert.match(diag,/peekLedgerDb/);assert.doesNotMatch(diag,/\bgetLedgerDb\b/);
+for(const x of ['ledger_inbox_v3','ledger_bootstrap_import_state_v8','ledger_outbox_v3','ledger_sync_state_v8','PRAGMA foreign_key_check','directLedgerIdUpdateSafeByCurrentFKState','reserved_ledger_id_already_exists_locally','cloudEvidence'])assert.ok(diag.includes(x),`missing ${x}`);
+assert.doesNotMatch(diag,/\.runAsync\s*\(/);assert.doesNotMatch(diag,/\.execAsync\s*\(/);assert.doesNotMatch(diag,/\bINSERT\b/i);assert.doesNotMatch(diag,/\bUPDATE\b/i);assert.doesNotMatch(diag,/\bDELETE\b/i);
+assert.match(settings,/financialCloudRecoveryV2/);assert.match(settings,/cloudRecovery:\s*financialCloudRecoveryV2/);assert.match(settings,/P19-015B0_LEDGER_IDENTITY_FORENSICS/);
+const s=sync.indexOf("if (source.reservedLedgerId && source.reservedLedgerId !== shell.ledgerId)");assert.ok(s>=0);const marker="return { attempted: true, ok: false, blocked: true, reason, source, shell };";const e=sync.indexOf(marker,s);assert.ok(e>s);const g=sync.slice(s,e+marker.length);
+assert.ok(g.includes('source.reservedRestoreEpoch'),'cloud restore epoch must come from reservedRestoreEpoch');for(const f of ['cloudRestoreEpoch','cloudRevision','cloudUpdatedAt','sourceHash','verifiedAt','legacyFinancialCount','walletCount','bootstrapId'])assert.ok(g.includes(f),`missing ${f}`);assert.doesNotMatch(g,/source\.snapshot\b/);assert.ok(!g.includes('snapshot:'));
+assert.match(gate,/p19-015b0-ledger-identity-forensics\.test\.cjs/);
+console.log('[PASS] P19-015B0 ledger identity forensics contract');console.log('[PASS] Diagnostic path contains no SQLite write API or DML');console.log('[PASS] Cloud evidence is metadata-only; financial payload is excluded');

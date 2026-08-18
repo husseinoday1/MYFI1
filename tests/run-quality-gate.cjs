@@ -61,6 +61,7 @@ const staticContracts = [
   'p19-013-atomic-v2-remote-apply.test.cjs',
   'p19-015a1-sqlite-runtime-core.test.cjs',
   'p19-015a2-maintenance-startup-barrier.test.cjs',
+  'p19-015b0-ledger-identity-forensics.test.cjs',
   'phase00-governance.test.cjs',
   'product-readiness-batch7.test.cjs',
   'real-state-consolidated-v5.test.cjs',

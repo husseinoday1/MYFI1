@@ -333,6 +333,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
     refreshDataHealth,
     financialLedgerV7Cutover,
     financialMutationSync,
+    financialCloudRecoveryV2,
     workspaceNamespace,
   } = useStore();
 
@@ -737,19 +738,19 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
     if (localSqliteDiagnosticBusy) return;
     setLocalSqliteDiagnosticBusy(true);
     try {
-      const evidence = await collectP19LocalSqliteDiagnostics({ workspaceNamespace, cfg });
+      const evidence = await collectP19LocalSqliteDiagnostics({ workspaceNamespace, cfg, cloudRecovery: financialCloudRecoveryV2 });
       const text = JSON.stringify(evidence, null, 2);
       setLocalSqliteDiagnostic(text);
-      console.log('[P19-014A_LOCAL_SQLITE_DIAGNOSTIC]', text);
+      console.log('[P19-015B0_LEDGER_IDENTITY_FORENSICS]', text);
     } catch (error) {
       const text = JSON.stringify({
-        patchId: 'P19-014A',
+        patchId: 'P19-015B0',
         readOnly: true,
         ok: false,
         reason: String(error?.message || error || 'local_sqlite_diagnostic_failed'),
       }, null, 2);
       setLocalSqliteDiagnostic(text);
-      console.warn('[P19-014A_LOCAL_SQLITE_DIAGNOSTIC]', text);
+      console.warn('[P19-015B0_LEDGER_IDENTITY_FORENSICS]', text);
     } finally {
       setLocalSqliteDiagnosticBusy(false);
     }
