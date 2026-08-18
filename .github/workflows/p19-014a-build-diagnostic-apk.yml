@@ -1,0 +1,90 @@
+name: P19-014A Diagnostic APK
+
+on:
+  push:
+    branches:
+      - r05-p19-014a-github-apk-build
+
+permissions:
+  contents: read
+
+jobs:
+  build-diagnostic-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout exact build branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verify diagnostic base commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_BASE="e124ed30330d6492c109db65c708f1afb3e4f2a8"
+          ACTUAL_BASE="$(git rev-parse HEAD^)"
+          echo "Workflow commit: $(git rev-parse HEAD)"
+          echo "Diagnostic base: $ACTUAL_BASE"
+          if [ "$ACTUAL_BASE" != "$EXPECTED_BASE" ]; then
+            echo "[FAIL] Expected base $EXPECTED_BASE but found $ACTUAL_BASE"
+            exit 1
+          fi
+          echo "[PASS] Exact P19-014A diagnostic base verified"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify Android signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
+          ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
+          echo "Signing certificate SHA256: $ACTUAL"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "[FAIL] Signing certificate does not match installed MYFI app"
+            exit 1
+          fi
+          echo "[PASS] Signing certificate matches installed MYFI app"
+
+      - name: Build signed release APK
+        working-directory: android
+        env:
+          CI: "true"
+        run: ./gradlew app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Verify APK exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          ls -lh "$APK"
+          sha256sum "$APK" | tee app-release.apk.sha256
+
+      - name: Upload diagnostic APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: P19-014A-diagnostic-release-apk
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            app-release.apk.sha256
+          if-no-files-found: error
+          retention-days: 7
