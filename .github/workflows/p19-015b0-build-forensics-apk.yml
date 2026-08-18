@@ -1,0 +1,92 @@
+name: P19-015B0 Forensics APK
+on:
+  push:
+    branches:
+      - r05-p19-015b0-github-apk-build-r4
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-forensics-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact P19-015B0 source and build-only change
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_BASE="ce9a32544492743f1cf07c9e7a0983138830da0b"
+          WORKFLOW=".github/workflows/p19-015b0-build-forensics-apk.yml"
+          git merge-base --is-ancestor "$EXPECTED_BASE" HEAD || { echo "[FAIL] P19-015B0 source commit is not an ancestor of HEAD"; exit 1; }
+          CHANGED="$(git diff --name-only "$EXPECTED_BASE"..HEAD)"
+          if [ "$CHANGED" != "$WORKFLOW" ]; then echo "[FAIL] Build branch contains changes outside the workflow file"; printf '%s\n' "$CHANGED"; exit 1; fi
+          echo "[PASS] Exact P19-015B0 source preserved; only GitHub build workflow added"
+          echo "SOURCE_HEAD=$EXPECTED_BASE" >> "$GITHUB_ENV"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Load public Supabase build environment
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require('fs');const cfg=JSON.parse(fs.readFileSync('eas.json','utf8'));const env=cfg?.build?.preview?.env||{};
+          for(const key of ['EXPO_PUBLIC_SUPABASE_URL','EXPO_PUBLIC_SUPABASE_KEY']){const value=String(env[key]||'').trim();if(!value)throw new Error(`[FAIL] Missing ${key} in eas.json preview env`);fs.appendFileSync(process.env.GITHUB_ENV,`${key}=${value}\n`)}
+          console.log('[PASS] Supabase public build environment loaded from eas.json');
+          NODE
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: P19-015B0 targeted safety contract
+        run: node tests/p19-015b0-ledger-identity-forensics.test.cjs .
+      - name: Static quality gate
+        run: npm run test:gate:static
+      - name: Runtime quality gate
+        run: npm run test:gate:runtime
+      - name: Android bundle verification
+        run: npm run verify:android
+      - name: Verify Android signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
+          ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then echo "[FAIL] Signing certificate does not match installed MYFI app"; exit 1; fi
+          echo "[PASS] Signing certificate matches installed MYFI app"
+      - name: Make Gradle wrapper executable
+        working-directory: android
+        run: chmod +x ./gradlew
+      - name: Build signed release APK
+        working-directory: android
+        env:
+          CI: "true"
+        run: ./gradlew app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
+      - name: Verify APK and create evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/release/app-release.apk"; test -f "$APK"
+          SHA="$(sha256sum "$APK" | awk '{print $1}')"; SIZE="$(stat -c%s "$APK")"
+          { echo "Patch=P19-015B0"; echo "SourceCommit=$SOURCE_HEAD"; echo "BuildCommit=$(git rev-parse HEAD)"; echo "Branch=$(git branch --show-current)"; echo "APK=$APK"; echo "SHA256=$SHA"; echo "SizeBytes=$SIZE"; echo "DiagnosticMode=READ_ONLY"; echo "CloudFinancialPayloadLogged=NO"; echo "ProductionSigningCertified=NO"; echo "FinancialDataChanged=NO"; echo "SQLiteSchemaChanged=NO"; echo "SQLiteSchemaVersion=8"; echo "MigrationRequired=NO"; echo "SecureStoreChanged=NO"; echo "ExistingUserDataPreserved=YES"; } | tee P19-015B0-apk-evidence.txt
+          sha256sum "$APK" | tee app-release.apk.sha256
+      - name: Upload P19-015B0 APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: P19-015B0-forensics-release-apk
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            app-release.apk.sha256
+            P19-015B0-apk-evidence.txt
+          if-no-files-found: error
+          retention-days: 7
