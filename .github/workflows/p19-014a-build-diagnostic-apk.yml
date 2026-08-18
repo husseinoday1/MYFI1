@@ -14,24 +14,34 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - name: Checkout exact build branch
+      - name: Checkout build branch
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Verify diagnostic base commit
+      - name: Verify diagnostic base and build-only changes
         shell: bash
         run: |
           set -euo pipefail
           EXPECTED_BASE="e124ed30330d6492c109db65c708f1afb3e4f2a8"
-          ACTUAL_BASE="$(git rev-parse HEAD^)"
-          echo "Workflow commit: $(git rev-parse HEAD)"
-          echo "Diagnostic base: $ACTUAL_BASE"
-          if [ "$ACTUAL_BASE" != "$EXPECTED_BASE" ]; then
-            echo "[FAIL] Expected base $EXPECTED_BASE but found $ACTUAL_BASE"
+          WORKFLOW=".github/workflows/p19-014a-build-diagnostic-apk.yml"
+
+          echo "HEAD: $(git rev-parse HEAD)"
+          git merge-base --is-ancestor "$EXPECTED_BASE" HEAD || {
+            echo "[FAIL] P19-014A base commit is not an ancestor of HEAD"
+            exit 1
+          }
+
+          CHANGED="$(git diff --name-only "$EXPECTED_BASE"..HEAD)"
+          echo "Changes since P19-014A base:"
+          printf '%s\n' "$CHANGED"
+
+          if [ -n "$CHANGED" ] && [ "$CHANGED" != "$WORKFLOW" ]; then
+            echo "[FAIL] Build branch contains changes outside the workflow file"
             exit 1
           fi
-          echo "[PASS] Exact P19-014A diagnostic base verified"
+
+          echo "[PASS] Exact P19-014A code preserved; only workflow changed"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,7 +50,7 @@ jobs:
           cache: npm
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -63,6 +73,10 @@ jobs:
             exit 1
           fi
           echo "[PASS] Signing certificate matches installed MYFI app"
+
+      - name: Make Gradle wrapper executable
+        working-directory: android
+        run: chmod +x ./gradlew
 
       - name: Build signed release APK
         working-directory: android
