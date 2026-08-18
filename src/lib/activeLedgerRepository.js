@@ -2,7 +2,7 @@
 // SQLite is the durable local transaction engine. Zustand remains a UI/cache
 // compatibility layer while screens migrate to SQL queries.
 import { Platform } from 'react-native';
-import { enqueueLedgerWrite, flushLedgerWrites, getLedgerDb } from './ledgerDatabase';
+import { enqueueLedgerWrite, flushLedgerWrites, getLedgerDb, runLedgerExclusiveTransaction } from './ledgerDatabase';
 import {
   hydrateLegacyCurrencyFields,
   moneyFromMinor,
@@ -316,12 +316,12 @@ export const replaceLedgerSnapshot = async ({ namespace = 'guest', transactions 
   if (!db) return false;
   const namespaceValue = ns(namespace);
   return enqueueWrite(async () => {
-    await db.withTransactionAsync(async () => {
-      await db.runAsync('DELETE FROM ledger_transactions WHERE namespace = ?', namespaceValue);
-      await db.runAsync('DELETE FROM ledger_wallets WHERE namespace = ?', namespaceValue);
-      await db.runAsync('DELETE FROM ledger_outbox WHERE namespace = ?', namespaceValue);
-      await upsertWalletsInternal(db, namespaceValue, wallets, baseCurrency);
-      const statement = await db.prepareAsync(TX_UPSERT);
+    await runLedgerExclusiveTransaction(db, async (txn) => {
+      await txn.runAsync('DELETE FROM ledger_transactions WHERE namespace = ?', namespaceValue);
+      await txn.runAsync('DELETE FROM ledger_wallets WHERE namespace = ?', namespaceValue);
+      await txn.runAsync('DELETE FROM ledger_outbox WHERE namespace = ?', namespaceValue);
+      await upsertWalletsInternal(txn, namespaceValue, wallets, baseCurrency);
+      const statement = await txn.prepareAsync(TX_UPSERT);
       try {
         for (const tx of Array.isArray(transactions) ? transactions : []) {
           if (!tx?.id) continue;
@@ -929,14 +929,14 @@ export const upsertMonthlyBudgetMap = async ({
   const namespaceValue = ns(namespace);
   const rows = Object.entries(budgets || {}).filter(([, value]) => Number(value) > 0);
   return enqueueWrite(async () => {
-    await db.withTransactionAsync(async () => {
-      await db.runAsync(
+    await runLedgerExclusiveTransaction(db, async (txn) => {
+      await txn.runAsync(
         'DELETE FROM ledger_monthly_budgets WHERE namespace = ? AND scope = ? AND month_key = ?',
         namespaceValue, String(scope || 'personal'), String(monthKey),
       );
       const updatedAt = new Date().toISOString();
       for (const [categoryId, amount] of rows) {
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT OR REPLACE INTO ledger_monthly_budgets
             (namespace,scope,month_key,category_id,currency_code,amount_minor,source,accepted_suggestion,dismissed_suggestion,updated_at)
            VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -971,27 +971,27 @@ export const cloneLedgerNamespace = async (sourceNamespace, targetNamespace, { r
   const target = ns(targetNamespace);
   if (source === target) return true;
   return enqueueWrite(async () => {
-    await db.withTransactionAsync(async () => {
+    await runLedgerExclusiveTransaction(db, async (txn) => {
       if (replace) {
-        await db.runAsync('DELETE FROM ledger_transactions WHERE namespace = ?', target);
-        await db.runAsync('DELETE FROM ledger_wallets WHERE namespace = ?', target);
-        await db.runAsync('DELETE FROM ledger_monthly_budgets WHERE namespace = ?', target);
+        await txn.runAsync('DELETE FROM ledger_transactions WHERE namespace = ?', target);
+        await txn.runAsync('DELETE FROM ledger_wallets WHERE namespace = ?', target);
+        await txn.runAsync('DELETE FROM ledger_monthly_budgets WHERE namespace = ?', target);
       }
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT OR REPLACE INTO ledger_wallets
           (namespace,id,name,wallet_type,scope,currency_code,opening_minor,opening_base_minor,base_currency,valuation_rate,payload_json,updated_at)
          SELECT ?,id,name,wallet_type,scope,currency_code,opening_minor,opening_base_minor,base_currency,valuation_rate,payload_json,updated_at
            FROM ledger_wallets WHERE namespace = ?`,
         target, source,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT OR REPLACE INTO ledger_monthly_budgets
           (namespace,scope,month_key,category_id,currency_code,amount_minor,source,accepted_suggestion,dismissed_suggestion,updated_at)
          SELECT ?,scope,month_key,category_id,currency_code,amount_minor,source,accepted_suggestion,dismissed_suggestion,updated_at
            FROM ledger_monthly_budgets WHERE namespace = ?`,
         target, source,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT OR REPLACE INTO ledger_transactions
           (namespace,id,scope,date_iso,ts,kind,flow_type,wallet_id,from_wallet_id,to_wallet_id,category_id,
            wallet_currency,base_currency,wallet_amount_minor,base_amount_minor,transfer_from_minor,transfer_to_minor,

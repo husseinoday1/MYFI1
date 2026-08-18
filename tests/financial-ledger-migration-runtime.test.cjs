@@ -8,7 +8,16 @@ const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const filename = path.join(root, 'src/lib/financialLedgerSchemaMigrations.js');
 let source = fs.readFileSync(filename, 'utf8');
 source = source
-  .replace(/import \{ enqueueLedgerWrite \} from '\.\/ledgerDatabase';/, 'const enqueueLedgerWrite = task => task();')
+  .replace(
+    /import \{ enqueueLedgerWrite, flushLedgerWrites, runLedgerExclusiveTransaction \} from '\.\/ledgerDatabase';/,
+    `const enqueueLedgerWrite = task => task();
+const flushLedgerWrites = async () => {};
+const runLedgerExclusiveTransaction = async (database, task) => {
+  let value;
+  await database.withExclusiveTransactionAsync(async txn => { value = await task(txn); });
+  return value;
+};`,
+  )
   .replace(/export const /g, 'const ')
   .replace(/export async function /g, 'async function ');
 source += `\nmodule.exports = { runLedgerSchemaMigrations, readLedgerSchemaMigrationStatus, migrationChecksum };\n`;
@@ -24,10 +33,10 @@ class AsyncDatabase {
   async runAsync(sql, ...args) { return this.db.prepare(sql).run(...args); }
   async getFirstAsync(sql, ...args) { return this.db.prepare(sql).get(...args) || null; }
   async getAllAsync(sql, ...args) { return this.db.prepare(sql).all(...args); }
-  async withTransactionAsync(callback) {
+  async withExclusiveTransactionAsync(callback) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      await callback();
+      await callback(this);
       this.db.exec('COMMIT');
     } catch (error) {
       try { this.db.exec('ROLLBACK'); } catch {}

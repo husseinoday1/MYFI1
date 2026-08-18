@@ -82,10 +82,10 @@ class FakeDb {
     return [];
   }
 
-  async withTransactionAsync(fn) {
+  async withExclusiveTransactionAsync(fn) {
     this.events.push(['begin']);
     try {
-      await fn();
+      await fn(this);
       this.events.push(['commit']);
     } catch (error) {
       this.events.push(['rollback']);

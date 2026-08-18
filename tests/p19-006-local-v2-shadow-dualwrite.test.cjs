@@ -22,8 +22,8 @@ for (const token of [
 
 assert.match(repository, /const prepareLocalEntity[\s\S]*baseRevision:\s*currentRevision/);
 assert.match(repository, /revision:\s*currentRevision \+ 1/);
-assert.match(repository, /insertFinancialTransactionOutbox\(db, releaseCommand, \{ commandId: shadowCommandId \}\)/);
-assert.match(repository, /insertEntityOutbox\(db, entity, \{ commandId: shadowCommandId \}\)/);
+assert.match(repository, /insertFinancialTransactionOutbox\(txn, releaseCommand, \{ commandId: shadowCommandId \}\)/);
+assert.match(repository, /insertEntityOutbox\(txn, entity, \{ commandId: shadowCommandId \}\)/);
 assert.match(repository, /financialTransactionShadowPayload/);
 assert.doesNotMatch(
   repository.match(/const financialTransactionShadowPayload[\s\S]*?\n};/)?.[0] || '',

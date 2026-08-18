@@ -101,11 +101,11 @@ class FakeDatabase {
     return [];
   }
 
-  async withTransactionAsync(callback) {
+  async withExclusiveTransactionAsync(callback) {
     this.events.push({ type: 'begin' });
     this.inTransaction = true;
     try {
-      await callback();
+      await callback(this);
       this.committed = true;
       this.events.push({ type: 'commit' });
     } catch (error) {

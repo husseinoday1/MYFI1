@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { enqueueLedgerWrite, getLedgerDb } from './ledgerDatabase';
+import { enqueueLedgerWrite, getLedgerDb, runLedgerExclusiveTransaction } from './ledgerDatabase';
 import { runLedgerSchemaMigrations } from './financialLedgerSchemaMigrations';
 import {
   buildExpenseLedgerCommand,
@@ -8,6 +8,7 @@ import {
 } from './financialLedgerV7Model';
 
 const readyDatabases = new WeakSet();
+const readyDatabasePromises = new WeakMap();
 export const FINANCIAL_SQLITE_SCHEMA_VERSION = 8;
 
 const safeJson = value => {
@@ -390,14 +391,26 @@ const financialLedgerHealthCheck = async (db) => {
 export const ensureFinancialLedgerV7 = async (db) => {
   if (!db) return false;
   if (readyDatabases.has(db)) return true;
-  await runLedgerSchemaMigrations({
-    database: db,
-    migrations: [FINANCIAL_LEDGER_V7_MIGRATION, FINANCIAL_LEDGER_V8_SYNC_IDENTITY_MIGRATION],
-    appVersion: '1.0.0',
-    healthCheck: financialLedgerHealthCheck,
-  });
-  readyDatabases.add(db);
-  return true;
+
+  const inFlight = readyDatabasePromises.get(db);
+  if (inFlight) return inFlight;
+
+  const readiness = (async () => {
+    await runLedgerSchemaMigrations({
+      database: db,
+      migrations: [FINANCIAL_LEDGER_V7_MIGRATION, FINANCIAL_LEDGER_V8_SYNC_IDENTITY_MIGRATION],
+      appVersion: '1.0.0',
+      healthCheck: financialLedgerHealthCheck,
+    });
+    readyDatabases.add(db);
+    return true;
+  })();
+  readyDatabasePromises.set(db, readiness);
+  try {
+    return await readiness;
+  } finally {
+    readyDatabasePromises.delete(db);
+  }
 };
 
 export const ensureLedgerSyncIdentityV8 = async ({
@@ -487,10 +500,10 @@ export const beginLedgerRestoreEpochV8 = async ({
     throw new Error('restore_epoch_operation_invalid');
   }
 
-  return enqueueWrite(async () => db.withTransactionAsync(async () => {
-    const identity = await ensureShadowLedgerSyncIdentityV8(db, target);
+  return enqueueWrite(async () => runLedgerExclusiveTransaction(db, async (txn) => {
+    const identity = await ensureShadowLedgerSyncIdentityV8(txn, target);
     const key = restoreIntentMetaKey(target);
-    const existingRow = await db.getFirstAsync(
+    const existingRow = await txn.getFirstAsync(
       `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
       key,
     );
@@ -516,7 +529,7 @@ export const beginLedgerRestoreEpochV8 = async ({
       createdAt: now,
       updatedAt: now,
     };
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
       key, safeJson(intent), now,
     );
@@ -533,15 +546,15 @@ export const commitLedgerRestoreEpochV8 = async ({
   const target = String(namespace || '').trim();
   const key = restoreIntentMetaKey(target);
 
-  return enqueueWrite(async () => db.withTransactionAsync(async () => {
-    const intentRow = await db.getFirstAsync(
+  return enqueueWrite(async () => runLedgerExclusiveTransaction(db, async (txn) => {
+    const intentRow = await txn.getFirstAsync(
       `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
       key,
     );
     const intent = parseJson(intentRow?.value, null);
     if (!intent) throw new Error('restore_epoch_commit_without_intent');
 
-    const identity = await db.getFirstAsync(
+    const identity = await txn.getFirstAsync(
       `SELECT namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version
          FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
       target,
@@ -559,7 +572,7 @@ export const commitLedgerRestoreEpochV8 = async ({
     }
 
     const now = new Date().toISOString();
-    const updated = await db.runAsync(
+    const updated = await txn.runAsync(
       `UPDATE ledger_sync_identity_v8
           SET restore_epoch=?,updated_at=?
         WHERE namespace=? AND ledger_id=? AND restore_epoch=?`,
@@ -572,13 +585,13 @@ export const commitLedgerRestoreEpochV8 = async ({
     // Start the new epoch with an empty cursor. Old outbox/inbox rows stay as
     // immutable evidence under the superseded epoch and are never selected as
     // current-epoch transport.
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT OR IGNORE INTO ledger_sync_state_v8
        (ledger_id,restore_epoch,last_server_sequence,last_success_at,last_device_id,updated_at)
        VALUES (?,?,0,NULL,NULL,?)`,
       String(identity.ledger_id), next, now,
     );
-    await db.runAsync(`DELETE FROM ledger_v7_meta WHERE key=?`, key);
+    await txn.runAsync(`DELETE FROM ledger_v7_meta WHERE key=?`, key);
     return {
       namespace: target,
       ledgerId: String(identity.ledger_id),
@@ -607,7 +620,7 @@ export const readFinancialBootstrapStateV8 = async ({
   const db = database || await getLedgerDb();
   if (!db) return null;
   await ensureFinancialLedgerV7(db);
-  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const identity = await ensureLedgerSyncIdentityV8({ namespace, database: db });
   const targetLedgerId = String(ledgerId || identity.ledgerId);
   const targetEpoch = Math.max(1, Number(restoreEpoch || identity.restoreEpoch));
   return db.getFirstAsync(
@@ -627,15 +640,15 @@ export const createFinancialBootstrapStageV8 = async ({
   const target = String(namespace || '').trim();
   if (!target) throw new Error('financial_v2_bootstrap_namespace_required');
 
-  return enqueueWrite(async () => db.withTransactionAsync(async () => {
-    const identity = await ensureShadowLedgerSyncIdentityV8(db, target);
-    const restoreIntent = await db.getFirstAsync(
+  return enqueueWrite(async () => runLedgerExclusiveTransaction(db, async (txn) => {
+    const identity = await ensureShadowLedgerSyncIdentityV8(txn, target);
+    const restoreIntent = await txn.getFirstAsync(
       `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
       restoreIntentMetaKey(target),
     );
     if (restoreIntent?.value) throw new Error('financial_v2_bootstrap_restore_intent_active');
 
-    const existing = await db.getFirstAsync(
+    const existing = await txn.getFirstAsync(
       `SELECT * FROM ledger_bootstrap_state_v8
         WHERE namespace=? AND ledger_id=? AND restore_epoch=?
         ORDER BY created_at DESC LIMIT 1`,
@@ -643,14 +656,14 @@ export const createFinancialBootstrapStageV8 = async ({
     );
     if (existing?.bootstrap_id) return existing;
 
-    const idRow = await db.getFirstAsync(
+    const idRow = await txn.getFirstAsync(
       `SELECT 'bootstrap-' || lower(hex(randomblob(16))) AS bootstrap_id`,
     );
     const bootstrapId = String(idRow?.bootstrap_id || '').trim();
     if (!bootstrapId) throw new Error('financial_v2_bootstrap_id_generation_failed');
     const stageNamespace = `bootstrap-stage:${identity.ledgerId}:${identity.restoreEpoch}:${bootstrapId}`;
 
-    const checkpointRow = await db.getFirstAsync(
+    const checkpointRow = await txn.getFirstAsync(
       `SELECT COALESCE(MAX(sequence_id),0) AS n
          FROM ledger_outbox_v3
         WHERE ledger_id=? AND restore_epoch=? AND superseded_by_bootstrap_id IS NULL`,
@@ -658,21 +671,21 @@ export const createFinancialBootstrapStageV8 = async ({
     );
     const checkpoint = Math.max(0, Number(checkpointRow?.n || 0));
 
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT INTO ledger_accounts_v7
        (namespace,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at)
        SELECT ?,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at
          FROM ledger_accounts_v7 WHERE namespace=?`,
       stageNamespace, identity.namespace,
     );
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT INTO ledger_exchange_rates_v7
        (namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)
        SELECT ?,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at
          FROM ledger_exchange_rates_v7 WHERE namespace=?`,
       stageNamespace, identity.namespace,
     );
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT INTO ledger_financial_transactions_v7
        (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
         idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)
@@ -681,28 +694,28 @@ export const createFinancialBootstrapStageV8 = async ({
          FROM ledger_financial_transactions_v7 WHERE namespace=?`,
       stageNamespace, identity.namespace,
     );
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT INTO ledger_postings_v7
        (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
        SELECT ?,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at
          FROM ledger_postings_v7 WHERE namespace=?`,
       stageNamespace, identity.namespace,
     );
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT INTO ledger_transaction_links_v7
        (namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)
        SELECT ?,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at
          FROM ledger_transaction_links_v7 WHERE namespace=?`,
       stageNamespace, identity.namespace,
     );
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT INTO ledger_entities_v7
        (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
        SELECT ?,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at
          FROM ledger_entities_v7 WHERE namespace=?`,
       stageNamespace, identity.namespace,
     );
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT INTO ledger_workspace_state_v7
        (namespace,source_mode,schema_version,shadow_checksum,shadow_verified_at,cutover_at,
         last_reconciled_at,payload_json,updated_at)
@@ -713,7 +726,7 @@ export const createFinancialBootstrapStageV8 = async ({
     );
 
     const now = new Date().toISOString();
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT INTO ledger_bootstrap_state_v8
        (namespace,ledger_id,restore_epoch,bootstrap_id,stage_namespace,checkpoint_outbox_sequence,
         status,expected_row_count,manifest_hash,created_at,finalized_at,last_error)
@@ -722,7 +735,7 @@ export const createFinancialBootstrapStageV8 = async ({
       bootstrapId, stageNamespace, checkpoint, now,
     );
 
-    return db.getFirstAsync(
+    return txn.getFirstAsync(
       `SELECT * FROM ledger_bootstrap_state_v8
         WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=? LIMIT 1`,
       identity.ledgerId, identity.restoreEpoch, bootstrapId,
@@ -831,8 +844,8 @@ export const finalizeFinancialBootstrapStageV8 = async ({
   await ensureFinancialLedgerV7(db);
   const hash = String(manifestHash || '').toLowerCase();
 
-  return enqueueWrite(async () => db.withTransactionAsync(async () => {
-    const state = await db.getFirstAsync(
+  return enqueueWrite(async () => runLedgerExclusiveTransaction(db, async (txn) => {
+    const state = await txn.getFirstAsync(
       `SELECT * FROM ledger_bootstrap_state_v8
         WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=? LIMIT 1`,
       String(ledgerId), Number(restoreEpoch), String(bootstrapId),
@@ -844,7 +857,7 @@ export const finalizeFinancialBootstrapStageV8 = async ({
     if (state.status === 'finalized') return state;
 
     const now = new Date().toISOString();
-    await db.runAsync(
+    await txn.runAsync(
       `UPDATE ledger_outbox_v3
           SET superseded_by_bootstrap_id=?,superseded_at=?,last_error=NULL
         WHERE ledger_id=? AND restore_epoch=?
@@ -852,14 +865,14 @@ export const finalizeFinancialBootstrapStageV8 = async ({
       String(bootstrapId), now, String(ledgerId), Number(restoreEpoch),
       Math.max(0, Number(state.checkpoint_outbox_sequence || 0)),
     );
-    await clearFinancialNamespaceRows(db, String(state.stage_namespace));
-    await db.runAsync(
+    await clearFinancialNamespaceRows(txn, String(state.stage_namespace));
+    await txn.runAsync(
       `UPDATE ledger_bootstrap_state_v8
           SET status='finalized',finalized_at=?,last_error=NULL
         WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=?`,
       now, String(ledgerId), Number(restoreEpoch), String(bootstrapId),
     );
-    return db.getFirstAsync(
+    return txn.getFirstAsync(
       `SELECT * FROM ledger_bootstrap_state_v8
         WHERE ledger_id=? AND restore_epoch=? AND bootstrap_id=? LIMIT 1`,
       String(ledgerId), Number(restoreEpoch), String(bootstrapId),
@@ -878,7 +891,7 @@ export const inspectFinancialEmptyShellV8 = async ({
     return { supported: false, empty: false, reason: 'sqlite_unavailable' };
   }
   await ensureFinancialLedgerV7(db);
-  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const identity = await ensureLedgerSyncIdentityV8({ namespace, database: db });
   const target = identity.namespace;
 
   const [
@@ -998,7 +1011,7 @@ export const readFinancialSyncProtocolV8 = async ({
     supported: false, activeProtocolVersion: 1, activatedAt: null,
   };
   await ensureFinancialLedgerV7(db);
-  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const identity = await ensureLedgerSyncIdentityV8({ namespace, database: db });
   const row = await db.getFirstAsync(
     `SELECT activated_at,last_success_at,last_shadow_success_at,
             shadow_last_server_sequence,last_server_sequence
@@ -1069,15 +1082,15 @@ export const activateFinancialSyncProtocolV2V8 = async ({
     throw new Error('financial_v2_activation_evidence_invalid');
   }
 
-  return enqueueWrite(async () => db.withTransactionAsync(async () => {
-    const identity = await ensureShadowLedgerSyncIdentityV8(db, target);
-    const restoreIntent = await db.getFirstAsync(
+  return enqueueWrite(async () => runLedgerExclusiveTransaction(db, async (txn) => {
+    const identity = await ensureShadowLedgerSyncIdentityV8(txn, target);
+    const restoreIntent = await txn.getFirstAsync(
       `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
       restoreIntentMetaKey(identity.namespace),
     );
     if (restoreIntent?.value) throw new Error('financial_v2_activation_restore_intent_active');
 
-    const bootstrap = await db.getFirstAsync(
+    const bootstrap = await txn.getFirstAsync(
       `SELECT bootstrap_id,manifest_hash,status,finalized_at
          FROM ledger_bootstrap_state_v8
         WHERE namespace=? AND ledger_id=? AND restore_epoch=?
@@ -1092,7 +1105,7 @@ export const activateFinancialSyncProtocolV2V8 = async ({
       throw new Error('financial_v2_activation_bootstrap_not_finalized');
     }
 
-    const pending = await db.getFirstAsync(
+    const pending = await txn.getFirstAsync(
       `SELECT COUNT(*) AS n
          FROM ledger_outbox_v3
         WHERE ledger_id=? AND restore_epoch=?
@@ -1104,7 +1117,7 @@ export const activateFinancialSyncProtocolV2V8 = async ({
       throw new Error('financial_v2_activation_pending_outbox');
     }
 
-    const existing = await db.getFirstAsync(
+    const existing = await txn.getFirstAsync(
       `SELECT activated_at,shadow_last_server_sequence,last_server_sequence,last_success_at
          FROM ledger_sync_state_v8
         WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
@@ -1142,13 +1155,13 @@ export const activateFinancialSyncProtocolV2V8 = async ({
 
     // Evidence and activation marker are committed atomically. There is no
     // intermediate durable state where V2 is active without verification proof.
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
       `sync_v2_activation_evidence:${identity.namespace}`,
       safeJson(activationEvidence),
       now,
     );
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT INTO ledger_sync_state_v8
        (ledger_id,restore_epoch,shadow_last_server_sequence,last_shadow_success_at,
         last_server_sequence,last_success_at,last_device_id,activated_at,updated_at)
@@ -1160,12 +1173,12 @@ export const activateFinancialSyncProtocolV2V8 = async ({
          updated_at=excluded.updated_at`,
       identity.ledgerId, identity.restoreEpoch, cursor, shadowAt, now, now,
     );
-    await db.runAsync(
+    await txn.runAsync(
       `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
       `active_sync_protocol:${identity.namespace}`, '2', now,
     );
 
-    const activated = await db.getFirstAsync(
+    const activated = await txn.getFirstAsync(
       `SELECT activated_at,shadow_last_server_sequence,last_server_sequence FROM ledger_sync_state_v8
         WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
       identity.ledgerId, identity.restoreEpoch,
@@ -1198,7 +1211,7 @@ export const readPendingLedgerMutationsV8 = async ({
   const db = database || await getLedgerDb();
   if (!db) return [];
   await ensureFinancialLedgerV7(db);
-  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const identity = await ensureLedgerSyncIdentityV8({ namespace, database: db });
   const targetLedgerId = String(ledgerId || identity.ledgerId);
   const targetEpoch = Math.max(1, Number(restoreEpoch || identity.restoreEpoch));
   if (targetLedgerId !== identity.ledgerId || targetEpoch !== identity.restoreEpoch) {
@@ -1226,9 +1239,9 @@ export const acknowledgeLedgerMutationsV8 = async ({
   await ensureFinancialLedgerV7(db);
   const now = new Date().toISOString();
   let changed = 0;
-  await enqueueWrite(() => db.withTransactionAsync(async () => {
+  await enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
     for (const id of ids) {
-      const result = await db.runAsync(
+      const result = await txn.runAsync(
         `UPDATE ledger_outbox_v3
             SET acknowledged_at=?,last_error=NULL
           WHERE ledger_id=? AND restore_epoch=? AND mutation_id=? AND acknowledged_at IS NULL`,
@@ -1713,9 +1726,9 @@ const v2WriteInboxCommand = async (db, identity, group, status, now) => {
 
 const v2WriteConflictInbox = async (db, identity, group) => {
   const now = new Date().toISOString();
-  await db.withTransactionAsync(async () => {
+  await runLedgerExclusiveTransaction(db, async (txn) => {
     for (const item of group) {
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_inbox_v3
          (ledger_id,restore_epoch,mutation_id,command_id,command_sequence,server_sequence,received_at,apply_status,applied_at)
          VALUES (?,?,?,?,?,?,?,'conflict',NULL)
@@ -1737,7 +1750,7 @@ export const applyRemoteLedgerMutationsV8 = async ({
   const db = database || await getLedgerDb();
   if (!db) return { supported:false,ok:false,reason:'sqlite_unavailable' };
   await ensureFinancialLedgerV7(db);
-  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const identity = await ensureLedgerSyncIdentityV8({ namespace, database: db });
   const targetLedgerId = String(ledgerId || identity.ledgerId);
   const targetEpoch = Math.max(1, Number(restoreEpoch || identity.restoreEpoch));
   if (targetLedgerId !== identity.ledgerId || targetEpoch !== identity.restoreEpoch) {
@@ -1888,9 +1901,9 @@ export const applyRemoteLedgerMutationsV8 = async ({
 
       if (shadowMode) {
         const now = new Date().toISOString();
-        await db.withTransactionAsync(async () => {
-          await v2WriteInboxCommand(db, identity, group, 'observed', now);
-          await db.runAsync(
+        await runLedgerExclusiveTransaction(db, async (txn) => {
+          await v2WriteInboxCommand(txn, identity, group, 'observed', now);
+          await txn.runAsync(
             `INSERT INTO ledger_sync_state_v8
              (ledger_id,restore_epoch,shadow_last_server_sequence,last_shadow_success_at,last_device_id,updated_at)
              VALUES (?,?,?,?,?,?)
@@ -1908,17 +1921,17 @@ export const applyRemoteLedgerMutationsV8 = async ({
       const now = new Date().toISOString();
       let commandApplied = 0;
       try {
-        await db.withTransactionAsync(async () => {
+        await runLedgerExclusiveTransaction(db, async (txn) => {
           for (const plan of plans) {
             if (plan.echo) continue;
             if (plan.item.entityType === 'financial_transaction') {
-              commandApplied += await v2ApplyFinancialTransactionPlan(db, identity.namespace, plan, deviceId);
+              commandApplied += await v2ApplyFinancialTransactionPlan(txn, identity.namespace, plan, deviceId);
             } else {
-              commandApplied += await v2ApplyDomainEntityPlan(db, identity.namespace, plan);
+              commandApplied += await v2ApplyDomainEntityPlan(txn, identity.namespace, plan);
             }
           }
-          await v2WriteInboxCommand(db, identity, group, 'applied', now);
-          await db.runAsync(
+          await v2WriteInboxCommand(txn, identity, group, 'applied', now);
+          await txn.runAsync(
             `INSERT INTO ledger_sync_state_v8
              (ledger_id,restore_epoch,shadow_last_server_sequence,last_server_sequence,
               last_shadow_success_at,last_success_at,last_device_id,updated_at)
@@ -2204,13 +2217,13 @@ export const commitFinancialLedgerV7Command = async (command, { database = null,
 
   return enqueueWrite(async () => {
     let result = null;
-    await db.withTransactionAsync(async () => {
-      const existing = await db.getFirstAsync(
+    await runLedgerExclusiveTransaction(db, async (txn) => {
+      const existing = await txn.getFirstAsync(
         `SELECT id FROM ledger_financial_transactions_v7 WHERE namespace=? AND idempotency_key=? LIMIT 1`,
         command.header.namespace, command.header.idempotencyKey,
       );
       if (existing?.id) {
-        const persisted = await readFinancialTransaction(db, command.header.namespace, String(existing.id));
+        const persisted = await readFinancialTransaction(txn, command.header.namespace, String(existing.id));
         result = { supported: true, ok: true, idempotent: true, transactionId: String(existing.id), persisted };
         return;
       }
@@ -2222,10 +2235,10 @@ export const commitFinancialLedgerV7Command = async (command, { database = null,
         return;
       }
 
-      for (const currency of command.currencies || []) await insertCurrency(db, currency);
-      for (const account of command.accounts || [command.account].filter(Boolean)) await upsertAccount(db, account);
+      for (const currency of command.currencies || []) await insertCurrency(txn, currency);
+      for (const account of command.accounts || [command.account].filter(Boolean)) await upsertAccount(txn, account);
       for (const rate of command.exchangeRates || [command.exchangeRate].filter(Boolean)) {
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT OR IGNORE INTO ledger_exchange_rates_v7
            (namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)
            VALUES (?,?,?,?,?,?,?,?,?)`,
@@ -2235,7 +2248,7 @@ export const commitFinancialLedgerV7Command = async (command, { database = null,
       }
 
       const header = command.header;
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_financial_transactions_v7
          (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
           idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)
@@ -2248,7 +2261,7 @@ export const commitFinancialLedgerV7Command = async (command, { database = null,
       );
 
       for (const item of command.postings || [command.posting].filter(Boolean)) {
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT INTO ledger_postings_v7
            (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
            VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -2257,7 +2270,7 @@ export const commitFinancialLedgerV7Command = async (command, { database = null,
         );
       }
       for (const link of command.links || []) {
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT INTO ledger_transaction_links_v7
            (namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)
            VALUES (?,?,?,?,?,?,?,?,?)`,
@@ -2266,15 +2279,15 @@ export const commitFinancialLedgerV7Command = async (command, { database = null,
         );
       }
       for (const entity of command.entities || []) {
-        const prepared = await prepareLocalEntity(db, entity);
+        const prepared = await prepareLocalEntity(txn, entity);
         Object.assign(entity, prepared);
-        await upsertEntity(db, prepared);
+        await upsertEntity(txn, prepared);
       }
 
       if (writeOutbox) {
-        await insertFinancialTransactionOutbox(db, command);
+        await insertFinancialTransactionOutbox(txn, command);
       }
-      const persisted = await readFinancialTransaction(db, header.namespace, header.id);
+      const persisted = await readFinancialTransaction(txn, header.namespace, header.id);
       result = {
         supported: true, ok: true, idempotent: false, transactionId: String(persisted.id),
         committedAt: header.updatedAt, persisted,
@@ -2304,16 +2317,16 @@ export const replaceFinancialTransactionV7 = async ({
   await ensureFinancialLedgerV7(db);
   return enqueueWrite(async () => {
     let result = null;
-    await db.withTransactionAsync(async () => {
-      const duplicateMutation = await db.getFirstAsync(
+    await runLedgerExclusiveTransaction(db, async (txn) => {
+      const duplicateMutation = await txn.getFirstAsync(
         `SELECT mutation_id FROM ledger_outbox_v2 WHERE mutation_id=? LIMIT 1`, command.mutation.mutationId,
       );
       if (duplicateMutation?.mutation_id) {
-        const persisted = await readFinancialTransaction(db, namespace, transaction.id);
+        const persisted = await readFinancialTransaction(txn, namespace, transaction.id);
         result = { supported: true, ok: true, idempotent: true, transactionId: persisted.id, persisted };
         return;
       }
-      const currentTransaction = await db.getFirstAsync(
+      const currentTransaction = await txn.getFirstAsync(
         `SELECT revision FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
         namespace, transaction.id,
       );
@@ -2338,12 +2351,12 @@ export const replaceFinancialTransactionV7 = async ({
         };
         return;
       }
-      for (const currency of command.currencies) await insertCurrency(db, currency);
-      for (const account of command.accounts) await upsertAccount(db, account);
-      await db.runAsync(`DELETE FROM ledger_transaction_links_v7 WHERE namespace=? AND transaction_id=?`, namespace, transaction.id);
-      await db.runAsync(`DELETE FROM ledger_postings_v7 WHERE namespace=? AND transaction_id=?`, namespace, transaction.id);
+      for (const currency of command.currencies) await insertCurrency(txn, currency);
+      for (const account of command.accounts) await upsertAccount(txn, account);
+      await txn.runAsync(`DELETE FROM ledger_transaction_links_v7 WHERE namespace=? AND transaction_id=?`, namespace, transaction.id);
+      await txn.runAsync(`DELETE FROM ledger_postings_v7 WHERE namespace=? AND transaction_id=?`, namespace, transaction.id);
       for (const rate of command.exchangeRates) {
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT INTO ledger_exchange_rates_v7
            (namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)
            VALUES (?,?,?,?,?,?,?,?,?)
@@ -2356,7 +2369,7 @@ export const replaceFinancialTransactionV7 = async ({
         );
       }
       const header = command.header;
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_financial_transactions_v7
          (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
           idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)
@@ -2376,7 +2389,7 @@ export const replaceFinancialTransactionV7 = async ({
         header.createdAt, header.updatedAt,
       );
       for (const item of command.postings) {
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT INTO ledger_postings_v7
            (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
            VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -2385,7 +2398,7 @@ export const replaceFinancialTransactionV7 = async ({
         );
       }
       for (const link of command.links) {
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT INTO ledger_transaction_links_v7
            (namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)
            VALUES (?,?,?,?,?,?,?,?,?)`,
@@ -2394,12 +2407,12 @@ export const replaceFinancialTransactionV7 = async ({
         );
       }
       for (const entity of command.entities) {
-        const prepared = await prepareLocalEntity(db, entity);
+        const prepared = await prepareLocalEntity(txn, entity);
         Object.assign(entity, prepared);
-        await upsertEntity(db, prepared);
+        await upsertEntity(txn, prepared);
       }
-      await insertFinancialTransactionOutbox(db, command);
-      const persisted = await readFinancialTransaction(db, namespace, transaction.id);
+      await insertFinancialTransactionOutbox(txn, command);
+      const persisted = await readFinancialTransaction(txn, namespace, transaction.id);
       result = { supported: true, ok: true, idempotent: false, transactionId: persisted.id, committedAt: header.updatedAt, persisted };
     });
     return result;
@@ -2418,30 +2431,30 @@ export const voidFinancialTransactionsV7 = async ({
   const now = new Date().toISOString();
   return enqueueWrite(async () => {
     let changed = 0;
-    await db.withTransactionAsync(async () => {
-      const shadowCommandId = await createShadowCommandIdV2(db);
+    await runLedgerExclusiveTransaction(db, async (txn) => {
+      const shadowCommandId = await createShadowCommandIdV2(txn);
       for (const id of ids) {
-        const row = await db.getFirstAsync(
+        const row = await txn.getFirstAsync(
           `SELECT revision,payload_json,deleted_at FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
           namespace, id,
         );
         if (!row || row.deleted_at) continue;
         const revision = Math.max(1, Number(row.revision || 1) + 1);
         const payload = { ...(parseJson(row.payload_json, {}) || {}), status: 'voided', deletedAt: now, revision, updatedAt: now };
-        await db.runAsync(
+        await txn.runAsync(
           `UPDATE ledger_financial_transactions_v7
               SET status='voided',deleted_at=?,revision=?,payload_json=?,updated_at=?
             WHERE namespace=? AND id=? AND deleted_at IS NULL`,
           now, revision, safeJson(payload), now, namespace, id,
         );
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT OR IGNORE INTO ledger_outbox_v2
            (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
            VALUES (?,?,?,?,?,?,?,?,?)`,
           namespace, `${namespace}:${id}:void:${revision}`, 'financial_transaction', id, 'void', revision,
           FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson({ transactionId: id, revision, deletedAt: now }), now,
         );
-        await insertShadowMutationV2(db, {
+        await insertShadowMutationV2(txn, {
           namespace, commandId: shadowCommandId, entityType: 'financial_transaction', entityId: id,
           operation: 'void', revision, baseRevision: revision - 1,
           payload: { transactionId: id, revision, deletedAt: now }, createdAt: now,
@@ -2450,13 +2463,13 @@ export const voidFinancialTransactionsV7 = async ({
       }
       for (const item of Array.isArray(entityChanges) ? entityChanges : []) {
         if (!item?.id || !item?.entityType) continue;
-        const entity = await prepareLocalEntity(db, {
+        const entity = await prepareLocalEntity(txn, {
           namespace, entityType: String(item.entityType), id: String(item.id),
           revision: Math.max(1, Number(item.revision || 1)), deletedAt: item.deletedAt || null,
           payload: item.payload ?? null, createdAt: String(item.createdAt || now), updatedAt: String(item.updatedAt || now),
         });
-        await upsertEntity(db, entity);
-        await insertEntityOutbox(db, entity, { commandId: shadowCommandId });
+        await upsertEntity(txn, entity);
+        await insertEntityOutbox(txn, entity, { commandId: shadowCommandId });
       }
     });
     return { supported: true, ok: true, changed };
@@ -2477,10 +2490,10 @@ export const archiveFinancialTransactionsV7 = async ({
   return enqueueWrite(async () => {
     let changed = 0;
     let releasedAllocations = 0;
-    await db.withTransactionAsync(async () => {
-      const shadowCommandId = await createShadowCommandIdV2(db);
+    await runLedgerExclusiveTransaction(db, async (txn) => {
+      const shadowCommandId = await createShadowCommandIdV2(txn);
       for (const id of ids) {
-        const row = await db.getFirstAsync(
+        const row = await txn.getFirstAsync(
           `SELECT kind,scope,date_iso,occurred_at,revision,payload_json,archived_at
              FROM ledger_financial_transactions_v7
             WHERE namespace=? AND id=? AND deleted_at IS NULL LIMIT 1`,
@@ -2493,13 +2506,13 @@ export const archiveFinancialTransactionsV7 = async ({
           ...(parseJson(row.payload_json, {}) || {}), archiveYear: targetYear,
           archivedAt, revision, updatedAt: archivedAt,
         };
-        await db.runAsync(
+        await txn.runAsync(
           `UPDATE ledger_financial_transactions_v7
               SET archive_year=?,archived_at=?,revision=?,payload_json=?,updated_at=?
             WHERE namespace=? AND id=? AND deleted_at IS NULL`,
           targetYear, archivedAt, revision, safeJson(payload), archivedAt, namespace, id,
         );
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT OR IGNORE INTO ledger_outbox_v2
            (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
            VALUES (?,?,?,?,?,?,?,?,?)`,
@@ -2507,7 +2520,7 @@ export const archiveFinancialTransactionsV7 = async ({
           'upsert', revision, FINANCIAL_LEDGER_SCHEMA_VERSION,
           safeJson({ transactionId: id, archiveYear: targetYear, archivedAt, revision }), archivedAt,
         );
-        await insertShadowMutationV2(db, {
+        await insertShadowMutationV2(txn, {
           namespace, commandId: shadowCommandId, entityType: 'financial_transaction', entityId: id,
           operation: 'upsert', revision, baseRevision: revision - 1,
           payload: { transactionId: id, archiveYear: targetYear, archivedAt, revision },
@@ -2516,12 +2529,12 @@ export const archiveFinancialTransactionsV7 = async ({
         const original = parseJson(row.payload_json, {}) || {};
         if ((row.kind === 'goal_allocation' || original.isGoalSaving) && !original.allocationReleased) {
           const releaseId = `v7-archive-release:${id}`;
-          const existingRelease = await db.getFirstAsync(
+          const existingRelease = await txn.getFirstAsync(
             `SELECT id FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
             namespace, releaseId,
           );
           if (!existingRelease?.id) {
-            const reservedRows = await db.getAllAsync(
+            const reservedRows = await txn.getAllAsync(
               `SELECT p.account_id,p.amount_minor,p.currency_code,
                       a.name,a.account_type,a.scope,a.status,a.created_at,a.updated_at,a.archived_at,
                       r.numerator,r.denominator
@@ -2578,8 +2591,8 @@ export const archiveFinancialTransactionsV7 = async ({
                   updatedAt: archivedAt,
                 },
               });
-              await insertCommandWithoutOutbox(db, releaseCommand);
-              await insertFinancialTransactionOutbox(db, releaseCommand, { commandId: shadowCommandId });
+              await insertCommandWithoutOutbox(txn, releaseCommand);
+              await insertFinancialTransactionOutbox(txn, releaseCommand, { commandId: shadowCommandId });
               releasedAllocations += 1;
             }
           }
@@ -2588,14 +2601,14 @@ export const archiveFinancialTransactionsV7 = async ({
       }
       for (const item of Array.isArray(entityChanges) ? entityChanges : []) {
         if (!item?.id || !item?.entityType) continue;
-        const entity = await prepareLocalEntity(db, {
+        const entity = await prepareLocalEntity(txn, {
           namespace, entityType: String(item.entityType), id: String(item.id),
           revision: Math.max(1, Number(item.revision || 1)), deletedAt: item.deletedAt || null,
           payload: item.payload ?? null, createdAt: String(item.createdAt || archivedAt),
           updatedAt: String(item.updatedAt || archivedAt),
         });
-        await upsertEntity(db, entity);
-        await insertEntityOutbox(db, entity, { commandId: shadowCommandId });
+        await upsertEntity(txn, entity);
+        await insertEntityOutbox(txn, entity, { commandId: shadowCommandId });
       }
     });
     const row = await db.getFirstAsync(
@@ -2631,10 +2644,10 @@ export const commitEntityChangesV7 = async ({ namespace = 'guest', changes = [],
   if (!entities.length) return { supported: true, ok: true, changed: 0 };
   return enqueueWrite(async () => {
     let changed = 0;
-    await db.withTransactionAsync(async () => {
-      const shadowCommandId = await createShadowCommandIdV2(db);
+    await runLedgerExclusiveTransaction(db, async (txn) => {
+      const shadowCommandId = await createShadowCommandIdV2(txn);
       for (const entity of entities) {
-        const current = await db.getFirstAsync(
+        const current = await txn.getFirstAsync(
           `SELECT revision,deleted_at,payload_json FROM ledger_entities_v7
             WHERE namespace=? AND entity_type=? AND id=? LIMIT 1`,
           entity.namespace, entity.entityType, entity.id,
@@ -2642,9 +2655,9 @@ export const commitEntityChangesV7 = async ({ namespace = 'guest', changes = [],
         const currentPayload = parseJson(current?.payload_json, null);
         const sameDeletedState = String(current?.deleted_at || '') === String(entity.deletedAt || '');
         if (current && sameDeletedState && canonicalJson(currentPayload) === canonicalJson(entity.payload)) continue;
-        const prepared = await prepareLocalEntity(db, entity);
-        await upsertEntity(db, prepared);
-        await insertEntityOutbox(db, prepared, { commandId: shadowCommandId });
+        const prepared = await prepareLocalEntity(txn, entity);
+        await upsertEntity(txn, prepared);
+        await insertEntityOutbox(txn, prepared, { commandId: shadowCommandId });
         changed += 1;
       }
     });
@@ -2932,9 +2945,9 @@ export const acknowledgeLedgerMutationsV7 = async ({ mutationIds = [], database 
   await ensureFinancialLedgerV7(db);
   const now = new Date().toISOString();
   let changed = 0;
-  await enqueueWrite(() => db.withTransactionAsync(async () => {
+  await enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
     for (const id of ids) {
-      const result = await db.runAsync(
+      const result = await txn.runAsync(
         `UPDATE ledger_outbox_v2 SET acknowledged_at=?,last_error=NULL WHERE mutation_id=? AND acknowledged_at IS NULL`,
         now, id,
       );
@@ -3013,9 +3026,9 @@ export const applyRemoteLedgerMutationsV7 = async ({
   return enqueueWrite(async () => {
     let applied = 0;
     let cursor = await getLedgerSyncCursorV7({ namespace, database: db });
-    await db.withTransactionAsync(async () => {
+    await runLedgerExclusiveTransaction(db, async (txn) => {
       for (const row of rows) {
-        const received = await db.getFirstAsync(`SELECT mutation_id FROM ledger_inbox_v2 WHERE mutation_id=? LIMIT 1`, row.mutationId);
+        const received = await txn.getFirstAsync(`SELECT mutation_id FROM ledger_inbox_v2 WHERE mutation_id=? LIMIT 1`, row.mutationId);
         if (received?.mutation_id) {
           cursor = Math.max(cursor, row.serverSequence);
           continue;
@@ -3023,7 +3036,7 @@ export const applyRemoteLedgerMutationsV7 = async ({
         if (row.entityType === 'financial_transaction') {
           const commandPayload = row.payload || {};
           if (row.operation === 'void' || row.operation === 'delete') {
-            const existing = await db.getFirstAsync(
+            const existing = await txn.getFirstAsync(
               `SELECT revision,payload_json,status,deleted_at
                  FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
               namespace, row.entityId,
@@ -3037,7 +3050,7 @@ export const applyRemoteLedgerMutationsV7 = async ({
               if (!alreadyVoided) throw remoteRevisionConflict('financial_transaction', row.entityId, row.entityRevision);
             } else {
               const deletedAt = commandPayload.deletedAt || new Date().toISOString();
-              await db.runAsync(
+              await txn.runAsync(
                 `UPDATE ledger_financial_transactions_v7
                     SET status='voided',deleted_at=?,revision=?,payload_json=?,updated_at=?
                   WHERE namespace=? AND id=?`,
@@ -3048,7 +3061,7 @@ export const applyRemoteLedgerMutationsV7 = async ({
               applied += 1;
             }
           } else if (commandPayload.archiveYear && commandPayload.transactionId) {
-            const existing = await db.getFirstAsync(
+            const existing = await txn.getFirstAsync(
               `SELECT revision,payload_json,archive_year,archived_at
                  FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
               namespace, row.entityId,
@@ -3063,7 +3076,7 @@ export const applyRemoteLedgerMutationsV7 = async ({
               if (!sameArchive) throw remoteRevisionConflict('financial_transaction', row.entityId, row.entityRevision);
             } else {
               const archivedAt = commandPayload.archivedAt || new Date().toISOString();
-              await db.runAsync(
+              await txn.runAsync(
                 `UPDATE ledger_financial_transactions_v7
                     SET archive_year=?,archived_at=?,revision=?,payload_json=?,updated_at=?
                   WHERE namespace=? AND id=?`,
@@ -3078,7 +3091,7 @@ export const applyRemoteLedgerMutationsV7 = async ({
             }
           } else if (commandPayload.transaction && commandPayload.originalTransaction) {
             const header = { ...commandPayload.transaction, namespace, revision: row.entityRevision };
-            const current = await db.getFirstAsync(
+            const current = await txn.getFirstAsync(
               `SELECT revision,payload_json,status,archive_year,archived_at,deleted_at
                  FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
               namespace, row.entityId,
@@ -3095,7 +3108,7 @@ export const applyRemoteLedgerMutationsV7 = async ({
                 throw remoteRevisionConflict('financial_transaction', row.entityId, row.entityRevision);
               }
               for (const sourceEntity of commandPayload.entities || []) {
-                const localEntity = await db.getFirstAsync(
+                const localEntity = await txn.getFirstAsync(
                   `SELECT revision,deleted_at,payload_json FROM ledger_entities_v7
                     WHERE namespace=? AND entity_type=? AND id=? LIMIT 1`,
                   namespace, String(sourceEntity.entityType || ''), String(sourceEntity.id || ''),
@@ -3117,15 +3130,15 @@ export const applyRemoteLedgerMutationsV7 = async ({
             }
             if (current && row.entityRevision < currentRevision) applyTransaction = false;
             if (applyTransaction) {
-              for (const currency of commandPayload.currencies || []) await insertCurrency(db, currency);
+              for (const currency of commandPayload.currencies || []) await insertCurrency(txn, currency);
               for (const sourceAccount of commandPayload.accounts || []) {
-                await upsertAccount(db, { ...sourceAccount, namespace });
+                await upsertAccount(txn, { ...sourceAccount, namespace });
               }
-              await db.runAsync(`DELETE FROM ledger_transaction_links_v7 WHERE namespace=? AND transaction_id=?`, namespace, row.entityId);
-              await db.runAsync(`DELETE FROM ledger_postings_v7 WHERE namespace=? AND transaction_id=?`, namespace, row.entityId);
+              await txn.runAsync(`DELETE FROM ledger_transaction_links_v7 WHERE namespace=? AND transaction_id=?`, namespace, row.entityId);
+              await txn.runAsync(`DELETE FROM ledger_postings_v7 WHERE namespace=? AND transaction_id=?`, namespace, row.entityId);
               for (const sourceRate of commandPayload.exchangeRates || []) {
                 const rate = { ...sourceRate, namespace };
-                await db.runAsync(
+                await txn.runAsync(
                   `INSERT INTO ledger_exchange_rates_v7
                    (namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)
                    VALUES (?,?,?,?,?,?,?,?,?)
@@ -3136,7 +3149,7 @@ export const applyRemoteLedgerMutationsV7 = async ({
                   rate.numerator, rate.denominator, rate.rateDate, rate.source, rate.capturedAt,
                 );
               }
-              await db.runAsync(
+              await txn.runAsync(
                 `INSERT INTO ledger_financial_transactions_v7
                  (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
                   idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)
@@ -3157,7 +3170,7 @@ export const applyRemoteLedgerMutationsV7 = async ({
               );
               for (const sourcePosting of commandPayload.postings || []) {
                 const item = { ...sourcePosting, namespace };
-                await db.runAsync(
+                await txn.runAsync(
                   `INSERT INTO ledger_postings_v7
                    (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -3167,7 +3180,7 @@ export const applyRemoteLedgerMutationsV7 = async ({
               }
               for (const sourceLink of commandPayload.links || []) {
                 const link = { ...sourceLink, namespace };
-                await db.runAsync(
+                await txn.runAsync(
                   `INSERT INTO ledger_transaction_links_v7
                    (namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)
                    VALUES (?,?,?,?,?,?,?,?,?)`,
@@ -3176,7 +3189,7 @@ export const applyRemoteLedgerMutationsV7 = async ({
                 );
               }
               for (const sourceEntity of commandPayload.entities || []) {
-                await upsertEntity(db, { ...sourceEntity, namespace });
+                await upsertEntity(txn, { ...sourceEntity, namespace });
               }
               applied += 1;
             }
@@ -3189,7 +3202,7 @@ export const applyRemoteLedgerMutationsV7 = async ({
             createdAt: row.payload?.createdAt || new Date().toISOString(),
             updatedAt: row.payload?.updatedAt || new Date().toISOString(),
           };
-          const currentEntity = await db.getFirstAsync(
+          const currentEntity = await txn.getFirstAsync(
             `SELECT revision,deleted_at,payload_json FROM ledger_entities_v7
               WHERE namespace=? AND entity_type=? AND id=? LIMIT 1`,
             namespace, row.entityType, row.entityId,
@@ -3201,21 +3214,21 @@ export const applyRemoteLedgerMutationsV7 = async ({
                 === canonicalSyncValue(sourceEntity.payload ?? null);
             if (!sameEntity) throw remoteRevisionConflict(row.entityType, row.entityId, row.entityRevision);
           } else if (!currentEntity || row.entityRevision > currentRevision) {
-            await upsertEntity(db, {
+            await upsertEntity(txn, {
               ...sourceEntity, namespace, entityType: row.entityType, id: row.entityId,
               revision: row.entityRevision,
             });
             applied += 1;
           }
         }
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT OR IGNORE INTO ledger_inbox_v2(mutation_id,namespace,server_sequence,received_at) VALUES (?,?,?,?)`,
           row.mutationId, namespace, row.serverSequence, new Date().toISOString(),
         );
         cursor = Math.max(cursor, row.serverSequence);
       }
       const now = new Date().toISOString();
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_sync_state_v7(namespace,last_server_sequence,last_success_at,last_device_id,updated_at)
          VALUES (?,?,?,?,?)
          ON CONFLICT(namespace) DO UPDATE SET
@@ -3244,12 +3257,12 @@ export const clearFinancialWorkspaceV7 = async ({ namespace = 'guest', database 
   await ensureFinancialLedgerV7(db);
   const target = String(namespace || '').trim();
   if (!target) return false;
-  await enqueueWrite(() => db.withTransactionAsync(async () => {
-    await clearFinancialNamespaceRows(db, target);
-    await db.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=?`, target);
-    await db.runAsync(`DELETE FROM ledger_inbox_v2 WHERE namespace=?`, target);
-    await db.runAsync(`DELETE FROM ledger_sync_state_v7 WHERE namespace=?`, target);
-    await db.runAsync(`DELETE FROM ledger_migration_audits_v7 WHERE namespace=?`, target);
+  await enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    await clearFinancialNamespaceRows(txn, target);
+    await txn.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=?`, target);
+    await txn.runAsync(`DELETE FROM ledger_inbox_v2 WHERE namespace=?`, target);
+    await txn.runAsync(`DELETE FROM ledger_sync_state_v7 WHERE namespace=?`, target);
+    await txn.runAsync(`DELETE FROM ledger_migration_audits_v7 WHERE namespace=?`, target);
   }));
   return true;
 };
@@ -3305,12 +3318,12 @@ export const stageFinancialWorkspaceV7 = async ({ stageNamespace, commands = [],
   const namespace = String(stageNamespace || '').trim();
   if (!namespace.includes('::shadow-stage::')) throw new Error('financial_v7_shadow_stage_namespace_invalid');
   return enqueueWrite(async () => {
-    await db.withTransactionAsync(async () => {
-      await clearFinancialNamespaceRows(db, namespace);
-      for (const command of commands) await insertCommandWithoutOutbox(db, command);
-      for (const entity of entities) await upsertEntity(db, entity);
+    await runLedgerExclusiveTransaction(db, async (txn) => {
+      await clearFinancialNamespaceRows(txn, namespace);
+      for (const command of commands) await insertCommandWithoutOutbox(txn, command);
+      for (const entity of entities) await upsertEntity(txn, entity);
       const now = new Date().toISOString();
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_workspace_state_v7
          (namespace,source_mode,schema_version,payload_json,updated_at) VALUES (?,?,?,?,?)`,
         namespace, 'shadow', FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson(workspacePayload), now,
@@ -3326,7 +3339,7 @@ export const discardFinancialWorkspaceStageV7 = async ({ stageNamespace, databas
   const namespace = String(stageNamespace || '').trim();
   if (!namespace.includes('::shadow-stage::')) return false;
   await ensureFinancialLedgerV7(db);
-  await enqueueWrite(() => db.withTransactionAsync(() => clearFinancialNamespaceRows(db, namespace)));
+  await enqueueWrite(() => runLedgerExclusiveTransaction(db, (txn) => clearFinancialNamespaceRows(txn, namespace)));
   return true;
 };
 
@@ -3346,24 +3359,24 @@ export const promoteFinancialWorkspaceStageV7 = async ({
   return enqueueWrite(async () => {
     const now = new Date().toISOString();
     const runId = `${target}:${Date.now()}`;
-    await db.withTransactionAsync(async () => {
+    await runLedgerExclusiveTransaction(db, async (txn) => {
       if (resetPendingOutbox) {
-        await db.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=? AND acknowledged_at IS NULL`, target);
+        await txn.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=? AND acknowledged_at IS NULL`, target);
       }
-      await clearFinancialNamespaceRows(db, target);
-      await db.runAsync(
+      await clearFinancialNamespaceRows(txn, target);
+      await txn.runAsync(
         `INSERT INTO ledger_accounts_v7
          (namespace,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at)
          SELECT ?,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at
            FROM ledger_accounts_v7 WHERE namespace=?`, target, stage,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_exchange_rates_v7
          (namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)
          SELECT ?,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at
            FROM ledger_exchange_rates_v7 WHERE namespace=?`, target, stage,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_financial_transactions_v7
          (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
           idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)
@@ -3371,37 +3384,37 @@ export const promoteFinancialWorkspaceStageV7 = async ({
                 idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at
            FROM ledger_financial_transactions_v7 WHERE namespace=?`, target, stage,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_postings_v7
          (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
          SELECT ?,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at
            FROM ledger_postings_v7 WHERE namespace=?`, target, stage,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_transaction_links_v7
          (namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)
          SELECT ?,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at
            FROM ledger_transaction_links_v7 WHERE namespace=?`, target, stage,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_entities_v7
          (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
          SELECT ?,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at
            FROM ledger_entities_v7 WHERE namespace=?`, target, stage,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_workspace_state_v7
          (namespace,source_mode,schema_version,shadow_checksum,shadow_verified_at,cutover_at,last_reconciled_at,payload_json,updated_at)
          VALUES (?,?,?,?,?,?,?,?,?)`,
         target, 'sqlite', FINANCIAL_LEDGER_SCHEMA_VERSION, checksum, now, now, now, safeJson(workspacePayload), now,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_migration_audits_v7
          (namespace,run_id,source_checksum,target_checksum,source_counts_json,target_counts_json,differences_json,exact_match,created_at)
          VALUES (?,?,?,?,?,?,?,?,?)`,
         target, runId, checksum, checksum, safeJson(sourceCounts), safeJson(targetCounts), '[]', 1, now,
       );
-      await clearFinancialNamespaceRows(db, stage);
+      await clearFinancialNamespaceRows(txn, stage);
     });
     return { supported: true, ok: true, cutoverAt: now, checksum, sourceMode: 'sqlite' };
   });
@@ -3417,19 +3430,19 @@ export const cloneFinancialWorkspaceV7 = async ({ sourceNamespace, targetNamespa
   const sourceState = await db.getFirstAsync(`SELECT * FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1`, source);
   if (!sourceState) return { supported: true, ok: false, reason: 'clone_source_missing' };
   return enqueueWrite(async () => {
-    await db.withTransactionAsync(async () => {
-      await clearFinancialNamespaceRows(db, target);
-      await db.runAsync(
+    await runLedgerExclusiveTransaction(db, async (txn) => {
+      await clearFinancialNamespaceRows(txn, target);
+      await txn.runAsync(
         `INSERT INTO ledger_accounts_v7(namespace,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at)
          SELECT ?,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at FROM ledger_accounts_v7 WHERE namespace=?`,
         target, source,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_exchange_rates_v7(namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)
          SELECT ?,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at FROM ledger_exchange_rates_v7 WHERE namespace=?`,
         target, source,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_financial_transactions_v7
          (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,idempotency_key,device_id,
           revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)
@@ -3437,23 +3450,23 @@ export const cloneFinancialWorkspaceV7 = async ({ sourceNamespace, targetNamespa
                 revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at
            FROM ledger_financial_transactions_v7 WHERE namespace=?`, target, source,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_postings_v7(namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
          SELECT ?,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at FROM ledger_postings_v7 WHERE namespace=?`,
         target, source,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_transaction_links_v7(namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)
          SELECT ?,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at FROM ledger_transaction_links_v7 WHERE namespace=?`,
         target, source,
       );
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_entities_v7(namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
          SELECT ?,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at FROM ledger_entities_v7 WHERE namespace=?`,
         target, source,
       );
       const now = new Date().toISOString();
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO ledger_workspace_state_v7
          (namespace,source_mode,schema_version,shadow_checksum,shadow_verified_at,cutover_at,last_reconciled_at,payload_json,updated_at)
          VALUES (?,?,?,?,?,?,?,?,?)`,

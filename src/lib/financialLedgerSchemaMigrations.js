@@ -1,7 +1,7 @@
 // MYFI Phase 2: reusable, crash-aware SQLite schema migration infrastructure.
 // Financial writes call ensureFinancialLedgerV7 before their own transaction,
 // so no financial mutation can proceed while a required schema migration fails.
-import { enqueueLedgerWrite } from './ledgerDatabase';
+import { enqueueLedgerWrite, flushLedgerWrites, runLedgerExclusiveTransaction } from './ledgerDatabase';
 
 export const LEDGER_SCHEMA_MIGRATION_JOURNAL_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -134,9 +134,9 @@ export async function runLedgerSchemaMigrations({
       );
 
       try {
-        await db.withTransactionAsync(async () => {
-          await migration.apply(db);
-          await setUserVersion(db, migration.toVersion);
+        await runLedgerExclusiveTransaction(db, async (txn) => {
+          await migration.apply(txn);
+          await setUserVersion(txn, migration.toVersion);
         });
       } catch (error) {
         await db.runAsync(
@@ -177,13 +177,20 @@ export async function runLedgerSchemaMigrations({
 
 export async function readLedgerSchemaMigrationStatus(database) {
   if (!database) return { supported: false, currentVersion: 0, migrations: [] };
-  await ensureJournal(database);
-  const [currentVersion, migrations] = await Promise.all([
-    readUserVersion(database),
-    database.getAllAsync(
-      `SELECT migration_id,from_version,to_version,checksum,started_at,completed_at,status,app_version,attempt_count,last_error
-         FROM schema_migrations ORDER BY to_version,migration_id`,
-    ),
-  ]);
+
+  // Status inspection is read-only. Wait for already-queued writes, then inspect
+  // sqlite_master instead of creating the journal as a side effect of a read.
+  await flushLedgerWrites();
+  const currentVersion = await readUserVersion(database);
+  const journal = await database.getFirstAsync(
+    `SELECT name FROM sqlite_master
+      WHERE type='table' AND name='schema_migrations' LIMIT 1`,
+  );
+  if (!journal?.name) return { supported: true, currentVersion, migrations: [] };
+
+  const migrations = await database.getAllAsync(
+    `SELECT migration_id,from_version,to_version,checksum,started_at,completed_at,status,app_version,attempt_count,last_error
+       FROM schema_migrations ORDER BY to_version,migration_id`,
+  );
   return { supported: true, currentVersion, migrations };
 }

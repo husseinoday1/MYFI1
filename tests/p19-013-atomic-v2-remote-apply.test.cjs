@@ -29,7 +29,7 @@ for (const token of [
   'last_server_sequence',
   'financial_v2_production_apply_before_activation',
   'SELECT activated_at FROM ledger_sync_state_v8',
-  'db.withTransactionAsync',
+  'runLedgerExclusiveTransaction',
 ]) assert(v8.includes(token), `missing V2 apply-body token: ${token}`);
 
 for (const token of [
@@ -47,9 +47,9 @@ for (const token of [
 
 assert.match(v8, /for \(const item of group\) plans\.push\(await v2PreflightMutation/,
   'whole command must be preflighted before production writes');
-assert.match(v8, /await db\.withTransactionAsync\(async \(\) => \{[\s\S]*v2ApplyFinancialTransactionPlan[\s\S]*v2WriteInboxCommand[\s\S]*last_server_sequence/,
-  'financial writes + inbox + production cursor must share a SQLite transaction');
-assert.match(v8, /if \(shadowMode\)[\s\S]*v2WriteInboxCommand\(db, identity, group, 'observed'/,
+assert.match(v8, /await runLedgerExclusiveTransaction\(db, async \(txn\) => \{[\s\S]*v2ApplyFinancialTransactionPlan\(txn,[\s\S]*v2WriteInboxCommand\(txn,[\s\S]*last_server_sequence/,
+  'financial writes + inbox + production cursor must share one exclusive SQLite transaction');
+assert.match(v8, /if \(shadowMode\)[\s\S]*v2WriteInboxCommand\(txn, identity, group, 'observed'/,
   'shadow mode must only observe commands');
 
 for (const token of [

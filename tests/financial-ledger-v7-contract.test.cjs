@@ -19,7 +19,8 @@ assert(repository.includes('ledger_financial_transactions_v7'), 'V7 transaction 
 assert(repository.includes('ledger_postings_v7'), 'V7 posting table missing');
 assert(repository.includes('ledger_outbox_v2'), 'V7 outbox table missing');
 assert(repository.includes('ledger_entities_v7') && repository.includes('ledger_workspace_state_v7'), 'V7 entities/cutover state tables missing');
-assert(repository.includes('withTransactionAsync'), 'Expense header, posting, and outbox must share one SQLite transaction');
+assert(repository.includes('runLedgerExclusiveTransaction'), 'Expense header, posting, and outbox must share one exclusive SQLite transaction');
+assert(!repository.includes('.withTransactionAsync('), 'Production V7 repository must not use non-exclusive SQLite transactions');
 assert(repository.includes('financial_v7_expense_readback_failed'), 'Committed Expense must be read back from Header/Postings before reaching UI state');
 assert(!/ledger_(?:accounts|exchange_rates|financial_transactions|postings|outbox)[\s\S]*?\bREAL\b/.test(repository), 'V7 financial schema must not store money or rates as REAL');
 const addTransBody = transactions.slice(transactions.indexOf('addTrans: async'), transactions.indexOf('duplicateTrans: async'));

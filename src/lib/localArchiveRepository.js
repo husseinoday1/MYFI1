@@ -3,7 +3,7 @@
 // remaining in the hot Zustand transaction array. This database is a local
 // performance/archive layer; the encrypted vault remains the active workspace
 // safety boundary and external MYFI archive packages remain portable backups.
-import { enqueueLedgerWrite, getLedgerDb } from './ledgerDatabase';
+import { enqueueLedgerWrite, getLedgerDb, runLedgerExclusiveTransaction } from './ledgerDatabase';
 // Shared connection initializes: PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON.
 import { defaultScopeForProfile, normalizeScope } from './modules';
 
@@ -116,8 +116,8 @@ export const storeColdArchiveYear = async ({
   const archivedAt = summary.archivedAt || new Date().toISOString();
   const metadataJson = safeJson(archiveMetadata(data, { ...summary, scope: archiveScope }));
 
-  await enqueueLedgerWrite(() => db.withTransactionAsync(async () => {
-    await db.runAsync(
+  await enqueueLedgerWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    await txn.runAsync(
       `INSERT INTO cold_archive_years
        (namespace, scope, year, archived_at, checksum, transaction_count, income, expense, net, metadata_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -136,14 +136,14 @@ export const storeColdArchiveYear = async ({
       Number(summary.net || 0),
       metadataJson,
     );
-    await db.runAsync(
+    await txn.runAsync(
       'DELETE FROM cold_archive_transactions WHERE namespace = ? AND scope = ? AND year = ?',
       ns,
       archiveScope,
       targetYear,
     );
 
-    const statement = await db.prepareAsync(`
+    const statement = await txn.prepareAsync(`
       INSERT INTO cold_archive_transactions
       (namespace, scope, year, id, date_iso, ts, wallet_id, category_id, flow_type, search_text, payload_json)
       VALUES ($namespace, $scope, $year, $id, $date, $ts, $wallet, $category, $flow, $search, $payload)
@@ -314,10 +314,10 @@ export const replaceColdArchives = async (namespace = 'guest', archives = []) =>
   }
 
   try {
-    await enqueueLedgerWrite(() => db.withTransactionAsync(async () => {
-      await db.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', ns);
+    await enqueueLedgerWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+      await txn.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', ns);
       if (incoming.length) {
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT INTO cold_archive_years
              (namespace, scope, year, archived_at, checksum, transaction_count, income, expense, net, metadata_json)
            SELECT ?, scope, year, archived_at, checksum, transaction_count, income, expense, net, metadata_json
@@ -326,7 +326,7 @@ export const replaceColdArchives = async (namespace = 'guest', archives = []) =>
           ns,
           stageNamespace,
         );
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT INTO cold_archive_transactions
              (namespace, scope, year, id, date_iso, ts, wallet_id, category_id, flow_type, search_text, payload_json)
            SELECT ?, scope, year, id, date_iso, ts, wallet_id, category_id, flow_type, search_text, payload_json
@@ -336,7 +336,7 @@ export const replaceColdArchives = async (namespace = 'guest', archives = []) =>
           stageNamespace,
         );
       }
-      await db.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', stageNamespace);
+      await txn.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', stageNamespace);
     }));
     return true;
   } catch (error) {
