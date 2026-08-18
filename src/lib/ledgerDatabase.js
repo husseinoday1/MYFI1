@@ -19,6 +19,10 @@ export const enqueueLedgerWrite = task => {
 
 export const flushLedgerWrites = () => ledgerWriteQueue.catch(() => undefined);
 
+// P19-014A: diagnostics may inspect an already-open handle, but must never
+// initialize the database or trigger schema/migration side effects themselves.
+export const peekLedgerDb = () => dbPromise;
+
 export async function getLedgerDb() {
   if (Platform.OS === 'web') return null;
   if (!dbPromise) {

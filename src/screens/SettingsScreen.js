@@ -20,6 +20,7 @@ import {
   Linking,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
@@ -46,6 +47,7 @@ import { RADIUS, weight } from '../lib/tokens';
 import LegacySettingsScreen from './SettingsLegacyScreen';
 import { PERFORMANCE_TEST_TIERS } from '../dev/performanceTestConfig';
 import { PRODUCT_NAME } from '../lib/productIdentity';
+import { collectP19LocalSqliteDiagnostics } from '../dev/p19LocalSqliteDiagnostics';
 
 const pageCopy = (lang = 'ar') => {
   const ar = lang === 'ar';
@@ -331,6 +333,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
     refreshDataHealth,
     financialLedgerV7Cutover,
     financialMutationSync,
+    workspaceNamespace,
   } = useStore();
 
   const th = TH[cfg.theme] || TH.dark;
@@ -363,6 +366,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
   const [restoreResultOpen, setRestoreResultOpen] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [testDataBusy, setTestDataBusy] = useState(false);
+  const [localSqliteDiagnosticBusy, setLocalSqliteDiagnosticBusy] = useState(false);
+  const [localSqliteDiagnostic, setLocalSqliteDiagnostic] = useState('');
   const emailRef = useRef('');
 
   const selectedCountry = COUNTRIES.find(item => item.code === cfg.country) || COUNTRIES[0];
@@ -728,6 +733,34 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
     }
   };
 
+  const runLocalSqliteDiagnostics = async () => {
+    if (localSqliteDiagnosticBusy) return;
+    setLocalSqliteDiagnosticBusy(true);
+    try {
+      const evidence = await collectP19LocalSqliteDiagnostics({ workspaceNamespace, cfg });
+      const text = JSON.stringify(evidence, null, 2);
+      setLocalSqliteDiagnostic(text);
+      console.log('[P19-014A_LOCAL_SQLITE_DIAGNOSTIC]', text);
+    } catch (error) {
+      const text = JSON.stringify({
+        patchId: 'P19-014A',
+        readOnly: true,
+        ok: false,
+        reason: String(error?.message || error || 'local_sqlite_diagnostic_failed'),
+      }, null, 2);
+      setLocalSqliteDiagnostic(text);
+      console.warn('[P19-014A_LOCAL_SQLITE_DIAGNOSTIC]', text);
+    } finally {
+      setLocalSqliteDiagnosticBusy(false);
+    }
+  };
+
+  const copyLocalSqliteDiagnostic = async () => {
+    if (!localSqliteDiagnostic) return;
+    await Clipboard.setStringAsync(localSqliteDiagnostic);
+    Alert.alert('', isAr ? 'تم نسخ دليل SQLite المحلي.' : 'Local SQLite evidence copied.');
+  };
+
   const toggleBioLock = async value => {
     if (value) {
       const supported = await isBiometricSupported();
@@ -992,6 +1025,10 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
             lastSyncError={lastSyncError}
             online={online}
             dirty={dirty}
+            localSqliteDiagnosticBusy={localSqliteDiagnosticBusy}
+            localSqliteDiagnostic={localSqliteDiagnostic}
+            onRunLocalSqliteDiagnostic={runLocalSqliteDiagnostics}
+            onCopyLocalSqliteDiagnostic={copyLocalSqliteDiagnostic}
             lastSyncedAt={lastSyncedAt}
             editIdentity={editIdentity}
             setEditIdentity={setEditIdentity}
@@ -1294,6 +1331,7 @@ function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accou
 
 function AccountPage({
   th, isAr, T, user, cfg, accountName, accountEmail, accountInitial, syncState, lastSyncError, online, dirty, lastSyncedAt,
+  localSqliteDiagnosticBusy, localSqliteDiagnostic, onRunLocalSqliteDiagnostic, onCopyLocalSqliteDiagnostic,
   editIdentity, setEditIdentity, nameDraft, setNameDraft, onSaveIdentity, onPickAvatar, onRemoveAvatar, onOpenAuth,
   onSync, onDevices, onPasswordReset, onSignOut, onDeleteAccount,
 }) {
@@ -1376,6 +1414,35 @@ function AccountPage({
                   ltr
                 />
               </>
+            ) : null}
+            {/* P19-014A_LOCAL_SQLITE_DIAGNOSTICS_UI: manual, read-only local evidence only. */}
+            <MenuRow
+              th={th}
+              isAr={isAr}
+              icon="server-outline"
+              title={isAr ? 'دليل SQLite المحلي' : 'Local SQLite evidence'}
+              subtitle={localSqliteDiagnosticBusy
+                ? (isAr ? 'جاري القراءة فقط…' : 'Reading only…')
+                : (isAr ? 'قراءة حالة المزامنة المحلية بدون تعديل البيانات' : 'Read local sync state without modifying data')}
+              onPress={onRunLocalSqliteDiagnostic}
+            />
+            {localSqliteDiagnostic ? (
+              <View style={{ paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: th.border }}>
+                <TouchableOpacity
+                  onPress={onCopyLocalSqliteDiagnostic}
+                  style={{ alignSelf: isAr ? 'flex-end' : 'flex-start', paddingVertical: 7, paddingHorizontal: 10, borderWidth: 1, borderColor: th.border, borderRadius: 10, marginBottom: 10 }}
+                >
+                  <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>
+                    {isAr ? 'نسخ الدليل' : 'Copy evidence'}
+                  </Text>
+                </TouchableOpacity>
+                <Text
+                  selectable
+                  style={{ color: th.sub, fontSize: 10.5, lineHeight: 16, writingDirection: 'ltr', textAlign: 'left' }}
+                >
+                  {localSqliteDiagnostic}
+                </Text>
+              </View>
             ) : null}
             <InfoRow th={th} isAr={isAr} title={T.lastSync} value={formatSyncTime(lastSyncedAt, isAr ? 'ar' : 'en')} />
             <MenuRow th={th} isAr={isAr} icon="phone-portrait-outline" title={T.devices} subtitle={T.devicesSub} onPress={onDevices} />
