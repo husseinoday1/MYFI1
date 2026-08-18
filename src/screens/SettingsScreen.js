@@ -989,6 +989,9 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
             accountEmail={accountEmail}
             accountInitial={accountInitial}
             syncState={syncState}
+            lastSyncError={lastSyncError}
+            online={online}
+            dirty={dirty}
             lastSyncedAt={lastSyncedAt}
             editIdentity={editIdentity}
             setEditIdentity={setEditIdentity}
@@ -1290,7 +1293,7 @@ function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accou
 }
 
 function AccountPage({
-  th, isAr, T, user, cfg, accountName, accountEmail, accountInitial, syncState, lastSyncedAt,
+  th, isAr, T, user, cfg, accountName, accountEmail, accountInitial, syncState, lastSyncError, online, dirty, lastSyncedAt,
   editIdentity, setEditIdentity, nameDraft, setNameDraft, onSaveIdentity, onPickAvatar, onRemoveAvatar, onOpenAuth,
   onSync, onDevices, onPasswordReset, onSignOut, onDeleteAccount,
 }) {
@@ -1355,6 +1358,25 @@ function AccountPage({
           <SectionLabel th={th} isAr={isAr} text={T.syncDevices} />
           <MenuGroup th={th}>
             <MenuRow th={th} isAr={isAr} icon={syncState.icon} iconColor={syncState.color} title={T.syncStatus} value={syncState.text} />
+            {/* P19-014_INTERNAL_SYNC_DIAGNOSTICS: temporary, read-only diagnostic surface. */}
+            {lastSyncError || !online ? (
+              <>
+                <InfoRow
+                  th={th}
+                  isAr={isAr}
+                  title={isAr ? 'رمز التشخيص الداخلي' : 'Internal diagnostic code'}
+                  value={String(lastSyncError || 'offline_without_sync_error')}
+                  ltr
+                />
+                <InfoRow
+                  th={th}
+                  isAr={isAr}
+                  title={isAr ? 'أعلام المزامنة الداخلية' : 'Internal sync flags'}
+                  value={`${online ? 'online' : 'offline'} · ${dirty ? 'dirty' : 'clean'}`}
+                  ltr
+                />
+              </>
+            ) : null}
             <InfoRow th={th} isAr={isAr} title={T.lastSync} value={formatSyncTime(lastSyncedAt, isAr ? 'ar' : 'en')} />
             <MenuRow th={th} isAr={isAr} icon="phone-portrait-outline" title={T.devices} subtitle={T.devicesSub} onPress={onDevices} />
             <MenuRow th={th} isAr={isAr} icon="sync-outline" title={T.syncNow} subtitle={syncState.text} onPress={onSync} last />
