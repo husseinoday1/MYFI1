@@ -1,0 +1,622 @@
+# MYFI — Claude Code Master Engineering Handoff
+
+Prepared: 2026-08-19 (last updated 2026-08-19, MYFI Planning & Audit session)
+Repository: `https://github.com/husseinoday1/MYFI1`
+
+## 0. What this document is — and is not
+
+This is **context, not truth**. It exists to onboard Claude Code as the primary
+engineering owner of MYFI quickly, without re-deriving everything from scratch
+every session. It is not a new authority level and it does not sit inside the
+canonical authority order.
+
+If anything in this file conflicts with the repository, `docs/00_MYFI_CANONICAL_AUTHORITY.md`,
+the Frozen Master Plan, a domain contract, or newer evidence: **stop, name the
+conflict, and resolve it using the canonical authority order in section 2.**
+This file will go stale — the repo will not. (It already has once: see §3.)
+
+---
+
+## 1. Project mission
+
+MYFI is a local-first personal-finance Android/Expo app, in Arabic, RTL-first.
+
+- **SQLite is the sole owner of financial operational truth** — ledger identity,
+  wallets, transactions, postings, historical FX, debts/receivables, goals,
+  commitments, budgets, recurring rules, archive metadata, reconciliation,
+  mutation outbox, sync inbox/cursors, and financial schema version.
+- **Supabase is transport, auth, and replication only.** It is never the
+  authority for whether local financial data exists.
+- Everything else (theme/language/country prefs, Zustand UI/query cache,
+  SecureStore auth secrets) is explicitly non-financial ownership. See
+  `docs/MYFI_DATA_OWNERSHIP.md`.
+
+---
+
+## 2. Source of truth — authority order
+
+Defined canonically in [`docs/00_MYFI_CANONICAL_AUTHORITY.md`](docs/00_MYFI_CANONICAL_AUTHORITY.md).
+Do not pick a document because its filename says "final"/"frozen"/"REV2" — use this order:
+
+1. **A0 — Actual Git repository state.** Verify branch, HEAD, `git status`,
+   schema state, before every session. The repo defines what exists now; it
+   does not override frozen financial invariants just because code violates them.
+2. **A1 — Frozen Master Plan.** `docs/01_CORE_AUTHORITY/MYFI_MASTER_PLAN_FROZEN.md`
+   — phase order, architecture, execution policy.
+3. **A2 — Active recovery/addendum overlays** for the current release only
+   (currently the R04.1 recovery addendum, now closed, and the P19 Sync V2
+   activation addendum, active and extended by the P19-013 atomic remote-apply
+   contract).
+4. **A3 — Permanent domain contracts** (financial, data ownership, sync,
+   backup, date/time, migration, performance, release scope, security). These
+   beat design notes and status prose.
+5. **A4 — Evidence/acceptance truth**, newest real-device evidence first. A
+   static PASS never overrules a later device failure.
+6. **A5 — Technical design docs** (financial model, SQLite V7/V8 design,
+   database architecture). Loses to A1–A4 on conflict.
+7. **A6 — Product/UX/support specs.** Cannot weaken financial/migration/
+   security/acceptance gates.
+8. **A7 — Release/store support docs.** Reverify time-sensitive Play Store
+   policy from official sources at submission time, not from a dated doc.
+
+Explicitly **superseded / no execution authority**: everything listed under
+`00_MYFI_CANONICAL_AUTHORITY.md` §3 (old REV2 master plan, old reconciliation
+notes, old takeover handoffs, `MYFI_IMPLEMENTATION_STATUS.md`,
+`FUTURE_ROADMAP_AND_RELEASE_PLAN_AR.md`, `RELEASE_READINESS_AR.md`, etc.) —
+consult only for historical archaeology, never as instruction.
+
+`MYFI_PRODUCT_BLUEPRINT.md` at the repo root is an **early, superseded
+concept doc** (AsyncStorage as source of truth, a different 6-phase roadmap
+than the frozen plan). Treat it as historical product-vision flavor only,
+never as current architecture or roadmap.
+
+---
+
+## 3. Current verified state (updated 2026-08-19, re-verified live against GitHub)
+
+⚠️ **This section drifts fast — this project has multiple active working
+environments (this Windows clone, GitHub Codespaces, separate Codex-style
+patch worktrees under `C:\Users\husse\AppData\Local\MYFI-PATCH-WORKTREES`) all
+pushing to the same GitHub repo. On 2026-08-19 this local Windows clone was
+found 17 commits behind the true remote tip, and a separately-prepared
+handoff doc was 29 commits behind (it named a checkpoint that was already
+superseded by an entire branch generation). Always re-run `git fetch --all
+&& git branch -r --sort=-committerdate | head` before trusting any of this.**
+
+```text
+True current tip (GitHub, verified 2026-08-19):
+  Branch: r05-p20-phase9-restore-epoch-gate
+  HEAD:   fd98f80  "P20-G01 add disposable restore epoch device gate"
+  Pushed: 2026-08-19 10:41 +0300
+
+This local Windows clone (kept for reference, NOT the tip):
+  Branch: r05-p19-012-empty-shell-cloud-recovery
+  HEAD:   884c349a6a0d624451a375ed7a6026e589985d49 (17 commits behind true tip)
+  Working tree: NOT CLEAN — see the broken-edit warning below; unconfirmed
+  whether it was ever fixed on the later branches.
+
+SQLite schema:    V8 (unchanged since P19-004)
+Current release:  R05 (in progress; R04.1 is CLOSED)
+Active addendum:  MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM.md (ACTIVE, extended by
+                   P19-013's fail-closed atomic V2 remote-apply contract)
+Phase 8:          Operational cutover — real-device PASS (P18-012).
+Phase 9:          STILL OPEN, but materially closer to closing. A real account
+                   has now passed real-device V2 acceptance for the ordinary
+                   path: V2 active, sync OK, a real transaction uploaded and
+                   downloaded, survived app restart, no V1 fallback observed
+                   (P20 evidence, 2026-08-19). The one remaining gate is
+                   P20-G01: real-device proof that the destructive
+                   restore-epoch/recovery handshake is safe, run ONLY against
+                   a disposable/empty test account, with 10 required steps
+                   (build signed acceptance APK → confirm the gate refuses to
+                   run on a non-empty account → run it once on a disposable
+                   account → verify server restore-event evidence → confirm
+                   the real account is untouched afterward). None of the 10
+                   steps are done yet.
+Phase 10:         Still BLOCKED — explicitly may not open until all 10 P20-G01
+                   items pass.
+Patch chain:      P19-001 through P19-013 (P19-013 removed a temporary V7
+                   remote-apply reuse and made V2 apply fail-closed), then
+                   P19-014/014A (diagnostics + local APK build path),
+                   P19-015A1/A2 (SQLite runtime serialization + startup
+                   hardening), P19-015B0/B1 (ledger-identity forensics +
+                   adoption preflight), four "P19 FINAL" commits (V2
+                   cutover/bootstrap/causal-order hardening), then "P20 FINAL"
+                   (fixed a real sync bug: a rotating signed avatar-image URL
+                   was being treated as part of canonical workspace state and
+                   causing spurious sync revision bumps — now excluded from
+                   equality checks), then P20-G01 (current tip).
+```
+
+**⚠️ Uncommitted change found in the working tree on 2026-08-19 (local Windows
+clone, branch `r05-p19-012-empty-shell-cloud-recovery`) — status on later
+branches not reconfirmed:**
+
+`src/lib/financialLedgerV7Repository.js` had one uncommitted line change that
+looked like a broken/accidental edit, not a real patch:
+
+```diff
+-        activationEvidence
++    activationEvidence,
+         && String(activationEvidence.ledgerId || '') === identity.ledgerId
+```
+
+This turns a valid `&&`-chain operand into `activationEvidence, && ...`, which
+is not syntactically valid as written and (if it did parse) would silently
+change `activationEvidenceValid` logic in the V8 sync protocol reader — the
+exact function that gates whether V2 activation evidence is trusted. Given
+P19-013/P20 work landed cleanly afterward on GitHub, this was likely a stray
+local edit that was never pushed — but confirm it's gone before trusting this
+file again, don't assume.
+
+**Known regression pattern to watch for:** P18-016 documented that after V7
+cutover, the legacy `user_data` snapshot merge must never again be used as a
+financial pull path (absence-as-deletion caused real tombstones — see §8).
+Any future touch to sync/reconciliation code must re-verify this guard is
+still in effect.
+
+---
+
+## 4. Architecture
+
+```text
+UI (React Native / Expo, RTL Arabic-first)
+  → Command/Query layer
+    → SQLite V8 local financial core (financialLedgerV7Repository.js et al.)
+        entities / postings / historical FX / outbox — one atomic transaction
+    → ledger_outbox_v2 / ledger_inbox_v2 / financial_mutations_v1(+v2)
+      → Supabase (transport, auth, RLS-protected compatibility + V2 schema)
+```
+
+- **Local write boundary (non-negotiable):**
+  `BEGIN → entity/header → postings → links → revision → outbox → COMMIT → UI cache → success`.
+  Outbox mutation must be in the *same* SQLite transaction as the financial write.
+- **Money:** integer minor units internally; decimals are display/input only.
+- **Supabase compatibility layer:** `public.user_data` / `sync_user_data_v2` —
+  intentionally still exists as a **compatibility mirror output only**, not a
+  financial pull source, post-cutover (see §8 incident).
+- **Cloud normalized schema** (`workspace_id`-scoped tables, RLS, `numeric(20,4)`)
+  described in `docs/DATABASE_ARCHITECTURE.md` is a transitional/compatibility
+  design, not the local storage contract — it does not redefine local-ledger
+  ownership.
+- Full technical design: `docs/SQLITE_FINANCIAL_CORE_V7_DESIGN_AR.md`,
+  `docs/FINANCIAL_MODEL_2_0_AR.md`, `docs/DATABASE_ARCHITECTURE.md`,
+  `docs/BACKFILL_RUNBOOK.md`.
+
+---
+
+## 5. Financial contracts — non-negotiable
+
+From `docs/MYFI_FINANCIAL_CONTRACT.md` and the multi-currency policy addendum:
+
+1. Financial history is never reinterpreted for country/login/guest-merge/
+   archive/restore/sync/timezone/upgrade reasons.
+2. Local-first: durable SQLite commit precedes UI success; cloud is later.
+3. Every balance must be derivable from authoritative postings.
+4. No silent repair. A financial mismatch is detected, classified, and stops
+   the risky operation — it is never quietly fixed.
+5. Financial IDs are immutable; edits raise a revision, never
+   delete/recreate under a new unrelated ID.
+6. Financial delete defaults to void/tombstone — never untracked disappearance.
+7. Historical FX snapshot is immutable per transaction; current valuation
+   rate is a separate concept. **Changing today's rate must never rewrite
+   any previously saved historical income/expense/net/budget value.**
+8. A transfer = source posting + destination posting + optional fee +
+   FX snapshot on currency mismatch. It is never counted as income/expense.
+9. Base/Home Currency is a ledger identity property, locked once history
+   exists; changing it later needs an explicit reviewed migration
+   (backup + preview + verification + recovery), never a plain setting toggle.
+10. Unknown wallet references in restore input are blocking errors — never
+    auto-repaired to a default wallet.
+11. Feature visibility (hiding a module) never deletes entities, transactions,
+    historical totals, backups, or evidence — navigation only.
+
+Also binding: `docs/MYFI_DATA_OWNERSHIP.md`, `docs/MYFI_SYNC_PROTOCOL.md`,
+`docs/MYFI_BACKUP_FORMAT.md`, `docs/MYFI_DATE_TIME_CONTRACT.md`,
+`docs/MYFI_MIGRATION_POLICY.md`, `docs/MYFI_PERFORMANCE_SLO.md`,
+`docs/MYFI_RELEASE_SCOPE.md`, `docs/MYFI_SECURITY_THREAT_MODEL.md`. Read the
+relevant one before touching that area — don't rely on this summary alone for
+implementation decisions.
+
+---
+
+## 6. Data ownership & account lifecycle
+
+- `ledger_id` is independent from `supabase_user_id`. **Never** `ledger_id = supabase_user_id`.
+  A ledger has an *optional* cloud-account link, not an identity equivalence.
+- **Logout ≠ Delete Local Data ≠ Delete Account.** Three independent operations:
+  - Logout: ends cloud session only; local ledger stays active and accessible.
+  - Delete Account: local ledger is secured/unlinked *before* cloud identity
+    deletion; user can continue local-only afterward.
+  - Delete Local Data: separate, explicit, warned, re-authed; never triggered
+    implicitly by the other two.
+- Account switch is an explicit namespace transition, never an implicit
+  Guest-ledger remount.
+- Full scenario matrix (A–H) is in Phase 9 of the Frozen Master Plan and is
+  the current open gate — see §3 and §9.
+
+---
+
+## 7. Sync model
+
+- Post-V7-cutover rule (hard-learned, see §8): **financial remote changes are
+  accepted only through explicit `sync_financial_mutations_v1`(/v2) mutations
+  or tombstones.** Mutation sync failure never falls back to a financial
+  snapshot pull. `user_data` snapshot is compatibility-mirror output only.
+- Outbox lifecycle: `pending → in_flight → acknowledged | failed_retryable | failed_permanent`,
+  backoff+jitter retry, not infinite fixed retry.
+- Inbox is idempotent on repeated delivery via mutation id/server sequence.
+- No automatic field-level merge on monetary conflict.
+- Sync worker pauses during restore / schema migration / canonical cutover.
+- **P19 Sync V2 activation is a verified cutover, not a successful upload.**
+  Required sequence: local authoritative SQLite → staged bootstrap → finalize
+  in Supabase → cloud read-back → per-row SHA-256 verification → ordered
+  manifest SHA-256 verification → V2 shadow drain → quiescent validation pass
+  (`pending=0, uploaded=0, downloaded=0, hasMore=false`) → atomic activation
+  evidence (`ledger_id`, `restore_epoch`, `bootstrap_id`, `manifest_hash`,
+  timestamps) + `activated_at`.
+  - Before durable `activated_at`: a failed verification may leave V1 operational.
+  - After durable `activated_at`: **automatic fallback to V1 is forbidden** —
+    a post-activation V2 failure is fail-closed and handled as a protocol
+    recovery event, not silently downgraded.
+- **P19-013 hardening (2026-08-18):** removed a temporary reuse of the V7
+  remote-apply engine for V2. Production apply now stays independent from
+  shadow validation (`allowProductionApply=false` by default), requires exact
+  V3-outbox-equality to recognize a local echo, requires local revision ==
+  remote `base_revision` for anything else, and commits financial rows +
+  inbox state + cursor in one SQLite transaction per command.
+- P19-012 narrow rule: if a post-cutover local ledger is a provably empty
+  shell for an authenticated user with pre-existing pre-V2 cloud history, the
+  server returns the exact legacy snapshot + SHA-256, client verifies the hash
+  before parsing, restores via the staged operational-cutover path, and then
+  **must continue toward V2** — it must not fall back to V1 on the same
+  attempt. A finalized V2 cloud ledger is never reinterpreted through
+  `user_data`; that's a separate `financial_v2_bootstrap_import_required` path.
+- **P20-G01 (2026-08-19, current open gate):** before Phase 9 can close, the
+  destructive restore-epoch handshake (`advance_financial_restore_epoch_v2`
+  CAS → local epoch CAS commit → new-epoch shadow pull → verify zero
+  old-epoch replay → verify server restore-event evidence → verify the
+  financial fingerprint is unchanged) must pass on a real device against a
+  genuinely disposable, financially-empty test account — never the real one.
+  The gate itself refuses to run if it observes any real financial state
+  (any transaction/debt/goal/commitment/second wallet/etc.) on the active
+  account, and separately proves `resetAll`/`importBackup` still fail closed.
+
+Full contract: `docs/MYFI_SYNC_PROTOCOL.md`,
+`docs/01_CORE_AUTHORITY/MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM.md`,
+`docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_PHASE9_RESTORE_EPOCH_GATE_2026-08-19.md`.
+
+---
+
+## 8. Known incidents (why we're strict)
+
+### Phase 9 legacy-snapshot-omission incident (CLOSED 2026-08-17, P18-021)
+
+After V7 operational cutover, `syncCloud` still ran the **legacy `user_data`
+three-way-merge as a financial pull path**. That merge interprets record
+*absence* as deletion. `reconcileFinancialWorkspaceV7` then treated records
+missing from the desired snapshot as `missingIds` and called
+`voidFinancialTransactionsV7` — turning a stale/incomplete cloud snapshot into
+**real local V7 void/delete mutations** across multiple account namespaces.
+
+Root cause fix (P18-016): post-cutover, financial remote changes are accepted
+only through explicit mutation/tombstone protocol; snapshot pull for finance
+is permanently forbidden (`financial_v7_snapshot_pull_forbidden`) and
+`user_data` becomes compatibility-mirror output only.
+
+Recovery (P18-017 → P18-020): a separate controlled operation, scoped only to
+the proven accidental-deletion cluster (32 recovery upserts, real-device
+verified), explicitly **not** touching earlier deliberate user deletions.
+
+**Lesson:** component-level PASS is not sufficient. Cross-layer sequences
+(cutover + sync + reconciliation together) must be tested explicitly, and any
+code path that can convert "record not present in a snapshot" into a delete
+is a standing financial-safety risk.
+
+### P19-011 activation ordering gap → P19-012 (evidence 2026-08-17)
+
+A real account was signed out, local data cleared on an older build, then
+signed back in. UI showed zero balance. Cloud data was intact (80
+transactions, 7 wallets, etc. — verified directly in Supabase). Root cause:
+P19-011 could attempt V2 bootstrap/activation on a truly empty local ledger
+*before* recovering existing pre-V2 cloud history, effectively registering an
+empty shell instead of recovering. Fixed by inserting the P19-012 narrow
+verified-recovery gate before P19-011 activation (§7).
+
+**Lesson:** ordering between "is this ledger really empty" and "should we
+bootstrap fresh" matters as much as the mutation logic itself.
+
+### Signed avatar URL causing spurious sync revisions (found/fixed 2026-08-19, P20 FINAL)
+
+Workspace sync revisions 7–12 for a test profile rotated on every check even
+though nothing the user controlled had changed. Root cause: a Supabase
+signed/rotating avatar-image URL (`cfg.avatarUri`) was being included in the
+canonical workspace payload used for equality/three-way-merge, so its
+rotation alone looked like a real edit and bumped the revision. Fixed by
+treating `avatarUri` as local/derived display state (excluded from equality
+and from the compatibility snapshot's `p_cfg`), keeping only the stable
+`avatarPath` as canonical/syncable.
+
+**Lesson:** not every corruption risk is a delete — a field that "looks like"
+config but is actually derived/ephemeral (signed URLs, computed caches) can
+silently pollute sync equality checks and cause spurious churn. Worth
+checking for elsewhere before trusting revision numbers as a change signal.
+
+---
+
+## 9. Phase roadmap (0–21, Frozen Master Plan)
+
+⚠️ **Naming trap:** commit-message patch IDs like `P18-xxx`, `P19-xxx`,
+`P20-xxx` are **sequential session/patch counters**, not Phase numbers. The
+P19/P20 patch chain implements Sync V2 hardening for **Phase 9** (Account
+Lifecycle Gate) and **Phase 14** (Sync Hardening) — it has nothing to do with
+"Phase 19"/"Phase 20" below (Codebase Final Cleanup / Release Candidate).
+Always check the Frozen Master Plan's own phase number, not the patch prefix.
+
+| # | Phase |
+|---|---|
+| 0 | Governance, Evidence, Contracts & Scope |
+| 1 | Android Native + SQLite V7 Reality Proof |
+| 2 | Migration Infrastructure Minimum |
+| 3 | Confirmed P0 Financial Safety Fixes |
+| 4 | Balance Proof + Financial Invariant Engine |
+| 5 | Shadow Migration / Migration Readiness Gate |
+| 6 | SQLite-first Write Path |
+| 7 | SQLite-first Read Path |
+| 8 | Operational Canonical Cutover |
+| **9** | **Account Lifecycle Gate ← current open gate, one item left (P20-G01)** |
+| 10 | Atomic Backup / Restore Engine (blocked by 9) |
+| 11 | Archive Consolidation |
+| 12 | Final Semantic Backup Round Trip |
+| 13 | Compatibility / Dual-write Retirement |
+| 14 | Sync Hardening (multi-device conflict/retry/stale-device — beyond the 2-device minimum) |
+| 15 | Performance + Reliability Gate |
+| 16 | Android Production + Security Gate |
+| 17 | Budget Intelligence + Recurring + Product Correctness |
+| 18 | Structural Refactor + UX / Accessibility |
+| 19 | Codebase Final Cleanup |
+| 20 | Final Release Candidate Gate |
+| 21 | Rollout / Rollback |
+
+Each phase has an explicit Definition of Done and several phases have hard
+prerequisites (e.g. no Phase 6 without Phase 5 readiness, no Phase 8 cutover
+without Phase 7 complete) — see `MYFI_MASTER_PLAN_FROZEN.md` §167 ("Definition
+of Done لكل Phase") and §185A ("Phase Ownership / Non-Intersection Rule")
+before assuming a phase can start early.
+
+---
+
+## 10. Current phase — what "done" looks like next
+
+Phase 9 (Account Lifecycle Gate) is OPEN but down to **one remaining gate**:
+**P20-G01**, the real-device restore-epoch/destructive-recovery acceptance
+test. Per `docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_PHASE9_RESTORE_EPOCH_GATE_2026-08-19.md`,
+10 items remain, none done yet:
+
+1. Build the P20-G01 signed acceptance APK.
+2. Install over the current app without clearing data.
+3. Confirm the gate refuses to run on the existing non-empty (real) account.
+4. Sign out and create/use a genuinely disposable, financially-empty test account.
+5. Let Protocol V2 reach an active/quiescent state on that account.
+6. Run the restore-epoch gate once.
+7. Require the exact pass marker `[P20_G01_PHASE9_RESTORE_EPOCH_GATE_PASS]`.
+8. Audit the Supabase restore event/epoch server-side.
+9. Sign out of the disposable account, re-login to the original real account.
+10. Verify the original account's transactions/balances are untouched and V2 sync is still healthy.
+
+Only after all 10 pass may Phase 9 be recorded CLOSED and Phase 10 opened.
+
+Separately, earlier Phase 9 scenario-matrix items (A/B/E/G/H from
+`MYFI_P18_013_PHASE9_MINIMUM_ACCEPTANCE_MATRIX`) should be reconciled against
+this newer evidence rather than assumed still-pending as originally written —
+the ordinary logout/re-login/account-switch/real-transaction path has since
+been device-proven via the P20 evidence in §7/§8.
+
+---
+
+## 11. Testing strategy
+
+```powershell
+npm run test:database   # schema + backfill + logic
+npm run test:logic      # tests/run-financial-core.cjs
+npm run test:ui         # tests/ui-contract.test.cjs
+npm run test:gate       # tests/run-quality-gate.cjs (full)
+npm run test:gate:static
+npm run test:gate:runtime
+npm run test:gate:cloud     # --include-cloud
+npm run test:gate:android   # --include-android
+npm run test:cloud          # tests/run-cloud-integration.cjs
+npm run test:sync:two-client   # real two-device/two-client mutation sync e2e
+npm run verify:android         # expo export --platform android (build sanity)
+```
+
+Rules (canonical authority §5, evidence precedence in §2/A4, and
+`docs/CODE_QUALITY_STANDARDS_AR.md`):
+
+- Static/compile/string-presence tests alone never close a device-dependent
+  behavior. Evidence precedence is real-device > runtime/integration >
+  automated contract/unit > static presence.
+- Device-reported failures follow: before-evidence → regression test → fix →
+  automated after-evidence → final device acceptance.
+- `NOT PROVEN` never silently becomes PASS.
+- Any change touching balance/movements needs a test in
+  `tests/financial-core.test.mjs`; UI-important changes need a contract test
+  in `tests/ui-contract.test.cjs` where text-checkable.
+- Before considering an edit done, ask: can it allow spending unavailable
+  money? Can a modal close despite a failed save? Did the entry UI grow
+  without necessity? Any dead code left? Is there a regression test?
+
+**Standing rules added 2026-08-20** (full detail in
+`docs/00_MYFI_CANONICAL_AUTHORITY.md` § "Standing Engineering Rules"),
+binding on every phase, not just Phase 9:
+
+- Only a CI-built (GitHub Actions) APK counts as acceptance evidence for any
+  gate. Local `gradlew`/manual builds are dev-iteration only — one already
+  produced a false "credential rotation" diagnosis by silently not baking in
+  required env vars.
+- Any stateful/counter logic (epoch, revision, cycle, retry count) needs a
+  test that runs the action **at least twice in sequence** — a prior fix
+  passed 81/81 tests while still breaking on the second restore-epoch advance.
+- `/code-review` runs and must be clean **before** every push, never as a
+  check applied after the change is already live.
+- CI scope/safety gates use `git merge-base --is-ancestor` + a repo-tracked
+  expected-files list, never a hardcoded single-commit exact-match — the
+  latter breaks the moment legitimate follow-up commits land.
+
+---
+
+## 12. Real financial data safety
+
+- Never clear/reset the user's real financial database to create a clean test.
+- Never delete the user's real cloud account, or invoke Delete Local Data
+  against the real ledger, as a test.
+- P20-G01 and Scenarios G/H (account delete, local-data delete) require a
+  disposable test account/dataset — never the real one.
+- Scenario E (second device) requires a genuinely isolated second
+  device/session, not a simulated one.
+- No scenario may mutate historical currency meaning, transaction IDs,
+  balances, wallet ownership, or ledger/account mapping.
+- If real user data must be inspected, it is **read-only**, with an audit
+  harness that reports `queryOnly=true`/`financialWrites=0` and is restored
+  afterward (the P18-012 pattern is the template to follow).
+
+---
+
+## 13. Git policy
+
+- No direct work on `main`.
+- No `git reset --hard` as an automatic recovery move.
+- No `git add .` / `git add -A` for financial patches — stage exact files.
+- No casual `npm install` / forced dependency upgrades.
+- No deleting/resetting user financial SQLite or SecureStore just to make
+  tests pass.
+- No app uninstall during existing-user financial acceptance unless a
+  specifically isolated test requires it.
+- No silent financial repair, no invented FX.
+- No financial history reinterpretation.
+- No "fixing" logout by cloning the same ledger into an unrelated Guest ledger.
+- No phase acceptance from compilation/static-string tests alone.
+- Keep patches small and auditable even when releases are consolidated.
+- One consolidated device-acceptance session where the active release plan requires it.
+- A failed/incomplete patch attempt is not committed; the dirty worktree is
+  preserved (not reset) so the next session can see exactly what was tried —
+  this is the established pattern from P19-011's first contract failure.
+
+---
+
+## 14. Execution autonomy
+
+**MUST (never violate without explicit user-approved change to canonical authority):**
+Financial-safety invariants (§5), data-ownership rules (§6), sync contract
+(§7), git policy (§13), real-data safety (§12), source-of-truth order (§2).
+
+**SHOULD (default working method):**
+Audit broadly before patching narrowly; fix root causes, not symptoms (P18-016
+over a one-off recovery); keep evidence docs current when you close or open a
+gate; prefer coherent patch batches over scattered one-liners; run the
+relevant automated gate before calling anything done; write the end-of-session
+status block (§19) every session.
+
+**AUTONOMOUS (Claude Code decides):**
+Which files to touch and how to sequence work inside a phase; test design;
+internal refactors that don't change contracts; script/tooling creation;
+whether a dependency addition is justified (state why); when a phase's own
+sequencing in the Frozen Master Plan looks wrong given current evidence —
+propose the change explicitly with evidence, do not silently reinterpret the
+plan.
+
+---
+
+## 15. Future product roadmap
+
+**Currently authorized / in progress:** Phases 9 → 21 as scoped in the Frozen
+Master Plan (§9 above), including Phase 17 (Budget Intelligence + Recurring +
+Product Correctness) and Phase 18 (Structural Refactor + UX/Accessibility).
+
+**Mentioned by the user, not yet in any canonical doc — NOT YET AUTHORIZED
+for implementation, needs a proper canonical-authority registration before
+any code starts:**
+- Contacts / Financial Parties linking.
+- Transaction templates.
+- Categories 2.0.
+- Quick Add flow.
+
+Do not start these from this handoff alone — they were raised in
+conversation, not registered in `00_MYFI_CANONICAL_AUTHORITY.md` or the
+Frozen Master Plan. If asked to build one, first check whether it has since
+been added to canonical docs; if not, treat it as a proposal to scope, not a
+ready task.
+
+**Deferred/conditional by explicit plan** (not future ideas, already decided):
+OCR, Voice, and multi-device sync are conditional — not described as
+production-ready before their specific gates close. Workspaces/shared ledgers
+and experimental/developer screens stay hidden if incomplete.
+
+---
+
+## 16. Brand / naming
+
+Final branding/rebranding is explicitly `DEFERRED_BY_PLAN until Arabic name is
+selected` (Frozen Master Plan). Do not rename the product, package, or
+user-facing brand strings speculatively.
+
+---
+
+## 17. Definition of done (general shape)
+
+Per-phase Definition of Done lives in the Frozen Master Plan §167 — read the
+specific phase's entry before declaring it closed. As a floor, closing any
+phase/gate requires, in this order of precedence: newer real-device evidence
+> runtime/integration evidence > automated contract/unit evidence > static
+source presence — never the reverse. A phase is not done because code exists;
+it's done when the evidence chain proves the frozen scenario matrix for that
+phase.
+
+---
+
+## 18. First-session instructions
+
+Do not start with "begin Phase 10" or any specific task. Start with:
+
+1. Inspect the repo yourself: `git fetch --all`, then check branch/HEAD
+   against `git branch -r --sort=-committerdate` — confirm you're looking at
+   the true tip, not a stale local checkout (this has already bitten this
+   project once — see §3). Confirm SQLite schema version.
+2. Read `docs/00_MYFI_CANONICAL_AUTHORITY.md`, then the Frozen Master Plan
+   sections for Phase 9 and Phase 10, then the P19/P20 evidence under
+   `docs/04_CURRENT_EVIDENCE/`.
+3. If working from this local Windows clone specifically, diagnose the
+   uncommitted `financialLedgerV7Repository.js` change flagged in §3 before
+   writing any new code in that file.
+4. Confirm whether the 10-item P20-G01 checklist (§10) is still the exact
+   next task, or whether a newer session has since progressed it.
+5. State the required-start-of-session block from canonical authority §6
+   before making any change:
+   ```text
+   Verified branch / HEAD / Working tree / Expo SDK / React Native /
+   SQLite schema / Current release/gate / Active addendum /
+   Current device failures / Financial-data impact of proposed work /
+   Schema/migration impact / Proposed patch ID
+   ```
+6. Do not trust this handoff blindly where it disagrees with what you find.
+
+---
+
+## 19. End-of-session handoff format
+
+Per canonical authority §7, close every session with:
+
+```text
+Current commit:
+Current branch:
+Current release/gate:
+Applied patches:
+Passed:
+Failed:
+Blocked:
+Next exact task:
+Financial data changed:
+SQLite/schema changed:
+Migration impact:
+Device acceptance status:
+```

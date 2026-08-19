@@ -300,3 +300,38 @@ Permanent recovery/sync invariants are recorded in:
 - `docs/MYFI_SYNC_PROTOCOL.md`.
 
 P19-013 automated evidence cannot close real-device acceptance. Production V2 use remains blocked until the reviewed APK is installed and the device recovery/sync acceptance is executed without conflict, cursor regression, financial-value drift, or fallback.
+
+<!-- STANDING_ENGINEERING_RULES_2026-08-20 -->
+## Standing Engineering Rules — 2026-08-20
+
+Adopted after the P20-G01 gate produced five back-to-back, mostly avoidable
+problems in one day (a device-only sync bug, a second bug in that fix caught
+only after it was already pushed once, a local-build tooling gap that
+produced a false "credential rotation" diagnosis, and a hand-maintained CI
+scope-gate that blocked its own fix). Binding on every session and every
+future phase, not just Phase 9:
+
+1. **CI is the only build path trusted for acceptance evidence.** A local
+   `gradlew`/manual build may be used for quick dev iteration, but a build
+   used to accept any gate (device test, release candidate, etc.) must come
+   from CI (GitHub Actions). Local builds have already produced at least one
+   false diagnosis by silently failing to bake in required env vars.
+2. **Stateful/counter logic (epoch, revision, cycle, retry count, etc.) must
+   have a test that exercises the action at least twice in sequence**, not
+   only the first pass. A prior fix here passed 81/81 tests while still
+   containing a bug that only appeared on the second restore-epoch advance.
+3. **`/code-review` must run and be clean before every push, with no
+   exceptions** — never as a check applied after the change is already live.
+4. **CI scope/safety gates must not hardcode a single exact base commit and
+   file list per patch.** Use an ancestry check
+   (`git merge-base --is-ancestor <base> HEAD`) plus a repo-tracked,
+   easily-updatable expected-files list, not a brittle single-commit
+   exact-match — the latter breaks the moment legitimate follow-up commits
+   land, which is exactly what happened to the P20-G01 workflow on
+   2026-08-20. Several other workflow files share this same brittle pattern
+   (`p19-014a-*`, `p19-final-*`, `p20-final-*`) — worth fixing when next
+   touched, not urgent on its own.
+
+**Explicitly declined (2026-08-20):** a separate staging Supabase project
+isolated from the "Production"-labeled one. Do not re-propose this unless a
+concrete incident makes the case again.
