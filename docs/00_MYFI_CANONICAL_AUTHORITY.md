@@ -253,6 +253,38 @@ Permanent sync invariants introduced by this overlay are also recorded in:
 The addendum/evidence cannot by themselves close Phase 9; newer real-device
 evidence retains higher precedence than automated/static evidence.
 
+<!-- PLANNING_AUDIT_FRESHNESS_RULE_2026-08-19 -->
+## Evidence Freshness Rule — 2026-08-19
+
+Added by the MYFI Planning & Audit process after a 2026-08-19 incident: a
+prepared handoff document named a "verified" branch/HEAD that was already 29
+commits behind the true GitHub tip, because multiple environments (local
+clones, Codespaces, separate patch worktrees) were pushing to this repository
+in parallel without any of them re-checking the others.
+
+Binding rule going forward:
+
+1. Every new file under `docs/04_CURRENT_EVIDENCE/` and every new/updated
+   handoff or status document MUST state the exact branch name and full
+   commit SHA it was verified against, and the date/time of that verification.
+2. Before publishing such a document, the author MUST run
+   `git fetch --all && git branch -r --sort=-committerdate` (or equivalent)
+   and confirm no branch with newer commits already exists. If one does,
+   either reconcile against it first or explicitly note it as an unreconciled
+   newer branch.
+3. A reader MUST treat any status/evidence document that does not state its
+   verification branch+SHA+date as unverified, not as current truth.
+4. This rule does not create a new authority level; it is a freshness
+   precondition on A0 (actual repository state) and A4 (evidence/acceptance
+   truth) as already defined above.
+
+Consolidated current Phase 9 status:
+`docs/04_CURRENT_EVIDENCE/MYFI_PHASE9_STATUS_CONSOLIDATED_2026-08-19.md`
+supersedes the older `MYFI_P18_013_PHASE9_MINIMUM_ACCEPTANCE_MATRIX` as the
+first document to read for "what is actually left in Phase 9" — the P18-013
+matrix remains historically useful but is not reconciled against P19/P20
+evidence on its own.
+
 <!-- P19_012_013_AUTHORITY_REGISTRATION -->
 ## P19-012/P19-013 Authority Registration — 2026-08-18
 
