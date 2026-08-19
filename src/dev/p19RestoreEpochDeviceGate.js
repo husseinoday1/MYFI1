@@ -4,7 +4,7 @@
 // interlocks fail closed, then exercises the V2 restore-epoch CAS handshake on a
 // financially empty/disposable account only.
 
-import { getLedgerNamespace } from '../lib/activeLedgerRepository';
+import { activeLedgerSupported, getLedgerNamespace } from '../lib/activeLedgerRepository';
 import { buildFinancialBackup } from '../lib/backupData';
 import {
   abortLedgerRestoreEpochV8,
@@ -104,6 +104,55 @@ const disposableBlockers = ({ state, coldArchives, localWorkspace }) => {
   return blockers;
 };
 
+// P20-G01-D1 — read-only diagnostics attached to a BLOCKED result only.
+// Rationale: the 2026-08-19 device run returned reason
+// 'disposable_financially_empty_account_required' with the single blocker
+// 'financial_v7_cutover_required' on BOTH the real and the disposable account,
+// which is not enough to tell "flag is false" from "flag was never set" from
+// "SQLite workspace unreadable". This collects observed state only; it reads
+// nothing new and mutates nothing.
+const blockedDiagnostics = ({ state, localWorkspace, coldArchives }) => {
+  const migration = state?.financialLedgerV7Migration || null;
+  const count = value => (Array.isArray(value) ? value.length : null);
+  return {
+    activeLedgerSupported: activeLedgerSupported(),
+    // Distinguishes "false" from "key absent on the store root".
+    cutoverKeyPresent: Object.prototype.hasOwnProperty.call(state || {}, 'financialLedgerV7Cutover'),
+    financialLedgerV7Cutover: state?.financialLedgerV7Cutover ?? null,
+    financialLedgerV7Ready: state?.financialLedgerV7Ready ?? null,
+    ledgerReady: state?.ledgerReady ?? null,
+    ledgerError: state?.ledgerError || null,
+    workspaceReady: state?.workspaceReady ?? null,
+    demoMode: state?.cfg?.demoMode ?? null,
+    migration: migration ? {
+      supported: migration.supported ?? null,
+      ok: migration.ok ?? null,
+      cutover: migration.cutover ?? null,
+      sourceMode: migration.sourceMode ?? null,
+      migrationReady: migration.migrationReady ?? null,
+      reason: migration.reason || null,
+    } : null,
+    storeCounts: {
+      trans: count(state?.trans),
+      debts: count(state?.debts),
+      goals: count(state?.goals),
+      commitments: count(state?.commitments),
+      wallets: count(state?.wallets),
+    },
+    // null localWorkspace means the V7 read itself yielded nothing —
+    // materially different from an empty-but-present workspace.
+    sqliteWorkspacePresent: !!localWorkspace,
+    sqliteCounts: {
+      trans: count(localWorkspace?.trans),
+      debts: count(localWorkspace?.debts),
+      goals: count(localWorkspace?.goals),
+      commitments: count(localWorkspace?.commitments),
+      wallets: count(localWorkspace?.wallets),
+    },
+    coldArchiveBundles: count(coldArchives),
+  };
+};
+
 export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
   const startedAt = new Date().toISOString();
   const base = {
@@ -144,6 +193,7 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
       blockers,
       workspaceNamespace,
       ledgerNamespace,
+      diagnostics: blockedDiagnostics({ state: initial, localWorkspace, coldArchives }),
     };
     console.warn('[P20_G01_RESTORE_EPOCH_GATE_BLOCKED]', JSON.stringify(evidence));
     return evidence;
