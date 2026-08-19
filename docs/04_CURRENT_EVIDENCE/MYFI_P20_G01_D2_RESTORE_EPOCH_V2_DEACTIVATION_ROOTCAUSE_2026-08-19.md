@@ -174,3 +174,60 @@ independently either way.
 4. Fresh disposable account, rebuild, re-run items 6–10.
 
 Phase 9 remains OPEN. Items 6–10 remain unmet.
+
+## Addendum 2026-08-20 — two defects found by code review of this very fix
+
+A `/code-review` pass over commit `5261671` (already pushed) found two problems, both
+now fixed in a follow-up.
+
+### 1. The fix reintroduced the bug it was correcting
+
+The supersession marker was keyed by namespace alone — the same namespace-only pattern
+this change existed to eliminate. A **second** consecutive epoch advance overwrote it
+with `previouslyActivated: false`, because the outgoing epoch had itself never
+activated, and the ledger read as an ordinary V1 again. Probed directly against the
+pushed code:
+
+```text
+after 1st advance: state=EPOCH_ACTIVATION_REQUIRED  requiresV2Recovery=true
+after 2nd advance: state=NOT_YET_ACTIVATED          requiresV2Recovery=false
+identity.protocolVersion still = 2
+```
+
+That is the original device symptom again, reachable by running controlled recovery
+twice before the new epoch completes its own activation.
+
+Fixed by keying the marker per `(namespace, ledger_id, epoch)` **and** carrying the
+supersession fact forward when the outgoing epoch was itself a superseding one — the
+key change alone would not have been enough, since the second advance recomputes
+`previouslyActivated` from an epoch that legitimately has no `activated_at`. The
+regression test now covers consecutive advances.
+
+### 2. `activationEvidenceValid` was never actually changed
+
+Contrary to what the original commit message and the section above claimed, that field
+still short-circuits on `!row?.activated_at`.
+
+On inspection the short-circuit is *correct*. The field encodes the addendum invariant
+— "there must never be a durable state in which V2 is marked active without the
+verification evidence that justified activation" — and that invariant genuinely holds
+when nothing is activated. The error was the claim, not the code.
+
+The field is kept with its meaning now documented at the definition, and a separate
+`activationEvidencePresent` answers the literal question of whether evidence for this
+ledger and epoch exists and checks out. Ruling item 3 is satisfied by
+`activationState` plus that new field, not by changing the invariant.
+
+### Verification after both fixes
+
+```text
+npm run test:gate ....... 81 passed, 0 failed, 11 skipped
+verify:android .......... OK
+p19-011 / p19-013 ....... PASS
+```
+
+### Process note
+
+Both defects were in code that had already passed the full gate and been pushed. The
+tests were green because they only covered a single epoch advance. This is the reason
+the review step was added to the workflow, and it earned its place on first use.

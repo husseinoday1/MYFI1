@@ -225,11 +225,37 @@ const {
 
   // The superseded evidence itself is retained as immutable history.
   assert.ok(db.meta.has(`sync_v2_activation_evidence:${NS}`), 'superseded evidence retained');
-  const pending = JSON.parse(db.meta.get(`sync_v2_epoch_activation_pending:${NS}`));
+  const pending = JSON.parse(db.meta.get(`sync_v2_epoch_activation_pending:${NS}:${LEDGER}:2`));
   assert.equal(pending.previouslyActivated, true);
   assert.equal(pending.fromEpoch, 1);
   assert.equal(pending.toEpoch, 2);
   console.log('[PASS] supersession is recorded with its provenance');
+
+  // --- a SECOND consecutive advance must not lose the supersession fact ----
+  // Found by code review of the first fix: with a namespace-only marker the 2->3
+  // advance overwrote previouslyActivated with false and the silent V1 fallback
+  // came straight back.
+  db.meta.set(`restore_intent:${NS}`, JSON.stringify({
+    ledgerId: LEDGER,
+    fromEpoch: 2,
+    toEpoch: 3,
+    operation: 'controlled_recovery',
+  }));
+  await commitLedgerRestoreEpochV8({
+    namespace: NS,
+    expectedFromEpoch: 2,
+    toEpoch: 3,
+    database: db,
+  });
+  const after2 = await readFinancialSyncProtocolV8({ namespace: NS, database: db });
+  assert.ok(
+    !(after2.activeProtocolVersion === 1 && after2.requiresV2Recovery === false),
+    'REGRESSION: a second consecutive epoch advance dropped back to a silent V1 '
+    + `(activeProtocolVersion=${after2.activeProtocolVersion}, requiresV2Recovery=${after2.requiresV2Recovery})`,
+  );
+  assert.equal(after2.requiresV2Recovery, true);
+  assert.equal(after2.activationState, 'EPOCH_ACTIVATION_REQUIRED');
+  console.log('[PASS] supersession survives consecutive epoch advances');
 
   // --- a ledger that never activated must stay plain V1, not "recovery" -----
   const fresh = makeDb();

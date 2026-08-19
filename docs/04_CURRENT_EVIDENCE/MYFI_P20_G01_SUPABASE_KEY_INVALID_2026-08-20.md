@@ -1,9 +1,38 @@
-# MYFI — Supabase anon key in repo is invalid (blocks all builds/logins)
+# MYFI — Supabase anon key: initial finding retracted, real cause under investigation
 
 Date: 2026-08-20
 Produced by: MYFI Testing & Release session
-Severity: **BLOCKING** — stops all P20-G01 device acceptance work (items 2–10)
-and, more broadly, blocks login on any APK built from the current repo state.
+Severity: **BLOCKING** — stops P20-G01 device acceptance work (items 2–10).
+
+## RETRACTION (2026-08-20, later same day)
+
+The "key is invalid" conclusion below was wrong. It was based on a `curl`
+against `/rest/v1/` (PostgREST's OpenAPI root), which rejects every
+non-service_role key regardless of validity — confirmed independently this
+session:
+
+```
+curl .../rest/v1/                 -> 401  (wrong test — root always rejects anon keys)
+curl .../auth/v1/settings         -> 200  (correct test — legacy key is valid)
+```
+
+The legacy anon key was never rotated out. Implementation migrated to a new
+`sb_publishable_...` key anyway (commit `afad788`, unrelated to this false
+alarm — see `MYFI_SUPABASE_PUBLISHABLE_KEY_MIGRATION_2026-08-20.md`), but that
+does not explain the device's `INVALID API KEY` at login.
+
+**Real leading hypothesis (Implementation):** the local APK build used
+`gradlew.bat app:assembleRelease` directly instead of
+`tools/build-local-internal-apk.ps1` / `npm run build:apk:local`. If
+`EXPO_PUBLIC_SUPABASE_KEY` isn't present in the environment at the moment
+Metro bundles the JS, `src/lib/supabase.js` falls back to the literal string
+`'offline-public-key'` (see `src/lib/supabase.js:5-11`), which fails login
+with an identical-looking error. This session did set `$env:` vars manually
+before invoking gradlew directly (not via the wrapper script) — being
+retested now with vars set and the build run in one unbroken command chain to
+rule out the vars being lost between shell steps.
+
+Original (incorrect) writeup preserved below for the record.
 
 ## Finding
 

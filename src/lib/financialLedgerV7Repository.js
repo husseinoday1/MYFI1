@@ -774,7 +774,9 @@ const activationEvidenceKey = (namespace, ledgerId, restoreEpoch) => (
 // The addendum forbids automatic fallback to V1 after durable activated_at, so the
 // superseding epoch must stay distinguishable from a ledger that simply never
 // activated: it is fail-closed and requires bootstrap+activation for the new epoch.
-const epochActivationPendingKey = namespace => `sync_v2_epoch_activation_pending:${String(namespace || 'guest')}`;
+const epochActivationPendingKey = (namespace, ledgerId, restoreEpoch) => (
+  `sync_v2_epoch_activation_pending:${String(namespace || 'guest')}:${String(ledgerId || '')}:${Number(restoreEpoch || 0)}`
+);
 
 export const readLedgerRestoreIntentV8 = async ({ namespace = 'guest', database = null } = {}) => {
   const db = database || await getLedgerDb();
@@ -867,6 +869,17 @@ export const commitLedgerRestoreEpochV8 = async ({
         WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
       String(identity.ledger_id), Number(identity.restore_epoch),
     );
+    // The outgoing epoch may itself be an unactivated epoch that superseded a
+    // durably activated one. Without carrying that fact forward, a second
+    // consecutive advance would report previouslyActivated:false and the ledger
+    // would silently read as an ordinary V1 ledger again.
+    const outgoingPendingRow = await txn.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+      epochActivationPendingKey(target, identity.ledger_id, identity.restore_epoch),
+    );
+    const outgoingPending = parseJson(outgoingPendingRow?.value, null);
+    const supersedesActivatedEpoch = !!supersededState?.activated_at
+      || outgoingPending?.previouslyActivated === true;
 
     const from = Number(expectedFromEpoch ?? intent.fromEpoch);
     const next = Number(toEpoch ?? intent.toEpoch);
@@ -905,15 +918,17 @@ export const commitLedgerRestoreEpochV8 = async ({
     // history and is never carried forward.
     await txn.runAsync(
       `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
-      epochActivationPendingKey(target),
+      epochActivationPendingKey(target, identity.ledger_id, next),
       safeJson({
         version: 1,
         namespace: target,
         ledgerId: String(identity.ledger_id),
         fromEpoch: from,
         toEpoch: next,
-        supersededActivatedAt: supersededState?.activated_at ? String(supersededState.activated_at) : null,
-        previouslyActivated: !!supersededState?.activated_at,
+        supersededActivatedAt: supersededState?.activated_at
+          ? String(supersededState.activated_at)
+          : (outgoingPending?.supersededActivatedAt || null),
+        previouslyActivated: supersedesActivatedEpoch,
         recordedAt: now,
       }),
       now,
@@ -1458,7 +1473,7 @@ export const readFinancialSyncProtocolV8 = async ({
   }
   const pendingRow = await db.getFirstAsync(
     `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
-    epochActivationPendingKey(identity.namespace),
+    epochActivationPendingKey(identity.namespace, identity.ledgerId, identity.restoreEpoch),
   );
   const pendingRaw = parseJson(pendingRow?.value, null);
   const epochActivationPending = (
@@ -1500,6 +1515,13 @@ export const readFinancialSyncProtocolV8 = async ({
         : (epochActivationPending ? 'EPOCH_ACTIVATION_REQUIRED' : 'NOT_YET_ACTIVATED')
     ),
     activationEvidence,
+    // Literal question: does evidence for THIS ledger and epoch exist and check out.
+    activationEvidencePresent: evidenceMatchesIdentity,
+    // Invariant from MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM: there must never be a
+    // durable state where V2 is active without the evidence that justified it.
+    // It is therefore true when activated_at is absent — that is the invariant
+    // holding, not proof of evidence. Use activationEvidencePresent or
+    // activationState for the literal question.
     activationEvidenceValid: !!(
       !row?.activated_at
       || (
@@ -1634,7 +1656,7 @@ export const activateFinancialSyncProtocolV2V8 = async ({
     // This epoch has now completed its own activation.
     await txn.runAsync(
       `DELETE FROM ledger_v7_meta WHERE key=?`,
-      epochActivationPendingKey(identity.namespace),
+      epochActivationPendingKey(identity.namespace, identity.ledgerId, identity.restoreEpoch),
     );
     await txn.runAsync(
       `INSERT INTO ledger_sync_state_v8
