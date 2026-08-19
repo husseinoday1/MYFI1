@@ -342,6 +342,16 @@ future phase, not just Phase 9:
    not sufficient; always confirm the actual CI run went green before
    reporting a change complete.
 
+6. **Any diagnostic field added to a payload that gets logged, persisted, or
+   copied across sessions/evidence docs must be checked for real financial
+   content first.** If it can carry amounts, balances, or monthly totals,
+   summarize it (e.g. `{type, keys}` shape only) instead of logging the raw
+   value. Discovered 2026-08-20: a shadow-migration parity diagnostic almost
+   logged `walletBalances`/`currencyBalances`/`monthlyTotals` verbatim for a
+   real account into a device evidence log that travels between sessions —
+   caught by `/code-review` before the push, not after. Diagnostics are
+   themselves a data-safety surface, not just a debugging convenience.
+
 **Explicitly declined (2026-08-20):** a separate staging Supabase project
 isolated from the "Production"-labeled one. Do not re-propose this unless a
 concrete incident makes the case again.
