@@ -354,10 +354,38 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
     return failure;
   }
 
+  // Everything below runs AFTER the restore epoch has already advanced on both the
+  // server and the local identity. A raw throw here would escape the gate with no
+  // evidence and no record that the epoch moved, which is exactly how the
+  // 2026-08-19 device run advanced an epoch silently. Report split state instead.
+  const postCommitFailure = (reason, extra = {}) => {
+    const failure = {
+      ...base,
+      ok: false,
+      blocked: false,
+      phase: 'POST_EPOCH_COMMIT',
+      reason: String(reason),
+      serverAdvanced: true,
+      localEpochCommitted: true,
+      splitStateRequiresRecovery: true,
+      ledgerId: identity.ledgerId,
+      fromEpoch,
+      toEpoch,
+      workspaceNamespace,
+      ledgerNamespace,
+      ...extra,
+    };
+    console.error('[P20_G01_RESTORE_EPOCH_GATE_FAIL]', JSON.stringify(failure));
+    return failure;
+  };
+
   const committedIdentity = await ensureLedgerSyncIdentityV8({ namespace: ledgerNamespace });
   const remainingIntent = await readLedgerRestoreIntentV8({ namespace: ledgerNamespace });
   if (Number(committedIdentity?.restoreEpoch || 0) !== toEpoch || remainingIntent) {
-    throw new Error('phase9_restore_epoch_local_postcondition_failed');
+    return postCommitFailure('phase9_restore_epoch_local_postcondition_failed', {
+      committedIdentity,
+      remainingIntent,
+    });
   }
 
   // Shadow/no-write pull on the NEW epoch proves old-epoch mutations are not replayed.
@@ -372,7 +400,9 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
       || Number(shadow.restoreEpoch || 0) !== toEpoch
       || Number(shadow.downloaded || 0) !== 0
       || Number(shadow.pendingAfterSync || 0) !== 0) {
-    throw new Error(`phase9_new_epoch_shadow_validation_failed:${shadow?.reason || 'unknown'}`);
+    return postCommitFailure(`phase9_new_epoch_shadow_validation_failed:${shadow?.reason || 'unknown'}`, {
+      shadow,
+    });
   }
 
   const { data: eventRows, error: eventError } = await supabase
@@ -381,15 +411,21 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
     .eq('ledger_id', identity.ledgerId)
     .eq('to_epoch', toEpoch)
     .eq('reason', 'controlled_recovery');
-  if (eventError) throw eventError;
+  if (eventError) {
+    return postCommitFailure(errorText(eventError), { restoreEventQueryFailed: true });
+  }
   if (!Array.isArray(eventRows) || eventRows.length !== 1
       || Number(eventRows[0]?.from_epoch || 0) !== fromEpoch) {
-    throw new Error('phase9_restore_event_evidence_missing');
+    return postCommitFailure('phase9_restore_event_evidence_missing', {
+      restoreEventCount: Array.isArray(eventRows) ? eventRows.length : null,
+    });
   }
 
   const finalState = getState();
   if (stateFingerprint(finalState, coldArchives) !== beforeFingerprint) {
-    throw new Error('phase9_restore_epoch_gate_changed_financial_state');
+    return postCommitFailure('phase9_restore_epoch_gate_changed_financial_state', {
+      financialFingerprintChanged: true,
+    });
   }
 
   const evidence = {

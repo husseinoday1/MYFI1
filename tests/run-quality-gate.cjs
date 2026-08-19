@@ -100,6 +100,7 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'p19_013_atomic_v2_model', 'run-p19-013-atomic-v2-model.cjs'],
   ['UNIT_RUNTIME', 'p19_015a1_sqlite_runtime_core', 'run-p19-015a1-sqlite-runtime-core.cjs'],
   ['UNIT_RUNTIME', 'p19_015a2_maintenance_startup_barrier', 'run-p19-015a2-maintenance-startup-barrier.cjs'],
+  ['UNIT_RUNTIME', 'p20_g01_d2_restore_epoch_activation', 'run-p20-g01-d2-restore-epoch-activation.cjs'],
   ['UNIT_RUNTIME', 'performance_data', 'performance-data-runtime-v512.test.cjs'],
   ['UNIT_RUNTIME', 'performance_generator', 'performance-generator-runtime-v51.test.cjs'],
   ['UNIT_RUNTIME', 'performance_storage', 'performance-storage-runtime-v512.test.cjs'],

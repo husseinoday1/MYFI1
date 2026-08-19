@@ -761,6 +761,21 @@ export const adoptUnbootstrappedCloudLedgerIdentityV8 = async ({
 
 const restoreIntentMetaKey = namespace => `restore_intent:${String(namespace || 'guest')}`;
 
+// P20-G01-D2 — activation evidence is bound to (namespace, ledger_id, restore_epoch)
+// per MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM "Activation evidence". The legacy
+// namespace-only key is still read so ledgers activated before this change stay
+// active without a migration, but only when its payload matches the current
+// ledger identity and epoch.
+const legacyActivationEvidenceKey = namespace => `sync_v2_activation_evidence:${String(namespace || 'guest')}`;
+const activationEvidenceKey = (namespace, ledgerId, restoreEpoch) => (
+  `sync_v2_activation_evidence:${String(namespace || 'guest')}:${String(ledgerId || '')}:${Number(restoreEpoch || 0)}`
+);
+// Written when a restore epoch supersedes an epoch that held durable activation.
+// The addendum forbids automatic fallback to V1 after durable activated_at, so the
+// superseding epoch must stay distinguishable from a ledger that simply never
+// activated: it is fail-closed and requires bootstrap+activation for the new epoch.
+const epochActivationPendingKey = namespace => `sync_v2_epoch_activation_pending:${String(namespace || 'guest')}`;
+
 export const readLedgerRestoreIntentV8 = async ({ namespace = 'guest', database = null } = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return null;
@@ -845,6 +860,14 @@ export const commitLedgerRestoreEpochV8 = async ({
     );
     if (!identity?.ledger_id) throw new Error('restore_epoch_identity_missing');
 
+    // Read the outgoing epoch's activation marker before the CAS so the new epoch
+    // can record whether it supersedes a durably activated V2 epoch.
+    const supersededState = await txn.getFirstAsync(
+      `SELECT activated_at FROM ledger_sync_state_v8
+        WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+      String(identity.ledger_id), Number(identity.restore_epoch),
+    );
+
     const from = Number(expectedFromEpoch ?? intent.fromEpoch);
     const next = Number(toEpoch ?? intent.toEpoch);
     if (String(intent.ledgerId) !== String(identity.ledger_id)
@@ -876,6 +899,25 @@ export const commitLedgerRestoreEpochV8 = async ({
       String(identity.ledger_id), next, now,
     );
     await txn.runAsync(`DELETE FROM ledger_v7_meta WHERE key=?`, key);
+
+    // The new epoch starts unactivated by contract: it must complete its own
+    // bootstrap + activation. Superseded evidence stays in place as immutable
+    // history and is never carried forward.
+    await txn.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+      epochActivationPendingKey(target),
+      safeJson({
+        version: 1,
+        namespace: target,
+        ledgerId: String(identity.ledger_id),
+        fromEpoch: from,
+        toEpoch: next,
+        supersededActivatedAt: supersededState?.activated_at ? String(supersededState.activated_at) : null,
+        previouslyActivated: !!supersededState?.activated_at,
+        recordedAt: now,
+      }),
+      now,
+    );
     return {
       namespace: target,
       ledgerId: String(identity.ledger_id),
@@ -1395,11 +1437,45 @@ export const readFinancialSyncProtocolV8 = async ({
       WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
     identity.ledgerId, identity.restoreEpoch,
   );
-  const evidenceRow = await db.getFirstAsync(
+  const epochEvidenceRow = await db.getFirstAsync(
     `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
-    `sync_v2_activation_evidence:${identity.namespace}`,
+    activationEvidenceKey(identity.namespace, identity.ledgerId, identity.restoreEpoch),
   );
-  const activationEvidence = parseJson(evidenceRow?.value, null);
+  let activationEvidence = parseJson(epochEvidenceRow?.value, null);
+  if (!activationEvidence) {
+    // Legacy namespace-only evidence is accepted only when it belongs to this
+    // exact ledger and epoch, so it can never survive an epoch advance.
+    const legacyRow = await db.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+      legacyActivationEvidenceKey(identity.namespace),
+    );
+    const legacyEvidence = parseJson(legacyRow?.value, null);
+    if (legacyEvidence
+        && String(legacyEvidence.ledgerId || '') === identity.ledgerId
+        && Number(legacyEvidence.restoreEpoch || 0) === identity.restoreEpoch) {
+      activationEvidence = legacyEvidence;
+    }
+  }
+  const pendingRow = await db.getFirstAsync(
+    `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+    epochActivationPendingKey(identity.namespace),
+  );
+  const pendingRaw = parseJson(pendingRow?.value, null);
+  const epochActivationPending = (
+    pendingRaw
+    && String(pendingRaw.ledgerId || '') === identity.ledgerId
+    && Number(pendingRaw.toEpoch || 0) === identity.restoreEpoch
+    && pendingRaw.previouslyActivated === true
+  ) ? pendingRaw : null;
+  const evidenceMatchesIdentity = !!(
+    activationEvidence
+    && String(activationEvidence.ledgerId || '') === identity.ledgerId
+    && Number(activationEvidence.restoreEpoch || 0) === identity.restoreEpoch
+    && String(activationEvidence.bootstrapId || '')
+    && /^[0-9a-f]{64}$/.test(String(activationEvidence.manifestHash || '').toLowerCase())
+    && Number.isFinite(Date.parse(String(activationEvidence.readbackVerifiedAt || '')))
+    && Number.isFinite(Date.parse(String(activationEvidence.shadowValidatedAt || '')))
+  );
   return {
     supported: true,
     namespace: identity.namespace,
@@ -1411,7 +1487,18 @@ export const readFinancialSyncProtocolV8 = async ({
     lastShadowSuccessAt: row?.last_shadow_success_at || null,
     shadowLastServerSequence: Math.max(0, Number(row?.shadow_last_server_sequence || 0)),
     lastServerSequence: Math.max(0, Number(row?.last_server_sequence || 0)),
-    requiresV2Recovery: !row?.activated_at && Math.max(0, Number(row?.last_server_sequence || 0)) > 0,
+    // A superseding epoch is a protocol recovery event, not an ordinary V1 ledger.
+    requiresV2Recovery: !row?.activated_at && (
+      !!epochActivationPending || Math.max(0, Number(row?.last_server_sequence || 0)) > 0
+    ),
+    epochActivationPending,
+    // Explicit state so callers never have to infer intent from a bare
+    // activeProtocolVersion of 1.
+    activationState: (
+      row?.activated_at
+        ? (evidenceMatchesIdentity ? 'ACTIVE' : 'ACTIVATION_EVIDENCE_MISSING')
+        : (epochActivationPending ? 'EPOCH_ACTIVATION_REQUIRED' : 'NOT_YET_ACTIVATED')
+    ),
     activationEvidence,
     activationEvidenceValid: !!(
       !row?.activated_at
@@ -1533,9 +1620,21 @@ export const activateFinancialSyncProtocolV2V8 = async ({
     // intermediate durable state where V2 is active without verification proof.
     await txn.runAsync(
       `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
-      `sync_v2_activation_evidence:${identity.namespace}`,
+      activationEvidenceKey(identity.namespace, identity.ledgerId, identity.restoreEpoch),
       safeJson(activationEvidence),
       now,
+    );
+    // Legacy key kept in step so older readers observe the same current evidence.
+    await txn.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+      legacyActivationEvidenceKey(identity.namespace),
+      safeJson(activationEvidence),
+      now,
+    );
+    // This epoch has now completed its own activation.
+    await txn.runAsync(
+      `DELETE FROM ledger_v7_meta WHERE key=?`,
+      epochActivationPendingKey(identity.namespace),
     );
     await txn.runAsync(
       `INSERT INTO ledger_sync_state_v8
