@@ -51,10 +51,31 @@ contract tests). **P20-G01 is the one gate with real, unstarted work**: proof
 that the destructive restore-epoch/recovery handshake behaves safely, which
 must be run on a real device against a disposable account.
 
-10 required steps, 0 done as of this file (see
-`MYFI_P20_G01_PHASE9_RESTORE_EPOCH_GATE_2026-08-19.md` for full detail):
+10 required steps (see `MYFI_P20_G01_PHASE9_RESTORE_EPOCH_GATE_2026-08-19.md`
+for full detail):
 
-1. Build the signed P20-G01 acceptance APK.
+**Correction (2026-08-19, later same day):** this file originally said "0 of
+10 done." That was wrong at the time of writing — CI run `32229015804` had
+already built and signed the acceptance APK hours earlier, and the MYFI
+Implementation session independently verified it (SHA-256 match, valid v2
+signature matching the installed app, gate strings present in the bundle).
+**This is exactly the kind of staleness the Evidence Freshness Rule in
+`00_MYFI_CANONICAL_AUTHORITY.md` exists to catch** — this doc is proof the
+rule is needed, and also proof it works once someone re-verifies.
+
+1. ✅ **DONE** — Build the signed P20-G01 acceptance APK. Verified: SHA-256
+   `b2bc29d3...2aa80a89`, arm64-v8a, 34.75 MB, apksigner v2 valid, signer
+   fingerprint matches the installed MYFI app. Gate strings
+   (`P20_G01_PHASE9_RESTORE_EPOCH_GATE_PASS`,
+   `advance_financial_restore_epoch_v2`, `controlled_recovery`) confirmed
+   present in the bundle. **Not independently confirmed:** whether the
+   `EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE=1` build flag actually took
+   effect — that can only be proven on-device at step 3 (the Settings row
+   must read "Restore Epoch test — disposable data only", not the normal
+   "Local SQLite evidence" row). GitHub Actions artifact expires in 7 days;
+   local copy retained at
+   `C:\Users\husse\Downloads\MYFI_P20_G01_ACCEPTANCE_APK\android\app\build\outputs\apk\release\app-release.apk`.
+   Evidence: `docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_ACCEPTANCE_APK_BUILD_2026-08-19.md`.
 2. Install over the current app without clearing data.
 3. Confirm the gate refuses to run on the real (non-empty) account.
 4. Sign out; create/use a genuinely disposable, financially-empty test account.
