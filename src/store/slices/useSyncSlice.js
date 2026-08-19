@@ -68,7 +68,61 @@ let syncQueue = Promise.resolve();
 let scheduledSyncTimer = null;
 let scheduledSyncReason = 'local_change';
 let scheduledSyncAttempt = 0;
+let transientSyncRetryTimer = null;
+let transientSyncRetryAttempt = 0;
 const SCHEDULED_SYNC_DELAYS_MS = [700, 3000, 10000, 30000];
+const TRANSIENT_SYNC_RETRY_DELAYS_MS = [1500, 5000, 15000, 30000];
+
+const transientSyncErrorText = error => String(
+  error?.message || error?.code || error || '',
+).toLowerCase();
+
+const isTransientCloudSyncError = error => (
+  /upstream request timeout|network request failed|fetch failed|gateway timeout|timed out|timeout|\b502\b|\b503\b|\b504\b/
+    .test(transientSyncErrorText(error))
+);
+
+const resetTransientCloudRetry = () => {
+  transientSyncRetryAttempt = 0;
+  if (transientSyncRetryTimer) clearTimeout(transientSyncRetryTimer);
+  transientSyncRetryTimer = null;
+};
+
+const armTransientCloudRetry = (get, syncUserId, error) => {
+  if (!isTransientCloudSyncError(error)) return false;
+  if (transientSyncRetryAttempt >= TRANSIENT_SYNC_RETRY_DELAYS_MS.length) {
+    console.warn('[P19_FINAL_TRANSIENT_RETRY_EXHAUSTED]', JSON.stringify({
+      attempts: transientSyncRetryAttempt,
+      reason: transientSyncErrorText(error),
+    }));
+    return false;
+  }
+
+  const attempt = transientSyncRetryAttempt + 1;
+  const delayMs = TRANSIENT_SYNC_RETRY_DELAYS_MS[transientSyncRetryAttempt];
+  transientSyncRetryAttempt = attempt;
+  if (transientSyncRetryTimer) clearTimeout(transientSyncRetryTimer);
+
+  console.warn('[P19_FINAL_TRANSIENT_RETRY]', JSON.stringify({
+    attempt,
+    delayMs,
+    reason: transientSyncErrorText(error),
+  }));
+
+  transientSyncRetryTimer = setTimeout(() => {
+    transientSyncRetryTimer = null;
+    const current = get();
+    if (!current.user
+        || current.user.id !== syncUserId
+        || current.cfg.demoMode
+        || !current.workspaceReady
+        || isFinancialMaintenanceBlocked()) {
+      return;
+    }
+    Promise.resolve(current.syncCloud?.({ reason: 'transient_retry' })).catch(() => {});
+  }, delayMs);
+  return true;
+};
 const FRESH_TEST_MODE = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
 const FRESH_TEST_NAMESPACE = 'fresh-test-new-user';
 
@@ -528,6 +582,38 @@ const runVerifiedEmptyShellCloudRecoveryV2 = async ({
     return { attempted: false, ok: true, reason: 'financial_cloud_recovery_not_eligible' };
   }
 
+  // A successful clean-V2 identity adoption is durable even if activation later
+  // hits a transient network timeout. Once the local identity matches that
+  // cutover marker, every retry remains V2-only; it must never fall back to V1.
+  const existingProtocol = await readFinancialSyncProtocolV8({ namespace: ledgerNamespace });
+  const cutoverMarker = await readResetMarker(workspaceNamespace);
+  const markerLedgerId = String(cutoverMarker?.cloudLedgerId || '').trim();
+  const markerRestoreEpoch = Number(cutoverMarker?.cloudRestoreEpoch || 0);
+  const durableCleanV2Cutover = cutoverMarker?.cleanV2Cutover === true
+    && markerLedgerId
+    && markerRestoreEpoch > 0
+    && String(existingProtocol?.ledgerId || '') === markerLedgerId
+    && Number(existingProtocol?.restoreEpoch || 0) === markerRestoreEpoch;
+
+  if (durableCleanV2Cutover) {
+    return {
+      attempted: false,
+      ok: true,
+      recovered: false,
+      requireV2: true,
+      adopted: true,
+      reason: existingProtocol?.activeProtocolVersion === 2
+        ? 'financial_v2_already_active'
+        : 'financial_v2_adoption_pending_activation',
+      protocol: existingProtocol,
+      source: {
+        mode: 'v2_unbootstrapped',
+        ledgerId: markerLedgerId,
+        restoreEpoch: markerRestoreEpoch,
+      },
+    };
+  }
+
   const wallets = Array.isArray(current.wallets) ? current.wallets : [];
   const localLooksLikeShell = financialDataCount(current) === 0
     && !hasCurrencySensitiveFinancialData(current)
@@ -546,10 +632,9 @@ const runVerifiedEmptyShellCloudRecoveryV2 = async ({
     };
   }
 
-  // P19 FINAL: once this local ledger has durably activated protocol V2, an
-  // empty financial workspace is a valid steady state. Do not reinterpret the
-  // finalized cloud bootstrap as a recovery request on every restart.
-  const existingProtocol = await readFinancialSyncProtocolV8({ namespace: ledgerNamespace });
+  // Once this local ledger has durably activated protocol V2, an empty/setup
+  // financial workspace is a valid steady state. Do not reinterpret a finalized
+  // cloud bootstrap as a fresh recovery request on every restart.
   if (existingProtocol?.activeProtocolVersion === 2) {
     return {
       attempted: false,
@@ -2124,6 +2209,12 @@ export const createSyncSlice = (set, get) => ({
             deviceId,
           });
           if (!activationFinancialSync.ok) {
+            console.warn('[P19_FINAL_V2_ACTIVATION_FAIL]', JSON.stringify({
+              reason: activationFinancialSync?.reason || null,
+              cloudRecoveryReason: cloudRecovery?.reason || null,
+              cloudRecoveryMode: cloudRecovery?.mode || cloudRecovery?.source?.mode || null,
+              requireV2: cloudRecovery?.requireV2 === true,
+            }));
             if (activationFinancialSync?.v2RecoveryRequired || financialProtocol?.requiresV2Recovery) {
               throw new Error(
                 activationFinancialSync.reason || 'financial_v2_production_apply_recovery_required'
@@ -2136,7 +2227,12 @@ export const createSyncSlice = (set, get) => ({
                 activationFinancialSync.reason || 'financial_v2_activation_required_after_cloud_recovery'
               );
             }
-            // Existing local ledgers retain the pre-activation P19-011 fallback.
+            // Existing local ledgers retain the pre-activation P19-011 fallback,
+            // but every such fallback is now explicit in device evidence.
+            console.warn('[P19_FINAL_V1_FALLBACK]', JSON.stringify({
+              reason: activationFinancialSync?.reason || 'financial_v2_activation_failed',
+              cloudRecoveryReason: cloudRecovery?.reason || null,
+            }));
             financialV2Active = false;
           } else {
             financialV2Active = true;
@@ -2216,6 +2312,7 @@ export const createSyncSlice = (set, get) => ({
 
         const persistSynced = async ({ revision, syncedAt, syncConflict = null }) => {
           if (get().user?.id !== syncUserId) return false;
+          resetTransientCloudRetry();
           if (await supersededByReset()) return false;
           const revisionValue = Number(revision || 0);
           const syncedAtValue = syncedAt || new Date().toISOString();
@@ -2499,11 +2596,17 @@ export const createSyncSlice = (set, get) => ({
         // Keep the technical payload in logs without exposing a raw Supabase
         // object as an Expo in-app error toast.
         console.warn('[STORE] multi-device sync', e?.message || e?.code || 'sync_failed');
+        const transientRetryScheduled = get().user?.id === syncUserId
+          ? armTransientCloudRetry(get, syncUserId, e)
+          : false;
         if (get().user?.id === syncUserId) {
           set({
             online: false,
             lastSyncError: String(e?.message || 'sync_failed'),
           });
+        }
+        if (!transientRetryScheduled && !isTransientCloudSyncError(e)) {
+          resetTransientCloudRetry();
         }
         return false;
       } finally {

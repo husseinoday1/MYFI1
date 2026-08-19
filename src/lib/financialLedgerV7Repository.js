@@ -561,15 +561,45 @@ export const adoptUnbootstrappedCloudLedgerIdentityV8 = async ({
       return Math.max(0, Number(row?.n || 0));
     };
 
+    // P19 FINAL R5: onboarding creates inert setup rows before the first login:
+    // one zero-balance wallet/account, categories and workspace metadata. Those
+    // rows are safe to bootstrap under the reserved cloud V2 identity. Any
+    // actual financial history or tracker entity still blocks identity adoption.
+    const accountRows = await txn.getAllAsync(
+      `SELECT id,archived_at FROM ledger_accounts_v7 WHERE namespace=? ORDER BY id`,
+      targetNamespace,
+    );
+    const walletRows = await txn.getAllAsync(
+      `SELECT id,payload_json,deleted_at
+         FROM ledger_entities_v7
+        WHERE namespace=? AND entity_type='wallet'
+        ORDER BY id`,
+      targetNamespace,
+    );
+    const walletIds = new Set(walletRows.map(row => String(row.id || '')));
+    const walletStateSafe = walletRows.length <= 1 && walletRows.every(row => {
+      const payload = parseJson(row.payload_json, {}) || {};
+      return !row.deleted_at
+        && Number(payload.openingBalance || 0) === 0
+        && Number(payload.openingBaseBalance || 0) === 0;
+    });
+    const accountStateSafe = accountRows.length <= 1
+      && accountRows.length <= walletRows.length
+      && accountRows.every(row => walletIds.has(String(row.id || '')) && !row.archived_at);
+
     const financialCounts = {
-      accounts: await count(`SELECT COUNT(*) AS n FROM ledger_accounts_v7 WHERE namespace=?`, targetNamespace),
       exchangeRates: await count(`SELECT COUNT(*) AS n FROM ledger_exchange_rates_v7 WHERE namespace=?`, targetNamespace),
       transactions: await count(`SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7 WHERE namespace=?`, targetNamespace),
       postings: await count(`SELECT COUNT(*) AS n FROM ledger_postings_v7 WHERE namespace=?`, targetNamespace),
       links: await count(`SELECT COUNT(*) AS n FROM ledger_transaction_links_v7 WHERE namespace=?`, targetNamespace),
-      nonWorkspaceEntities: await count(
+      unsafeEntities: await count(
         `SELECT COUNT(*) AS n FROM ledger_entities_v7
-          WHERE namespace=? AND NOT (entity_type='workspace' AND id='workspace')`,
+          WHERE namespace=?
+            AND NOT (
+              (entity_type='workspace' AND id='workspace')
+              OR entity_type='wallet'
+              OR entity_type='category'
+            )`,
         targetNamespace,
       ),
     };
@@ -581,6 +611,19 @@ export const adoptUnbootstrappedCloudLedgerIdentityV8 = async ({
         financialCounts,
       };
     }
+    if (!walletStateSafe || !accountStateSafe) {
+      return {
+        supported: true,
+        ok: false,
+        reason: 'financial_v2_adoption_setup_shell_not_safe',
+        setupShell: {
+          accounts: accountRows.length,
+          wallets: walletRows.length,
+          walletStateSafe,
+          accountStateSafe,
+        },
+      };
+    }
 
     const totalShadow = await count(
       `SELECT COUNT(*) AS n FROM ledger_outbox_v3 WHERE ledger_id=?`,
@@ -590,25 +633,40 @@ export const adoptUnbootstrappedCloudLedgerIdentityV8 = async ({
       `SELECT COUNT(*) AS n
          FROM ledger_outbox_v3
         WHERE namespace=? AND ledger_id=? AND restore_epoch=?
-          AND entity_type='workspace' AND entity_id='workspace' AND operation='upsert'
-          AND acknowledged_at IS NULL AND superseded_by_bootstrap_id IS NULL`,
+          AND acknowledged_at IS NULL
+          AND superseded_by_bootstrap_id IS NULL
+          AND operation='upsert'
+          AND (
+            (entity_type='workspace' AND entity_id='workspace')
+            OR entity_type IN ('wallet','category')
+          )`,
       targetNamespace, currentLedgerId, currentEpoch,
     );
-    const pendingLegacy = await count(
-      `SELECT COUNT(*) AS n FROM ledger_outbox_v2
-        WHERE namespace=? AND acknowledged_at IS NULL`,
+    const totalLegacy = await count(
+      `SELECT COUNT(*) AS n FROM ledger_outbox_v2 WHERE namespace=?`,
       targetNamespace,
     );
     const allowedLegacy = await count(
       `SELECT COUNT(*) AS n FROM ledger_outbox_v2
-        WHERE namespace=? AND acknowledged_at IS NULL
-          AND entity_type='workspace' AND entity_id='workspace' AND operation='upsert'`,
+        WHERE namespace=?
+          AND acknowledged_at IS NULL
+          AND operation='upsert'
+          AND (
+            (entity_type='workspace' AND entity_id='workspace')
+            OR entity_type IN ('wallet','category')
+          )`,
+      targetNamespace,
+    );
+    const legacySync = await txn.getFirstAsync(
+      `SELECT last_server_sequence FROM ledger_sync_state_v7 WHERE namespace=? LIMIT 1`,
       targetNamespace,
     );
 
     const blockedTransport = {
       shadowUnexpected: totalShadow - allowedShadow,
-      legacyUnexpected: pendingLegacy - allowedLegacy,
+      legacyUnexpected: totalLegacy - allowedLegacy,
+      legacyInbox: await count(`SELECT COUNT(*) AS n FROM ledger_inbox_v2 WHERE namespace=?`, targetNamespace),
+      legacySyncCursor: Math.max(0, Number(legacySync?.last_server_sequence || 0)),
       inbox: await count(`SELECT COUNT(*) AS n FROM ledger_inbox_v3 WHERE ledger_id=?`, currentLedgerId),
       bootstrap: await count(`SELECT COUNT(*) AS n FROM ledger_bootstrap_state_v8 WHERE ledger_id=?`, currentLedgerId),
       bootstrapImport: await count(`SELECT COUNT(*) AS n FROM ledger_bootstrap_import_state_v8 WHERE ledger_id=?`, currentLedgerId),
@@ -626,12 +684,16 @@ export const adoptUnbootstrappedCloudLedgerIdentityV8 = async ({
     const now = new Date().toISOString();
     const markerKey = cleanV2AdoptionMetaKey(targetNamespace);
     const intent = {
-      version: 1,
+      version: 2,
       namespace: targetNamespace,
       fromLedgerId: currentLedgerId,
       toLedgerId: targetLedgerId,
       restoreEpoch: targetEpoch,
       status: 'adopting',
+      setupShell: {
+        accounts: accountRows.length,
+        wallets: walletRows.length,
+      },
       createdAt: now,
       updatedAt: now,
     };
@@ -640,6 +702,8 @@ export const adoptUnbootstrappedCloudLedgerIdentityV8 = async ({
       markerKey, safeJson(intent), now,
     );
 
+    // Setup-shell transport rows are disposable because the verified V2
+    // bootstrap immediately captures the canonical current SQLite projection.
     const removedShadow = await txn.runAsync(
       `DELETE FROM ledger_outbox_v3 WHERE ledger_id=?`,
       currentLedgerId,
@@ -689,6 +753,7 @@ export const adoptUnbootstrappedCloudLedgerIdentityV8 = async ({
       restoreEpoch: targetEpoch,
       droppedShadowRows: Number(removedShadow?.changes || 0),
       droppedLegacyRows: Number(removedLegacy?.changes || 0),
+      setupShell: completed.setupShell,
       foreignKeyCheck: 'ok',
     };
   }));
@@ -1112,39 +1177,91 @@ export const inspectFinancialEmptyShellV8 = async ({
   await ensureFinancialLedgerV7(db);
   const identity = await ensureLedgerSyncIdentityV8({ namespace, database: db });
   const target = identity.namespace;
+  const count = async (sql, ...params) => {
+    const row = await db.getFirstAsync(sql, ...params);
+    return Math.max(0, Number(row?.n || 0));
+  };
 
   const [
-    tx, postings, links, nonWorkspaceEntities,
-    nonWorkspaceV1Outbox, nonWorkspaceV2Outbox,
-    bootstrapStates, importStates, activation, restoreIntent,
+    accountRows,
+    walletRows,
+    transactions,
+    exchangeRates,
+    postings,
+    links,
+    unsafeEntities,
+    totalLegacyOutbox,
+    allowedLegacyOutbox,
+    totalShadowOutbox,
+    allowedShadowOutbox,
+    legacyInbox,
+    legacySync,
+    bootstrapStates,
+    importStates,
+    activation,
+    restoreIntent,
   ] = await Promise.all([
-    db.getFirstAsync(`SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7 WHERE namespace=?`, target),
-    db.getFirstAsync(`SELECT COUNT(*) AS n FROM ledger_postings_v7 WHERE namespace=?`, target),
-    db.getFirstAsync(`SELECT COUNT(*) AS n FROM ledger_transaction_links_v7 WHERE namespace=?`, target),
-    db.getFirstAsync(
+    db.getAllAsync(
+      `SELECT id,archived_at FROM ledger_accounts_v7 WHERE namespace=? ORDER BY id`,
+      target,
+    ),
+    db.getAllAsync(
+      `SELECT id,payload_json,deleted_at
+         FROM ledger_entities_v7
+        WHERE namespace=? AND entity_type='wallet'
+        ORDER BY id`,
+      target,
+    ),
+    count(`SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7 WHERE namespace=?`, target),
+    count(`SELECT COUNT(*) AS n FROM ledger_exchange_rates_v7 WHERE namespace=?`, target),
+    count(`SELECT COUNT(*) AS n FROM ledger_postings_v7 WHERE namespace=?`, target),
+    count(`SELECT COUNT(*) AS n FROM ledger_transaction_links_v7 WHERE namespace=?`, target),
+    count(
       `SELECT COUNT(*) AS n FROM ledger_entities_v7
-        WHERE namespace=? AND entity_type<>'workspace'`,
+        WHERE namespace=?
+          AND NOT (
+            (entity_type='workspace' AND id='workspace')
+            OR entity_type='wallet'
+            OR entity_type='category'
+          )`,
       target,
     ),
-    db.getFirstAsync(
+    count(`SELECT COUNT(*) AS n FROM ledger_outbox_v2 WHERE namespace=?`, target),
+    count(
       `SELECT COUNT(*) AS n FROM ledger_outbox_v2
-        WHERE namespace=? AND acknowledged_at IS NULL AND entity_type<>'workspace'`,
+        WHERE namespace=?
+          AND acknowledged_at IS NULL
+          AND operation='upsert'
+          AND (
+            (entity_type='workspace' AND entity_id='workspace')
+            OR entity_type IN ('wallet','category')
+          )`,
       target,
     ),
-    db.getFirstAsync(
+    count(`SELECT COUNT(*) AS n FROM ledger_outbox_v3 WHERE ledger_id=?`, identity.ledgerId),
+    count(
       `SELECT COUNT(*) AS n FROM ledger_outbox_v3
-        WHERE ledger_id=? AND restore_epoch=?
+        WHERE namespace=? AND ledger_id=? AND restore_epoch=?
           AND acknowledged_at IS NULL
           AND superseded_by_bootstrap_id IS NULL
-          AND entity_type<>'workspace'`,
-      identity.ledgerId, identity.restoreEpoch,
+          AND operation='upsert'
+          AND (
+            (entity_type='workspace' AND entity_id='workspace')
+            OR entity_type IN ('wallet','category')
+          )`,
+      target, identity.ledgerId, identity.restoreEpoch,
     ),
+    count(`SELECT COUNT(*) AS n FROM ledger_inbox_v2 WHERE namespace=?`, target),
     db.getFirstAsync(
+      `SELECT last_server_sequence FROM ledger_sync_state_v7 WHERE namespace=? LIMIT 1`,
+      target,
+    ),
+    count(
       `SELECT COUNT(*) AS n FROM ledger_bootstrap_state_v8
         WHERE ledger_id=? AND restore_epoch=?`,
       identity.ledgerId, identity.restoreEpoch,
     ),
-    db.getFirstAsync(
+    count(
       `SELECT COUNT(*) AS n FROM ledger_bootstrap_import_state_v8
         WHERE ledger_id=? AND restore_epoch=?`,
       identity.ledgerId, identity.restoreEpoch,
@@ -1160,28 +1277,68 @@ export const inspectFinancialEmptyShellV8 = async ({
     ),
   ]);
 
+  const walletIds = new Set(walletRows.map(row => String(row.id || '')));
+  const walletStateSafe = walletRows.length <= 1 && walletRows.every(row => {
+    const payload = parseJson(row.payload_json, {}) || {};
+    return !row.deleted_at
+      && Number(payload.openingBalance || 0) === 0
+      && Number(payload.openingBaseBalance || 0) === 0;
+  });
+  const accountStateSafe = accountRows.length <= 1
+    && accountRows.length <= walletRows.length
+    && accountRows.every(row => walletIds.has(String(row.id || '')) && !row.archived_at);
+
+  const nonWorkspaceV1Outbox = Math.max(0, totalLegacyOutbox - allowedLegacyOutbox);
+  const nonWorkspaceV2Outbox = Math.max(0, totalShadowOutbox - allowedShadowOutbox);
   const counts = {
-    transactions: Number(tx?.n || 0),
-    postings: Number(postings?.n || 0),
-    links: Number(links?.n || 0),
-    nonWorkspaceEntities: Number(nonWorkspaceEntities?.n || 0),
-    nonWorkspaceV1Outbox: Number(nonWorkspaceV1Outbox?.n || 0),
-    nonWorkspaceV2Outbox: Number(nonWorkspaceV2Outbox?.n || 0),
-    bootstrapStates: Number(bootstrapStates?.n || 0),
-    importStates: Number(importStates?.n || 0),
+    accounts: accountRows.length,
+    wallets: walletRows.length,
+    transactions,
+    exchangeRates,
+    postings,
+    links,
+    unsafeEntities,
+    nonWorkspaceV1Outbox,
+    legacyUnexpectedOutbox: nonWorkspaceV1Outbox,
+    nonWorkspaceV2Outbox,
+    shadowUnexpectedOutbox: nonWorkspaceV2Outbox,
+    legacyInbox,
+    legacySyncCursor: Math.max(0, Number(legacySync?.last_server_sequence || 0)),
+    bootstrapStates,
+    importStates,
   };
-  const empty = Object.values(counts).every(value => value === 0)
+  const empty = transactions === 0
+    && exchangeRates === 0
+    && postings === 0
+    && links === 0
+    && unsafeEntities === 0
+    && walletStateSafe
+    && accountStateSafe
+    && counts.legacyUnexpectedOutbox === 0
+    && counts.shadowUnexpectedOutbox === 0
+    && legacyInbox === 0
+    && counts.legacySyncCursor === 0
+    && bootstrapStates === 0
+    && importStates === 0
     && !activation?.activated_at
     && !restoreIntent?.value;
 
   return {
     supported: true,
     empty,
+    setupOnly: empty && (
+      accountRows.length > 0
+      || walletRows.length > 0
+      || totalLegacyOutbox > 0
+      || totalShadowOutbox > 0
+    ),
     namespace: target,
     ledgerId: identity.ledgerId,
     restoreEpoch: identity.restoreEpoch,
     activatedAt: activation?.activated_at || null,
     restoreIntentActive: !!restoreIntent?.value,
+    walletStateSafe,
+    accountStateSafe,
     counts,
   };
 };
