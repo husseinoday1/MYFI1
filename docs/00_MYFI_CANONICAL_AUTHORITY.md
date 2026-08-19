@@ -332,6 +332,16 @@ future phase, not just Phase 9:
    (`p19-014a-*`, `p19-final-*`, `p20-final-*`) — worth fixing when next
    touched, not urgent on its own.
 
+5. **A change is not "done" on green local tests/review alone — it needs a
+   confirmed green CI run, by run ID, checked after the push.** Discovered
+   2026-08-20: a scope-gate the same session had written earlier that day
+   silently failed 7 consecutive CI runs (a different workflow, tightened by
+   an earlier fix, now rejecting the session's own legitimate files) while
+   local `test:gate` stayed green throughout — nobody had actually opened CI
+   to look. Passing local tests plus a clean `/code-review` is necessary but
+   not sufficient; always confirm the actual CI run went green before
+   reporting a change complete.
+
 **Explicitly declined (2026-08-20):** a separate staging Supabase project
 isolated from the "Production"-labeled one. Do not re-propose this unless a
 concrete incident makes the case again.
