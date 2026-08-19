@@ -1,0 +1,151 @@
+name: P20-G01 Phase 9 Restore Epoch Gate APK
+
+on:
+  push:
+    branches:
+      - r05-p20-phase9-restore-epoch-gate
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-p20-g01-phase9-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout acceptance branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact accepted P20 baseline and patch scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_BASE="d847957c05dc9fe3cdd0bc3eb9c93d525f65deb0"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE"
+          printf '%s\n' \
+            ".github/workflows/p20-g01-phase9-restore-epoch-gate.yml" \
+            "docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_PHASE9_RESTORE_EPOCH_GATE_2026-08-19.md" \
+            "src/dev/p19RestoreEpochDeviceGate.js" \
+            "src/screens/SettingsScreen.js" \
+            "tests/p20-g01-phase9-restore-epoch-gate.test.cjs" \
+            | sort > /tmp/expected.txt
+          git diff --name-only "$EXPECTED_BASE"..HEAD | sort > /tmp/actual.txt
+          diff -u /tmp/expected.txt /tmp/actual.txt
+          echo "SOURCE_BASE=$EXPECTED_BASE" >> "$GITHUB_ENV"
+          echo "[PASS] exact accepted P20 baseline and P20-G01 scope verified"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Load acceptance environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const cfg=JSON.parse(fs.readFileSync('eas.json','utf8'));
+          const env=cfg?.build?.preview?.env||{};
+          for(const key of ['EXPO_PUBLIC_SUPABASE_URL','EXPO_PUBLIC_SUPABASE_KEY']){
+            const value=String(env[key]||'').trim();
+            if(!value) throw new Error(`[FAIL] Missing ${key} in eas.json preview env`);
+            fs.appendFileSync(process.env.GITHUB_ENV,`${key}=${value}\n`);
+          }
+          NODE
+          echo "EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE=1" >> "$GITHUB_ENV"
+          echo "[PASS] disposable restore-epoch acceptance flag enabled"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: P20-G01 targeted contract
+        run: node tests/p20-g01-phase9-restore-epoch-gate.test.cjs .
+
+      - name: P20 client-closure regression
+        run: node tests/p20-v2-client-closure.test.cjs .
+
+      - name: P19 final regression
+        run: node tests/p19-final-clean-v2-hardening.test.cjs .
+
+      - name: Static quality gate
+        run: npm run test:gate:static
+
+      - name: Runtime quality gate
+        run: npm run test:gate:runtime
+
+      - name: Android bundle verification
+        run: npm run verify:android
+
+      - name: Verify signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
+          ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
+          test "$ACTUAL" = "$EXPECTED"
+          echo "[PASS] signing certificate matches installed MYFI"
+
+      - name: Build signed acceptance APK
+        working-directory: android
+        env:
+          CI: "true"
+          EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE: "1"
+        run: |
+          chmod +x ./gradlew
+          ./gradlew app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Verify acceptance APK evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          SIZE="$(stat -c%s "$APK")"
+          {
+            echo "Patch=P20-G01"
+            echo "Gate=PHASE9_RESTORE_EPOCH_DEVICE_ACCEPTANCE"
+            echo "SourceBase=$SOURCE_BASE"
+            echo "BuildCommit=$(git rev-parse HEAD)"
+            echo "Branch=$(git branch --show-current)"
+            echo "APK=$APK"
+            echo "SHA256=$SHA"
+            echo "SizeBytes=$SIZE"
+            echo "ExpoSDK=54"
+            echo "ReactNative=0.81.5"
+            echo "SQLiteSchemaVersion=8"
+            echo "FinancialDataChangedByCode=NO"
+            echo "SQLiteSchemaChanged=NO"
+            echo "MigrationRequired=NO"
+            echo "SecureStoreChanged=NO"
+            echo "SupabaseSchemaChanged=NO"
+            echo "AcceptanceFlag=EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE=1"
+            echo "ProductionFeatureChange=NO"
+            echo "DeviceAcceptance=PENDING"
+          } | tee P20-G01-build-evidence.txt
+          sha256sum "$APK" | tee app-release.apk.sha256
+
+      - name: Upload P20-G01 acceptance APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: P20-G01-phase9-restore-epoch-gate-apk
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            app-release.apk.sha256
+            P20-G01-build-evidence.txt
+          if-no-files-found: error
+          retention-days: 7

@@ -48,6 +48,7 @@ import LegacySettingsScreen from './SettingsLegacyScreen';
 import { PERFORMANCE_TEST_TIERS } from '../dev/performanceTestConfig';
 import { PRODUCT_NAME } from '../lib/productIdentity';
 import { collectP19LocalSqliteDiagnostics } from '../dev/p19LocalSqliteDiagnostics';
+import { P19_RESTORE_EPOCH_DEVICE_GATE_ENABLED, runP19RestoreEpochDeviceGate } from '../dev/p19RestoreEpochDeviceGate';
 
 const pageCopy = (lang = 'ar') => {
   const ar = lang === 'ar';
@@ -738,6 +739,27 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
     if (localSqliteDiagnosticBusy) return;
     setLocalSqliteDiagnosticBusy(true);
     try {
+      if (P19_RESTORE_EPOCH_DEVICE_GATE_ENABLED) {
+        const evidence = await runP19RestoreEpochDeviceGate({ getState: useStore.getState });
+        const text = JSON.stringify(evidence, null, 2);
+        setLocalSqliteDiagnostic(text);
+        console.log(evidence?.ok
+          ? '[P20_G01_PHASE9_RESTORE_EPOCH_GATE_PASS]'
+          : '[P20_G01_PHASE9_RESTORE_EPOCH_GATE_RESULT]', text);
+        Alert.alert(
+          '',
+          evidence?.ok
+            ? (cfg.lang === 'ar'
+              ? 'PASS — اكتمل اختبار Restore Epoch على الحساب التجريبي. لا تستخدم هذا الحساب كحساب مالي حقيقي.'
+              : 'PASS — Restore Epoch gate completed on the disposable account. Do not use this account for real finances.')
+            : (evidence?.blocked
+              ? (cfg.lang === 'ar'
+                ? `BLOCKED — لم يتم تعديل البيانات. السبب: ${evidence?.reason || 'غير معروف'}`
+                : `BLOCKED — No data was changed. Reason: ${evidence?.reason || 'unknown'}`)
+              : (evidence?.reason || 'Restore Epoch gate failed')),
+        );
+        return;
+      }
       const evidence = await collectP19LocalSqliteDiagnostics({ workspaceNamespace, cfg, cloudRecovery: financialCloudRecoveryV2 });
       const text = JSON.stringify(evidence, null, 2);
       setLocalSqliteDiagnostic(text);
@@ -1421,10 +1443,14 @@ function AccountPage({
               th={th}
               isAr={isAr}
               icon="server-outline"
-              title={isAr ? 'دليل SQLite المحلي' : 'Local SQLite evidence'}
+              title={P19_RESTORE_EPOCH_DEVICE_GATE_ENABLED
+                ? (isAr ? 'اختبار Restore Epoch — بيانات تجريبية فقط' : 'Restore Epoch gate — disposable only')
+                : (isAr ? 'دليل SQLite المحلي' : 'Local SQLite evidence')}
               subtitle={localSqliteDiagnosticBusy
                 ? (isAr ? 'جاري القراءة فقط…' : 'Reading only…')
-                : (isAr ? 'قراءة حالة المزامنة المحلية بدون تعديل البيانات' : 'Read local sync state without modifying data')}
+                : (P19_RESTORE_EPOCH_DEVICE_GATE_ENABLED
+                  ? (isAr ? 'يرفض التنفيذ إذا وجد أي بيانات مالية حقيقية' : 'Refuses to run unless the account is disposable and financially empty')
+                  : (isAr ? 'قراءة حالة المزامنة المحلية بدون تعديل البيانات' : 'Read local sync state without modifying data'))}
               onPress={onRunLocalSqliteDiagnostic}
             />
             {localSqliteDiagnostic ? (
