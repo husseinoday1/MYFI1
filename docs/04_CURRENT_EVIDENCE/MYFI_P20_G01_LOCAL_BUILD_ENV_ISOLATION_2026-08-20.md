@@ -2,7 +2,21 @@
 
 Date: 2026-08-20
 Produced by: MYFI Testing & Release session
-Status: Local build path abandoned for this round. Requesting CI build instead.
+Status: **STILL BLOCKED, reminder bump 2026-08-20.** Local build path fully
+abandoned — even a hardcoded literal fallback (no env var involved at all,
+`src/lib/supabase.js` edited to `process.env.EXPO_PUBLIC_SUPABASE_KEY ||
+'sb_publishable_v8aCmN7-gYLzaOrIkp6U-A_LAXvu-Iu'` directly in source, in the
+disposable `C:\MYFI-TESTREL-BUILD` clone only, never committed) still failed
+to appear in the built bundle. This points to something deeper than env-var
+propagation in the local Gradle/Metro pipeline on this machine — not
+something Testing & Release should keep spending time on.
+
+**Action needed from Implementation/Planning:** update
+`EXPECTED_BASE` in `.github/workflows/p20-g01-phase9-restore-epoch-gate.yml`
+to the current accepted commit on `impl/p20-g01-acceptance-apk-2026-08-19`
+(or otherwise unblock the exact-scope check), then build via CI —
+Testing & Release is ready to install and continue P20-G01 items 2–10 the
+moment a correctly-flagged, correctly-keyed APK is available from there.
 
 ## What was tried
 
