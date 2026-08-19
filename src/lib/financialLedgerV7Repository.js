@@ -475,6 +475,225 @@ export const readLedgerSyncIdentityV8 = async ({ namespace = 'guest', database =
   } : null;
 };
 
+const cleanV2AdoptionMetaKey = namespace => `clean_v2_adoption:${String(namespace || 'guest')}`;
+
+export const adoptUnbootstrappedCloudLedgerIdentityV8 = async ({
+  namespace = 'guest',
+  cloudLedgerId,
+  cloudRestoreEpoch = 1,
+  database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
+  await ensureFinancialLedgerV7(db);
+
+  const targetNamespace = String(namespace || '').trim();
+  const targetLedgerId = String(cloudLedgerId || '').trim();
+  const targetEpoch = Number(cloudRestoreEpoch);
+  if (!targetNamespace) {
+    return { supported: true, ok: false, reason: 'financial_v2_adoption_namespace_required' };
+  }
+  if (!targetLedgerId || !Number.isSafeInteger(targetEpoch) || targetEpoch <= 0) {
+    return { supported: true, ok: false, reason: 'financial_v2_adoption_target_invalid' };
+  }
+
+  return enqueueWrite(async () => runLedgerExclusiveTransaction(db, async (txn) => {
+    const identity = await txn.getFirstAsync(
+      `SELECT namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version,created_at,updated_at
+         FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
+      targetNamespace,
+    );
+    if (!identity?.ledger_id) {
+      return { supported: true, ok: false, reason: 'financial_v2_adoption_local_identity_missing' };
+    }
+
+    const currentLedgerId = String(identity.ledger_id);
+    const currentEpoch = Math.max(1, Number(identity.restore_epoch || 1));
+    if (currentLedgerId === targetLedgerId) {
+      if (currentEpoch !== targetEpoch) {
+        return {
+          supported: true,
+          ok: false,
+          reason: 'financial_v2_adoption_restore_epoch_mismatch',
+          localRestoreEpoch: currentEpoch,
+          cloudRestoreEpoch: targetEpoch,
+        };
+      }
+      return {
+        supported: true,
+        ok: true,
+        idempotent: true,
+        namespace: targetNamespace,
+        fromLedgerId: currentLedgerId,
+        ledgerId: targetLedgerId,
+        restoreEpoch: targetEpoch,
+        droppedShadowRows: 0,
+        droppedLegacyRows: 0,
+      };
+    }
+
+    if (currentEpoch !== targetEpoch) {
+      return {
+        supported: true,
+        ok: false,
+        reason: 'financial_v2_adoption_restore_epoch_mismatch',
+        localRestoreEpoch: currentEpoch,
+        cloudRestoreEpoch: targetEpoch,
+      };
+    }
+
+    const reservedLocal = await txn.getFirstAsync(
+      `SELECT namespace,ledger_id,restore_epoch
+         FROM ledger_sync_identity_v8 WHERE ledger_id=? LIMIT 1`,
+      targetLedgerId,
+    );
+    if (reservedLocal?.ledger_id) {
+      return {
+        supported: true,
+        ok: false,
+        reason: 'financial_v2_adoption_target_already_local',
+        targetNamespace: String(reservedLocal.namespace || ''),
+      };
+    }
+
+    const count = async (sql, ...params) => {
+      const row = await txn.getFirstAsync(sql, ...params);
+      return Math.max(0, Number(row?.n || 0));
+    };
+
+    const financialCounts = {
+      accounts: await count(`SELECT COUNT(*) AS n FROM ledger_accounts_v7 WHERE namespace=?`, targetNamespace),
+      exchangeRates: await count(`SELECT COUNT(*) AS n FROM ledger_exchange_rates_v7 WHERE namespace=?`, targetNamespace),
+      transactions: await count(`SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7 WHERE namespace=?`, targetNamespace),
+      postings: await count(`SELECT COUNT(*) AS n FROM ledger_postings_v7 WHERE namespace=?`, targetNamespace),
+      links: await count(`SELECT COUNT(*) AS n FROM ledger_transaction_links_v7 WHERE namespace=?`, targetNamespace),
+      nonWorkspaceEntities: await count(
+        `SELECT COUNT(*) AS n FROM ledger_entities_v7
+          WHERE namespace=? AND NOT (entity_type='workspace' AND id='workspace')`,
+        targetNamespace,
+      ),
+    };
+    if (Object.values(financialCounts).some(value => value > 0)) {
+      return {
+        supported: true,
+        ok: false,
+        reason: 'financial_v2_adoption_local_financial_state_present',
+        financialCounts,
+      };
+    }
+
+    const totalShadow = await count(
+      `SELECT COUNT(*) AS n FROM ledger_outbox_v3 WHERE ledger_id=?`,
+      currentLedgerId,
+    );
+    const allowedShadow = await count(
+      `SELECT COUNT(*) AS n
+         FROM ledger_outbox_v3
+        WHERE namespace=? AND ledger_id=? AND restore_epoch=?
+          AND entity_type='workspace' AND entity_id='workspace' AND operation='upsert'
+          AND acknowledged_at IS NULL AND superseded_by_bootstrap_id IS NULL`,
+      targetNamespace, currentLedgerId, currentEpoch,
+    );
+    const pendingLegacy = await count(
+      `SELECT COUNT(*) AS n FROM ledger_outbox_v2
+        WHERE namespace=? AND acknowledged_at IS NULL`,
+      targetNamespace,
+    );
+    const allowedLegacy = await count(
+      `SELECT COUNT(*) AS n FROM ledger_outbox_v2
+        WHERE namespace=? AND acknowledged_at IS NULL
+          AND entity_type='workspace' AND entity_id='workspace' AND operation='upsert'`,
+      targetNamespace,
+    );
+
+    const blockedTransport = {
+      shadowUnexpected: totalShadow - allowedShadow,
+      legacyUnexpected: pendingLegacy - allowedLegacy,
+      inbox: await count(`SELECT COUNT(*) AS n FROM ledger_inbox_v3 WHERE ledger_id=?`, currentLedgerId),
+      bootstrap: await count(`SELECT COUNT(*) AS n FROM ledger_bootstrap_state_v8 WHERE ledger_id=?`, currentLedgerId),
+      bootstrapImport: await count(`SELECT COUNT(*) AS n FROM ledger_bootstrap_import_state_v8 WHERE ledger_id=?`, currentLedgerId),
+      syncState: await count(`SELECT COUNT(*) AS n FROM ledger_sync_state_v8 WHERE ledger_id=?`, currentLedgerId),
+    };
+    if (Object.values(blockedTransport).some(value => value > 0)) {
+      return {
+        supported: true,
+        ok: false,
+        reason: 'financial_v2_adoption_transport_state_not_clean',
+        blockedTransport,
+      };
+    }
+
+    const now = new Date().toISOString();
+    const markerKey = cleanV2AdoptionMetaKey(targetNamespace);
+    const intent = {
+      version: 1,
+      namespace: targetNamespace,
+      fromLedgerId: currentLedgerId,
+      toLedgerId: targetLedgerId,
+      restoreEpoch: targetEpoch,
+      status: 'adopting',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await txn.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+      markerKey, safeJson(intent), now,
+    );
+
+    const removedShadow = await txn.runAsync(
+      `DELETE FROM ledger_outbox_v3 WHERE ledger_id=?`,
+      currentLedgerId,
+    );
+    const removedLegacy = await txn.runAsync(
+      `DELETE FROM ledger_outbox_v2
+        WHERE namespace=? AND acknowledged_at IS NULL`,
+      targetNamespace,
+    );
+
+    const updated = await txn.runAsync(
+      `UPDATE ledger_sync_identity_v8
+          SET ledger_id=?,restore_epoch=?,protocol_version=2,minimum_supported_version=2,updated_at=?
+        WHERE namespace=? AND ledger_id=? AND restore_epoch=?`,
+      targetLedgerId, targetEpoch, now, targetNamespace, currentLedgerId, currentEpoch,
+    );
+    if (Number(updated?.changes || 0) !== 1) {
+      throw new Error('financial_v2_adoption_identity_compare_and_swap_failed');
+    }
+
+    const fkRows = await txn.getAllAsync('PRAGMA foreign_key_check');
+    if (Array.isArray(fkRows) && fkRows.length > 0) {
+      throw new Error('financial_v2_adoption_foreign_key_check_failed');
+    }
+
+    const completedAt = new Date().toISOString();
+    const completed = {
+      ...intent,
+      status: 'adopted_pending_bootstrap',
+      updatedAt: completedAt,
+      adoptedAt: completedAt,
+      droppedShadowRows: Number(removedShadow?.changes || 0),
+      droppedLegacyRows: Number(removedLegacy?.changes || 0),
+    };
+    await txn.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+      markerKey, safeJson(completed), completedAt,
+    );
+
+    return {
+      supported: true,
+      ok: true,
+      idempotent: false,
+      namespace: targetNamespace,
+      fromLedgerId: currentLedgerId,
+      ledgerId: targetLedgerId,
+      restoreEpoch: targetEpoch,
+      droppedShadowRows: Number(removedShadow?.changes || 0),
+      droppedLegacyRows: Number(removedLegacy?.changes || 0),
+      foreignKeyCheck: 'ok',
+    };
+  }));
+};
+
 const restoreIntentMetaKey = namespace => `restore_intent:${String(namespace || 'guest')}`;
 
 export const readLedgerRestoreIntentV8 = async ({ namespace = 'guest', database = null } = {}) => {

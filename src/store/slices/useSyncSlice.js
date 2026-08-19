@@ -40,6 +40,7 @@ import {
   readFinancialSyncProtocolV8,
   inspectFinancialEmptyShellV8,
   recordFinancialCloudRecoveryV8,
+  adoptUnbootstrappedCloudLedgerIdentityV8,
 } from '../../lib/financialLedgerV7Repository';
 import { compareSnapshots, loadNormalizedSnapshot } from '../../lib/normalizedRepository';
 import { syncFinancialMutationsV7 } from '../../lib/financialMutationSync';
@@ -545,6 +546,22 @@ const runVerifiedEmptyShellCloudRecoveryV2 = async ({
     };
   }
 
+  // P19 FINAL: once this local ledger has durably activated protocol V2, an
+  // empty financial workspace is a valid steady state. Do not reinterpret the
+  // finalized cloud bootstrap as a recovery request on every restart.
+  const existingProtocol = await readFinancialSyncProtocolV8({ namespace: ledgerNamespace });
+  if (existingProtocol?.activeProtocolVersion === 2) {
+    return {
+      attempted: false,
+      ok: true,
+      recovered: false,
+      requireV2: true,
+      reason: 'financial_v2_already_active',
+      protocol: existingProtocol,
+      shell,
+    };
+  }
+
   set({
     financialCloudRecoveryV2: {
       status: 'checking_cloud',
@@ -603,18 +620,68 @@ const runVerifiedEmptyShellCloudRecoveryV2 = async ({
   }
 
   if (source.mode === 'v2_unbootstrapped') {
-    const reason = 'financial_v2_unbootstrapped_cloud_recovery_required';
+    const cloudLedgerId = String(source.ledgerId || '').trim();
+    const cloudRestoreEpoch = Number(source.restoreEpoch || 0);
+    if (!cloudLedgerId || cloudRestoreEpoch <= 0) {
+      const reason = 'financial_v2_unbootstrapped_identity_invalid';
+      set({ financialCloudRecoveryV2: { status: 'failed', workspaceNamespace, ledgerNamespace, error: reason } });
+      return { attempted: true, ok: false, reason, source };
+    }
+
+    const adoption = await adoptUnbootstrappedCloudLedgerIdentityV8({
+      namespace: ledgerNamespace,
+      cloudLedgerId,
+      cloudRestoreEpoch,
+    });
+    if (!adoption?.ok) {
+      const reason = String(adoption?.reason || 'financial_v2_unbootstrapped_identity_adoption_failed');
+      set({
+        financialCloudRecoveryV2: {
+          status: 'failed_v2_unbootstrapped_adoption',
+          workspaceNamespace,
+          ledgerNamespace,
+          ledgerId: cloudLedgerId,
+          restoreEpoch: cloudRestoreEpoch,
+          error: reason,
+        },
+      });
+      return { attempted: true, ok: false, blocked: true, reason, source, adoption };
+    }
+
+    await writeResetMarker(workspaceNamespace, {
+      pendingCloudSync: false,
+      legacyRecoveryDisabled: true,
+      cleanV2Cutover: true,
+      cloudLedgerId,
+      cloudRestoreEpoch,
+    });
+    console.info('[P19_FINAL_V2_ADOPTED]', JSON.stringify({
+      fromLedgerId: adoption.fromLedgerId || null,
+      ledgerId: adoption.ledgerId,
+      restoreEpoch: adoption.restoreEpoch,
+      idempotent: adoption.idempotent === true,
+    }));
     set({
       financialCloudRecoveryV2: {
-        status: 'blocked_v2_unbootstrapped',
+        status: 'adopted_v2_unbootstrapped',
         workspaceNamespace,
         ledgerNamespace,
-        ledgerId: source.ledgerId,
-        restoreEpoch: source.restoreEpoch,
-        error: reason,
+        ledgerId: adoption.ledgerId,
+        restoreEpoch: adoption.restoreEpoch,
+        adoptedAt: new Date().toISOString(),
+        error: null,
       },
     });
-    return { attempted: true, ok: false, blocked: true, reason, source };
+    return {
+      attempted: true,
+      ok: true,
+      recovered: false,
+      requireV2: true,
+      adopted: true,
+      mode: 'v2_unbootstrapped',
+      source,
+      adoption,
+    };
   }
 
   if (source.mode !== 'legacy_snapshot' || !source.snapshot) {
@@ -1106,6 +1173,14 @@ const runControlledFinancialV2Activation = async ({
       error: null,
     },
   });
+
+  console.info('[P19_FINAL_V2_ACTIVE]', JSON.stringify({
+    ledgerId: activated.ledgerId,
+    restoreEpoch: activated.restoreEpoch,
+    bootstrapId: bootstrap.bootstrapId,
+    protocol: 2,
+    productionCursor: Number(productionSync.cursor || 0),
+  }));
 
   return {
     ok: true,
@@ -2056,7 +2131,7 @@ export const createSyncSlice = (set, get) => ({
             }
             // A ledger just restored from cloud must never drop into V1 on the
             // same attempt. Its next safe step is verified V2 bootstrap/activation.
-            if (cloudRecovery?.recovered && cloudRecovery?.requireV2) {
+            if (cloudRecovery?.requireV2) {
               throw new Error(
                 activationFinancialSync.reason || 'financial_v2_activation_required_after_cloud_recovery'
               );
@@ -2114,6 +2189,15 @@ export const createSyncSlice = (set, get) => ({
             // Never fall back to snapshot pull after V7 cutover. Snapshot
             // absence previously generated local void/delete mutations.
             throw new Error(financialMutationSync.reason || 'financial_v7_mutation_sync_required');
+          }
+          if (financialV2Active) {
+            console.info('[P19_FINAL_V2_SYNC_OK]', JSON.stringify({
+              ledgerId: financialProtocol?.ledgerId || activationFinancialSync?.activated?.ledgerId || null,
+              restoreEpoch: Number(financialProtocol?.restoreEpoch || activationFinancialSync?.activated?.restoreEpoch || 0),
+              protocol: 2,
+              cursor: Number(financialMutationSync.cursor || 0),
+              pendingAfterSync: Number(financialMutationSync.pendingAfterSync || 0),
+            }));
           }
           // Snapshot sync remains only as a compatibility mirror OUTPUT after
           // V7 cutover. Financial pull authority is the mutation protocol.
