@@ -1,0 +1,152 @@
+name: P19-015B1 Diagnostic APK
+
+on:
+  push:
+    branches:
+      - r05-p19-015b1-github-apk-build-r1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-diagnostic-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact P19-015B1 source and build-only change
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_SOURCE="93b0a94fb9b080026883488c9d420aa3b600027e"
+          WORKFLOW=".github/workflows/p19-015b1-build-diagnostic-apk.yml"
+          PARENT="$(git rev-parse HEAD^)"
+          if [ "$PARENT" != "$EXPECTED_SOURCE" ]; then
+            echo "[FAIL] Build commit parent mismatch: $PARENT != $EXPECTED_SOURCE"
+            exit 1
+          fi
+          CHANGED="$(git diff --name-only "$EXPECTED_SOURCE"..HEAD)"
+          if [ "$CHANGED" != "$WORKFLOW" ]; then
+            echo "[FAIL] Build branch contains changes outside workflow"
+            printf '%s\n' "$CHANGED"
+            exit 1
+          fi
+          grep -q "P19-015B1_LEDGER_IDENTITY_ADOPTION_PREFLIGHT" src/dev/p19LocalSqliteDiagnostics.js
+          test -f tests/p19-015b1-identity-adoption-preflight.test.cjs
+          echo "[PASS] Exact P19-015B1 source preserved"
+          echo "SOURCE_HEAD=$EXPECTED_SOURCE" >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Load public Supabase build environment
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const cfg=JSON.parse(fs.readFileSync('eas.json','utf8'));
+          const env=cfg?.build?.preview?.env||{};
+          for(const key of ['EXPO_PUBLIC_SUPABASE_URL','EXPO_PUBLIC_SUPABASE_KEY']){
+            const value=String(env[key]||'').trim();
+            if(!value) throw new Error(`[FAIL] Missing ${key} in eas.json preview env`);
+            fs.appendFileSync(process.env.GITHUB_ENV,`${key}=${value}\n`);
+          }
+          console.log('[PASS] Supabase public build environment loaded from eas.json');
+          NODE
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: P19-015B0 regression contract
+        run: node tests/p19-015b0-ledger-identity-forensics.test.cjs .
+
+      - name: P19-015B1 targeted safety contract
+        run: node tests/p19-015b1-identity-adoption-preflight.test.cjs .
+
+      - name: Static quality gate
+        run: npm run test:gate:static
+
+      - name: Runtime quality gate
+        run: npm run test:gate:runtime
+
+      - name: Android bundle verification
+        run: npm run verify:android
+
+      - name: Verify Android signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
+          ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "[FAIL] Signing certificate does not match installed MYFI app"
+            exit 1
+          fi
+          echo "[PASS] Signing certificate matches installed MYFI app"
+
+      - name: Make Gradle wrapper executable
+        working-directory: android
+        run: chmod +x ./gradlew
+
+      - name: Build signed release APK
+        working-directory: android
+        env:
+          CI: "true"
+        run: ./gradlew app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Verify APK and create evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          SIZE="$(stat -c%s "$APK")"
+          {
+            echo "Patch=P19-015B1"
+            echo "SourceCommit=$SOURCE_HEAD"
+            echo "BuildCommit=$(git rev-parse HEAD)"
+            echo "Branch=$(git branch --show-current)"
+            echo "APK=$APK"
+            echo "SHA256=$SHA"
+            echo "SizeBytes=$SIZE"
+            echo "DiagnosticMode=READ_ONLY"
+            echo "RawPayloadReturned=NO"
+            echo "CloudFinancialPayloadLogged=NO"
+            echo "FinancialDataChanged=NO"
+            echo "SQLiteSchemaChanged=NO"
+            echo "SQLiteSchemaVersion=8"
+            echo "MigrationRequired=NO"
+            echo "SecureStoreChanged=NO"
+            echo "ExistingUserDataPreserved=YES"
+          } | tee P19-015B1-apk-evidence.txt
+          sha256sum "$APK" | tee app-release.apk.sha256
+
+      - name: Upload P19-015B1 APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: P19-015B1-diagnostic-release-apk
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            app-release.apk.sha256
+            P19-015B1-apk-evidence.txt
+          if-no-files-found: error
+          retention-days: 7
