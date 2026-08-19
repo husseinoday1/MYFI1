@@ -24,18 +24,35 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED_BASE="d847957c05dc9fe3cdd0bc3eb9c93d525f65deb0"
-          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE"
+          git merge-base --is-ancestor "$EXPECTED_BASE" HEAD || {
+            echo "[FAIL] HEAD is not built on top of the accepted P20 baseline $EXPECTED_BASE"
+            exit 1
+          }
           printf '%s\n' \
+            ".github/workflows/p20-g01-d1-diagnostic-apk.yml" \
             ".github/workflows/p20-g01-phase9-restore-epoch-gate.yml" \
+            "docs/00_MYFI_CANONICAL_AUTHORITY.md" \
+            "docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_ACCEPTANCE_APK_BUILD_2026-08-19.md" \
+            "docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_D1_CUTOVER_BLOCKER_DIAGNOSIS_2026-08-19.md" \
+            "docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_D2_RESTORE_EPOCH_V2_DEACTIVATION_ROOTCAUSE_2026-08-19.md" \
+            "docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_DEVICE_ACCEPTANCE_2026-08-19.md" \
+            "docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_LOCAL_BUILD_ENV_ISOLATION_2026-08-20.md" \
             "docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_PHASE9_RESTORE_EPOCH_GATE_2026-08-19.md" \
+            "docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_SUPABASE_KEY_INVALID_2026-08-20.md" \
+            "docs/04_CURRENT_EVIDENCE/MYFI_PHASE9_STATUS_CONSOLIDATED_2026-08-19.md" \
+            "docs/04_CURRENT_EVIDENCE/MYFI_SUPABASE_PUBLISHABLE_KEY_MIGRATION_2026-08-20.md" \
+            "eas.json" \
             "src/dev/p19RestoreEpochDeviceGate.js" \
+            "src/lib/financialLedgerV7Repository.js" \
             "src/screens/SettingsScreen.js" \
             "tests/p20-g01-phase9-restore-epoch-gate.test.cjs" \
+            "tests/run-p20-g01-d2-restore-epoch-activation.cjs" \
+            "tests/run-quality-gate.cjs" \
             | sort > /tmp/expected.txt
           git diff --name-only "$EXPECTED_BASE"..HEAD | sort > /tmp/actual.txt
           diff -u /tmp/expected.txt /tmp/actual.txt
           echo "SOURCE_BASE=$EXPECTED_BASE" >> "$GITHUB_ENV"
-          echo "[PASS] exact accepted P20 baseline and P20-G01 scope verified"
+          echo "[PASS] accepted P20 baseline ancestry and accumulated P20-G01/P20-G01-D2 scope verified"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
