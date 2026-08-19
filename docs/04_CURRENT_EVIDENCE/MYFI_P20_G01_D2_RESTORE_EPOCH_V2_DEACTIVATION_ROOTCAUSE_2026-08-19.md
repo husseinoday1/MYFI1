@@ -84,20 +84,55 @@ The `catch` block reasons carefully about preserving intent when `serverAdvanced
 is true, and that reasoning is bypassed for every post-commit failure. That is why
 the device session saw an epoch silently move from 1 to 2 with no gate output.
 
-## On `financial_bootstrap_required` — one thing NOT yet proven
+## On `financial_bootstrap_required` — SETTLED by read-only Supabase check (2026-08-19, Testing & Release)
 
 `financial_bootstrap_required` is raised server-side when
 `financial_ledgers_v2.bootstrapped_at is null`
 (`supabase/migrations/202608170002_...sql:264`,
-`202608170004_...sql:524`). Notably `advance_financial_restore_epoch_v2`
-(`202608170003_...sql:98`) updates only `restore_epoch` and `updated_at` — it does
-**not** clear `bootstrapped_at`. So an epoch advance alone should not strip the
-server bootstrap.
+`202608170004_...sql:524`). `advance_financial_restore_epoch_v2`
+(`202608170003_...sql:98`) itself updates only `restore_epoch`/`updated_at`, but
+there is a **separate BEFORE UPDATE trigger** on `financial_ledgers_v2`
+(`202608170004_financial_bootstrap_v2.sql:60-69`):
 
-That leaves the server-side cause of 3b open. The most likely explanation is the
-earlier intentional Supabase data wipe recorded in the device-acceptance file,
-which would have removed the bootstrap row independently of anything the gate did.
-**This needs one read-only server-side check to settle** — do not assume it.
+```sql
+if new.restore_epoch is distinct from old.restore_epoch then
+  new.bootstrap_id := null;
+  new.bootstrap_manifest_hash := null;
+  new.bootstrapped_at := null;
+end if;
+```
+
+This trigger — not the earlier intentional data wipe — is the direct cause.
+Confirmed by a read-only `select` against the affected row:
+
+```json
+{
+  "ledger_id": "ledger-7e217fd55b4633bb82da5689ab97bdb9",
+  "owner_user_id": "0c9600f3-0a3f-46fa-8763-113795adf802",
+  "restore_epoch": 2,
+  "bootstrap_id": null,
+  "bootstrap_manifest_hash": null,
+  "bootstrapped_at": null,
+  "created_at": "2026-08-18 06:54:24.171263+00",
+  "updated_at": "2026-08-19 17:46:12.028649+00"
+}
+```
+
+`updated_at` (17:46:12.028649 UTC) matches `identity.updatedAt`
+(`2026-08-19T17:46:12.259Z`) from the run-3c gate payload to within ~230ms —
+i.e. this row was written by the same epoch-advance event captured in run
+3a→3b, not by any earlier, unrelated wipe. **The prior "most likely
+explanation" (intentional earlier wipe) is ruled out for this specific
+symptom.**
+
+This means the trigger's own design is now a fourth defect, additive to the
+three already identified: every restore-epoch advance unconditionally strips
+bootstrap state, which is *consistent* with the app-layer bug (row 3, epoch-keyed
+lookup missing `activated_at`) but represents its own decision that Option
+A/B in "Why no fix yet" must account for — a chosen fix has to either
+re-bootstrap after every epoch advance (which this trigger now makes
+mandatory, reinforcing Option A) or stop nulling these columns on epoch
+advance as part of Option B.
 
 ## Consequences
 
