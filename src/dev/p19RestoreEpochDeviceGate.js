@@ -111,6 +111,19 @@ const disposableBlockers = ({ state, coldArchives, localWorkspace }) => {
 // which is not enough to tell "flag is false" from "flag was never set" from
 // "SQLite workspace unreadable". This collects observed state only; it reads
 // nothing new and mutates nothing.
+// Parity differences name a metric and carry both values. The count metrics are
+// scalars and safe to report; walletBalances / currencyBalances / monthlyTotals are
+// maps of real money, and this payload gets console-logged and copied around. Report
+// the shape of those, never the amounts.
+const metricSummary = value => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return value.length <= 80 ? value : `<string:${value.length}>`;
+  if (Array.isArray(value)) return { type: "array", length: value.length };
+  if (typeof value === "object") return { type: "object", keys: Object.keys(value).length };
+  return `<${typeof value}>`;
+};
+
 const blockedDiagnostics = ({ state, localWorkspace, coldArchives }) => {
   const migration = state?.financialLedgerV7Migration || null;
   const count = value => (Array.isArray(value) ? value.length : null);
@@ -131,6 +144,27 @@ const blockedDiagnostics = ({ state, localWorkspace, coldArchives }) => {
       sourceMode: migration.sourceMode ?? null,
       migrationReady: migration.migrationReady ?? null,
       reason: migration.reason || null,
+      // shadow_parity_failed is useless without the metric that actually
+      // diverged. runFinancialShadowMigrationV7 returns differences plus both
+      // metric sets; recording only the reason string is what forced a second
+      // device round-trip on 2026-08-20.
+      differences: Array.isArray(migration.differences)
+        ? migration.differences.slice(0, 20).map(item => ({
+          field: item?.field ?? null,
+          source: metricSummary(item?.source),
+          target: metricSummary(item?.target),
+        }))
+        : null,
+      sourceCounts: migration.sourceCounts
+        ? Object.fromEntries(Object.entries(migration.sourceCounts)
+          .map(([key, value]) => [key, metricSummary(value)]))
+        : null,
+      targetCounts: migration.targetCounts
+        ? Object.fromEntries(Object.entries(migration.targetCounts)
+          .map(([key, value]) => [key, metricSummary(value)]))
+        : null,
+      sourceChecksum: migration.sourceChecksum || null,
+      targetChecksum: migration.targetChecksum || null,
     } : null,
     storeCounts: {
       trans: count(state?.trans),
@@ -139,6 +173,15 @@ const blockedDiagnostics = ({ state, localWorkspace, coldArchives }) => {
       commitments: count(state?.commitments),
       wallets: count(state?.wallets),
     },
+    // Before cutover the shadow migration stages into a separate namespace and
+    // discards it, so the real V7 workspace is EXPECTED to be empty and
+    // sqliteCounts is expected to read 0 against a non-empty storeCounts. Do not
+    // read a mismatch here as a defect while this flag is true — on 2026-08-20 a
+    // healthy pre-cutover account was reported as a wallet-persistence bug on
+    // exactly that misreading.
+    // Even once true, store transaction counts are a bounded projection, so treat
+    // only the non-transaction counts as directly comparable.
+    sqliteCountsComparableToStore: !!state?.financialLedgerV7Cutover,
     // null localWorkspace means the V7 read itself yielded nothing —
     // materially different from an empty-but-present workspace.
     sqliteWorkspacePresent: !!localWorkspace,
