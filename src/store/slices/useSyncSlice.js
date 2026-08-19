@@ -9,7 +9,7 @@ import {
   isFinancialMaintenanceBlocked,
   runFinancialMaintenanceTask,
 } from '../../lib/financialMaintenanceBarrier';
-import { mergeWorkspaceStates, sameWorkspaceData } from '../multiDeviceSync';
+import { canonicalWorkspaceCfg, mergeWorkspaceStates, sameWorkspaceData } from '../multiDeviceSync';
 import { supabase } from '../../lib/supabase';
 import { STORAGE, DEF_CATS, DEF_CFG, DEF_NOTIF, LEGACY_STORAGE_KEYS, normalizeCfg } from '../../lib/constants';
 import { normalizedPreviewEnabled, normalizedShadowEnabled } from '../../lib/databaseMode';
@@ -1969,7 +1969,7 @@ export const createSyncSlice = (set, get) => ({
           entityType: 'workspace',
           id: 'workspace',
           payload: {
-            cfg: clean.cfg,
+            cfg: canonicalWorkspaceCfg(clean.cfg),
             notif: clean.notif,
             cloudRevision: Number(clean.cloudRevision || 0),
           },
@@ -2199,6 +2199,15 @@ export const createSyncSlice = (set, get) => ({
         let financialV2Active = financialProtocol?.activeProtocolVersion === 2;
         let activationFinancialSync = null;
 
+        console.info('[P20_V2_SYNC_CONTEXT]', JSON.stringify({
+          activeLedgerSupported: activeLedgerSupported(),
+          financialLedgerV7Cutover: !!initial.financialLedgerV7Cutover,
+          activeProtocolVersion: Number(financialProtocol?.activeProtocolVersion || 0),
+          financialV2Active,
+          ledgerId: financialProtocol?.ledgerId || null,
+          restoreEpoch: Number(financialProtocol?.restoreEpoch || 0),
+        }));
+
         if (activeLedgerSupported() && initial.financialLedgerV7Cutover && !financialV2Active) {
           activationFinancialSync = await runControlledFinancialV2Activation({
             get,
@@ -2281,6 +2290,16 @@ export const createSyncSlice = (set, get) => ({
           } else {
             set({ financialMutationSync });
           }
+          console.info('[P20_V2_MUTATION_STATE]', JSON.stringify({
+            protocol: financialV2Active ? 2 : 1,
+            ok: !!financialMutationSync?.ok,
+            reason: financialMutationSync?.reason || null,
+            uploaded: Number(financialMutationSync?.uploaded || 0),
+            downloaded: Number(financialMutationSync?.downloaded || 0),
+            pendingAfterSync: Number(financialMutationSync?.pendingAfterSync || 0),
+            cursor: Number(financialMutationSync?.cursor || 0),
+            hasMore: financialMutationSync?.hasMore === true,
+          }));
           if (!financialMutationSync.ok) {
             // Never fall back to snapshot pull after V7 cutover. Snapshot
             // absence previously generated local void/delete mutations.
@@ -2339,7 +2358,11 @@ export const createSyncSlice = (set, get) => ({
               namespace: getLedgerNamespace(namespace, finalState.cfg),
               changes: [{
                 entityType: 'workspace', id: 'workspace',
-                payload: { cfg: finalState.cfg, notif: finalState.notif, cloudRevision: revisionValue },
+                payload: {
+                  cfg: canonicalWorkspaceCfg(finalState.cfg),
+                  notif: finalState.notif,
+                  cloudRevision: revisionValue,
+                },
               }],
             });
             if (workspaceCommit.supported && !workspaceCommit.ok) {
@@ -2558,7 +2581,7 @@ export const createSyncSlice = (set, get) => ({
             p_wallets: current.wallets,
             p_commitments: current.commitments,
             p_cats: current.cats,
-            p_cfg: current.cfg,
+            p_cfg: canonicalWorkspaceCfg(current.cfg),
             p_device_id: deviceId,
           });
 

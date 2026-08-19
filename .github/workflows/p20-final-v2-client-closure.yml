@@ -1,0 +1,153 @@
+name: P20 FINAL V2 Client Closure APK
+
+on:
+  push:
+    branches:
+      - r05-p20-final-v2-client-closure
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-p20-final-v2-client-closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout P20 client closure branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact source base and patch scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_BASE="8a31c7e1d885817f3b42f26cc14627c369558632"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE"
+          printf '%s\n' \
+            ".github/workflows/p20-final-v2-client-closure.yml" \
+            "docs/04_CURRENT_EVIDENCE/MYFI_P20_V2_CLIENT_CLOSURE_PLAN_2026-08-19.md" \
+            "src/lib/financialLedgerV7Repository.js" \
+            "src/store/multiDeviceSync.js" \
+            "src/store/slices/useSyncSlice.js" \
+            "tests/p20-v2-client-closure.test.cjs" \
+            "tests/run-quality-gate.cjs" \
+            | sort > /tmp/expected.txt
+          git diff --name-only "$EXPECTED_BASE"..HEAD | sort > /tmp/actual.txt
+          diff -u /tmp/expected.txt /tmp/actual.txt
+          grep -q "canonicalWorkspaceCfg" src/store/multiDeviceSync.js
+          grep -q "canonicalFinancialEntityPayload" src/lib/financialLedgerV7Repository.js
+          grep -q "P20_V2_SYNC_CONTEXT" src/store/slices/useSyncSlice.js
+          grep -q "P20_V2_MUTATION_STATE" src/store/slices/useSyncSlice.js
+          echo "[PASS] exact P20 client-closure scope verified"
+          echo "SOURCE_BASE=$EXPECTED_BASE" >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Load public Supabase build environment
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const cfg=JSON.parse(fs.readFileSync('eas.json','utf8'));
+          const env=cfg?.build?.preview?.env||{};
+          for(const key of ['EXPO_PUBLIC_SUPABASE_URL','EXPO_PUBLIC_SUPABASE_KEY']){
+            const value=String(env[key]||'').trim();
+            if(!value) throw new Error(`[FAIL] Missing ${key} in eas.json preview env`);
+            fs.appendFileSync(process.env.GITHUB_ENV,`${key}=${value}\n`);
+          }
+          console.log('[PASS] public Supabase build environment loaded');
+          NODE
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: P20 targeted client-closure contract
+        run: node tests/p20-v2-client-closure.test.cjs .
+
+      - name: P19 regression contract
+        run: node tests/p19-final-clean-v2-hardening.test.cjs .
+
+      - name: Static quality gate
+        run: npm run test:gate:static
+
+      - name: Runtime quality gate
+        run: npm run test:gate:runtime
+
+      - name: Android bundle verification
+        run: npm run verify:android
+
+      - name: Verify signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
+          ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
+          test "$ACTUAL" = "$EXPECTED"
+          echo "[PASS] signing certificate matches installed MYFI"
+
+      - name: Make Gradle wrapper executable
+        working-directory: android
+        run: chmod +x ./gradlew
+
+      - name: Build signed release APK
+        working-directory: android
+        env:
+          CI: "true"
+        run: ./gradlew app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Verify APK and build evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          SIZE="$(stat -c%s "$APK")"
+          {
+            echo "Patch=P20-FINAL-V2-CLIENT-CLOSURE"
+            echo "SourceBase=$SOURCE_BASE"
+            echo "BuildCommit=$(git rev-parse HEAD)"
+            echo "Branch=$(git branch --show-current)"
+            echo "APK=$APK"
+            echo "SHA256=$SHA"
+            echo "SizeBytes=$SIZE"
+            echo "ExpoSDK=54"
+            echo "ReactNative=0.81.5"
+            echo "SQLiteSchemaVersion=8"
+            echo "FinancialDataChangedByCode=NO"
+            echo "SQLiteSchemaChanged=NO"
+            echo "MigrationRequired=NO"
+            echo "SecureStoreChanged=NO"
+            echo "ExistingUserDataPreserved=YES"
+            echo "AvatarPathCanonical=YES"
+            echo "AvatarUriDerivedLocalOnly=YES"
+            echo "V2ContextLogging=YES"
+            echo "DeviceAcceptance=PENDING"
+          } | tee P20-FINAL-V2-client-closure-build-evidence.txt
+          sha256sum "$APK" | tee app-release.apk.sha256
+
+      - name: Upload P20 final APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: P20-FINAL-v2-client-closure-apk
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            app-release.apk.sha256
+            P20-FINAL-V2-client-closure-build-evidence.txt
+          if-no-files-found: error
+          retention-days: 7

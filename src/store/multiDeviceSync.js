@@ -204,6 +204,18 @@ export const mergeArray3 = (
   ];
 };
 
+export const canonicalWorkspaceCfg = cfg => (
+  Object.fromEntries(
+    Object.entries(cfg || {}).filter(([key]) => key !== 'avatarUri'),
+  )
+);
+
+const localDerivedWorkspaceCfg = cfg => (
+  Object.prototype.hasOwnProperty.call(cfg || {}, 'avatarUri')
+    ? { avatarUri: String(cfg?.avatarUri || '') }
+    : {}
+);
+
 const dataView = state => ({
   trans: state?.trans || [],
   debts: state?.debts || [],
@@ -211,7 +223,7 @@ const dataView = state => ({
   wallets: state?.wallets || [],
   commitments: state?.commitments || [],
   cats: state?.cats || [],
-  cfg: state?.cfg || {},
+  cfg: canonicalWorkspaceCfg(state?.cfg),
 });
 
 export const sameWorkspaceData = (a, b) => (
@@ -269,13 +281,16 @@ export const mergeWorkspaceStates = ({
       [],
       { path: 'cats', conflicts },
     ),
-    cfg: mergeValue3(
-      b.cfg || {},
-      local.cfg || {},
-      remote.cfg || {},
-      'cfg',
-      conflicts,
-    ),
+    cfg: {
+      ...mergeValue3(
+        canonicalWorkspaceCfg(b.cfg),
+        canonicalWorkspaceCfg(local.cfg),
+        canonicalWorkspaceCfg(remote.cfg),
+        'cfg',
+        conflicts,
+      ),
+      ...localDerivedWorkspaceCfg(local.cfg),
+    },
     // Notification preferences are still local-only in the current
     // cloud schema, so never discard this device's notification config.
     notif: local.notif || remote.notif || {},

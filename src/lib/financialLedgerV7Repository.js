@@ -2358,6 +2358,21 @@ const upsertAccount = (db, account) => db.runAsync(
   account.currencyCode, account.status, account.createdAt, account.updatedAt, account.archivedAt,
 );
 
+const canonicalFinancialEntityPayload = (entityType, payload) => {
+  if (String(entityType || '') !== 'workspace'
+      || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  const cfg = payload.cfg;
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return payload;
+  return {
+    ...payload,
+    cfg: Object.fromEntries(
+      Object.entries(cfg).filter(([key]) => key !== 'avatarUri'),
+    ),
+  };
+};
+
 const upsertEntity = (db, entity) => db.runAsync(
   `INSERT INTO ledger_entities_v7
    (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
@@ -2366,7 +2381,7 @@ const upsertEntity = (db, entity) => db.runAsync(
      revision=excluded.revision,deleted_at=excluded.deleted_at,payload_json=excluded.payload_json,updated_at=excluded.updated_at
    WHERE excluded.revision >= ledger_entities_v7.revision`,
   entity.namespace, entity.entityType, entity.id, entity.revision, entity.deletedAt,
-  safeJson(entity.payload), entity.createdAt, entity.updatedAt,
+  safeJson(canonicalFinancialEntityPayload(entity.entityType, entity.payload)), entity.createdAt, entity.updatedAt,
 );
 
 const prepareLocalEntity = async (db, entity) => {
@@ -2377,6 +2392,7 @@ const prepareLocalEntity = async (db, entity) => {
   const currentRevision = Math.max(0, Number(current?.revision || 0));
   return {
     ...entity,
+    payload: canonicalFinancialEntityPayload(entity.entityType, entity.payload),
     revision: currentRevision + 1,
     baseRevision: currentRevision,
   };
@@ -3015,7 +3031,8 @@ export const commitEntityChangesV7 = async ({ namespace = 'guest', changes = [],
   const entities = (Array.isArray(changes) ? changes : []).filter(item => item?.id && item?.entityType).map(item => ({
     namespace: String(namespace), entityType: String(item.entityType), id: String(item.id),
     revision: Math.max(1, Number(item.revision || 1)), deletedAt: item.deletedAt || null,
-    payload: item.payload ?? null, createdAt: String(item.createdAt || now), updatedAt: String(item.updatedAt || now),
+    payload: canonicalFinancialEntityPayload(String(item.entityType), item.payload ?? null),
+    createdAt: String(item.createdAt || now), updatedAt: String(item.updatedAt || now),
   }));
   if (!entities.length) return { supported: true, ok: true, changed: 0 };
   return enqueueWrite(async () => {
