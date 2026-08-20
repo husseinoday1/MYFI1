@@ -1,0 +1,110 @@
+# MYFI — Implementation session handoff
+
+Date: 2026-08-21
+From: MYFI Implementation (context near exhaustion)
+To: MYFI Implementation 2
+Branch: `impl/p20-g01-acceptance-apk-2026-08-19`
+
+## Where things stand
+
+```text
+Phase 9        CLOSED — recorded as 9/10 confirmed + 1 accepted, not 10/10
+Phase 10       Steps 1-3 landed, benchmark harness landed, Step 4 NOT started
+Supabase       two FK drifts verified live and fixed; account deletion unblocked
+Backup format  7 gaps hardened, fixture suite in the gate
+test:gate      87 passed, 0 failed, 11 skipped
+```
+
+Every commit below has a confirmed green CI run. Working tree clean, local and origin
+in sync.
+
+## The one thing to do next
+
+**Get benchmark numbers from a real device.** Step 4 (the isolated staging engine) is
+deliberately on hold until they exist — the user chose to wait for measurement rather
+than pick Strategy A on the report's recommendation alone.
+
+Run on device:
+
+1. Install over the app, no Clear Data.
+2. **A clean disposable account.** Not a real one. The guard refuses if the ledger holds
+   anything, but do not lean on it.
+3. Settings → Account → "Restore benchmark — disposable only".
+4. Confirm the prompt. It generates and stages 1k + 10k + 50k + 100k transactions in
+   sequence — minutes of an apparently frozen app. Do not close it.
+5. "Copy evidence" and return the payload.
+
+### Read the numbers with this in mind
+
+`maintenanceBlockedMs` is a **lower bound**, not the production lock window.
+`beginLedgerRestoreEpochV8` and `commitLedgerRestoreEpochV8` are excluded from the
+measurement, and per the Phase 10 report §13 production would run those under the same
+lock. `ffe390f` marks this inside the payload itself so it cannot be read off without
+seeing the caveat.
+
+Strategy A (stage inside the maintenance lock) is the report's recommendation on
+grounds of simplicity, and it does not cost what the report implies. Promotion scales
+well — `promoteFinancialWorkspaceStageV7` moves rows with `INSERT INTO ... SELECT`
+inside SQLite, so 100k rows is one statement per table. **Staging** is the row-by-row
+JS part, and that is what the lock window is actually made of. That is the number to
+look at.
+
+## What landed today
+
+| Commit | What |
+|---|---|
+| `f7b8b30` | P10-001 canonical backup read model |
+| `ddc00d2` | P10-002 semantic hash contract + the §51 permanent regression |
+| `c2fbfaa` | P10-003 strict structural validator |
+| `9c31529` | profiles_id_fkey drift verified live and fixed |
+| `3303f7e` | finance_data_id_fkey cascaded — nothing blocks account deletion now |
+| `8cebc61` | backup-format fixtures landed, held out of the gate |
+| `ed5bd92` | inspectBackupData hardened, fixtures wired into the gate |
+| `5f83034` | benchmark harness wired flag-gated |
+| `b827cdc` | benchmark flag added to the D1 build |
+| `ffe390f` | `maintenanceBlockedMs` marked a lower bound in the payload |
+
+## Things that will bite you if you do not know them
+
+**Every module written today had a real defect found by review or the gate.** Not one
+landed clean first time. Three of those were rules that were too strict and refused
+legitimate data — one would have stopped a user opening their own year archive, one
+would have refused a valid restore. Before adding any new validation, ask what else
+reaches that code path besides the case you have in mind.
+
+**Verify field names against the producer, not the consumer.** P10-002 shipped hashing
+`payload.amountMinor`, which does not exist — `payload_json` stores `plan.original`
+with `amt`/`walletAmount`/`baseAmount`. Every transaction hashed zero for its amounts
+and the fixture passed because it invented the same names.
+
+**A test that goes green on unfixed code is describing the present.** The backup
+fixtures arrived passing 66/66 with two tests asserting broken input was accepted.
+Inverted before wiring them in.
+
+**The CI scope guard.** `.github/p20-g01-d1-allowed-source.txt` lists the shipped-source
+files this branch may touch. Add a file there in the same commit that first changes it,
+or the build goes red for a reason unrelated to your change. It caught me twice.
+
+**Nothing counts as done until a green CI run id is confirmed.** Seven consecutive red
+runs went unnoticed here because local `test:gate` was green and nobody opened Actions.
+
+## Open, not blocking
+
+- `finance_data` is legacy and still scheduled for Phase 13/19 removal. It now cascades
+  rather than blocking, which is a stopgap, not the retirement.
+- Supabase performance advisors list 17 unindexed FKs and 17 unused indexes.
+  Deliberately not acted on — see the Disk IO assessment for why, and revisit with the
+  benchmark numbers.
+- `MYFI_CLAUDE_CODE_MASTER_HANDOFF.md` sits untracked at the repo root, not mine.
+
+## Standing rules in force
+
+Six of them, in `docs/00_MYFI_CANONICAL_AUTHORITY.md`: CI-only acceptance builds;
+counter/epoch logic tested across two consecutive iterations; `/code-review` clean
+before push, not after; CI gates keyed on ancestry plus a repo-tracked allowlist rather
+than a hard-coded commit; a confirmed green CI run id before calling anything done; and
+diagnostic payloads that summarise rather than publish a user's money.
+
+The last one has an automated control now — `tests/dev-diagnostic-payload-privacy.test.cjs`
+— because three separate leaks appeared in one day and reviewer attention is not a
+control.
