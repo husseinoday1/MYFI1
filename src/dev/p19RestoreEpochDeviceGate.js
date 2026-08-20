@@ -101,6 +101,20 @@ const disposableBlockers = ({ state, coldArchives, localWorkspace }) => {
   if (localDebts) blockers.push(`sqlite_debts_present:${localDebts}`);
   if (localGoals) blockers.push(`sqlite_goals_present:${localGoals}`);
   if (localCommitments) blockers.push(`sqlite_commitments_present:${localCommitments}`);
+
+  // Wallets were judged from the display store alone, unlike every other entity.
+  // The store is a projection; SQLite is the financial record. A wallet that exists
+  // in SQLite but not in the projection would have let the gate treat a non-empty
+  // ledger as disposable — the one thing these preconditions exist to prevent.
+  // Before cutover the V7 workspace is legitimately empty, so this adds no false
+  // blocker there; it only fires on wallets SQLite actually holds.
+  const localWallets = rows(localWorkspace?.wallets);
+  if (localWallets.length > 1) {
+    blockers.push(`sqlite_multiple_wallets_present:${localWallets.length}`);
+  }
+  if (localWallets.some(wallet => walletOpeningValue(wallet) !== 0)) {
+    blockers.push('sqlite_nonzero_wallet_opening_balance');
+  }
   return blockers;
 };
 

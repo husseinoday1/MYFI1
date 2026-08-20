@@ -84,4 +84,18 @@ assert(gate.includes('p19-011-controlled-v2-activation.test.cjs'),
 assert(gate.includes('run-p19-011-bootstrap-readback.cjs'),
   'P19-011 read-back runtime is not registered in quality gate');
 
+// P20-G01: the legacy namespace-only activation-evidence key may still be READ for
+// ledgers activated before evidence became epoch-scoped, but must never be written
+// again — it cannot express which epoch its evidence belongs to, which is how stale
+// evidence survived an epoch advance on device.
+const legacyUses = (repo.match(/legacyActivationEvidenceKey\(/g) || []).length;
+assert.equal(
+  legacyUses, 1,
+  `legacy evidence key must keep exactly one (read) use, found ${legacyUses}`,
+);
+assert.ok(
+  !/INSERT OR REPLACE INTO ledger_v7_meta[\s\S]{0,200}?legacyActivationEvidenceKey/.test(repo),
+  'legacy activation-evidence key must never be written again',
+);
+
 console.log('MYFI P19-011R1 VERIFIED READBACK + CONTROLLED V2 ACTIVATION: PASSED');

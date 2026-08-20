@@ -40,6 +40,9 @@ assert.match(gate, /const restoreResult = await afterReset\.importBackup\(JSON\.
 assert.match(gate, /transactions_present/);
 assert.match(gate, /archived_transactions_present/);
 assert.match(gate, /nonzero_wallet_opening_balance/);
+// Wallet emptiness must be judged from SQLite too, not the display projection alone.
+assert.match(gate, /sqlite_multiple_wallets_present/);
+assert.match(gate, /sqlite_nonzero_wallet_opening_balance/);
 assert.match(gate, /pending_v2_mutations_must_sync_first/);
 assert.match(gate, /active_protocol_v2_required/);
 assert.match(gate, /cloud_v2_identity_not_ready/);

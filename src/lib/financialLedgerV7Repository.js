@@ -1647,13 +1647,11 @@ export const activateFinancialSyncProtocolV2V8 = async ({
       safeJson(activationEvidence),
       now,
     );
-    // Legacy key kept in step so older readers observe the same current evidence.
-    await txn.runAsync(
-      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
-      legacyActivationEvidenceKey(identity.namespace),
-      safeJson(activationEvidence),
-      now,
-    );
+    // The legacy namespace-only key is no longer written. It cannot express which
+    // epoch its evidence belongs to, which is exactly how stale evidence survived an
+    // epoch advance. Reads still accept it for ledgers activated before this change,
+    // and only when its payload matches the current ledger and epoch, so those keep
+    // working without a migration while no new ambiguous rows are created.
     // This epoch has now completed its own activation.
     await txn.runAsync(
       `DELETE FROM ledger_v7_meta WHERE key=?`,
