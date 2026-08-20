@@ -359,6 +359,14 @@ future phase, not just Phase 9:
    caught by `/code-review` before the push, not after. Diagnostics are
    themselves a data-safety surface, not just a debugging convenience.
 
+   **Refinement (2026-08-20):** this leaked a second time the same day (a
+   coordinator/bootstrap result object passed whole into a failure payload,
+   carrying `rows`). `/code-review` caught it both times, but relying on
+   review alone for a repeating pattern is thin. Add an automated contract
+   test that forbids passing a raw coordinator/bootstrap/activation result
+   object into any diagnostic payload under `src/dev/` — summarize
+   (ids/counts) before it's ever eligible to be logged.
+
 **Explicitly declined (2026-08-20):** a separate staging Supabase project
 isolated from the "Production"-labeled one. Do not re-propose this unless a
 concrete incident makes the case again.
