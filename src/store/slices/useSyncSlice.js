@@ -2229,6 +2229,17 @@ export const createSyncSlice = (set, get) => ({
                 activationFinancialSync.reason || 'financial_v2_production_apply_recovery_required'
               );
             }
+            // A ledger whose epoch superseded a durably activated one may not drop to
+            // V1 when its re-activation attempt fails. The addendum forbids automatic
+            // fallback after durable activated_at; this is fail-closed instead.
+            // Bounded, like the guard above it: financialProtocol is only read when
+            // financialLedgerV7Cutover is true, so neither guard can see a superseded
+            // epoch on a workspace that is not cut over.
+            if (financialProtocol?.activationState === 'EPOCH_ACTIVATION_REQUIRED') {
+              throw new Error(
+                activationFinancialSync.reason || 'financial_v2_epoch_activation_required'
+              );
+            }
             // A ledger just restored from cloud must never drop into V1 on the
             // same attempt. Its next safe step is verified V2 bootstrap/activation.
             if (cloudRecovery?.requireV2) {

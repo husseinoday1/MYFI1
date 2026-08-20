@@ -200,18 +200,26 @@ const {
   const after = await readFinancialSyncProtocolV8({ namespace: NS, database: db });
 
   // --- THE REGRESSION -------------------------------------------------------
-  // This is the exact device symptom: identity says protocol v2 while the
-  // protocol read says v1, with nothing marking it as a recovery event.
-  assert.ok(
-    !(after.activeProtocolVersion === 1 && after.requiresV2Recovery === false),
-    'REGRESSION: epoch advance produced a silent V1 fallback '
+  // The device symptom was: identity says protocol v2 while the protocol read says
+  // v1 and NOTHING distinguishes it from a ledger that simply never activated. The
+  // invariant is that distinction, not any particular flag carrying it.
+  assert.notEqual(
+    after.activationState, 'NOT_YET_ACTIVATED',
+    'REGRESSION: epoch advance is indistinguishable from a never-activated V1 ledger '
     + `(activeProtocolVersion=${after.activeProtocolVersion}, `
-    + `identity.protocolVersion=${db.identity.protocol_version}, `
-    + `requiresV2Recovery=${after.requiresV2Recovery})`,
+    + `identity.protocolVersion=${db.identity.protocol_version})`,
   );
-  assert.equal(after.requiresV2Recovery, true, 'superseding epoch must be a recovery event');
   assert.equal(after.activationState, 'EPOCH_ACTIVATION_REQUIRED');
-  console.log('[PASS] superseding epoch is fail-closed, not a silent V1 ledger');
+  assert.equal(after.epochActivationPending?.previouslyActivated, true);
+  // requiresV2Recovery is reserved for the unsafe case (no activation yet a
+  // production cursor already moved). A superseding epoch is safe to resume, and
+  // flagging it here would make runControlledFinancialV2Activation refuse the very
+  // bootstrap+activation sequence the new epoch needs.
+  assert.equal(
+    after.requiresV2Recovery, false,
+    'a superseding epoch must stay resumable, not be routed to manual recovery',
+  );
+  console.log('[PASS] superseding epoch is distinguishable and resumable');
 
   // Checked after the primary regression assertion so that running this test
   // against pre-fix sources fails on the real symptom, not on a missing field.
@@ -248,14 +256,33 @@ const {
     database: db,
   });
   const after2 = await readFinancialSyncProtocolV8({ namespace: NS, database: db });
-  assert.ok(
-    !(after2.activeProtocolVersion === 1 && after2.requiresV2Recovery === false),
-    'REGRESSION: a second consecutive epoch advance dropped back to a silent V1 '
-    + `(activeProtocolVersion=${after2.activeProtocolVersion}, requiresV2Recovery=${after2.requiresV2Recovery})`,
+  assert.notEqual(
+    after2.activationState, 'NOT_YET_ACTIVATED',
+    'REGRESSION: a second consecutive epoch advance lost the supersession fact '
+    + `(activeProtocolVersion=${after2.activeProtocolVersion}, `
+    + `activationState=${after2.activationState})`,
   );
-  assert.equal(after2.requiresV2Recovery, true);
+  assert.equal(after2.epochActivationPending?.previouslyActivated, true);
+  assert.equal(after2.requiresV2Recovery, false);
   assert.equal(after2.activationState, 'EPOCH_ACTIVATION_REQUIRED');
   console.log('[PASS] supersession survives consecutive epoch advances');
+
+  // --- the genuinely unsafe case must still demand recovery ----------------
+  // Not activated, but a production cursor already moved. Narrowing
+  // requiresV2Recovery must not lose this.
+  const unsafe = makeDb();
+  globalThis.__TEST_DB__ = unsafe;
+  unsafe.identity.restore_epoch = 1;
+  unsafe.syncState.set(`${LEDGER}:1`, {
+    ledger_id: LEDGER,
+    restore_epoch: 1,
+    activated_at: null,
+    last_server_sequence: 42,
+    updated_at: `2026-08-20T00:00:00.000Z`,
+  });
+  const cursorMoved = await readFinancialSyncProtocolV8({ namespace: NS, database: unsafe });
+  assert.equal(cursorMoved.requiresV2Recovery, true, "advanced production cursor still demands recovery");
+  console.log('[PASS] unactivated ledger with a moved production cursor still demands recovery');
 
   // --- a ledger that never activated must stay plain V1, not "recovery" -----
   const fresh = makeDb();

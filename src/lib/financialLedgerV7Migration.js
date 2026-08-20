@@ -1,5 +1,6 @@
 import { buildFinancialLedgerCommand, FINANCIAL_LEDGER_SCHEMA_VERSION } from './financialLedgerV7Model';
 import {
+  canonicalFinancialEntityPayload,
   discardFinancialWorkspaceStageV7,
   financialLedgerV7Supported,
   getFinancialWorkspaceStateV7,
@@ -193,9 +194,12 @@ const projectionDocument = ({ commands, entities }) => {
   }))).sort((left, right) => left.id.localeCompare(right.id)),
   accounts: [...accounts.values()].sort((left, right) => left.id.localeCompare(right.id)),
   exchangeRates: [...exchangeRates.values()].sort((left, right) => left.id.localeCompare(right.id)),
+  // The staged read-back returns what upsertEntity persisted, which is the
+  // canonical payload. Hash the same form here or parity can never match.
   entities: entities.map(entity => ({
     entityType: entity.entityType, id: entity.id, revision: entity.revision,
-    deletedAt: entity.deletedAt, payload: entity.payload,
+    deletedAt: entity.deletedAt,
+    payload: canonicalFinancialEntityPayload(entity.entityType, entity.payload),
   })).sort((left, right) => `${left.entityType}:${left.id}`.localeCompare(`${right.entityType}:${right.id}`)),
   };
 };

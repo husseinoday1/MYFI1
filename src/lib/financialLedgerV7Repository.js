@@ -1502,10 +1502,11 @@ export const readFinancialSyncProtocolV8 = async ({
     lastShadowSuccessAt: row?.last_shadow_success_at || null,
     shadowLastServerSequence: Math.max(0, Number(row?.shadow_last_server_sequence || 0)),
     lastServerSequence: Math.max(0, Number(row?.last_server_sequence || 0)),
-    // A superseding epoch is a protocol recovery event, not an ordinary V1 ledger.
-    requiresV2Recovery: !row?.activated_at && (
-      !!epochActivationPending || Math.max(0, Number(row?.last_server_sequence || 0)) > 0
-    ),
+    // Reserved for the genuinely unsafe case: not activated, yet a production
+    // cursor already advanced. A superseding epoch is NOT this — its sync-state row
+    // is fresh with cursor 0, and it must resume bootstrap+activation rather than
+    // be refused. That case is carried by activationState/epochActivationPending.
+    requiresV2Recovery: !row?.activated_at && Math.max(0, Number(row?.last_server_sequence || 0)) > 0,
     epochActivationPending,
     // Explicit state so callers never have to infer intent from a bare
     // activeProtocolVersion of 1.
@@ -2479,7 +2480,11 @@ const upsertAccount = (db, account) => db.runAsync(
   account.currencyCode, account.status, account.createdAt, account.updatedAt, account.archivedAt,
 );
 
-const canonicalFinancialEntityPayload = (entityType, payload) => {
+// Exported so the shadow-parity projection can hash the same canonical form this
+// module persists. Hashing the raw payload on the source side while the write path
+// stores the canonical one made parity compare a value against its own canonical
+// form, and every workspace carrying cfg.avatarUri failed cutover permanently.
+export const canonicalFinancialEntityPayload = (entityType, payload) => {
   if (String(entityType || '') !== 'workspace'
       || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return payload;
