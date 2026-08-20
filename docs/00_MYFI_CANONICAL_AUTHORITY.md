@@ -332,6 +332,13 @@ future phase, not just Phase 9:
    (`p19-014a-*`, `p19-final-*`, `p20-final-*`) — worth fixing when next
    touched, not urgent on its own.
 
+   **Refinement (2026-08-20, after the P20-G01 gate broke CI a second time
+   the same day):** keep the expected-files list in its own repo-tracked
+   file (e.g. `.github/<workflow>-allowed-source.txt`), not inline in the
+   YAML — reviewed like code, one place to update per legitimate change.
+   Strip `\r` before comparing: the repo is edited on Windows, CI runs on
+   Linux.
+
 5. **A change is not "done" on green local tests/review alone — it needs a
    confirmed green CI run, by run ID, checked after the push.** Discovered
    2026-08-20: a scope-gate the same session had written earlier that day
