@@ -64,6 +64,7 @@ const staticContracts = [
   'p19-015b0-ledger-identity-forensics.test.cjs',
   'p20-v2-client-closure.test.cjs',
   'dev-diagnostic-payload-privacy.test.cjs',
+  'sync-error-classification.test.cjs',
   'phase00-governance.test.cjs',
   'product-readiness-batch7.test.cjs',
   'real-state-consolidated-v5.test.cjs',

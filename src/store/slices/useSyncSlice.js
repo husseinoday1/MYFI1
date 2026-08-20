@@ -10,6 +10,11 @@ import {
   runFinancialMaintenanceTask,
 } from '../../lib/financialMaintenanceBarrier';
 import { canonicalWorkspaceCfg, mergeWorkspaceStates, sameWorkspaceData } from '../multiDeviceSync';
+import {
+  isNeverRetrySyncError,
+  isTransientCloudSyncError,
+  syncDiagnosticCode,
+} from '../../lib/syncErrorClassification';
 import { supabase } from '../../lib/supabase';
 import { STORAGE, DEF_CATS, DEF_CFG, DEF_NOTIF, LEGACY_STORAGE_KEYS, normalizeCfg } from '../../lib/constants';
 import { normalizedPreviewEnabled, normalizedShadowEnabled } from '../../lib/databaseMode';
@@ -73,24 +78,37 @@ let transientSyncRetryAttempt = 0;
 const SCHEDULED_SYNC_DELAYS_MS = [700, 3000, 10000, 30000];
 const TRANSIENT_SYNC_RETRY_DELAYS_MS = [1500, 5000, 15000, 30000];
 
-const transientSyncErrorText = error => String(
-  error?.message || error?.code || error || '',
-).toLowerCase();
+// Classification moved to src/lib/syncErrorClassification.js. It used to match
+// /\b502\b/ against the whole error text, so an incidental "502" anywhere in a 5xx
+// HTML body made an unrelated failure look transient.
+//
+// Circuit breaker: once the retry ladder is exhausted, stop arming retries at all
+// for a cooldown instead of re-entering the ladder on the next trigger.
+const SYNC_CIRCUIT_COOLDOWN_MS = 5 * 60 * 1000;
+let syncCircuitOpenUntil = 0;
 
-const isTransientCloudSyncError = error => (
-  /upstream request timeout|network request failed|fetch failed|gateway timeout|timed out|timeout|\b502\b|\b503\b|\b504\b/
-    .test(transientSyncErrorText(error))
-);
+const isSyncCircuitOpen = () => Date.now() < syncCircuitOpenUntil;
+
+// Retry logs record why, but a raw 5xx body is headers and edge metadata; keep the
+// short sanitised code instead.
+const transientSyncErrorText = error => syncDiagnosticCode(
+  error?.message || error?.code || error || '',
+) || 'sync_failed';
 
 const resetTransientCloudRetry = () => {
+  syncCircuitOpenUntil = 0;
   transientSyncRetryAttempt = 0;
   if (transientSyncRetryTimer) clearTimeout(transientSyncRetryTimer);
   transientSyncRetryTimer = null;
 };
 
 const armTransientCloudRetry = (get, syncUserId, error) => {
+  // Defence in depth: these can never be resolved by resending the same payload.
+  if (isNeverRetrySyncError(error)) return false;
+  if (isSyncCircuitOpen()) return false;
   if (!isTransientCloudSyncError(error)) return false;
   if (transientSyncRetryAttempt >= TRANSIENT_SYNC_RETRY_DELAYS_MS.length) {
+    syncCircuitOpenUntil = Date.now() + SYNC_CIRCUIT_COOLDOWN_MS;
     console.warn('[P19_FINAL_TRANSIENT_RETRY_EXHAUSTED]', JSON.stringify({
       attempts: transientSyncRetryAttempt,
       reason: transientSyncErrorText(error),

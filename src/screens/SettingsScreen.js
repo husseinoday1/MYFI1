@@ -31,6 +31,7 @@ import ChoiceSheet from '../components/ChoiceSheet';
 import { isBiometricSupported, authenticate } from '../lib/biometric';
 import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
 import { inspectBackupData } from '../lib/backupData';
+import { syncDiagnosticCode } from '../lib/syncErrorClassification';
 import AccountDeleteModal from '../components/AccountDeleteModal';
 import DecisionModal from '../components/DecisionModal';
 import { supabase } from '../lib/supabase';
@@ -1426,7 +1427,9 @@ function AccountPage({
                   th={th}
                   isAr={isAr}
                   title={isAr ? 'رمز التشخيص الداخلي' : 'Internal diagnostic code'}
-                  value={String(lastSyncError || 'offline_without_sync_error')}
+                  // A 5xx arrives as an HTML body with headers and edge metadata.
+                  // The row is labelled "diagnostic code"; give it an actual code.
+                  value={syncDiagnosticCode(lastSyncError) || 'offline_without_sync_error'}
                   ltr
                 />
                 <InfoRow
