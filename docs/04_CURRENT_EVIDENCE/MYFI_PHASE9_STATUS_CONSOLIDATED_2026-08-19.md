@@ -4,24 +4,30 @@ Prepared by: MYFI Planning & Audit session
 Date: 2026-08-19
 
 <!-- PHASE9_CLOSED_FINAL_2026-08-20 -->
-## ★ Phase 9: CLOSED — 2026-08-20 (final, 10/10 items confirmed)
+## ★ Phase 9: CLOSED — 2026-08-20 (items 1–9 confirmed; item 10 accepted with a named caveat, not "10/10")
 
 Item 8: confirmed (server restore event matches device log, <1s apart).
-Items 9–10: signed back into the real account (`husseinoday10@gmail.com`)
-— **financial data present, correct, and visible: the safety property
-Phase 9 exists to protect, confirmed.** Live cloud sync was observed stuck
-(2+ min, no completion) at the moment of the check. Root cause identified,
-not a new defect: the Supabase dashboard shows "Project is depleting its
-Disk IO Budget" with the database at 353MB/500MB (70%) of the free Nano
-tier — the same resource constraint already implicated in today's other
-Supabase symptoms (504s, delete failure, signup rate limit). Tracked in
-`MYFI_SUPABASE_DB_ASSESSMENT_2026-08-20.md`; does not indicate data loss or
-a P20-G01 code regression. Evidence:
-`MYFI_P20_G01_ITEMS_8_10_FINAL_2026-08-20.md`.
+Item 10 as originally specified reads: "Verify original transaction/account
+remains intact **and V2 sync remains healthy**." Only the first half is
+confirmed — signed back into the real account (`husseinoday10@gmail.com`)
+and **financial data is present, correct, and visible: the safety property
+Phase 9 exists to protect, confirmed.** The second half is not: live cloud
+sync was observed stuck (2+ min, no completion) at the moment of the check.
+Root cause identified, not a new defect: the Supabase dashboard shows
+"Project is depleting its Disk IO Budget" with the database at 353MB/500MB
+(70%) of the free Nano tier — the same resource constraint already
+implicated in today's other Supabase symptoms (504s, delete failure,
+signup rate limit). Tracked in `MYFI_SUPABASE_DB_ASSESSMENT_2026-08-20.md`.
+Evidence: `MYFI_P20_G01_ITEMS_8_10_FINAL_2026-08-20.md` (itself records
+items 9–10 as "PARTIALLY CONFIRMED, one open item" — that file is the
+accurate source, this section must not overstate it).
 
-**Ruling:** closing Phase 9 on this basis — the financial-safety guarantee
-(data intact) is proven; the stuck sync is a known, separately-tracked
-infrastructure capacity issue, not a code-safety gap this gate is meant to
+**Ruling (conscious acceptance, not a full pass):** closing Phase 9 on
+items 1–9 fully confirmed, item 10 accepted as *data verified intact,
+V2-sync-health verification deferred to the known, separately-tracked Disk
+IO constraint* — not claimed as "10/10." The financial-safety guarantee
+that actually matters (data intact) is proven; the deferred half is an
+infrastructure capacity issue, not a code-safety gap this gate exists to
 catch. Phase 10 continues, unblocked.
 
 <!-- PHASE9_CLOSURE_CORRECTION_2026-08-20 (superseded above) -->
