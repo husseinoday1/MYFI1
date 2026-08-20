@@ -71,7 +71,12 @@ const normalizeRpcObject = value => {
   return value && typeof value === 'object' ? value : null;
 };
 
-const disposableBlockers = ({ state, coldArchives, localWorkspace }) => {
+// Exported so the Phase 10 benchmark harness can reuse this exact guard instead of
+// carrying its own copy. It decides whether a ledger is safe to run destructive
+// acceptance work against; two copies of that decision drift, and the copy that
+// falls behind is the one that lets a real ledger through. The same reasoning kept
+// the entity canonicalisation rule in one place after the cfg.avatarUri incident.
+export const disposableBlockers = ({ state, coldArchives, localWorkspace }) => {
   const blockers = [];
   if (!state?.user?.id) blockers.push('signed_in_account_required');
   if (!state?.workspaceReady) blockers.push('workspace_not_ready');

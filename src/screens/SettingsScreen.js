@@ -50,6 +50,7 @@ import { PERFORMANCE_TEST_TIERS } from '../dev/performanceTestConfig';
 import { PRODUCT_NAME } from '../lib/productIdentity';
 import { collectP19LocalSqliteDiagnostics } from '../dev/p19LocalSqliteDiagnostics';
 import { P19_RESTORE_EPOCH_DEVICE_GATE_ENABLED, runP19RestoreEpochDeviceGate } from '../dev/p19RestoreEpochDeviceGate';
+import { PHASE10_RESTORE_BENCHMARK_ENABLED, runPhase10RestoreBenchmarkHarness } from '../dev/phase10RestoreBenchmarkHarness';
 
 const pageCopy = (lang = 'ar') => {
   const ar = lang === 'ar';
@@ -736,6 +737,50 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
     }
   };
 
+  // Phase 10 benchmark. Kept out of runLocalSqliteDiagnostics on purpose: that
+  // function carries the P20-G01 acceptance gate, which is Phase 9 closure evidence,
+  // and it should not grow branches for unrelated work.
+  const runPhase10Benchmark = async () => {
+    if (localSqliteDiagnosticBusy) return;
+    // One tap generates and stages 1k, 10k, 50k and 100k synthetic transactions in
+    // sequence — 160k rows through the JS bridge. On a phone that is minutes of an
+    // apparently frozen app, with a real chance of being killed mid-run. The work
+    // itself is fine; being surprised by it is not, so the operator confirms first.
+    const proceed = await new Promise((resolve) => {
+      Alert.alert(
+        cfg.lang === 'ar' ? 'قياس طويل' : 'Long-running benchmark',
+        cfg.lang === 'ar'
+          ? 'يولّد ويرحّل 1000 و10 آلاف و50 ألف و100 ألف حركة بالتتابع. قد يستغرق دقائق ويبدو التطبيق متوقفاً. لا تغلقه أثناء التنفيذ.'
+          : 'Generates and stages 1k, 10k, 50k and 100k transactions in sequence. This can take minutes and the app will look frozen. Do not close it while it runs.',
+        [
+          { text: cfg.lang === 'ar' ? 'إلغاء' : 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+          { text: cfg.lang === 'ar' ? 'ابدأ' : 'Start', onPress: () => resolve(true) },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) },
+      );
+    });
+    if (!proceed) return;
+    setLocalSqliteDiagnosticBusy(true);
+    try {
+      const evidence = await runPhase10RestoreBenchmarkHarness({});
+      const text = JSON.stringify(evidence, null, 2);
+      setLocalSqliteDiagnostic(text);
+      console.log('[P10_RESTORE_BENCHMARK_RESULT]', text);
+      Alert.alert(
+        '',
+        cfg.lang === 'ar'
+          ? 'اكتمل القياس. انسخ الدليل وأعده للتحليل.'
+          : 'Benchmark complete. Copy the evidence and send it back for analysis.',
+      );
+    } catch (error) {
+      const message = String(error?.message || error || 'benchmark_failed');
+      setLocalSqliteDiagnostic(message);
+      Alert.alert('', message);
+    } finally {
+      setLocalSqliteDiagnosticBusy(false);
+    }
+  };
+
   const runLocalSqliteDiagnostics = async () => {
     if (localSqliteDiagnosticBusy) return;
     setLocalSqliteDiagnosticBusy(true);
@@ -1052,6 +1097,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
             localSqliteDiagnosticBusy={localSqliteDiagnosticBusy}
             localSqliteDiagnostic={localSqliteDiagnostic}
             onRunLocalSqliteDiagnostic={runLocalSqliteDiagnostics}
+            onRunPhase10Benchmark={runPhase10Benchmark}
             onCopyLocalSqliteDiagnostic={copyLocalSqliteDiagnostic}
             lastSyncedAt={lastSyncedAt}
             editIdentity={editIdentity}
@@ -1356,6 +1402,7 @@ function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accou
 function AccountPage({
   th, isAr, T, user, cfg, accountName, accountEmail, accountInitial, syncState, lastSyncError, online, dirty, lastSyncedAt,
   localSqliteDiagnosticBusy, localSqliteDiagnostic, onRunLocalSqliteDiagnostic, onCopyLocalSqliteDiagnostic,
+  onRunPhase10Benchmark,
   editIdentity, setEditIdentity, nameDraft, setNameDraft, onSaveIdentity, onPickAvatar, onRemoveAvatar, onOpenAuth,
   onSync, onDevices, onPasswordReset, onSignOut, onDeleteAccount,
 }) {
@@ -1440,6 +1487,19 @@ function AccountPage({
                   ltr
                 />
               </>
+            ) : null}
+            {/* P10 benchmark: inert unless EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK=1. */}
+            {PHASE10_RESTORE_BENCHMARK_ENABLED ? (
+              <MenuRow
+                th={th}
+                isAr={isAr}
+                icon="speedometer-outline"
+                title={isAr ? 'قياس أداء الاسترجاع — بيانات تجريبية فقط' : 'Restore benchmark — disposable only'}
+                subtitle={localSqliteDiagnosticBusy
+                  ? (isAr ? 'جاري القياس…' : 'Measuring…')
+                  : (isAr ? 'يرفض التنفيذ إذا وجد أي بيانات مالية حقيقية' : 'Refuses to run unless the account is disposable and financially empty')}
+                onPress={onRunPhase10Benchmark}
+              />
             ) : null}
             {/* P19-014A_LOCAL_SQLITE_DIAGNOSTICS_UI: manual, read-only local evidence only. */}
             <MenuRow

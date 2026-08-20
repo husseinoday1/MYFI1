@@ -6,6 +6,7 @@
 # and blank lines are ignored.
 eas.json
 src/dev/p19RestoreEpochDeviceGate.js
+src/dev/phase10RestoreBenchmarkHarness.js
 src/lib/backupData.js
 src/lib/financialBackupV2.js
 src/lib/financialLedgerV7Migration.js
