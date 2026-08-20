@@ -1,88 +1,102 @@
-# MYFI P20-G01 — new-account wallet shadow-parity defect blocks V7 cutover for any fresh account
+# MYFI P20-G01 — shadow_parity_failed root cause: checksum mismatch, not count mismatch
 
 Date: 2026-08-20
 Produced by: MYFI Testing & Release session
-APK: CI build, commit `2d42b63`, SHA-256
-`58eb01e0c896acc7921f5a97a2bec22e85d31dd3d538ff74fcc0afcc5fde571e`
-(verified via `gh run view 32310400149` — status completed, conclusion
-success — before use, per the new "verify the CI run, don't assume" rule).
+APK: CI build, commit `1ffa382` ("P20-G01 report what shadow parity actually
+compared, and stop money leaking into it"), SHA-256
+`7480fee2e841ec0af758080fe735347977fb2180d096bcba40ded00f14a1ecab` —
+verified via `gh run view 32313773182` (completed/success) before use, and
+verified installed-on-device via `adb pull` + hash match after install.
 
-## Finding
+## RETRACTION of the previous write-up in this file
 
-This build finally surfaces the `diagnostics` object Implementation asked
-for (`storeCounts`/`sqliteCounts`/`cutoverKeyPresent`) — the D1 fix landed.
-It answers the original question directly: **not a benign edge case, a real
-reproducible defect.**
+The earlier finding in this file ("wallet never reaches SQLite,
+storeCounts.wallets:1 vs sqliteCounts.wallets:0 is the defect") was
+incorrect per Implementation: the shadow-migration staging area is a
+separate namespace (`::shadow-stage::v7`) that gets cleared on every exit
+path, so the real workspace being 0/empty pre-cutover is the **healthy**
+state, not a defect. The old diagnostic build printed `storeCounts` next to
+`sqliteCounts` with no indication they weren't meant to match, which invited
+the wrong conclusion. This build adds `sqliteCountsComparableToStore: false`
+to make that explicit. Retracted, not deleted, so the false lead and its
+correction are both on record.
 
-Brand-new, genuinely disposable/empty account (`husenaudi73@gmail.com` was
-tried first — turned out to already exist and be the P20-G01-D2 diagnostic
-session's consumed/split-state account from 2026-08-19, unrelated new
-signup — abandoned in favor of a fresh email, `pannen337@gmail.com`, never
-used before). Gate pressed twice, ~5 minutes apart, with an add-then-delete
-transaction round-trip in between (to rule out "just needs a sync tick"):
+## The real finding: single clean gate press, fresh account, full diagnostics
 
-**Press 1** (immediately after account creation, sync status not yet run):
+Account: newly created `pannen337@gmail.com` (workspace
+`user:0f5384a8-d22f-4996-a474-816ca81260e9`), financially empty, single gate
+press (per Implementation's explicit request — one press only, this round is
+about reading `diagnostics.migration.differences`, not re-establishing
+reproducibility).
+
 ```json
-"ledgerError": null,
-"financialLedgerV7Ready": true,
-"migration": {"ok": false, "reason": "shadow_parity_failed"},
-"storeCounts":  {"wallets": 1, "trans": 0, "debts": 0, "goals": 0, "commitments": 0},
-"sqliteCounts": {"wallets": 0, "trans": 0, "debts": 0, "goals": 0, "commitments": 0}
+"reason": "disposable_financially_empty_account_required",
+"blockers": ["financial_v7_cutover_required"],
+"diagnostics": {
+  "ledgerError": "shadow_parity_failed",
+  "migration": {
+    "ok": false,
+    "reason": "shadow_parity_failed",
+    "differences": [
+      { "field": "checksum", "source": "fnv1a32:cffb5d15:3834", "target": "fnv1a32:0ca69208:3819" }
+    ],
+    "sourceCounts": {
+      "activeTransactions": 0, "archivedTransactions": 0, "syntheticTransactions": 0,
+      "totalLedgerTransactions": 0, "postings": 0, "links": 0, "entities": 10, "wallets": 1,
+      "walletBalances": {"type":"object","keys":1},
+      "currencyBalances": {"type":"object","keys":1},
+      "monthlyTotals": {"type":"object","keys":0}
+    },
+    "targetCounts": { "<identical to sourceCounts in every field>": true },
+    "sourceChecksum": "fnv1a32:cffb5d15:3834",
+    "targetChecksum": "fnv1a32:0ca69208:3819"
+  },
+  "storeCounts": {"trans":0,"debts":0,"goals":0,"commitments":0,"wallets":1},
+  "sqliteCountsComparableToStore": false,
+  "sqliteCounts": {"trans":0,"debts":0,"goals":0,"commitments":0,"wallets":0}
+}
 ```
 
-**Press 2** (after creating and deleting one transaction, confirmed synced —
-Settings row showed a real "last sync" timestamp, not "not yet synced"):
-```json
-"ledgerError": "shadow_parity_failed",
-"financialLedgerV7Ready": false,
-"migration": {"ok": false, "reason": "shadow_parity_failed"},
-"storeCounts":  {"wallets": 1, "trans": 0, "debts": 0, "goals": 0, "commitments": 0},
-"sqliteCounts": {"wallets": 0, "trans": 0, "debts": 0, "goals": 0, "commitments": 0}
-```
+(`walletBalances`/`currencyBalances`/`monthlyTotals` correctly redacted to
+`{type, keys}` shape per the new no-money-in-evidence-files rule — confirms
+that fix landed too.)
 
-Identical wallet mismatch both times: the client-side store has 1 wallet
-(the default wallet every new account gets), SQLite has 0. Transaction sync
-completing between presses had no effect on this — the wallet record
-specifically never lands in local SQLite for this account, regardless of
-what else syncs successfully.
+## What this actually shows
 
-## Source pointer
+**`sourceCounts` and `targetCounts` are identical in every single field** —
+same entity count (10), same wallet count (1), zero transactions on both
+sides. The migration/cutover check is not failing on a count mismatch at
+all. It's failing purely on **checksum**: `fnv1a32:cffb5d15:3834` vs
+`fnv1a32:0ca69208:3819` — different hash *and* a different trailing length
+figure (3834 vs 3819), meaning the two sides' serialized representations
+differ by content, not by what's counted.
 
-`src/dev/p19RestoreEpochDeviceGate.js`:
-- line 54: builds the store-side wallet snapshot from `state?.wallets`
-- line 135/140/145/150: builds `storeCounts`/`sqliteCounts` by comparing
-  `state?.wallets` against `localWorkspace?.wallets`
-- the `shadow_parity_failed` reason is the migration/cutover check's verdict
-  when these disagree
+This means some field's *value* (not presence/count) differs between the
+shadow-staged copy and the real workspace — e.g. a timestamp, an ID, a
+balance representation, or key ordering feeding into the checksum
+differently. Which specific field is not exposed by this diagnostic (it
+reports counts and a whole-payload checksum, not a per-field diff) —
+identifying it needs Implementation to look at what
+`sourceChecksum`/`targetChecksum` are computed over.
 
-Not investigated further — finding where the default wallet is created
-client-side and why it never gets persisted to the SQLite workspace for a
-fresh account is Implementation-level work.
+## Incident during this round (no data-safety issue, but worth recording)
 
-## Why this matters beyond P20-G01
-
-If this reproduces for any brand-new account (not just this one — two
-different fresh accounts today, `husenaudi73@gmail.com`'s creation and
-`pannen337@gmail.com`, both landed in a similar state, though the first was
-abandoned before a clean second reading), **no fresh account can ever pass
-V7 cutover**, which would block P20-G01 items 6–10 indefinitely regardless
-of how many new test accounts are created — this is not a test-account
-hygiene problem, it looks like a genuine onboarding defect.
-
-## Per the new consecutive-run rule
-
-Planning & Audit's new standing rule requires counter/epoch-related fixes to
-be verified across two consecutive runs before acceptance. This defect
-itself was observed consistently across two consecutive presses on the same
-account (documented above) — the reproducibility is already established.
-What's not yet known is whether this affects every fresh account or just
-these two.
+Before capturing the clean read above, one gate press was mistakenly fired
+while the device was still logged into the old **consumed** test account
+(`user:0c9600f3-...`, previously flagged by Implementation as "should be
+treated as consumed and not reused"). That press produced
+`[P20_G01_RESTORE_EPOCH_GATE_FAIL]` with `serverAdvanced: true,
+localEpochCommitted: true, splitStateRequiresRecovery: true`, advancing that
+account's epoch from 2 to 3 and deepening its already-split state.
+`financialDataChangedByGate` stayed `false` throughout. Since that account
+was already marked not-for-reuse, no new consequence follows — noted here
+only so nobody mistakes epoch 3 on `0c9600f3` for a fresh signal later. That
+account remains fully abandoned.
 
 ## Next
 
-Not something Testing & Release can work around from the UI — recommend
-Implementation trace why a fresh account's default wallet exists in
-client-side store state but is never written to the local SQLite workspace.
-Testing & Release is standing by to re-run once a fix is confirmed by CI.
-
-No commit/push yet — pending confirmation this file should go out as-is.
+Implementation: identify which field feeds the checksum difference between
+shadow-stage and real workspace for a fresh, empty account — the counts
+prove it isn't a missing/extra record, so the diff is almost certainly in a
+value (timestamp, generated ID, or serialization order) rather than data
+loss. Testing & Release is standing by for the next diagnostic build or fix.
