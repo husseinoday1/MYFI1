@@ -105,6 +105,7 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'p20_g01_d2_restore_epoch_activation', 'run-p20-g01-d2-restore-epoch-activation.cjs'],
   ['UNIT_RUNTIME', 'p10_001_canonical_backup_source', 'run-p10-001-canonical-backup-source.cjs'],
   ['UNIT_RUNTIME', 'p10_002_semantic_hash', 'run-p10-002-semantic-hash.cjs'],
+  ['UNIT_RUNTIME', 'p10_003_restore_validator', 'run-p10-003-restore-validator.cjs'],
   ['UNIT_RUNTIME', 'performance_data', 'performance-data-runtime-v512.test.cjs'],
   ['UNIT_RUNTIME', 'performance_generator', 'performance-generator-runtime-v51.test.cjs'],
   ['UNIT_RUNTIME', 'performance_storage', 'performance-storage-runtime-v512.test.cjs'],
