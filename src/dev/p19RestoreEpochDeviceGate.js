@@ -115,6 +115,25 @@ const disposableBlockers = ({ state, coldArchives, localWorkspace }) => {
 // scalars and safe to report; walletBalances / currencyBalances / monthlyTotals are
 // maps of real money, and this payload gets console-logged and copied around. Report
 // the shape of those, never the amounts.
+// syncFinancialMutationsV2 returns `conflicts` (and can carry `mutations`) — remote
+// financial rows. Keep the numbers that make the failure diagnosable, never the rows.
+const syncSummary = result => {
+  if (!result || typeof result !== 'object') return result ?? null;
+  return {
+    ok: result.ok ?? null,
+    supported: result.supported ?? null,
+    reason: result.reason || null,
+    restoreEpoch: result.restoreEpoch ?? null,
+    uploaded: result.uploaded ?? null,
+    downloaded: result.downloaded ?? null,
+    cursor: result.cursor ?? null,
+    pages: result.pages ?? null,
+    pendingAfterSync: result.pendingAfterSync ?? null,
+    conflictCount: Array.isArray(result.conflicts) ? result.conflicts.length : null,
+    mutationCount: Array.isArray(result.mutations) ? result.mutations.length : null,
+  };
+};
+
 // runControlledFinancialV2Activation returns bootstrap and readbackVerification on
 // failure, and those carry `rows` — the actual financial baseline read back from the
 // server. This payload is console-logged and pasted into evidence files, so keep the
@@ -514,7 +533,7 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
       || Number(shadow.downloaded || 0) !== 0
       || Number(shadow.pendingAfterSync || 0) !== 0) {
     return postCommitFailure(`phase9_new_epoch_shadow_validation_failed:${shadow?.reason || 'unknown'}`, {
-      shadow,
+      shadow: syncSummary(shadow),
     });
   }
 
