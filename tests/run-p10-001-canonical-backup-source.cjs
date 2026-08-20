@@ -54,6 +54,16 @@ let source = fs.readFileSync(filename, 'utf8')
     [
       'const getColdArchiveNamespace = (ns) => ns;',
       'const exportColdArchives = async () => globalThis.__ARCHIVES__;',
+      'const ensureColdArchiveSchema = async () => true;',
+    ].join('\n'),
+  )
+  // P10-004 reads the whole model inside one read transaction. Stubbed here to run
+  // the task straight through; run-p10-004 is where the transaction itself is proved.
+  .replace(
+    /import \{[\s\S]*?\} from '\.\/ledgerDatabase';/,
+    [
+      'const getLedgerDb = async () => globalThis.__DB__;',
+      'const runLedgerReadTransaction = async (db, task) => task(db);',
     ].join('\n'),
   )
   .replace(
@@ -62,6 +72,7 @@ let source = fs.readFileSync(filename, 'utf8')
       'const readFinancialProjectionV7 = async () => globalThis.__PROJECTION__;',
       'const readLedgerSyncIdentityV8 = async () => globalThis.__IDENTITY__;',
       'const getFinancialWorkspaceStateV7 = async () => globalThis.__WORKSPACE__;',
+      'const ensureFinancialLedgerV7 = async () => true;',
       // Present so a future edit that reaches for it is caught by the write guard.
       'const ensureLedgerSyncIdentityV8 = async () => { globalThis.__WRITES__.push("ensureLedgerSyncIdentityV8"); throw new Error("backup read must not create identity"); };',
     ].join('\n'),
@@ -85,6 +96,7 @@ const { readCanonicalBackupSource, CANONICAL_BACKUP_SOURCE_VERSION } = compiled.
   globalThis.__WORKSPACE__ = workspaceRow;
   globalThis.__ARCHIVES__ = archivesRow;
   globalThis.__WRITES__ = writeAttempts;
+  globalThis.__DB__ = { withTransactionAsync: async task => task() };
 
   const model = await readCanonicalBackupSource({ namespace: NS });
 

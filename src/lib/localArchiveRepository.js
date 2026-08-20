@@ -188,6 +188,13 @@ export const storeColdArchiveYears = async ({ namespace = 'guest', archives = []
   return true;
 };
 
+// P10-004: create the cold-archive tables if they are not there yet, so a caller can
+// do it before opening a read transaction. openDb() enqueues that DDL on the shared
+// write queue, and the queue is not reentrant — reaching it from inside a transaction
+// that already holds the queue deadlocks. A backup reads archives and ledger together
+// in one snapshot, so it needs this done up front.
+export const ensureColdArchiveSchema = async () => !!(await openDb());
+
 export const listColdArchiveYears = async (namespace = 'guest') => {
   const db = await openDb();
   if (!db) return [];

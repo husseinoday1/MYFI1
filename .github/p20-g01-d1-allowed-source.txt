@@ -13,6 +13,8 @@ src/lib/financialLedgerV7Migration.js
 src/lib/financialLedgerV7Repository.js
 src/lib/financialRestoreValidator.js
 src/lib/financialSemanticProjection.js
+src/lib/ledgerDatabase.js
+src/lib/localArchiveRepository.js
 src/lib/syncErrorClassification.js
 src/screens/SettingsScreen.js
 src/store/slices/useSyncSlice.js

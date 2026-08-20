@@ -20,8 +20,10 @@
 // backup read must never bring a ledger identity into being as a side effect of being
 // inspected. A missing identity is reported, never invented.
 
-import { getColdArchiveNamespace, exportColdArchives } from './localArchiveRepository';
+import { ensureColdArchiveSchema, getColdArchiveNamespace, exportColdArchives } from './localArchiveRepository';
+import { getLedgerDb, runLedgerReadTransaction } from './ledgerDatabase';
 import {
+  ensureFinancialLedgerV7,
   getFinancialWorkspaceStateV7,
   readFinancialProjectionV7,
   readLedgerSyncIdentityV8,
@@ -62,14 +64,6 @@ export const readCanonicalBackupSource = async ({
     return { supported: true, ok: false, reason: 'canonical_backup_namespace_required' };
   }
 
-  const projection = await readFinancialProjectionV7({ namespace: ledgerNamespace, database });
-  if (!projection) {
-    return { supported: false, ok: false, reason: 'sqlite_unavailable' };
-  }
-
-  const identity = await readLedgerSyncIdentityV8({ namespace: ledgerNamespace, database });
-  const workspaceState = await getFinancialWorkspaceStateV7({ namespace: ledgerNamespace, database });
-
   // Cold archives live in the same database, which is what makes a single atomic
   // promotion possible later (Step 5). They are part of financial truth, so a backup
   // that omits them is incomplete.
@@ -80,6 +74,9 @@ export const readCanonicalBackupSource = async ({
   // rows beside LIVE archives and never be told. Reading two different sources into
   // one model that claims to be a single ledger is precisely the class of mistake
   // that produced the cutover parity failure, so refuse rather than mislead.
+  //
+  // P10-004 moved this ahead of the reads: it depends only on the argument, so there
+  // is no reason to open a snapshot and read the whole ledger before refusing it.
   if (database) {
     return {
       supported: true,
@@ -89,8 +86,40 @@ export const readCanonicalBackupSource = async ({
         + "reading it would mix staged ledger rows with live archives.",
     };
   }
-  const archives = await exportColdArchives(getColdArchiveNamespace(ledgerNamespace, cfg));
 
+  const db = await getLedgerDb();
+  if (!db) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
+
+  const archiveNamespace = getColdArchiveNamespace(ledgerNamespace, cfg);
+
+  // Both of these enqueue their own DDL on the shared write queue, and the queue is
+  // not reentrant — reaching either from inside the read transaction below would
+  // deadlock rather than fail. Warm them first; both are memoised, so this is free
+  // once the ledger has been opened.
+  await ensureFinancialLedgerV7(db);
+  await ensureColdArchiveSchema();
+
+  // P10-004: one snapshot, not six SELECTs with gaps between them. Read the ledger
+  // and its archives one after another and a concurrent write lands in the middle —
+  // a transaction taken from before it, its postings from after — and every checksum
+  // computed later certifies that torn pair as sound. The research names this the
+  // consistent-read requirement; it is what makes the semantic hash mean anything.
+  //
+  // exportColdArchives resolves the same shared connection internally, so its queries
+  // are inside this transaction too. That is exactly why the isolated-handle refusal
+  // above has to stay: the moment a caller supplies a different handle, the archives
+  // silently come from somewhere else.
+  const snapshot = await runLedgerReadTransaction(db, async (executor) => ({
+    projection: await readFinancialProjectionV7({ namespace: ledgerNamespace, database: executor }),
+    identity: await readLedgerSyncIdentityV8({ namespace: ledgerNamespace, database: executor }),
+    workspaceState: await getFinancialWorkspaceStateV7({ namespace: ledgerNamespace, database: executor }),
+    archives: await exportColdArchives(archiveNamespace),
+  }));
+
+  const { projection, identity, workspaceState, archives } = snapshot;
+  if (!projection) {
+    return { supported: false, ok: false, reason: 'sqlite_unavailable' };
+  }
   const transactions = rows(projection.transactions);
   const entities = groupEntities(projection.entities);
 
