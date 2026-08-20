@@ -273,8 +273,11 @@ export async function runPhase10RestoreBenchmarkHarness({
         { stagedCounts: targetCounts, promotedCounts },
       );
 
-      // Required Phase-10 decision metric:
+      // Required Phase-10 decision metric, but a LOWER BOUND on the real thing:
       // Strategy A baseline = stage write + stage readback + SQL-native promotion.
+      // The production restore also holds the ledger exclusively across
+      // beginLedgerRestoreEpochV8 and commitLedgerRestoreEpochV8, which this harness
+      // does not perform. The true blocked window is this number plus both.
       const maintenanceBlockedRawMs = (
         stageWriteRawMs
         + stageReadbackRawMs
@@ -301,6 +304,11 @@ export async function runPhase10RestoreBenchmarkHarness({
         promotionOnlyMs: roundMs(promotionRawMs),
         postCommitReadbackMs: roundMs(postCommitReadbackRawMs),
         maintenanceBlockedMs: roundMs(maintenanceBlockedRawMs),
+        // Carried in the payload, not only in a comment, so the number cannot be read
+        // as the full production lock window by anyone holding just this evidence JSON.
+        maintenanceBlockedIsLowerBound: true,
+        maintenanceBlockedScope: 'stage_write+stage_readback+promotion',
+        maintenanceBlockedExcludes: ['beginLedgerRestoreEpochV8', 'commitLedgerRestoreEpochV8'],
         totalRestoreMs: roundMs(totalRestoreRawMs),
 
         // Outside this staging/promotion harness. These require a separate
