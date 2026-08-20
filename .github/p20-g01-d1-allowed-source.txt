@@ -9,6 +9,7 @@ src/dev/p19RestoreEpochDeviceGate.js
 src/lib/financialBackupV2.js
 src/lib/financialLedgerV7Migration.js
 src/lib/financialLedgerV7Repository.js
+src/lib/financialSemanticProjection.js
 src/lib/syncErrorClassification.js
 src/screens/SettingsScreen.js
 src/store/slices/useSyncSlice.js
