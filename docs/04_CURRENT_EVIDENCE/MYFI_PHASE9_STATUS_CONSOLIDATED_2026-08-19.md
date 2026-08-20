@@ -3,6 +3,27 @@
 Prepared by: MYFI Planning & Audit session
 Date: 2026-08-19
 
+<!-- PHASE9_CLOSED_2026-08-20 -->
+## ★ Phase 9: CLOSED — 2026-08-20
+
+P20-G01 (the one remaining gate) passed real-device acceptance. Post-PASS
+`/code-review` required 2 mandatory fixes (SQLite-verified empty-account
+check; stop writing the ambiguous legacy activation-evidence key).
+Implementation pushed both in commit `611b091`; Testing & Release
+re-confirmed PASS on that exact commit on 2026-08-20 — `fromEpoch 2→3`,
+`financialDataChangedByGate: false`. Evidence:
+`docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_MANDATORY_FIXES_CONFIRMED_2026-08-20.md`.
+
+**Phase 10 (Atomic Backup / Restore Engine) is now open.** Non-destructive
+prep work already started in parallel — see
+`MYFI_PHASE10_BACKUP_RESTORE_RESEARCH_2026-08-20.md` §32 for what's safe to
+build now vs. what stays gated on other conditions.
+
+A separate, unrelated issue was found during Phase 9 testing (Supabase
+`profiles_id_fkey` schema drift, real Postgres connectivity/load pressure)
+— tracked independently in
+`MYFI_SUPABASE_DB_ASSESSMENT_2026-08-20.md`, does not reopen Phase 9.
+
 ## Verified against
 
 ```text
