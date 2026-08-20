@@ -31,14 +31,13 @@ jobs:
           set -euo pipefail
           ACCEPTED_GATE="fd98f80dd1eb2f7aca9ad23d5d06aa64940e8ba0"
           git merge-base --is-ancestor "$ACCEPTED_GATE" HEAD
-          # Shipped source may differ from the accepted P20-G01 baseline only in the
-          # acceptance-gate module, the V2 activation repository (the P20-G01-D2 fix),
-          # and the Supabase client config. Anything else means unreviewed scope crept in.
-          printf '%s\n' \
-            "eas.json" \
-            "src/dev/p19RestoreEpochDeviceGate.js" \
-            "src/lib/financialLedgerV7Repository.js" \
-            | sort > /tmp/expected.txt
+          # The allowed set lives in .github/p20-g01-d1-allowed-source.txt so it is
+          # reviewed like code and edited in one obvious place. Anything appearing in
+          # shipped source that is not listed there fails the build, and vice versa.
+          ALLOWED=".github/p20-g01-d1-allowed-source.txt"
+          test -f "$ALLOWED"
+          sed -e 's/\r$//' "$ALLOWED" | grep -vE '^[[:space:]]*(#|$)' | sort -u > /tmp/expected.txt
+          test -s /tmp/expected.txt
           git diff --name-only "$ACCEPTED_GATE"..HEAD -- \
             src android app.json eas.json package.json package-lock.json \
             | sort > /tmp/actual.txt

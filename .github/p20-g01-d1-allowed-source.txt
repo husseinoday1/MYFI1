@@ -1,0 +1,11 @@
+# Shipped source files this acceptance branch is allowed to differ in, measured
+# against the accepted P20-G01 baseline fd98f80. The CI scope guard fails the build
+# if the real diff does not match this list exactly — in either direction.
+#
+# Add a file here in the same commit that first changes it. Lines starting with #
+# and blank lines are ignored.
+eas.json
+src/dev/p19RestoreEpochDeviceGate.js
+src/lib/financialLedgerV7Migration.js
+src/lib/financialLedgerV7Repository.js
+src/store/slices/useSyncSlice.js
