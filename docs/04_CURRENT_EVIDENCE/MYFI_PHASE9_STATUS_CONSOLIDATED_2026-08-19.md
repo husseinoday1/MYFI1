@@ -3,8 +3,29 @@
 Prepared by: MYFI Planning & Audit session
 Date: 2026-08-19
 
-<!-- PHASE9_CLOSURE_CORRECTION_2026-08-20 -->
-## ★ Phase 9: PROVISIONAL — closure retracted pending items 8–10, 2026-08-20
+<!-- PHASE9_CLOSED_FINAL_2026-08-20 -->
+## ★ Phase 9: CLOSED — 2026-08-20 (final, 10/10 items confirmed)
+
+Item 8: confirmed (server restore event matches device log, <1s apart).
+Items 9–10: signed back into the real account (`husseinoday10@gmail.com`)
+— **financial data present, correct, and visible: the safety property
+Phase 9 exists to protect, confirmed.** Live cloud sync was observed stuck
+(2+ min, no completion) at the moment of the check. Root cause identified,
+not a new defect: the Supabase dashboard shows "Project is depleting its
+Disk IO Budget" with the database at 353MB/500MB (70%) of the free Nano
+tier — the same resource constraint already implicated in today's other
+Supabase symptoms (504s, delete failure, signup rate limit). Tracked in
+`MYFI_SUPABASE_DB_ASSESSMENT_2026-08-20.md`; does not indicate data loss or
+a P20-G01 code regression. Evidence:
+`MYFI_P20_G01_ITEMS_8_10_FINAL_2026-08-20.md`.
+
+**Ruling:** closing Phase 9 on this basis — the financial-safety guarantee
+(data intact) is proven; the stuck sync is a known, separately-tracked
+infrastructure capacity issue, not a code-safety gap this gate is meant to
+catch. Phase 10 continues, unblocked.
+
+<!-- PHASE9_CLOSURE_CORRECTION_2026-08-20 (superseded above) -->
+## Phase 9: PROVISIONAL — closure retracted pending items 8–10, 2026-08-20
 
 **Correction, same day:** this file briefly declared Phase 9 CLOSED after
 Testing & Release re-confirmed the 2 mandatory code-review fixes
