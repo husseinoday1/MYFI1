@@ -3,26 +3,31 @@
 Prepared by: MYFI Planning & Audit session
 Date: 2026-08-19
 
-<!-- PHASE9_CLOSED_2026-08-20 -->
-## ★ Phase 9: CLOSED — 2026-08-20
+<!-- PHASE9_CLOSURE_CORRECTION_2026-08-20 -->
+## ★ Phase 9: PROVISIONAL — closure retracted pending items 8–10, 2026-08-20
 
-P20-G01 (the one remaining gate) passed real-device acceptance. Post-PASS
-`/code-review` required 2 mandatory fixes (SQLite-verified empty-account
-check; stop writing the ambiguous legacy activation-evidence key).
-Implementation pushed both in commit `611b091`; Testing & Release
-re-confirmed PASS on that exact commit on 2026-08-20 — `fromEpoch 2→3`,
-`financialDataChangedByGate: false`. Evidence:
-`docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_MANDATORY_FIXES_CONFIRMED_2026-08-20.md`.
+**Correction, same day:** this file briefly declared Phase 9 CLOSED after
+Testing & Release re-confirmed the 2 mandatory code-review fixes
+(`611b091`, `fromEpoch 2→3`, `financialDataChangedByGate: false`).
+Implementation then caught that this was premature: the P20-G01 gate spec
+(`MYFI_P20_G01_PHASE9_RESTORE_EPOCH_GATE_2026-08-19.md:92`) requires all 10
+items, and no evidence trail shows items 8–10 were re-run after the fix —
+specifically item 10, confirming the **real account** (`husseinoday10@gmail.com`)
+is untouched and V2-healthy after this round of testing. An earlier evidence
+file recorded 9–10 as done, but that was *before* the mandatory fixes and
+the most recent disposable-account test round, on the same shared,
+resource-stressed Supabase project. Good catch — thank you, Implementation,
+for refusing to write "10/10 complete" when the trail didn't support it.
 
-**Phase 10 (Atomic Backup / Restore Engine) is now open.** Non-destructive
-prep work already started in parallel — see
-`MYFI_PHASE10_BACKUP_RESTORE_RESEARCH_2026-08-20.md` §32 for what's safe to
-build now vs. what stays gated on other conditions.
+**Current status: 7/10 confirmed. 8, 9, 10 require one final device check
+(Testing & Release estimates minutes, not a rebuild) before Phase 9 is
+re-declared CLOSED.** Phase 10 non-destructive prep work (§24 of the Phase
+10 research doc) continues in parallel — none of it touches live financial
+state, so it isn't blocked by this.
 
 A separate, unrelated issue was found during Phase 9 testing (Supabase
 `profiles_id_fkey` schema drift, real Postgres connectivity/load pressure)
-— tracked independently in
-`MYFI_SUPABASE_DB_ASSESSMENT_2026-08-20.md`, does not reopen Phase 9.
+— tracked independently in `MYFI_SUPABASE_DB_ASSESSMENT_2026-08-20.md`.
 
 ## Verified against
 
