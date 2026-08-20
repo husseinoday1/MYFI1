@@ -10,17 +10,14 @@
 // archive year, including 0 and negatives. And there is no Array.isArray check on
 // `currencies` or `rates` anywhere in the file.
 //
-// NOT WIRED INTO THE QUALITY GATE, deliberately.
+// WIRED INTO THE QUALITY GATE as of 2026-08-20.
 //
-// It passes 66/66 against the current unhardened source, and two of its tests assert
-// `valid === true` for input that ought to be refused: a malformed currency code and
-// a zero exchange rate, both with coherently re-signed checksums. As a gate that
-// would encode the vulnerabilities as expected behaviour and make the hardening work
-// break the build. A security suite that goes green on unfixed code is describing
-// the present, not defending against it.
-//
-// When inspectBackupData is hardened, the two KNOWN GAP tests must be inverted to
-// assert rejection. Only then does this belong in the gate.
+// It arrived passing 66/66 against unhardened source, with two tests asserting
+// `valid === true` for input that ought to be refused. A security suite that goes
+// green on unfixed code describes the present rather than defending against it, so
+// it was held out of the gate until inspectBackupData was hardened. Those two tests
+// are now inverted and assert rejection, which is what makes this real regression
+// cover: if the hardening is ever removed, these fail.
 'use strict';
 
 const test = require('node:test');
@@ -321,19 +318,33 @@ test('tampered non-positive exchange rate is detected by rates checksum', () => 
   expectInvalid(inspectBackupData(backup), 'backup_checksum_mismatch:rates');
 });
 
-test('KNOWN GAP: coherent malformed currency code is currently accepted', () => {
+// Was a KNOWN GAP asserting acceptance. Closed 2026-08-20: a re-signed checksum makes
+// a forged section internally coherent, so checksums alone can never catch this — the
+// value itself has to be checked. 'US' is two letters and names no currency.
+test('coherent malformed currency code is rejected', () => {
   const backup = validBackup();
   backup.currencies = ['IQD', 'US', 'USD'];
   resignLogicalSections(backup);
+  expectInvalid(inspectBackupData(backup), 'backup_currency_code_invalid:1');
+});
+
+// The check is case-insensitive on purpose: the defect is length, not casing, and
+// refusing lowercase would block older backups written before normalisation.
+test('lowercase currency codes still restore', () => {
+  const backup = validBackup();
+  backup.currencies = ['iqd', 'usd'];
+  resignLogicalSections(backup);
   const result = inspectBackupData(backup);
   assert.equal(
-    result.valid,
-    true,
-    `Current source unexpectedly rejected the forged currency fixture: ${JSON.stringify(result.errors)}`,
+    result.errors.some(code => String(code).startsWith('backup_currency_code_invalid')),
+    false,
+    `lowercase codes must not be refused: ${JSON.stringify(result.errors)}`,
   );
 });
 
-test('KNOWN GAP: coherent non-positive exchange rate is currently accepted', () => {
+// Was a KNOWN GAP asserting acceptance. Closed 2026-08-20: a zero rate is not a rate.
+// Any conversion using it destroys the amount or flips its sign.
+test('coherent non-positive exchange rate is rejected', () => {
   const backup = validBackup();
   backup.rates.push({
     id: 'forged-rate',
@@ -345,11 +356,13 @@ test('KNOWN GAP: coherent non-positive exchange rate is currently accepted', () 
     source: 'forged',
   });
   resignLogicalSections(backup);
+  // Assert the code, not the index: the fixture already carries rates, so the forged
+  // entry lands wherever the array happens to end.
   const result = inspectBackupData(backup);
-  assert.equal(
-    result.valid,
-    true,
-    `Current source unexpectedly rejected the forged rate fixture: ${JSON.stringify(result.errors)}`,
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.errors.some(code => String(code).startsWith('backup_rate_not_positive')),
+    `expected a non-positive rate error; got ${JSON.stringify(result.errors)}`,
   );
 });
 

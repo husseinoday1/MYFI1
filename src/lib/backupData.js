@@ -191,6 +191,19 @@ export const inspectBackupData = (data) => {
     return { valid: false, errors: ['backup_not_object'], warnings, ...summarizeBackupData({}) };
   }
 
+  // Every validation below the version gate is keyed on Number(data.v || 0), so a
+  // payload with no `v` scored 0 and skipped manifest, checksum, collection, budget
+  // and archive validation entirely — drop the field and the whole block is bypassed.
+  //
+  // Required only of payloads that present themselves as a full logical backup. This
+  // same function also inspects year-archive payloads (myfiFiles.js:307 runs it over
+  // every package kind), and those legitimately carry no version — demanding one there
+  // refused a valid archive, which the quality gate caught. Keying on the sections the
+  // version gate actually protects closes the bypass without breaking the other
+  // document type.
+  const claimsFullBackup = data.manifest != null || data.checksums != null || data.financialData != null;
+  if (claimsFullBackup && data.v == null) errors.push('backup_version_missing');
+
   if (data.v != null) {
     const version = Number(data.v);
     if (!Number.isInteger(version) || version < 1) errors.push('backup_version_invalid');
@@ -270,11 +283,54 @@ export const inspectBackupData = (data) => {
     errors.push('backup_cold_archives_not_array');
   } else {
     (Array.isArray(data.coldArchives) ? data.coldArchives : []).forEach((archive, index) => {
-      if (!isObject(archive) || !Number.isInteger(Number(archive.year)) || !isObject(archive.data)) {
+      // Number.isInteger(Number(x)) alone accepts 0, negatives, null and "" — none of
+      // which name a real archive year.
+      const archiveYear = Number(archive?.year);
+      if (!isObject(archive) || !Number.isInteger(archiveYear) || archiveYear <= 0 || !isObject(archive.data)) {
         errors.push(`backup_cold_archive_invalid:${index}`);
         return;
       }
       if (!Array.isArray(archive.data.trans)) errors.push(`backup_cold_archive_transactions_invalid:${index}`);
+    });
+  }
+
+  // `currencies` and `rates` were read as `data.currencies || []` and never
+  // type-checked, so an object in place of an array passed validation and reached
+  // restore as a shape nothing downstream expects.
+  if (data.currencies != null && !Array.isArray(data.currencies)) {
+    errors.push('backup_currencies_not_array');
+  }
+  if (data.rates != null && !Array.isArray(data.rates)) {
+    errors.push('backup_rates_not_array');
+  }
+
+  // Deliberately case-insensitive. The vulnerability is a wrong-length code such as
+  // "US"; rejecting lowercase would refuse older backups whose codes were stored
+  // before normalisation, and an over-strict rule costs a user their restore just as
+  // surely as a lax one lets bad data in.
+  (Array.isArray(data.currencies) ? data.currencies : []).forEach((code, index) => {
+    if (!/^[A-Za-z]{3}$/.test(String(code ?? ''))) {
+      errors.push(`backup_currency_code_invalid:${index}`);
+    }
+  });
+
+  // A zero or negative rate is not a rate. Every conversion using it either destroys
+  // the amount or flips its sign, and no legitimate export produces one.
+  (Array.isArray(data.rates) ? data.rates : []).forEach((item, index) => {
+    if (!isObject(item)) return;
+    if (item.rate == null || !(Number(item.rate) > 0)) {
+      errors.push(`backup_rate_not_positive:${index}`);
+    }
+  });
+
+  // financialData collections were compared by checksum only, so a null or object in
+  // place of an array passed whenever the checksums were coherently re-signed.
+  if (isObject(data.financialData)) {
+    COLLECTION_KEYS.forEach((key) => {
+      const value = data.financialData[key];
+      if (value != null && !Array.isArray(value)) {
+        errors.push(`backup_financial_collection_not_array:${key}`);
+      }
     });
   }
 
@@ -300,14 +356,24 @@ export const inspectBackupData = (data) => {
       return;
     }
 
-    if (tx.walletId && walletIds.size && !walletIds.has(tx.walletId)) {
-      errors.push(`backup_transaction_wallet_unknown:${index}`);
+    // The `walletIds.size &&` short-circuit meant an empty wallet list skipped this
+    // check completely, so a transaction naming a wallet that does not exist was
+    // accepted. The transfer branch above has an explicit empty-list guard; these two
+    // did not. An unresolvable reference is blocking regardless of how many wallets
+    // the backup happens to carry — otherwise restore reaches prepareWalletData,
+    // which invents a wallet to satisfy it.
+    if (tx.walletId && !walletIds.has(tx.walletId)) {
+      errors.push(walletIds.size
+        ? `backup_transaction_wallet_unknown:${index}`
+        : `backup_transaction_without_wallets:${index}`);
     }
   });
 
   (Array.isArray(data.commitments) ? data.commitments : []).forEach((item, index) => {
-    if (item?.walletId && walletIds.size && !walletIds.has(item.walletId)) {
-      errors.push(`backup_commitment_wallet_unknown:${index}`);
+    if (item?.walletId && !walletIds.has(item.walletId)) {
+      errors.push(walletIds.size
+        ? `backup_commitment_wallet_unknown:${index}`
+        : `backup_commitment_without_wallets:${index}`);
     }
   });
 
