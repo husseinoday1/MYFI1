@@ -26,6 +26,11 @@ for (const token of [
   'deleteLocalInterlock',
   'backupRestoreInterlock',
   'P20_G01_PHASE9_RESTORE_EPOCH_GATE_PASS',
+  // The new epoch has no server baseline until it is re-bootstrapped; the gate must
+  // drive that through the production coordinator before shadow-validating.
+  'activateFinancialSyncV2',
+  'phase9_new_epoch_reactivation_failed',
+  'phase9_new_epoch_reactivation_identity_mismatch',
 ]) {
   assert(gate.includes(token), `missing gate token: ${token}`);
 }
@@ -38,6 +43,13 @@ assert.match(gate, /nonzero_wallet_opening_balance/);
 assert.match(gate, /pending_v2_mutations_must_sync_first/);
 assert.match(gate, /active_protocol_v2_required/);
 assert.match(gate, /cloud_v2_identity_not_ready/);
+
+// Re-activation must happen BEFORE the new-epoch shadow pull, otherwise the pull runs
+// against an unbootstrapped epoch and always fails with financial_bootstrap_required.
+assert.ok(
+  gate.indexOf('activateFinancialSyncV2()') < gate.indexOf('phase9_new_epoch_shadow_validation_failed'),
+  'new-epoch re-activation must precede shadow validation',
+);
 
 // The acceptance gate may advance protocol metadata, but it must never clear,
 // replace or delete the financial workspace itself.

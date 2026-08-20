@@ -115,6 +115,35 @@ const disposableBlockers = ({ state, coldArchives, localWorkspace }) => {
 // scalars and safe to report; walletBalances / currencyBalances / monthlyTotals are
 // maps of real money, and this payload gets console-logged and copied around. Report
 // the shape of those, never the amounts.
+// runControlledFinancialV2Activation returns bootstrap and readbackVerification on
+// failure, and those carry `rows` — the actual financial baseline read back from the
+// server. This payload is console-logged and pasted into evidence files, so keep the
+// diagnosis (which stage failed, how many rows, which ids) and drop the row contents.
+const activationSummary = result => {
+  if (!result || typeof result !== 'object') return result ?? null;
+  const stage = source => (source && typeof source === 'object' ? {
+    ok: source.ok ?? null,
+    supported: source.supported ?? null,
+    reason: source.reason || null,
+    ledgerId: source.ledgerId || null,
+    restoreEpoch: source.restoreEpoch ?? null,
+    bootstrapId: source.bootstrapId || null,
+    manifestHash: source.manifestHash || null,
+    expectedRowCount: source.expectedRowCount ?? null,
+    readBackRowCount: source.readBackRowCount ?? null,
+    rowCount: Array.isArray(source.rows) ? source.rows.length : null,
+  } : null);
+  return {
+    ok: result.ok ?? null,
+    reason: result.reason || null,
+    alreadyActive: result.alreadyActive ?? null,
+    v2RecoveryRequired: result.v2RecoveryRequired ?? null,
+    bootstrap: stage(result.bootstrap),
+    readbackVerification: stage(result.readbackVerification),
+    shadowPasses: result.shadowPasses ?? null,
+  };
+};
+
 const metricSummary = value => {
   if (value === null || value === undefined) return null;
   if (typeof value === "number" || typeof value === "boolean") return value;
@@ -428,6 +457,47 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
     return postCommitFailure('phase9_restore_epoch_local_postcondition_failed', {
       committedIdentity,
       remainingIntent,
+    });
+  }
+
+  // The server clears bootstrap metadata on every epoch advance by design
+  // (clear_financial_bootstrap_on_epoch_change_v2, 202608170004:56: "Any restore-epoch
+  // advance invalidates the prior bootstrap. The next epoch must establish a new full
+  // baseline before mutation sync can resume."). So the new epoch has no baseline and
+  // cannot be shadow-validated until it is re-bootstrapped and re-activated. Without
+  // this step the gate always failed here with financial_bootstrap_required and left
+  // the ledger in split state — observed on device 2026-08-20.
+  //
+  // Reuse the production coordinator (runControlledFinancialV2Activation, via the
+  // activateFinancialSyncV2 action) rather than open-coding a second bootstrap
+  // sequence here: it already performs bootstrap, read-back and manifest verification,
+  // shadow validation with production apply disabled, the quiescence check, and the
+  // durable activation commit, and it is covered by the P19-011/P19-013 contracts.
+  const reactivationState = getState();
+  if (typeof reactivationState?.activateFinancialSyncV2 !== 'function') {
+    return postCommitFailure('phase9_new_epoch_reactivation_api_missing');
+  }
+  const reactivation = await reactivationState.activateFinancialSyncV2();
+  if (!reactivation?.ok) {
+    return postCommitFailure(
+      `phase9_new_epoch_reactivation_failed:${reactivation?.reason || 'unknown'}`,
+      { reactivation: activationSummary(reactivation) },
+    );
+  }
+
+  // The re-activated protocol must belong to THIS ledger and the NEW epoch. A
+  // coordinator that activated something else would otherwise be read as success.
+  const reactivatedProtocol = await readFinancialSyncProtocolV8({ namespace: ledgerNamespace });
+  if (reactivatedProtocol?.activeProtocolVersion !== 2
+      || String(reactivatedProtocol?.ledgerId || '') !== String(identity.ledgerId)
+      || Number(reactivatedProtocol?.restoreEpoch || 0) !== toEpoch) {
+    return postCommitFailure('phase9_new_epoch_reactivation_identity_mismatch', {
+      observed: {
+        activeProtocolVersion: reactivatedProtocol?.activeProtocolVersion ?? null,
+        ledgerId: reactivatedProtocol?.ledgerId || null,
+        restoreEpoch: reactivatedProtocol?.restoreEpoch ?? null,
+        activationState: reactivatedProtocol?.activationState || null,
+      },
     });
   }
 
