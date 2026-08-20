@@ -1,14 +1,14 @@
-# MYFI — Claude Code Master Engineering Handoff
+# MYFI — Engineering Handoff
 
 Prepared: 2026-08-19 (last updated 2026-08-19, MYFI Planning & Audit session)
 Repository: `https://github.com/husseinoday1/MYFI1`
 
 ## 0. What this document is — and is not
 
-This is **context, not truth**. It exists to onboard Claude Code as the primary
-engineering owner of MYFI quickly, without re-deriving everything from scratch
-every session. It is not a new authority level and it does not sit inside the
-canonical authority order.
+This is **context, not truth**. It exists to onboard whichever AI engineering
+tool is currently acting as MYFI's primary engineer quickly, without
+re-deriving everything from scratch every session. It is not a new authority
+level and it does not sit inside the canonical authority order.
 
 If anything in this file conflicts with the repository, `docs/00_MYFI_CANONICAL_AUTHORITY.md`,
 the Frozen Master Plan, a domain contract, or newer evidence: **stop, name the
@@ -517,7 +517,7 @@ gate; prefer coherent patch batches over scattered one-liners; run the
 relevant automated gate before calling anything done; write the end-of-session
 status block (§19) every session.
 
-**AUTONOMOUS (Claude Code decides):**
+**AUTONOMOUS (the engineering session decides):**
 Which files to touch and how to sequence work inside a phase; test design;
 internal refactors that don't change contracts; script/tooling creation;
 whether a dependency addition is justified (state why); when a phase's own
