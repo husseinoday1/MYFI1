@@ -75,6 +75,9 @@ jobs:
           }
           NODE
           echo "EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE=1" >> "$GITHUB_ENV"
+          # Phase 10 benchmark row. Independent of the gate flag — the two features
+          # do not interact, so one diagnostic build can carry both.
+          echo "EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK=1" >> "$GITHUB_ENV"
           echo "[PASS] disposable restore-epoch acceptance flag enabled"
 
       - name: Install dependencies
@@ -112,6 +115,7 @@ jobs:
         env:
           CI: "true"
           EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE: "1"
+          EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK: "1"
         run: |
           chmod +x ./gradlew
           ./gradlew app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
@@ -144,6 +148,7 @@ jobs:
             echo "SupabaseSchemaChanged=NO"
             echo "GatePreconditionsChanged=NO"
             echo "AcceptanceFlag=EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE=1"
+            echo "BenchmarkFlag=EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK=1"
             echo "ProductionFeatureChange=NO"
             echo "DeviceAcceptance=PENDING"
           } | tee P20-G01-D1-build-evidence.txt
