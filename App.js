@@ -853,7 +853,11 @@ function AppRoot() {
         onNotificationAction={handleNotificationPress}
       />
     ),
-    history: <HistoryScreen />,
+    // Both screens declare onAddExpense/onAddIncome with a no-op default, and neither
+    // was given one here — so the +/- buttons on their empty states were decorative.
+    // A user with no transactions taps the one obvious call to action and nothing
+    // happens. Same handlers HomeScreen already uses.
+    history: <HistoryScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} />,
     trackers: (
       <TrackersLabScreen
         focusRequest={trackerFocus}
@@ -864,7 +868,7 @@ function AppRoot() {
         onNewTracker={openNewTracker}
       />
     ),
-    reports: <ReportsScreen />,
+    reports: <ReportsScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} />,
     settings: <SettingsScreen onOpenArchive={() => setArchiveOpen(true)} tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} />,
   };
 
