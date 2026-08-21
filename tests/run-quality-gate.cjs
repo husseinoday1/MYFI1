@@ -125,6 +125,7 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'p10_012_supabase_contract', 'run-p10-012-supabase-contract.cjs'],
   ['UNIT_RUNTIME', 'p10_013_bounded_row_source', 'run-p10-013-bounded-row-source.cjs'],
   ['UNIT_RUNTIME', 'p10_013_live_generation', 'run-p10-013-live-generation.cjs'],
+  ['UNIT_RUNTIME', 'p10_013_cold_archive_generation', 'run-p10-013-cold-archive-generation.cjs'],
   ['UNIT_RUNTIME', 'home_hidden_amounts', 'run-home-hidden-amounts.cjs'],
   ['UNIT_RUNTIME', 'ci_source_scope_guard', 'run-ci-source-scope-guard.cjs'],
   ['UNIT_RUNTIME', 'performance_data', 'performance-data-runtime-v512.test.cjs'],

@@ -6,6 +6,7 @@
 import { enqueueLedgerWrite, getLedgerDb, runLedgerExclusiveTransaction } from './ledgerDatabase';
 // Shared connection initializes: PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON.
 import { defaultScopeForProfile, normalizeScope } from './modules';
+import { advanceLiveGenerationForMutationInTransactionV13 } from './financialLiveGenerationV13';
 
 const readyDatabases = new WeakSet();
 
@@ -103,21 +104,26 @@ const archiveMetadata = (data = {}, summary = {}) => ({
   archiveScope: data.archiveScope || summary.scope || 'personal',
 });
 
-export const storeColdArchiveYear = async ({
-  namespace = 'guest', year, scope = 'personal', data = {}, summary = {}, checksum = '',
+const isPrivateArchiveNamespaceV13 = namespace => /::(?:shadow-stage|restore-stage|restore-checkpoint)::/.test(String(namespace || ''));
+const advanceArchiveGenerationInTransactionV13 = (database, namespace) => (
+  isPrivateArchiveNamespaceV13(namespace)
+    ? Promise.resolve(null)
+    : advanceLiveGenerationForMutationInTransactionV13({ database, namespace })
+);
+
+const storeColdArchiveYearInTransactionV13 = async ({
+  database, namespace = 'guest', year, scope = 'personal', data = {}, summary = {}, checksum = '',
 } = {}) => {
   const targetYear = Number(year);
   const rows = Array.isArray(data?.trans) ? data.trans : [];
   if (!Number.isInteger(targetYear) || !rows.length) return false;
-  const db = await openDb();
-  if (!db) return false;
+  if (!database) throw new Error('cold_archive_transaction_required');
   const ns = normalizeNamespace(namespace);
   const archiveScope = normalizeArchiveScope(scope, data?.cfg);
   const archivedAt = summary.archivedAt || new Date().toISOString();
   const metadataJson = safeJson(archiveMetadata(data, { ...summary, scope: archiveScope }));
 
-  await enqueueLedgerWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
-    await txn.runAsync(
+  await database.runAsync(
       `INSERT INTO cold_archive_years
        (namespace, scope, year, archived_at, checksum, transaction_count, income, expense, net, metadata_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -135,15 +141,15 @@ export const storeColdArchiveYear = async ({
       Number(summary.expense || 0),
       Number(summary.net || 0),
       metadataJson,
-    );
-    await txn.runAsync(
+  );
+  await database.runAsync(
       'DELETE FROM cold_archive_transactions WHERE namespace = ? AND scope = ? AND year = ?',
       ns,
       archiveScope,
       targetYear,
-    );
+  );
 
-    const statement = await txn.prepareAsync(`
+  const statement = await database.prepareAsync(`
       INSERT INTO cold_archive_transactions
       (namespace, scope, year, id, date_iso, ts, wallet_id, category_id, flow_type, search_text, payload_json)
       VALUES ($namespace, $scope, $year, $id, $date, $ts, $wallet, $category, $flow, $search, $payload)
@@ -152,10 +158,10 @@ export const storeColdArchiveYear = async ({
         category_id=excluded.category_id,flow_type=excluded.flow_type,
         search_text=excluded.search_text,payload_json=excluded.payload_json
     `);
-    try {
-      for (let index = 0; index < rows.length; index += 1) {
-        const item = rows[index] || {};
-        await statement.executeAsync({
+  try {
+    for (let index = 0; index < rows.length; index += 1) {
+      const item = rows[index] || {};
+      await statement.executeAsync({
           $namespace: ns,
           $scope: archiveScope,
           $year: targetYear,
@@ -167,25 +173,44 @@ export const storeColdArchiveYear = async ({
           $flow: String(item.flowType || item.kind || ''),
           $search: transactionSearchText(item),
           $payload: safeJson(item),
-        });
-        if (index > 0 && index % 750 === 0) {
-          // Give React Native a frame between large archive batches.
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
+      });
+      if (index > 0 && index % 750 === 0) {
+        // Give React Native a frame between large archive batches.
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
-    } finally {
-      await statement.finalizeAsync();
     }
-  }));
+  } finally {
+    await statement.finalizeAsync();
+  }
   return true;
 };
 
+export const storeColdArchiveYear = async (options = {}) => {
+  const db = await openDb();
+  if (!db) return false;
+  const namespace = normalizeNamespace(options.namespace);
+  return enqueueLedgerWrite(() => runLedgerExclusiveTransaction(db, async txn => {
+    const stored = await storeColdArchiveYearInTransactionV13({ ...options, database: txn, namespace });
+    if (!stored) return false;
+    await advanceArchiveGenerationInTransactionV13(txn, namespace);
+    return true;
+  }));
+};
+
 export const storeColdArchiveYears = async ({ namespace = 'guest', archives = [] } = {}) => {
-  for (const archive of Array.isArray(archives) ? archives : []) {
-    const ok = await storeColdArchiveYear({ namespace, ...archive });
-    if (!ok) return false;
-  }
-  return true;
+  const incoming = Array.isArray(archives) ? archives : [];
+  if (!incoming.length) return true;
+  const db = await openDb();
+  if (!db) return false;
+  const targetNamespace = normalizeNamespace(namespace);
+  return enqueueLedgerWrite(() => runLedgerExclusiveTransaction(db, async txn => {
+    for (const archive of incoming) {
+      const stored = await storeColdArchiveYearInTransactionV13({ ...archive, database: txn, namespace: targetNamespace });
+      if (!stored) throw new Error('cold_archive_batch_item_invalid');
+    }
+    await advanceArchiveGenerationInTransactionV13(txn, targetNamespace);
+    return true;
+  }));
 };
 
 // P10-004: create the cold-archive tables if they are not there yet, so a caller can
@@ -272,7 +297,12 @@ export const clearColdArchives = async (namespace = 'guest') => {
   const db = await openDb();
   if (!db) return true;
   const ns = normalizeNamespace(namespace);
-  await enqueueLedgerWrite(() => db.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', ns));
+  await enqueueLedgerWrite(() => runLedgerExclusiveTransaction(db, async txn => {
+    const deleted = await txn.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', ns);
+    if (Number(deleted?.changes || 0) > 0) {
+      await advanceArchiveGenerationInTransactionV13(txn, ns);
+    }
+  }));
   return true;
 };
 
@@ -282,7 +312,7 @@ export const clearColdArchives = async (namespace = 'guest') => {
 export const clearColdArchiveNamespaceInTransaction = async ({ database, namespace } = {}) => {
   const target = String(namespace || '').trim();
   if (!database || !target) throw new Error('cold_archive_transaction_namespace_invalid');
-  await database.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', target);
+  return database.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', target);
 };
 
 export const replaceColdArchiveNamespaceFromStageInTransaction = async ({
@@ -293,21 +323,22 @@ export const replaceColdArchiveNamespaceFromStageInTransaction = async ({
   if (!database || !target || !stage || target === stage) {
     throw new Error('cold_archive_transaction_stage_invalid');
   }
-  await clearColdArchiveNamespaceInTransaction({ database, namespace: target });
-  await database.runAsync(
+  const cleared = await clearColdArchiveNamespaceInTransaction({ database, namespace: target });
+  const headers = await database.runAsync(
     `INSERT INTO cold_archive_years
        (namespace, scope, year, archived_at, checksum, transaction_count, income, expense, net, metadata_json)
      SELECT ?, scope, year, archived_at, checksum, transaction_count, income, expense, net, metadata_json
        FROM cold_archive_years WHERE namespace = ?`,
     target, stage,
   );
-  await database.runAsync(
+  const rows = await database.runAsync(
     `INSERT INTO cold_archive_transactions
        (namespace, scope, year, id, date_iso, ts, wallet_id, category_id, flow_type, search_text, payload_json)
      SELECT ?, scope, year, id, date_iso, ts, wallet_id, category_id, flow_type, search_text, payload_json
        FROM cold_archive_transactions WHERE namespace = ?`,
     target, stage,
   );
+  return Number(cleared?.changes || 0) + Number(headers?.changes || 0) + Number(rows?.changes || 0);
 };
 
 // Exporting/restoring the cold archive is intentionally explicit and happens only
@@ -362,10 +393,11 @@ export const replaceColdArchives = async (namespace = 'guest', archives = []) =>
 
   try {
     await enqueueLedgerWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
-      await replaceColdArchiveNamespaceFromStageInTransaction({
+      const changed = await replaceColdArchiveNamespaceFromStageInTransaction({
         database: txn, namespace: ns, stageNamespace,
       });
       await clearColdArchiveNamespaceInTransaction({ database: txn, namespace: stageNamespace });
+      if (changed > 0) await advanceArchiveGenerationInTransactionV13(txn, ns);
     }));
     return true;
   } catch (error) {

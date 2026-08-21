@@ -125,3 +125,43 @@ export const advanceLiveGenerationInTransactionV13 = async ({
   }
   return next;
 };
+
+// This is intentionally a mutation-only bootstrap path. It establishes identity
+// and token together with the caller's real financial mutation; reads and plain
+// advances remain fail-closed and never initialise metadata on their own.
+export const advanceLiveGenerationForMutationInTransactionV13 = async ({
+  database, namespace,
+} = {}) => {
+  const txn = requireTransaction(database);
+  const targetNamespace = text(namespace);
+  if (!targetNamespace) throw new Error('financial_live_generation_namespace_required');
+  let identity = await txn.getFirstAsync(
+    `SELECT namespace,ledger_id,restore_epoch
+       FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
+    targetNamespace,
+  );
+  if (!identity?.ledger_id) {
+    const now = new Date().toISOString();
+    await txn.runAsync(
+      `INSERT OR IGNORE INTO ledger_sync_identity_v8
+       (namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version,created_at,updated_at)
+       VALUES (?,'ledger-' || lower(hex(randomblob(16))),1,2,2,?,?)`,
+      targetNamespace, now, now,
+    );
+    identity = await txn.getFirstAsync(
+      `SELECT namespace,ledger_id,restore_epoch
+         FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
+      targetNamespace,
+    );
+  }
+  if (!identity?.ledger_id || !validEpoch(Number(identity.restore_epoch))) {
+    throw new Error('financial_live_generation_identity_missing');
+  }
+  const boundIdentity = {
+    namespace: String(identity.namespace || targetNamespace),
+    ledgerId: String(identity.ledger_id),
+    restoreEpoch: Number(identity.restore_epoch),
+  };
+  await registerLiveGenerationInTransactionV13({ database: txn, ...boundIdentity });
+  return advanceLiveGenerationInTransactionV13({ database: txn, ...boundIdentity });
+};

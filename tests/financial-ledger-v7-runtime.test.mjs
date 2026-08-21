@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import { buildExpenseLedgerCommand, buildFinancialLedgerCommand, exchangeRateFraction } from '../src/lib/financialLedgerV7Model';
 import {
   archiveFinancialTransactionsV7,
+  applyRemoteLedgerMutationsV8,
+  clearFinancialWorkspaceV7,
   commitEntityChangesV7,
   commitExpenseLedgerV7Command,
   replaceFinancialTransactionV7,
+  voidFinancialTransactionsV7,
 } from '../src/lib/financialLedgerV7Repository';
 import { buildFinancialShadowProjectionV7, financialProjectionChecksum } from '../src/lib/financialLedgerV7Migration';
 import { normalizeFinancialMutationSyncResponse, serializeLedgerMutationBatch } from '../src/lib/financialMutationSync';
@@ -23,6 +26,7 @@ class FakeDatabase {
     this.currentEntityRevision = currentEntityRevision;
     this.archivedGoal = archivedGoal;
     this.events = [];
+    this.meta = new Map();
     this.shadowId = 0;
     this.inTransaction = false;
     this.committed = false;
@@ -36,6 +40,14 @@ class FakeDatabase {
   async runAsync(sql, ...args) {
     this.events.push({ type: 'run', sql, args, inTransaction: this.inTransaction });
     if (this.failOutbox && sql.includes('INSERT INTO ledger_outbox_v2')) throw new Error('outbox_insert_failed');
+    if (sql.includes('INSERT INTO ledger_v7_meta')) {
+      this.meta.set(String(args[0]), String(args[1]));
+    }
+    if (sql.includes('UPDATE ledger_v7_meta SET value=')) {
+      const [value, , key, expected] = args;
+      if (this.meta.get(String(key)) !== String(expected)) return { changes: 0 };
+      this.meta.set(String(key), String(value));
+    }
     return { changes: 1 };
   }
 
@@ -49,6 +61,13 @@ class FakeDatabase {
         namespace: 'user:test', ledger_id: 'ledger-runtime-test', restore_epoch: 1,
         protocol_version: 2, minimum_supported_version: 2,
       };
+    }
+    if (sql.includes('FROM ledger_sync_state_v8') && sql.includes('activated_at')) {
+      return { activated_at: '2026-08-22T00:00:00.000Z' };
+    }
+    if (sql.includes('FROM ledger_v7_meta')) {
+      const value = this.meta.get(String(args[0]));
+      return value === undefined ? null : { value };
     }
     if (this.archivedGoal && sql.includes('SELECT kind,scope,date_iso,occurred_at,revision,payload_json,archived_at')) {
       return {
@@ -76,6 +95,11 @@ class FakeDatabase {
     }
     if (sql.includes('SELECT revision FROM ledger_financial_transactions_v7')) {
       return this.currentTransactionRevision == null ? null : { revision: this.currentTransactionRevision };
+    }
+    if (sql.includes('FROM ledger_financial_transactions_v7') && sql.includes('revision,payload_json,deleted_at')) {
+      return this.currentTransactionRevision == null ? null : {
+        revision: this.currentTransactionRevision, payload_json: '{}', deleted_at: null,
+      };
     }
     if (sql.includes('JOIN ledger_postings_v7')) {
       return {
@@ -119,6 +143,10 @@ class FakeDatabase {
 }
 
 const run = async () => {
+  const liveGeneration = db => {
+    const raw = db.meta.get('financial_live_generation_v13:user:test');
+    return raw ? Number(JSON.parse(raw).generation) : null;
+  };
   const fraction = exchangeRateFraction(1310.5);
   assert.deepEqual(fraction, { numerator: 2621, denominator: 2 });
 
@@ -207,9 +235,9 @@ const run = async () => {
     }],
     now: '2026-08-14T03:00:00.000Z',
   });
-  assert.equal(shadow.metrics.activeTransactions, 1);
-  assert.equal(shadow.metrics.archivedTransactions, 1);
-  assert.equal(shadow.metrics.syntheticTransactions, 1);
+  assert.equal(shadow.metrics.activeTransactions, 1, `shadow active=${shadow.metrics.activeTransactions}`);
+  assert.equal(shadow.metrics.archivedTransactions, 1, `shadow archived=${shadow.metrics.archivedTransactions}`);
+  assert.equal(shadow.metrics.syntheticTransactions, 1, `shadow synthetic=${shadow.metrics.syntheticTransactions}`);
   assert.equal(shadow.metrics.walletBalances['wallet-iqd'].physicalMinor, 7000000);
   assert.equal(financialProjectionChecksum(shadow.document), shadow.checksum);
 
@@ -230,7 +258,7 @@ const run = async () => {
     hasMore: false,
   });
   assert.equal(mutationResponse.latestSequence, 8);
-  assert.equal(mutationResponse.remoteMutations.length, 1);
+  assert.equal(mutationResponse.remoteMutations.length, 1, `remote mutations=${mutationResponse.remoteMutations.length}`);
 
   const db = new FakeDatabase();
   const result = await commitExpenseLedgerV7Command(command, { database: db });
@@ -240,6 +268,7 @@ const run = async () => {
   assert.equal(result.persisted.currencyCode, 'USD');
   assert.equal(db.committed, true);
   assert.equal(db.rolledBack, false);
+  assert.equal(liveGeneration(db), 1, `local command generation=${liveGeneration(db)}`);
 
   for (const table of ['ledger_financial_transactions_v7', 'ledger_postings_v7', 'ledger_outbox_v2']) {
     const write = db.events.find(event => event.type === 'run' && event.sql.includes(`INSERT INTO ${table}`));
@@ -253,6 +282,7 @@ const run = async () => {
     /outbox_insert_failed/,
   );
   assert.equal(failingDb.rolledBack, true, 'outbox failure must roll back header and posting writes');
+  assert.equal(liveGeneration(failingDb), null, 'failed local command must not leave a live generation token');
   const failingOutboxIndex = failingDb.events.findIndex(event => event.type === 'run' && event.sql.includes('INSERT INTO ledger_outbox_v2'));
   const rollbackAfterOutbox = failingDb.events.findIndex((event, index) => index > failingOutboxIndex && event.type === 'rollback');
   assert.ok(failingOutboxIndex >= 0 && rollbackAfterOutbox > failingOutboxIndex, 'outbox failure must terminate the financial transaction with rollback');
@@ -268,6 +298,7 @@ const run = async () => {
     false,
     'idempotent retry must not create a second outbox mutation',
   );
+  assert.equal(liveGeneration(retryDb), null, 'idempotent local retry must not advance generation');
 
   const staleDb = new FakeDatabase({ currentTransactionRevision: 5 });
   const staleReplacement = await replaceFinancialTransactionV7({
@@ -317,6 +348,7 @@ const run = async () => {
     [['financial_transaction', 6, 5], ['debt', 9, 8]],
     'V2 revisions/base revisions must be sequential for both transaction and linked entity',
   );
+  assert.equal(liveGeneration(replacementDb), 1, `replacement generation=${liveGeneration(replacementDb)}`);
 
   const entityDb = new FakeDatabase({ currentEntityRevision: 12 });
   const entityResult = await commitEntityChangesV7({
@@ -333,6 +365,35 @@ const run = async () => {
   ));
   assert.equal(entityOutbox.args[1], 'user:test:goal:goal-1:revision:13');
   assert.equal(entityOutbox.args[5], 13);
+  assert.equal(liveGeneration(entityDb), 1, `entity generation=${liveGeneration(entityDb)}`);
+
+  const voidDb = new FakeDatabase({ currentTransactionRevision: 1 });
+  const voided = await voidFinancialTransactionsV7({
+    namespace: 'user:test', transactionIds: ['void-v7-1'], database: voidDb,
+  });
+  assert.equal(voided.ok, true);
+  assert.equal(voided.changed, 1);
+  assert.equal(liveGeneration(voidDb), 1, `void generation=${liveGeneration(voidDb)}`);
+
+  const remoteDb = new FakeDatabase();
+  const remoteApplied = await applyRemoteLedgerMutationsV8({
+    namespace: 'user:test', ledgerId: 'ledger-runtime-test', restoreEpoch: 1,
+    allowProductionApply: true, database: remoteDb,
+    mutations: [{
+      ledgerId: 'ledger-runtime-test', restoreEpoch: 1, mutationId: 'remote-category-1',
+      serverSequence: 1, commandId: 'remote-command-1', commandSequence: 1, commandMutationCount: 1,
+      entityType: 'category', entityId: 'category-1', operation: 'upsert', revision: 1, baseRevision: 0,
+      protocolVersion: 2, minimumSupportedVersion: 2, payloadSchemaVersion: 1,
+      payload: { entityType: 'category', id: 'category-1', revision: 1, baseRevision: 0, payload: { name: 'Food' } },
+    }],
+  });
+  assert.equal(remoteApplied.ok, true);
+  assert.equal(remoteApplied.applied, 1, 'V2 remote command must mutate the local financial ledger');
+  assert.equal(liveGeneration(remoteDb), 1, 'V2 remote apply must advance generation in the same transaction');
+
+  const clearDb = new FakeDatabase();
+  assert.equal(await clearFinancialWorkspaceV7({ namespace: 'user:test', database: clearDb }), true);
+  assert.equal(liveGeneration(clearDb), 1, 'active workspace clear must advance generation in its transaction');
 
   const archiveDb = new FakeDatabase({ archivedGoal: true });
   const archived = await archiveFinancialTransactionsV7({
@@ -343,8 +404,8 @@ const run = async () => {
     database: archiveDb,
   });
   assert.equal(archived.ok, true);
-  assert.equal(archived.changed, 1);
-  assert.equal(archived.releasedAllocations, 1);
+  assert.equal(archived.changed, 1, `archived changed=${archived.changed}`);
+  assert.equal(archived.releasedAllocations, 1, `released allocations=${archived.releasedAllocations}`);
   const releasePosting = archiveDb.events.find(event => (
     event.type === 'run'
     && event.sql.includes('INSERT INTO ledger_postings_v7')
@@ -359,6 +420,7 @@ const run = async () => {
     'archive and its hidden release must both be mutation-synced',
   );
   assert.equal(archiveDb.committed, true);
+  assert.equal(liveGeneration(archiveDb), 1, `archive generation=${liveGeneration(archiveDb)}`);
 
   console.log('MYFI Financial Ledger V7 repository runtime mock passed.');
 };

@@ -66,6 +66,10 @@ const runLedgerExclusiveTransaction = (db, task) => globalThis.__P10_EXCLUSIVE__
     `const defaultScopeForProfile = () => 'personal';
 const normalizeScope = value => value;`,
   )
+  .replace(
+    /import \{ advanceLiveGenerationForMutationInTransactionV13 \} from '\.\/financialLiveGenerationV13';/,
+    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used_in_p10_010'); };`,
+  )
   .replace(/export const /g, 'const ');
 archiveSource += `\nmodule.exports = {
   ensureColdArchiveSchema, clearColdArchiveNamespaceInTransaction,
@@ -108,6 +112,10 @@ const mergeCloudWorkspaceCfg = (localCfg = {}, cloudCfg = {}) => ({ ...(localCfg
   ensureColdArchiveSchema,
   replaceColdArchiveNamespaceFromStageInTransaction,
 } = globalThis.__P10_ARCHIVE__;`,
+  )
+  .replace(
+    /import \{[\s\S]*?\} from '\.\/financialLiveGenerationV13';/,
+    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used_in_p10_010'); };`,
   )
   .replace(/export const /g, 'const ')
   .replace(/export async function /g, 'async function ')

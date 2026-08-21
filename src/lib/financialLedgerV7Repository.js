@@ -12,6 +12,9 @@ import {
   ensureColdArchiveSchema,
   replaceColdArchiveNamespaceFromStageInTransaction,
 } from './localArchiveRepository';
+import {
+  advanceLiveGenerationForMutationInTransactionV13,
+} from './financialLiveGenerationV13';
 
 const readyDatabases = new WeakSet();
 const readyDatabasePromises = new WeakMap();
@@ -2486,6 +2489,9 @@ export const applyRemoteLedgerMutationsV8 = async ({
             identity.ledgerId, identity.restoreEpoch, commandSequence, commandSequence,
             now, now, String(deviceId || ''), now,
           );
+          if (commandApplied > 0) {
+            await advanceActiveFinancialGenerationInTransactionV13(txn, identity.namespace);
+          }
         });
         applied += commandApplied;
       } catch (error) {
@@ -2596,6 +2602,15 @@ const ensureShadowLedgerSyncIdentityV8 = async (db, namespace) => {
     protocolVersion: Math.max(2, Number(row.protocol_version || 2)),
     minimumSupportedVersion: Math.max(1, Number(row.minimum_supported_version || 2)),
   };
+};
+
+// P10-013 Strategy B: this is the only adapter used by ordinary active-ledger
+// mutations. It deliberately creates the token only while committing a real
+// mutation, never from a read/advance call or from a private restore namespace.
+const isPrivateFinancialNamespaceV13 = namespace => /::(?:shadow-stage|restore-stage|restore-checkpoint)::/.test(String(namespace || ''));
+const advanceActiveFinancialGenerationInTransactionV13 = async (database, namespace) => {
+  if (isPrivateFinancialNamespaceV13(namespace)) return null;
+  return advanceLiveGenerationForMutationInTransactionV13({ database, namespace });
 };
 
 const createShadowCommandIdV2 = async db => {
@@ -2847,6 +2862,7 @@ export const commitFinancialLedgerV7Command = async (command, { database = null,
       if (writeOutbox) {
         await insertFinancialTransactionOutbox(txn, command);
       }
+      await advanceActiveFinancialGenerationInTransactionV13(txn, header.namespace);
       const persisted = await readFinancialTransaction(txn, header.namespace, header.id);
       result = {
         supported: true, ok: true, idempotent: false, transactionId: String(persisted.id),
@@ -2972,6 +2988,7 @@ export const replaceFinancialTransactionV7 = async ({
         await upsertEntity(txn, prepared);
       }
       await insertFinancialTransactionOutbox(txn, command);
+      await advanceActiveFinancialGenerationInTransactionV13(txn, namespace);
       const persisted = await readFinancialTransaction(txn, namespace, transaction.id);
       result = { supported: true, ok: true, idempotent: false, transactionId: persisted.id, committedAt: header.updatedAt, persisted };
     });
@@ -3030,6 +3047,9 @@ export const voidFinancialTransactionsV7 = async ({
         });
         await upsertEntity(txn, entity);
         await insertEntityOutbox(txn, entity, { commandId: shadowCommandId });
+      }
+      if (changed > 0 || (Array.isArray(entityChanges) && entityChanges.some(item => item?.id && item?.entityType))) {
+        await advanceActiveFinancialGenerationInTransactionV13(txn, namespace);
       }
     });
     return { supported: true, ok: true, changed };
@@ -3170,6 +3190,9 @@ export const archiveFinancialTransactionsV7 = async ({
         await upsertEntity(txn, entity);
         await insertEntityOutbox(txn, entity, { commandId: shadowCommandId });
       }
+      if (changed > 0 || (Array.isArray(entityChanges) && entityChanges.some(item => item?.id && item?.entityType))) {
+        await advanceActiveFinancialGenerationInTransactionV13(txn, namespace);
+      }
     });
     const row = await db.getFirstAsync(
       `SELECT COUNT(*) AS count FROM ledger_financial_transactions_v7
@@ -3221,6 +3244,7 @@ export const commitEntityChangesV7 = async ({ namespace = 'guest', changes = [],
         await insertEntityOutbox(txn, prepared, { commandId: shadowCommandId });
         changed += 1;
       }
+      if (changed > 0) await advanceActiveFinancialGenerationInTransactionV13(txn, namespace);
     });
     return { supported: true, ok: true, changed };
   });
@@ -3855,13 +3879,15 @@ export const applyRemoteLedgerMutationsV7 = async ({
 export const clearFinancialNamespaceRowsInTransactionV7 = async (db, namespace) => {
   const target = String(namespace || '').trim();
   if (!db || !target) throw new Error('financial_v7_transaction_namespace_invalid');
-  await db.runAsync(`DELETE FROM ledger_transaction_links_v7 WHERE namespace=?`, target);
-  await db.runAsync(`DELETE FROM ledger_postings_v7 WHERE namespace=?`, target);
-  await db.runAsync(`DELETE FROM ledger_financial_transactions_v7 WHERE namespace=?`, target);
-  await db.runAsync(`DELETE FROM ledger_exchange_rates_v7 WHERE namespace=?`, target);
-  await db.runAsync(`DELETE FROM ledger_accounts_v7 WHERE namespace=?`, target);
-  await db.runAsync(`DELETE FROM ledger_entities_v7 WHERE namespace=?`, target);
-  await db.runAsync(`DELETE FROM ledger_workspace_state_v7 WHERE namespace=?`, target);
+  const results = [];
+  results.push(await db.runAsync(`DELETE FROM ledger_transaction_links_v7 WHERE namespace=?`, target));
+  results.push(await db.runAsync(`DELETE FROM ledger_postings_v7 WHERE namespace=?`, target));
+  results.push(await db.runAsync(`DELETE FROM ledger_financial_transactions_v7 WHERE namespace=?`, target));
+  results.push(await db.runAsync(`DELETE FROM ledger_exchange_rates_v7 WHERE namespace=?`, target));
+  results.push(await db.runAsync(`DELETE FROM ledger_accounts_v7 WHERE namespace=?`, target));
+  results.push(await db.runAsync(`DELETE FROM ledger_entities_v7 WHERE namespace=?`, target));
+  results.push(await db.runAsync(`DELETE FROM ledger_workspace_state_v7 WHERE namespace=?`, target));
+  return results.reduce((count, result) => count + Number(result?.changes || 0), 0);
 };
 
 export const copyFinancialNamespaceFromStageInTransactionV7 = async ({
@@ -3919,11 +3945,16 @@ export const clearFinancialWorkspaceV7 = async ({ namespace = 'guest', database 
   const target = String(namespace || '').trim();
   if (!target) return false;
   await enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
-    await clearFinancialNamespaceRowsInTransactionV7(txn, target);
-    await txn.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=?`, target);
-    await txn.runAsync(`DELETE FROM ledger_inbox_v2 WHERE namespace=?`, target);
-    await txn.runAsync(`DELETE FROM ledger_sync_state_v7 WHERE namespace=?`, target);
-    await txn.runAsync(`DELETE FROM ledger_migration_audits_v7 WHERE namespace=?`, target);
+    const cleared = await clearFinancialNamespaceRowsInTransactionV7(txn, target);
+    const cleanup = [
+      await txn.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=?`, target),
+      await txn.runAsync(`DELETE FROM ledger_inbox_v2 WHERE namespace=?`, target),
+      await txn.runAsync(`DELETE FROM ledger_sync_state_v7 WHERE namespace=?`, target),
+      await txn.runAsync(`DELETE FROM ledger_migration_audits_v7 WHERE namespace=?`, target),
+    ];
+    if (cleared > 0 || cleanup.some(result => Number(result?.changes || 0) > 0)) {
+      await advanceActiveFinancialGenerationInTransactionV13(txn, target);
+    }
   }));
   return true;
 };

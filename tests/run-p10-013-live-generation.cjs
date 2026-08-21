@@ -11,6 +11,7 @@ let source = fs.readFileSync(filename, 'utf8').replace(/export const /g, 'const 
 source += `\nmodule.exports = {
   FINANCIAL_LIVE_GENERATION_TOKEN_VERSION, registerLiveGenerationInTransactionV13,
   readLiveGenerationInTransactionV13, advanceLiveGenerationInTransactionV13,
+  advanceLiveGenerationForMutationInTransactionV13,
 };`;
 const compiled = new Module(filename, module);
 compiled.filename = filename;
@@ -19,6 +20,7 @@ compiled._compile(source, filename);
 const {
   FINANCIAL_LIVE_GENERATION_TOKEN_VERSION, registerLiveGenerationInTransactionV13,
   readLiveGenerationInTransactionV13, advanceLiveGenerationInTransactionV13,
+  advanceLiveGenerationForMutationInTransactionV13,
 } = compiled.exports;
 
 class AsyncSqlite {
@@ -43,7 +45,12 @@ const inTransaction = task => db.withExclusiveTransactionAsync(task);
 
 (async () => {
   try {
-    db.native.exec('CREATE TABLE ledger_v7_meta(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT NOT NULL)');
+    db.native.exec(`CREATE TABLE ledger_v7_meta(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT NOT NULL);
+      CREATE TABLE ledger_sync_identity_v8(
+        namespace TEXT PRIMARY KEY,ledger_id TEXT NOT NULL,restore_epoch INTEGER NOT NULL,
+        protocol_version INTEGER NOT NULL,minimum_supported_version INTEGER NOT NULL,
+        created_at TEXT NOT NULL,updated_at TEXT NOT NULL
+      );`);
     assert.equal(FINANCIAL_LIVE_GENERATION_TOKEN_VERSION, 1);
 
     const registered = await inTransaction(txn => registerLiveGenerationInTransactionV13({ database: txn, ...alpha }));
@@ -77,6 +84,27 @@ const inTransaction = task => db.withExclusiveTransactionAsync(task);
     const third = await inTransaction(txn => advanceLiveGenerationInTransactionV13({ database: txn, ...alpha }));
     assert.deepEqual([second.generation, third.generation], [2, 3],
       'two sequential successful operations must each advance exactly once');
+
+    const mutationNamespace = 'account:mutation-bootstrap';
+    const mutationFirst = await inTransaction(txn => advanceLiveGenerationForMutationInTransactionV13({
+      database: txn, namespace: mutationNamespace,
+    }));
+    const mutationSecond = await inTransaction(txn => advanceLiveGenerationForMutationInTransactionV13({
+      database: txn, namespace: mutationNamespace,
+    }));
+    assert.deepEqual([mutationFirst.generation, mutationSecond.generation], [1, 2],
+      'two sequential real mutations bootstrap once then advance once each');
+    await assert.rejects(
+      inTransaction(async txn => {
+        await advanceLiveGenerationForMutationInTransactionV13({ database: txn, namespace: 'account:mutation-rollback' });
+        throw new Error('mutation_generation_rollback');
+      }),
+      /mutation_generation_rollback/,
+    );
+    assert.equal(await db.getFirstAsync(
+      'SELECT value FROM ledger_v7_meta WHERE key=?',
+      'financial_live_generation_v13:account:mutation-rollback',
+    ), null, 'failed mutation bootstrap and generation both roll back');
 
     await inTransaction(txn => registerLiveGenerationInTransactionV13({ database: txn, ...beta }));
     await inTransaction(txn => advanceLiveGenerationInTransactionV13({ database: txn, ...beta }));

@@ -53,6 +53,10 @@ source = source
       'const replaceColdArchiveNamespaceFromStageInTransaction = async () => true;',
     ].join('\n'),
   )
+  .replace(
+    /import \{\s*advanceLiveGenerationForMutationInTransactionV13,?\s*\} from '\.\/financialLiveGenerationV13';/,
+    "const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used'); };",
+  )
   .replace(/export const /g, 'const ')
   .replace(/export async function /g, 'async function ');
 

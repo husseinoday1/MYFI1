@@ -60,6 +60,8 @@ const getLedgerDb = async () => globalThis.__P10_DB__;
 const runLedgerExclusiveTransaction = (db, task) => globalThis.__P10_EXCLUSIVE__(db, task);`)
   .replace(/import \{ defaultScopeForProfile, normalizeScope \} from '\.\/modules';/,
     `const defaultScopeForProfile = () => 'personal'; const normalizeScope = value => value;`)
+  .replace(/import \{ advanceLiveGenerationForMutationInTransactionV13 \} from '\.\/financialLiveGenerationV13';/,
+    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used'); };`)
   .replace(/export const /g, 'const ');
 archiveSource += `\nmodule.exports = {
   ensureColdArchiveSchema, clearColdArchiveNamespaceInTransaction,
@@ -88,6 +90,8 @@ const mergeCloudWorkspaceCfg = (localCfg = {}, cloudCfg = {}) => ({ ...(localCfg
   .replace(/import \{[\s\S]*?\} from '\.\/localArchiveRepository';/,
     `const { clearColdArchiveNamespaceInTransaction, ensureColdArchiveSchema,
   replaceColdArchiveNamespaceFromStageInTransaction } = globalThis.__P10_ARCHIVE__;`)
+  .replace(/import \{[\s\S]*?\} from '\.\/financialLiveGenerationV13';/,
+    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used'); };`)
   .replace(/export const /g, 'const ').replace(/export async function /g, 'async function ').replace(/export function /g, 'function ');
 repositorySource += `\nmodule.exports = {
   FINANCIAL_LEDGER_SCHEMA_VERSION, FINANCIAL_LEDGER_V7_SCHEMA_SQL, FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL,
@@ -329,22 +333,31 @@ const coordinatorAdapters = () => ({
     assert.equal((await readCanonicalRestoreRecoveryStateV11({ namespace, database })).recovery.status, 'local_promoted_pending_reload', 'a crash before durable reload state remains retryable');
 
     database.close(); database = new AsyncSqlite(filename); globalThis.__P10_DB__ = database;
-    let winningRecovery = null;
-    const staleRecovery = await recoverCanonicalRestoreAfterCommitV11({
+    let releaseStaleReload = null;
+    let staleReloadStarted = null;
+    const staleReloadGate = new Promise(resolve => { releaseStaleReload = resolve; });
+    const staleReloadStartedGate = new Promise(resolve => { staleReloadStarted = resolve; });
+    const staleRecoveryPromise = recoverCanonicalRestoreAfterCommitV11({
       namespace,
       database,
       reload: async ({ source }) => {
-        winningRecovery = await recoverCanonicalRestoreAfterCommitV11({
-          namespace, database,
-          reload: async ({ source: winnerSource }) => ({ ok: winnerSource.transactions[0]?.id === 'tx-new' }),
-        });
+        staleReloadStarted();
+        await staleReloadGate;
         return { ok: source.transactions[0]?.id === 'tx-new' };
       },
     });
+    await staleReloadStartedGate;
+    const winningRecovery = await recoverCanonicalRestoreAfterCommitV11({
+      namespace,
+      database,
+      reload: async ({ source }) => ({ ok: source.transactions[0]?.id === 'tx-new' }),
+    });
+    releaseStaleReload();
+    const staleRecovery = await staleRecoveryPromise;
     assert.equal(winningRecovery.ok, true);
     assert.equal(staleRecovery.ok, true);
     assert.equal(staleRecovery.idempotent, true,
-      'a stale reload callback must accept the matching durable result without overwriting it');
+      'an interleaved stale recovery must accept the matching durable result without overwriting it');
     const completed = await readCanonicalRestoreRecoveryStateV11({ namespace, database });
     assert.equal(completed.recovery.status, 'local_reloaded_reconciliation_required');
     const repeated = await recoverCanonicalRestoreAfterCommitV11({ namespace, database, reload: async () => ({ ok: true }) });
