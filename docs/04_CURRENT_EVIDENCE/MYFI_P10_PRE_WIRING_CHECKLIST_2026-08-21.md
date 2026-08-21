@@ -95,6 +95,21 @@ replacement should not break the shipped app — that was verified by grep, not 
 it. But "adds a new RPC" was the wrong summary for a migration that rewrites a live
 function and alters a live table, and the difference matters to whoever approves it.
 
+**Reaffirmed by the user, 2026-08-21, after the correction above.** They were shown that
+the migration rewrites a live function and alters a live table, offered the preflight /
+apply / postcheck round, and chose to leave it unapplied.
+
+The reasoning, so it is not re-litigated: nothing needs it. All four modules that would
+call `advance_financial_restore_epoch_v3` have zero callers, and no live path is waiting
+on it. Applying it today would buy a production change with no benefit against it, and
+would break the rule this project set for itself — the migration goes in when P10-012 is
+actually being tested, so it is applied and exercised in the same session rather than
+sitting applied and unused.
+
+Rolling back a `create or replace` is not a restore; it is a second production edit that
+redefines the function from the August migration's body. That asymmetry is the reason to
+wait for a moment when the change earns its risk.
+
 **Decision (Planning & Audit, 2026-08-21):** it stays unapplied. Not as a side effect of
 wiring, of a test, or of anything else. Applying it needs the coordinator's direct
 approval and its own round: preflight against the live schema, reviewed migration, apply,
