@@ -2,6 +2,7 @@
 // This is intentionally an operational rollback test, not a source-text contract.
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const Module = require('node:module');
@@ -117,6 +118,22 @@ repositorySource += `\nmodule.exports = {
 };\n`;
 const repository = compile(repositoryFilename, repositorySource);
 
+const proofCountKeys = Object.freeze([
+  'transactions', 'postings', 'links', 'accounts', 'exchangeRates', 'entities',
+  'coldArchiveBundles', 'coldArchiveRecords',
+]);
+const isCanonicalRestoreOperationIdV11 = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+const deriveCanonicalRestoreProofDigestV11 = ({ operationId, ledgerId, fromEpoch, toEpoch, semanticHash, validatorVersion, counts: proofCounts }) => {
+  const orderedCounts = Object.fromEntries(proofCountKeys.map(key => [key, Number(proofCounts[key])]));
+  return crypto.createHash('sha256').update(JSON.stringify({
+    domain: 'MYFI:P10-012:RESTORE-PROOF:V1',
+    operationId: String(operationId).toLowerCase(), ledgerId: String(ledgerId),
+    fromEpoch: Number(fromEpoch), toEpoch: Number(toEpoch), semanticHash: String(semanticHash).toLowerCase(),
+    validatorVersion: Number(validatorVersion), counts: orderedCounts,
+  })).digest('hex');
+};
+globalThis.__P10_RESTORE_PROOF__ = { deriveCanonicalRestoreProofDigestV11, isCanonicalRestoreOperationIdV11 };
+
 const promotionFilename = path.join(root, 'src/lib/financialRestorePromotionV11.js');
 let promotionSource = fs.readFileSync(promotionFilename, 'utf8')
   .replace(
@@ -138,6 +155,10 @@ const mergeCloudWorkspaceCfg = (localCfg = {}, cloudCfg = {}) => ({ ...(localCfg
   'coldArchiveBundles', 'coldArchiveRecords',
 ]);`,
   )
+  .replace(
+    /import \{[\s\S]*?\} from '\.\/financialRestoreProofV11';/,
+    `const { deriveCanonicalRestoreProofDigestV11, isCanonicalRestoreOperationIdV11 } = globalThis.__P10_RESTORE_PROOF__;`,
+  )
   .replace(/export const /g, 'const ');
 promotionSource += `\nmodule.exports = { promoteCanonicalRestoreStageV11 };\n`;
 globalThis.__P10_REPOSITORY__ = repository;
@@ -153,6 +174,16 @@ const counts = Object.freeze({
   accounts: 1, transactions: 1, postings: 1, links: 0, exchangeRates: 0, entities: 0,
   coldArchiveBundles: 1, coldArchiveRecords: 1,
 });
+const operationIds = Object.freeze({
+  7: '11111111-1111-4111-8111-111111111111',
+  8: '22222222-2222-4222-8222-222222222222',
+});
+const serverEventIds = Object.freeze({
+  7: '33333333-3333-4333-8333-333333333333',
+  8: '44444444-4444-4444-8444-444444444444',
+});
+const authUserId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const deviceId = 'device-p10-010';
 const proof = Object.freeze({ semanticHash: hashOne, counts, validatorVersion: 2 });
 const stageMetaKey = stage => `canonical_restore_stage_v11:${stage}`;
 const intentKey = `restore_intent:${namespace}`;
@@ -192,12 +223,25 @@ const seedStage = async ({ stage, label, hash, epoch }) => {
   }), now);
 };
 
-const seedIntent = async (from) => run(
-  `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
-  intentKey,
-  JSON.stringify({ version: 1, namespace, ledgerId: 'ledger-disposable', fromEpoch: from, toEpoch: from + 1, operation: 'backup_restore' }),
-  now,
-);
+const seedIntent = async ({ from, stage, stageProof }) => {
+  const operationId = operationIds[from];
+  const restoreProofDigest = deriveCanonicalRestoreProofDigestV11({
+    operationId, ledgerId: 'ledger-disposable', fromEpoch: from, toEpoch: from + 1,
+    semanticHash: stageProof.semanticHash, validatorVersion: stageProof.validatorVersion, counts: stageProof.counts,
+  });
+  return run(
+    `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+    intentKey,
+    JSON.stringify({
+      version: 2, stateVersion: 1, status: 'server_epoch_proven', namespace,
+      authUserId, ledgerId: 'ledger-disposable', fromEpoch: from, toEpoch: from + 1,
+      operation: 'backup_restore', operationId, serverEventId: serverEventIds[from], deviceId,
+      stageNamespace: stage, semanticHash: stageProof.semanticHash, counts: stageProof.counts,
+      validatorVersion: stageProof.validatorVersion, restoreProofDigest, serverProvedAt: now,
+    }),
+    now,
+  );
+};
 
 const snapshot = async () => {
   const tables = [
@@ -237,7 +281,7 @@ const snapshot = async () => {
     (ledger_id,restore_epoch,mutation_id,command_id,command_sequence,server_sequence,received_at)
     VALUES (?,?,?,?,?,?,?)`, 'ledger-disposable', 7, 'old-v3-inbox', 'command-old', 1, 1, now);
   await seedStage({ stage: stageOne, label: 'new', hash: hashOne, epoch: 7 });
-  await seedIntent(7);
+  await seedIntent({ from: 7, stage: stageOne, stageProof: proof });
 
   const before = await snapshot();
   const emptyCounts = await promoteCanonicalRestoreStageV11({
@@ -301,7 +345,11 @@ const snapshot = async () => {
     'promotion must retain device-local preferences and overlay only the financial config allowlist');
   assert.equal((await database.getFirstAsync(`SELECT restore_epoch FROM ledger_sync_identity_v8 WHERE namespace=?`, namespace)).restore_epoch, 8);
   assert.equal(await database.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=?`, intentKey), null, 'epoch primitive consumes its intent');
-  assert.ok(await database.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=?`, `canonical_restore_promotion_v11:${namespace}`), 'durable local promotion state exists');
+  const promotionState = JSON.parse((await database.getFirstAsync(
+    `SELECT value FROM ledger_v7_meta WHERE key=?`, `canonical_restore_promotion_v11:${namespace}`,
+  )).value);
+  assert.equal(promotionState.stateVersion, 2,
+    'atomic intent-to-promotion handoff must advance, never reset, stateVersion');
   assert.equal(await database.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=?`, stageMetaKey(stageOne)), null, 'consumed stage readiness is removed atomically');
   assert.equal((await all(`SELECT mutation_id FROM ledger_outbox_v2 WHERE namespace=?`, namespace)).length, 1, 'old V2 outbox remains evidence');
   assert.equal((await all(`SELECT mutation_id FROM ledger_inbox_v2 WHERE namespace=?`, namespace)).length, 1, 'old V2 inbox remains evidence');
@@ -312,7 +360,11 @@ const snapshot = async () => {
   const stageTwo = `${namespace}::restore-stage::two`;
   const hashTwo = 'b'.repeat(64);
   await seedStage({ stage: stageTwo, label: 'newer', hash: hashTwo, epoch: 8 });
-  await seedIntent(8);
+  await seedIntent({
+    from: 8,
+    stage: stageTwo,
+    stageProof: { semanticHash: hashTwo, counts, validatorVersion: 2 },
+  });
   const second = await promoteCanonicalRestoreStageV11({
     namespace, stageNamespace: stageTwo,
     stageProof: { semanticHash: hashTwo, counts, validatorVersion: 2 },

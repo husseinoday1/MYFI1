@@ -19,11 +19,20 @@ import {
   ensureFinancialLedgerV7,
 } from './financialLedgerV7Repository';
 import { enqueueLedgerWrite, getLedgerDb, runLedgerExclusiveTransaction } from './ledgerDatabase';
+import {
+  deriveCanonicalRestoreProofDigestV11,
+  isCanonicalRestoreOperationIdV11,
+} from './financialRestoreProofV11';
 
 const PROMOTION_META_PREFIX = 'canonical_restore_promotion_v11:';
 const RECOVERY_STATES = new Set([
   'local_promoted_pending_reload',
   'local_reloaded_reconciliation_required',
+  'cloud_bootstrapping',
+  'cloud_readback_verified',
+  'shadow_quiescent',
+  'recovery_required',
+  'v2_activated',
 ]);
 
 const text = value => String(value ?? '');
@@ -60,16 +69,37 @@ const fault = async (injector, boundary) => {
   if (typeof injector === 'function') await injector(boundary);
 };
 
-const validRestoreState = (state, namespace) => (
-  isObject(state)
-  && RECOVERY_STATES.has(text(state.status))
-  && text(state.namespace) === namespace
-  && nonBlank(state.ledgerId)
-  && Number.isInteger(Number(state.fromEpoch)) && Number(state.fromEpoch) >= 1
-  && Number.isInteger(Number(state.toEpoch)) && Number(state.toEpoch) === Number(state.fromEpoch) + 1
-  && validHash(state.semanticHash)
-  && validCounts(state.counts)
-);
+const validRestoreState = (state, namespace) => {
+  if (!isObject(state)
+      || Number(state.version) !== 2
+      || !Number.isInteger(Number(state.stateVersion)) || Number(state.stateVersion) < 1
+      || !RECOVERY_STATES.has(text(state.status))
+      || text(state.namespace) !== namespace
+      || !isCanonicalRestoreOperationIdV11(state.authUserId)
+      || !isCanonicalRestoreOperationIdV11(state.operationId)
+      || !isCanonicalRestoreOperationIdV11(state.serverEventId)
+      || !nonBlank(state.deviceId)
+      || !nonBlank(state.ledgerId)
+      || Number.isNaN(Number(state.validatorVersion)) || Number(state.validatorVersion) < 1
+      || !Number.isInteger(Number(state.fromEpoch)) || Number(state.fromEpoch) < 1
+      || !Number.isInteger(Number(state.toEpoch)) || Number(state.toEpoch) !== Number(state.fromEpoch) + 1
+      || !validHash(state.semanticHash)
+      || !validHash(state.restoreProofDigest)
+      || !validCounts(state.counts)) return false;
+  try {
+    return deriveCanonicalRestoreProofDigestV11({
+      operationId: state.operationId,
+      ledgerId: state.ledgerId,
+      fromEpoch: state.fromEpoch,
+      toEpoch: state.toEpoch,
+      semanticHash: state.semanticHash,
+      validatorVersion: state.validatorVersion,
+      counts: state.counts,
+    }) === text(state.restoreProofDigest).toLowerCase();
+  } catch {
+    return false;
+  }
+};
 
 const readRestoreState = async (database, namespace) => {
   const row = await database.getFirstAsync(
@@ -91,13 +121,14 @@ export const readCanonicalRestoreRecoveryStateV11 = async ({ namespace, database
     return {
       supported: true,
       ok: true,
-      pending: true,
+      pending: text(state.status) !== 'v2_activated',
       recovery: {
         status: text(state.status),
         namespace: target,
+        operationId: text(state.operationId).toLowerCase(),
         ledgerId: text(state.ledgerId),
         restoreEpoch: Number(state.toEpoch),
-        reconciliationRequired: true,
+        reconciliationRequired: text(state.status) !== 'v2_activated',
       },
     };
   } catch (error) {
@@ -127,6 +158,19 @@ export const recoverCanonicalRestoreAfterCommitV11 = async ({
     const beforeReload = await readRestoreState(db, target);
     if (!beforeReload) return failure('canonical_restore_reload_state_missing');
     if (!validRestoreState(beforeReload, target)) return failure('canonical_restore_reload_state_invalid');
+    if (text(beforeReload.status) !== 'local_promoted_pending_reload') {
+      return {
+        supported: true,
+        ok: true,
+        namespace: target,
+        operationId: text(beforeReload.operationId).toLowerCase(),
+        ledgerId: text(beforeReload.ledgerId),
+        restoreEpoch: Number(beforeReload.toEpoch),
+        reconciliationRequired: text(beforeReload.status) !== 'v2_activated',
+        idempotent: true,
+        status: text(beforeReload.status),
+      };
+    }
 
     // This is a fresh, transaction-consistent canonical SQLite read, not a Zustand
     // cache or a compatibility snapshot. It is intentionally repeated after a crash.
@@ -161,6 +205,9 @@ export const recoverCanonicalRestoreAfterCommitV11 = async ({
         `SELECT ledger_id,restore_epoch FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`, target,
       );
       if (!validRestoreState(state, target)
+          || text(state.status) !== 'local_promoted_pending_reload'
+          || text(state.operationId).toLowerCase() !== text(beforeReload.operationId).toLowerCase()
+          || Number(state.stateVersion) !== Number(beforeReload.stateVersion)
           || text(state.ledgerId) !== text(beforeReload.ledgerId)
           || text(state.semanticHash).toLowerCase() !== actualHash
           || !sameCounts(state.counts, actualCounts)
@@ -177,6 +224,7 @@ export const recoverCanonicalRestoreAfterCommitV11 = async ({
         promotionMetaKey(target),
         safeJson({
           ...state,
+          stateVersion: Number(state.stateVersion) + 1,
           status: 'local_reloaded_reconciliation_required',
           reloadedAt,
           reconciliationRequired: true,
@@ -190,6 +238,7 @@ export const recoverCanonicalRestoreAfterCommitV11 = async ({
       supported: true,
       ok: true,
       namespace: target,
+      operationId: text(beforeReload.operationId).toLowerCase(),
       ledgerId: text(beforeReload.ledgerId),
       restoreEpoch: Number(beforeReload.toEpoch),
       reconciliationRequired: true,

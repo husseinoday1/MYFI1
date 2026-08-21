@@ -136,6 +136,16 @@ const manifestCounts = canonical => ({
   coldArchiveBundles: canonical.archives.length,
   coldArchiveRecords: canonical.archives.reduce((sum, archive) => sum + archive.records.length, 0),
 });
+const isCanonicalRestoreOperationIdV11 = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+const deriveCanonicalRestoreProofDigestV11 = ({ operationId, ledgerId, fromEpoch, toEpoch, semanticHash, validatorVersion, counts }) => {
+  const orderedCounts = Object.fromEntries(countKeys.map(key => [key, Number(counts[key])]));
+  return crypto.createHash('sha256').update(JSON.stringify({
+    domain: 'MYFI:P10-012:RESTORE-PROOF:V1', operationId: String(operationId).toLowerCase(),
+    ledgerId: String(ledgerId), fromEpoch: Number(fromEpoch), toEpoch: Number(toEpoch),
+    semanticHash: String(semanticHash).toLowerCase(), validatorVersion: Number(validatorVersion), counts: orderedCounts,
+  })).digest('hex');
+};
+globalThis.__P10_RESTORE_PROOF__ = { deriveCanonicalRestoreProofDigestV11, isCanonicalRestoreOperationIdV11 };
 
 const promotionFilename = path.join(root, 'src/lib/financialRestorePromotionV11.js');
 let promotionSource = fs.readFileSync(promotionFilename, 'utf8')
@@ -145,6 +155,8 @@ let promotionSource = fs.readFileSync(promotionFilename, 'utf8')
   .replace(/import \{ cloudWorkspaceCfg, mergeCloudWorkspaceCfg \} from '\.\/cloudWorkspaceMetadata\.js';/,
     `const cloudWorkspaceCfg = cfg => cfg?.currency === undefined ? {} : { currency: cfg.currency };
 const mergeCloudWorkspaceCfg = (localCfg = {}, cloudCfg = {}) => ({ ...(localCfg || {}), ...cloudWorkspaceCfg(cloudCfg) });`)
+  .replace(/import \{[\s\S]*?\} from '\.\/financialRestoreProofV11';/,
+    `const { deriveCanonicalRestoreProofDigestV11, isCanonicalRestoreOperationIdV11 } = globalThis.__P10_RESTORE_PROOF__;`)
   .replace(/export const /g, 'const ');
 globalThis.__P10_COUNT_KEYS__ = countKeys;
 promotionSource += `\nmodule.exports = { promoteCanonicalRestoreStageV11 };\n`;
@@ -158,6 +170,8 @@ let recoverySource = fs.readFileSync(recoveryFilename, 'utf8')
   .replace(/import \{[\s\S]*?\} from '\.\/financialLedgerV7Repository';/, `const { ensureFinancialLedgerV7 } = globalThis.__P10_REPOSITORY__;`)
   .replace(/import \{ enqueueLedgerWrite, getLedgerDb, runLedgerExclusiveTransaction \} from '\.\/ledgerDatabase';/,
     `const enqueueLedgerWrite = task => globalThis.__P10_QUEUE__(task); const getLedgerDb = async () => globalThis.__P10_DB__; const runLedgerExclusiveTransaction = (db, task) => globalThis.__P10_EXCLUSIVE__(db, task);`)
+  .replace(/import \{[\s\S]*?\} from '\.\/financialRestoreProofV11';/,
+    `const { deriveCanonicalRestoreProofDigestV11, isCanonicalRestoreOperationIdV11 } = globalThis.__P10_RESTORE_PROOF__;`)
   .replace(/export const /g, 'const ');
 recoverySource += `\nmodule.exports = { readCanonicalRestoreRecoveryStateV11, recoverCanonicalRestoreAfterCommitV11 };\n`;
 globalThis.__P10_CANON__ = canonicalize;
@@ -165,9 +179,21 @@ globalThis.__P10_HASH__ = hash;
 globalThis.__P10_COUNTS__ = manifestCounts;
 const { readCanonicalRestoreRecoveryStateV11, recoverCanonicalRestoreAfterCommitV11 } = compile(recoveryFilename, recoverySource);
 
+const coordinatorFilename = path.join(root, 'src/lib/financialRestoreCloudRecoveryV11.js');
+let coordinatorSource = fs.readFileSync(coordinatorFilename, 'utf8')
+  .replace(/import \{ enqueueLedgerWrite, getLedgerDb, runLedgerExclusiveTransaction \} from '\.\/ledgerDatabase';/,
+    `const enqueueLedgerWrite = task => globalThis.__P10_QUEUE__(task); const getLedgerDb = async () => globalThis.__P10_DB__; const runLedgerExclusiveTransaction = (db, task) => globalThis.__P10_EXCLUSIVE__(db, task);`)
+  .replace(/import \{[\s\S]*?\} from '\.\/financialRestoreProofV11';/,
+    `const { deriveCanonicalRestoreProofDigestV11, isCanonicalRestoreOperationIdV11 } = globalThis.__P10_RESTORE_PROOF__;`)
+  .replace(/export const /g, 'const ');
+coordinatorSource += `\nmodule.exports = { runCanonicalRestoreCloudRecoveryV11 };\n`;
+const { runCanonicalRestoreCloudRecoveryV11 } = compile(coordinatorFilename, coordinatorSource);
+
 const now = '2026-08-21T13:00:00.000Z';
-const namespace = 'user:restart-proof';
+const namespace = 'workspace:restart-proof';
 const stage = `${namespace}::restore-stage::restart`;
+const authUserId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const operationId = '11111111-1111-4111-8111-111111111111';
 const run = (sql, ...params) => database.runAsync(sql, ...params);
 
 const seedRows = async (target, label) => {
@@ -178,11 +204,79 @@ const seedRows = async (target, label) => {
   await run(`INSERT INTO cold_archive_transactions(namespace,scope,year,id,date_iso,ts,wallet_id,category_id,flow_type,search_text,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, target, 'personal', label === 'new' ? 2025 : 2024, `archive-${label}`, '2025-01-01', 1, `wallet-${label}`, null, 'expense', label, JSON.stringify({ id: `archive-${label}` }));
 };
 
+const coordinatorAdapters = () => ({
+  preflight: async request => {
+    const identity = await database.getFirstAsync(
+      `SELECT ledger_id,restore_epoch FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`, namespace,
+    );
+    const stageMarker = await database.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, `canonical_restore_stage_v11:${stage}`,
+    );
+    return {
+      ok: true,
+      namespace,
+      authUserId,
+      ledgerId: identity?.ledger_id,
+      restoreEpoch: Number(identity?.restore_epoch),
+      activeProtocolVersion: 2,
+      pendingMutationCount: 0,
+      stageReady: request.resumePhase === 'post_commit' || !!stageMarker,
+      sqliteIntegrity: true,
+      writerQueueDrained: true,
+      storageReady: true,
+      maintenanceOwned: true,
+      workspaceAuthorized: true,
+    };
+  },
+  getAuthenticatedUserId: async () => ({ authUserId }),
+  advanceOrResolveRestoreEpoch: async request => ({
+    ok: true, outcome: 'already_advanced', eventId: '33333333-3333-4333-8333-333333333333',
+    ownerId: authUserId, ledgerId: 'ledger-restart', fromEpoch: 7, toEpoch: 8,
+    reason: 'backup_restore', deviceId: 'device-p10-011', operationId,
+    restoreProofDigest: request.restoreProofDigest,
+  }),
+  promoteCanonicalRestoreStage: args => promoteCanonicalRestoreStageV11(args),
+  reloadCanonicalRestore: ({ namespace: targetNamespace, database: targetDatabase }) => (
+    recoverCanonicalRestoreAfterCommitV11({
+      namespace: targetNamespace,
+      database: targetDatabase,
+      reload: async ({ source }) => ({ ok: source.transactions[0]?.id === 'tx-new' }),
+    })
+  ),
+  activateRestoreBaselineV2: async ({ onPhase, operationId: boundOperationId }) => {
+    await onPhase('cloud_readback_verified', {
+      ledgerId: 'ledger-restart', restoreEpoch: 8, bootstrapId: 'bootstrap-restart',
+      identityVerified: true, manifestVerified: true, rowCountVerified: true,
+    });
+    await onPhase('shadow_quiescent', {
+      ledgerId: 'ledger-restart', restoreEpoch: 8, pendingAfterSync: 0,
+      conflictCount: 0, shadowOnly: true, productionApplyPerformed: false,
+    });
+    return {
+      ok: true, operationId: boundOperationId, ledgerId: 'ledger-restart', restoreEpoch: 8,
+      activeProtocolVersion: 2, productionApplyPerformed: false,
+      readbackVerified: true, shadowQuiescent: true,
+    };
+  },
+});
+
 (async () => {
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'myfi-p10-011-'));
-  const filename = path.join(temp, 'restart.sqlite');
+  const externalFilename = String(process.env.MYFI_P10_012_RUNTIME_DB_FILE || '').trim();
+  const resumeExternal = process.env.MYFI_P10_012_RUNTIME_RESUME === '1';
+  const hardExitBoundary = String(process.env.MYFI_P10_012_HARD_EXIT_BOUNDARY || '').trim();
+  const temp = externalFilename ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'myfi-p10-011-'));
+  const filename = externalFilename || path.join(temp, 'restart.sqlite');
   try {
     database = new AsyncSqlite(filename); globalThis.__P10_DB__ = database;
+    if (resumeExternal) {
+      const resumed = await runCanonicalRestoreCloudRecoveryV11({
+        namespace, database, adapters: coordinatorAdapters(),
+      });
+      assert.equal(resumed.ok, true, JSON.stringify(resumed));
+      assert.equal(resumed.status, 'v2_activated');
+      console.log('MYFI P10-012 REAL FINANCIAL HARD-EXIT RESUME: PASS');
+      return;
+    }
     await database.execAsync(`${repository.FINANCIAL_LEDGER_V7_SCHEMA_SQL}\n${repository.FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL}`);
     await archive.ensureColdArchiveSchema();
     await run(`INSERT INTO ledger_currencies(code,minor_exponent,enabled) VALUES ('IQD',3,1)`);
@@ -195,9 +289,27 @@ const seedRows = async (target, label) => {
     const stagedSource = await backup.readCanonicalBackupSource({ namespace: stage });
     const proof = { semanticHash: hash(canonicalize(stagedSource)), counts: manifestCounts(canonicalize(stagedSource)), validatorVersion: 1 };
     await run(`INSERT INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`, `canonical_restore_stage_v11:${stage}`, JSON.stringify({ version: 1, state: 'ready', namespace: stage, ledgerId: 'ledger-restart', ...proof }), now);
-    await run(`INSERT INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`, `restore_intent:${namespace}`, JSON.stringify({ version: 1, namespace, ledgerId: 'ledger-restart', fromEpoch: 7, toEpoch: 8, operation: 'backup_restore' }), now);
-    const promoted = await promoteCanonicalRestoreStageV11({ namespace, stageNamespace: stage, stageProof: proof, expectedFromEpoch: 7, toEpoch: 8, database });
-    assert.equal(promoted.ok, true, 'fixture must reach the real P10-010 COMMIT');
+    const operation = {
+      namespace, authUserId, ledgerId: 'ledger-restart', fromEpoch: 7, toEpoch: 8,
+      deviceId: 'device-p10-011', operationId, stageNamespace: stage, stageProof: proof,
+    };
+    const afterCommit = await runCanonicalRestoreCloudRecoveryV11({
+      operation,
+      database,
+      adapters: coordinatorAdapters(),
+      faultInjector: point => {
+        if (hardExitBoundary && point === hardExitBoundary) process.exit(86);
+        if (!hardExitBoundary && point === 'after_local_promotion') {
+          throw new Error('p10_012_process_stop_after_local_commit');
+        }
+      },
+    });
+    if (externalFilename) {
+      throw new Error(`hard_exit_boundary_not_reached:${hardExitBoundary}:${JSON.stringify(afterCommit)}`);
+    }
+    assert.equal(afterCommit.ok, false);
+    assert.equal(afterCommit.reason, 'canonical_restore_cloud_operation_failed',
+      'fault details must not be persisted or exposed as diagnostic codes');
 
     // Equivalent to the app process disappearing immediately after COMMIT: no cache
     // reload callback and no P10-011 state write have run before the file is reopened.
@@ -217,15 +329,39 @@ const seedRows = async (target, label) => {
     assert.equal((await readCanonicalRestoreRecoveryStateV11({ namespace, database })).recovery.status, 'local_promoted_pending_reload', 'a crash before durable reload state remains retryable');
 
     database.close(); database = new AsyncSqlite(filename); globalThis.__P10_DB__ = database;
-    const recovered = await recoverCanonicalRestoreAfterCommitV11({ namespace, database, reload: async ({ source }) => ({ ok: source.transactions[0]?.id === 'tx-new' }) });
-    assert.equal(recovered.ok, true); assert.equal(recovered.reconciliationRequired, true);
+    let winningRecovery = null;
+    const staleRecovery = await recoverCanonicalRestoreAfterCommitV11({
+      namespace,
+      database,
+      reload: async ({ source }) => {
+        winningRecovery = await recoverCanonicalRestoreAfterCommitV11({
+          namespace, database,
+          reload: async ({ source: winnerSource }) => ({ ok: winnerSource.transactions[0]?.id === 'tx-new' }),
+        });
+        return { ok: source.transactions[0]?.id === 'tx-new' };
+      },
+    });
+    assert.equal(winningRecovery.ok, true);
+    assert.equal(staleRecovery.ok, false);
+    assert.equal(staleRecovery.reason, 'canonical_restore_reload_state_changed',
+      'a stale reload callback must not overwrite the newer durable state');
     const completed = await readCanonicalRestoreRecoveryStateV11({ namespace, database });
     assert.equal(completed.recovery.status, 'local_reloaded_reconciliation_required');
     const repeated = await recoverCanonicalRestoreAfterCommitV11({ namespace, database, reload: async () => ({ ok: true }) });
     assert.equal(repeated.ok, true); assert.equal(repeated.idempotent, true, 'restart recovery is safe to run twice');
+    const activated = await runCanonicalRestoreCloudRecoveryV11({
+      namespace,
+      database,
+      adapters: coordinatorAdapters(),
+    });
+    assert.equal(activated.ok, true); assert.equal(activated.status, 'v2_activated');
+    const finalRecovery = await readCanonicalRestoreRecoveryStateV11({ namespace, database });
+    assert.equal(finalRecovery.pending, false);
+    assert.equal(finalRecovery.recovery.reconciliationRequired, false);
+    console.log('[PASS] P10-012 crosses real P10-010 COMMIT, real P10-011 restart reload and shadow-only activation');
     console.log('MYFI P10-011 POST-COMMIT RESTART/RECOVERY: PASS');
   } finally {
     try { database?.close(); } catch {}
-    fs.rmSync(temp, { recursive: true, force: true });
+    if (temp) fs.rmSync(temp, { recursive: true, force: true });
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

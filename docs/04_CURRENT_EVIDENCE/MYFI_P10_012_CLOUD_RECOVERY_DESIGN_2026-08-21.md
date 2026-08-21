@@ -31,8 +31,10 @@ This review rejects seven assumptions in it:
    stop after bootstrap, verified read-back, non-mutating shadow quiescence and
    atomic activation. Normal V2 sync may resume only afterwards.
 4. “Server error means abort the intent” was too broad. A timeout may hide a
-   successful server COMMIT. Only a positive read proving that the server is still
-   at the old epoch and has no matching event permits cancellation.
+   successful server COMMIT. Independent review further proved that even a later
+   read of the old epoch is racy while the timed-out transaction may still commit.
+   Once the RPC is dispatched there is no cancellation path; one exact bounded
+   invocation of the same idempotent, ledger-locking RPC resolves behind it.
 5. Close/reopen SQLite is useful but not a literal process-kill test. The automated
    matrix must add a child-process hard exit at each durable boundary; P10-014 must
    repeat the critical locations on Android.
@@ -117,8 +119,8 @@ and epochs into a versioned promotion record while deleting the intent. After
 COMMIT, that promotion record is authoritative and P10-011 must validate/preserve the
 same fields. This is the crash-safe handoff the first design omitted.
 
-The coordinator is restartable at every arrow. It resolves a timed-out RPC by a
-bounded server evidence read. A request timeout is `server_outcome_unknown`, not
+The coordinator is restartable at every arrow. It resolves a timed-out RPC by one
+bounded exact invocation of the same ledger-locking RPC. A request timeout is `server_outcome_unknown`, not
 `failed`, not permission to cancel, and not permission to create another operation.
 
 ## Exact workflow
@@ -135,12 +137,11 @@ bounded server evidence read. A request timeout is `server_outcome_unknown`, not
 3. **Call the versioned server CAS.** Inputs are exact and bounded. A normal success
    or an automatic/exact retry returns the same event. The installed
    `supabase-js 2.110.8` may retry transient PostgREST/RPC requests, so server
-   idempotency is mandatory. After any ambiguous result, the client reads evidence
-   by owner/ledger/epoch/operation/proof-digest; it does not launch a second
-   operation.
-   Cancellation is offered only after a successful read proves old cloud epoch plus
-   no matching event. Conflict, ownership failure or mismatched evidence remains
-   fail-closed.
+   idempotency is mandatory. After an ambiguous result, the client invokes the same
+   RPC once with the identical owner/ledger/epoch/device/operation/proof inputs. Its
+   row lock serializes behind any timed-out transaction. If that resolver is also
+   ambiguous, durable backoff applies; no new operation and no cancellation are
+   permitted. Conflict, ownership failure or mismatched evidence remains fail-closed.
 4. **Revalidate and promote once locally.** Immediately before P10-010, revalidate
    the immutable READY stage against the semantic hash/counts that reproduce the
    server-bound proof digest. P10-010's one SQLite transaction promotes the
@@ -173,7 +174,8 @@ that proof without placing the raw semantic hash or row counts in the cloud.
 The new RPC is still idempotent, with no custom retry storm. Current Supabase
 documentation notes that RPC/PostgREST calls may be retried for transient failures;
 the server-side operation must therefore be safely repeatable and the client must
-resolve ambiguous outcomes by evidence read, not invoke another destructive action.
+resolve ambiguous outcomes through the same idempotent operation under the ledger
+lock, never by inferring safety from a racy unlocked read.
 
 ## Interface boundaries
 
@@ -208,11 +210,12 @@ remains silent and does not take this barrier.
    integrity, writer-queue drain and a conservative free-space/WAL budget must pass
    before the irreversible server epoch CAS. P10-014 measures the real budget; live
    restore remains disabled until that device gate exists.
-4. **Bounded network/resource behavior.** One logical RPC operation, bounded evidence
-   reads, library backoff/jitter and a durable next-retry time; no custom tight retry
-   loop. This limits Supabase requests and protects the Data API connection pool.
-5. **Stage retention rules.** Before proven server advance, a proven-safe user cancel
-   may clear the private stage. After server proof, stage and evidence are never
+4. **Bounded network/resource behavior.** One logical RPC plus at most one exact
+   ledger-locking resolver invocation, library backoff/jitter and a durable
+   next-retry time; no custom tight retry loop. This limits Supabase requests and
+   protects the Data API connection pool.
+5. **Stage retention rules.** A user may cancel only before the first server RPC is
+   dispatched. After dispatch, stage and evidence are never
    auto-deleted until local promotion succeeds or the same backup is safely re-staged
    to the exact proof digest.
 6. **Additive rollout and non-destructive rollback.** Cloud migration adds nullable
@@ -230,9 +233,9 @@ All first-round tests use a strict fake server adapter and a file-backed SQLite
 fixture. They execute real P10-010/P10-011 local code; no mock may replace their
 financial transaction.
 
-1. definitive pre-advance rejection: old local ledger unchanged; cancellation is
-   allowed only after a read proves old cloud epoch and no event;
-2. server advances but response is dropped: evidence read proves the same operation,
+1. definitive pre-dispatch rejection: old local ledger unchanged and no server call;
+   after dispatch there is no cancellation path;
+2. server advances but response is dropped: the exact ledger-locking retry proves the same operation,
    then exactly one local promotion occurs;
 3. second device / different operation ID or proof digest races: second path fails
    closed and cannot promote its stage;

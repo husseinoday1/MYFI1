@@ -10,6 +10,10 @@ import {
 } from './financialLedgerV7Repository';
 import { CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS } from './financialBackupV11';
 import { cloudWorkspaceCfg, mergeCloudWorkspaceCfg } from './cloudWorkspaceMetadata.js';
+import {
+  deriveCanonicalRestoreProofDigestV11,
+  isCanonicalRestoreOperationIdV11,
+} from './financialRestoreProofV11';
 
 const RESTORE_STAGE_MARKER = '::restore-stage::';
 const STAGE_META_PREFIX = 'canonical_restore_stage_v11:';
@@ -40,6 +44,7 @@ const safeJson = (value) => {
 };
 
 const validHash = value => /^[a-f0-9]{64}$/i.test(text(value));
+const validStateVersion = value => Number.isInteger(Number(value)) && Number(value) >= 1;
 const validCounts = value => isObject(value)
   && Object.keys(value).length === CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS.length
   && CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS.every(key => (
@@ -138,6 +143,20 @@ export const promoteCanonicalRestoreStageV11 = async ({
       const intent = parseObject(intentRow?.value);
       const stagePayload = parseObject(stageWorkspaceRow?.payload_json);
       const currentPayload = currentWorkspaceRow ? parseObject(currentWorkspaceRow.payload_json) : {};
+      let expectedRestoreProofDigest = null;
+      try {
+        expectedRestoreProofDigest = deriveCanonicalRestoreProofDigestV11({
+          operationId: intent?.operationId,
+          ledgerId: identity?.ledger_id,
+          fromEpoch: from,
+          toEpoch: next,
+          semanticHash: proof.semanticHash,
+          validatorVersion: proof.validatorVersion,
+          counts: proof.counts,
+        });
+      } catch {
+        expectedRestoreProofDigest = null;
+      }
       if (!stageMarker || stageMarker.state !== 'ready'
           || stageMarker.namespace !== stage
           || !identity?.ledger_id
@@ -148,9 +167,23 @@ export const promoteCanonicalRestoreStageV11 = async ({
           || Number(identity.restore_epoch) !== from
           || text(stageWorkspaceRow?.source_mode) !== 'shadow'
           || Number(stageWorkspaceRow?.schema_version) !== FINANCIAL_LEDGER_SCHEMA_VERSION
-          || !intent || !nonBlank(intent.operation)
+          || !intent || Number(intent.version) !== 2
+          || text(intent.status) !== 'server_epoch_proven'
+          || text(intent.operation) !== 'backup_restore'
+          || !isCanonicalRestoreOperationIdV11(intent.operationId)
+          || !isCanonicalRestoreOperationIdV11(intent.authUserId)
+          || !isCanonicalRestoreOperationIdV11(intent.serverEventId)
+          || !nonBlank(intent.deviceId)
+          || !validStateVersion(intent.stateVersion)
           || text(intent.ledgerId) !== text(identity.ledger_id)
-          || Number(intent.fromEpoch) !== from || Number(intent.toEpoch) !== next) {
+          || text(intent.namespace) !== target
+          || text(intent.stageNamespace) !== stage
+          || Number(intent.fromEpoch) !== from || Number(intent.toEpoch) !== next
+          || text(intent.semanticHash).toLowerCase() !== text(proof.semanticHash).toLowerCase()
+          || Number(intent.validatorVersion) !== Number(proof.validatorVersion)
+          || !sameCounts(intent.counts, proof.counts)
+          || !expectedRestoreProofDigest
+          || text(intent.restoreProofDigest).toLowerCase() !== expectedRestoreProofDigest) {
         throw new Error('canonical_restore_promotion_precondition_failed');
       }
       const restoredWorkspacePayload = mergeRestoredFinancialConfig({ currentPayload, stagePayload });
@@ -179,16 +212,24 @@ export const promoteCanonicalRestoreStageV11 = async ({
         `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
         promotionMetaKey(target),
         safeJson({
-          version: 1,
+          version: 2,
+          stateVersion: Number(intent.stateVersion) + 1,
           status: 'local_promoted_pending_reload',
           namespace: target,
+          authUserId: text(intent.authUserId).toLowerCase(),
           ledgerId: text(identity.ledger_id),
           fromEpoch: from,
           toEpoch: next,
           operation: text(intent.operation),
+          operationId: text(intent.operationId).toLowerCase(),
+          serverEventId: text(intent.serverEventId).toLowerCase(),
+          deviceId: text(intent.deviceId).trim(),
+          restoreProofDigest: expectedRestoreProofDigest,
           stageNamespace: stage,
           semanticHash: text(proof.semanticHash).toLowerCase(),
           counts: proof.counts,
+          validatorVersion: Number(proof.validatorVersion),
+          serverProvedAt: intent.serverProvedAt || null,
           promotedAt: now,
         }),
         now,
@@ -213,6 +254,8 @@ export const promoteCanonicalRestoreStageV11 = async ({
         namespace: target,
         ledgerId: advanced.ledgerId,
         restoreEpoch: advanced.restoreEpoch,
+        operationId: text(intent.operationId).toLowerCase(),
+        restoreProofDigest: expectedRestoreProofDigest,
         semanticHash: text(proof.semanticHash).toLowerCase(),
       };
     }});
