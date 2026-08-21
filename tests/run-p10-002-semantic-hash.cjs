@@ -74,6 +74,7 @@ const ledger = (overrides = {}) => ({
   }],
   transactions: [{
     id: 't1', revision: 1, archivedAt: null, deletedAt: null, archiveYear: null,
+    storage: { idempotencyKey: 'expense:t1', deviceId: 'device-origin', createdAt: '2026-01-02T00:00:00.000Z' },
     // The real shape stored in payload_json: plan.original, the app-level
     // transaction. Amounts are amt / walletAmount / baseAmount in major units.
     // An invented shape here would let the module read undefined for every amount
@@ -215,6 +216,16 @@ const changedLiveRecord = ledger();
 changedLiveRecord.transactions[0].payload.note = 'corrected receipt reference';
 assert.notEqual(semanticHashV2(ledger()), semanticHashV2(changedLiveRecord),
   'a user-entered live transaction field omitted by V1 must change V2');
+
+const changedStoredProvenance = ledger();
+changedStoredProvenance.transactions[0].storage.deviceId = 'different-origin';
+assert.notEqual(semanticHashV2(ledger()), semanticHashV2(changedStoredProvenance),
+  'stored transaction provenance required for an exact stage must be covered by V2');
+
+const changedStageOnlyAccountField = ledger();
+changedStageOnlyAccountField.accounts[0].name = 'different stored account name';
+assert.notEqual(semanticHashV2(ledger()), semanticHashV2(changedStageOnlyAccountField),
+  'stored account fields required for an exact stage must be covered by V2');
 
 const changedArchiveRecord = JSON.parse(JSON.stringify(v2Source));
 changedArchiveRecord.archives[0].data.trans[0].note = 'different historic note';

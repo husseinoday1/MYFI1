@@ -3259,28 +3259,33 @@ export const readFinancialProjectionV7 = async ({
   if (!schemaReady) await ensureFinancialLedgerV7(db);
   const [transactionRows, entityRows, postingRows, linkRows, accountRows, rateRows] = await Promise.all([
     db.getAllAsync(
-      `SELECT id,revision,payload_json,archive_year,archived_at,deleted_at FROM ledger_financial_transactions_v7 WHERE namespace=? ORDER BY id`,
+      `SELECT id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
+              idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at
+         FROM ledger_financial_transactions_v7 WHERE namespace=? ORDER BY id`,
       namespace,
     ),
     db.getAllAsync(
-      `SELECT entity_type,id,revision,deleted_at,payload_json FROM ledger_entities_v7 WHERE namespace=? ORDER BY entity_type,id`,
+      `SELECT entity_type,id,revision,deleted_at,payload_json,created_at,updated_at
+         FROM ledger_entities_v7 WHERE namespace=? ORDER BY entity_type,id`,
       namespace,
     ),
     db.getAllAsync(
-      `SELECT id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id FROM ledger_postings_v7 WHERE namespace=? ORDER BY transaction_id,id`,
+      `SELECT id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at
+         FROM ledger_postings_v7 WHERE namespace=? ORDER BY transaction_id,id`,
       namespace,
     ),
     db.getAllAsync(
-      `SELECT id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code
+      `SELECT id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at
          FROM ledger_transaction_links_v7 WHERE namespace=? ORDER BY transaction_id,id`,
       namespace,
     ),
     db.getAllAsync(
-      `SELECT id,account_type,scope,currency_code,status FROM ledger_accounts_v7 WHERE namespace=? ORDER BY id`,
+      `SELECT id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at
+         FROM ledger_accounts_v7 WHERE namespace=? ORDER BY id`,
       namespace,
     ),
     db.getAllAsync(
-      `SELECT id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source
+      `SELECT id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at
          FROM ledger_exchange_rates_v7 WHERE namespace=? ORDER BY id`,
       namespace,
     ),
@@ -3290,29 +3295,38 @@ export const readFinancialProjectionV7 = async ({
       id: String(row.id), revision: Math.max(1, Number(row.revision || 1)),
       payload: parseJson(row.payload_json, null), archiveYear: row.archive_year,
       archivedAt: row.archived_at, deletedAt: row.deleted_at,
+      storage: {
+        kind: row.kind, status: row.status, scope: row.scope, dateISO: row.date_iso,
+        occurredAt: row.occurred_at, categoryId: row.category_id, title: row.title, note: row.note,
+        sourceType: row.source_type, sourceId: row.source_id, idempotencyKey: row.idempotency_key,
+        deviceId: row.device_id, createdAt: row.created_at, updatedAt: row.updated_at,
+      },
     })),
     entities: entityRows.map(row => ({
       entityType: String(row.entity_type), id: String(row.id), revision: Number(row.revision),
       deletedAt: row.deleted_at, payload: parseJson(row.payload_json, null),
+      createdAt: row.created_at, updatedAt: row.updated_at,
     })),
     postings: postingRows.map(row => ({
       id: String(row.id), transactionId: String(row.transaction_id), accountId: String(row.account_id), bucket: String(row.bucket),
       role: String(row.role), amountMinor: Number(row.amount_minor), currencyCode: String(row.currency_code),
-      exchangeRateId: row.exchange_rate_id || null,
+      exchangeRateId: row.exchange_rate_id || null, createdAt: row.created_at,
     })),
     links: linkRows.map(row => ({
       id: String(row.id), transactionId: String(row.transaction_id), linkType: String(row.link_type), linkId: String(row.link_id),
       relation: String(row.relation), appliedAmountMinor: Number(row.applied_amount_minor || 0),
-      currencyCode: row.currency_code || null,
+      currencyCode: row.currency_code || null, createdAt: row.created_at,
     })),
     accounts: accountRows.map(row => ({
       id: String(row.id), accountType: String(row.account_type), scope: String(row.scope),
-      currencyCode: String(row.currency_code), status: String(row.status),
+      currencyCode: String(row.currency_code), status: String(row.status), name: row.name,
+      createdAt: row.created_at, updatedAt: row.updated_at, archivedAt: row.archived_at,
     })),
     exchangeRates: rateRows.map(row => ({
       id: String(row.id), baseCurrencyCode: String(row.base_currency_code),
       quoteCurrencyCode: String(row.quote_currency_code), numerator: Number(row.numerator),
       denominator: Number(row.denominator), rateDate: String(row.rate_date), source: String(row.source),
+      capturedAt: row.captured_at,
     })),
   };
 };

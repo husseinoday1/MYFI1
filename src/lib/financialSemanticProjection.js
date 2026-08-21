@@ -203,8 +203,9 @@ const canonicalArchive = (archive) => {
 // A logical restore promises the complete user-entered financial records, including
 // cold archive records. It does not promise device presentation/preferences. The
 // same allowlist that the existing backup format uses defines the only workspace cfg
-// fields that are financial; theme, language, privacy controls, notifications and
-// device identity cannot make an otherwise identical ledger fail proof.
+// fields that are financial; theme, language, privacy controls and notifications
+// cannot make an otherwise identical ledger fail proof. Per-transaction provenance
+// (including its stored device id) is a ledger record and remains covered below.
 const canonicalFinancialConfigV2 = (workspace = {}) => {
   const state = parseObject(workspace?.payloadJson ?? workspace?.payload);
   const localCfg = state?.localPreferences?.cfg || state?.cfg || {};
@@ -217,6 +218,7 @@ const canonicalTransactionV2 = transaction => ({
   deletedAt: text(transaction?.deletedAt),
   archivedAt: text(transaction?.archivedAt),
   archiveYear: transaction?.archiveYear ?? null,
+  storage: transaction?.storage ?? {},
   // The payload is the canonical user-entered transaction record. Do not reduce it
   // to an amount subset: title, note, transfer/FX fields, links and future approved
   // financial fields must all be detected if a stage read-back loses or changes one.
@@ -229,7 +231,17 @@ const canonicalEntityV2 = entity => ({
   revision: minor(entity?.revision),
   deletedAt: text(entity?.deletedAt),
   payload: canonicalFinancialEntityPayload(entity?.entityType, entity?.payload ?? null),
+  createdAt: text(entity?.createdAt),
+  updatedAt: text(entity?.updatedAt),
 });
+
+const canonicalPostingV2 = posting => ({ ...canonicalPosting(posting), createdAt: text(posting?.createdAt) });
+const canonicalLinkV2 = link => ({ ...canonicalLink(link), createdAt: text(link?.createdAt) });
+const canonicalAccountV2 = account => ({
+  ...canonicalAccount(account), name: text(account?.name), createdAt: text(account?.createdAt),
+  updatedAt: text(account?.updatedAt), archivedAt: text(account?.archivedAt),
+});
+const canonicalExchangeRateV2 = rate => ({ ...canonicalExchangeRate(rate), capturedAt: text(rate?.capturedAt) });
 
 const canonicalArchiveDataV2 = (data = {}) => {
   const source = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
@@ -272,11 +284,11 @@ export const canonicalizeFinancialLedger = (model = {}) => {
     // ledger are not the same financial truth.
     ledgerId: text(model?.ledger?.ledgerId),
     baseCurrency: text(model?.baseCurrency ?? model?.workspace?.baseCurrency),
-    accounts: rows(model?.accounts).map(canonicalAccount).sort(byId),
-    exchangeRates: rows(model?.exchangeRates).map(canonicalExchangeRate).sort(byId),
+    accounts: rows(model?.accounts).map(canonicalAccountV2).sort(byId),
+    exchangeRates: rows(model?.exchangeRates).map(canonicalExchangeRateV2).sort(byId),
     transactions: rows(model?.transactions).map(canonicalTransaction).sort(byId),
-    postings: rows(model?.postings).map(canonicalPosting).sort(byId),
-    links: rows(model?.links).map(canonicalLink).sort(byId),
+    postings: rows(model?.postings).map(canonicalPostingV2).sort(byId),
+    links: rows(model?.links).map(canonicalLinkV2).sort(byId),
     entities: entities.map(canonicalEntity).sort(
       (left, right) => `${left.entityType}:${left.id}`.localeCompare(`${right.entityType}:${right.id}`),
     ),
@@ -300,11 +312,11 @@ export const canonicalizeFinancialLedgerV2 = (model = {}) => {
     semanticHashVersion: SEMANTIC_HASH_V2_VERSION,
     ledgerId: text(model?.ledger?.ledgerId),
     financialConfig: canonicalFinancialConfigV2(model?.workspace),
-    accounts: rows(model?.accounts).map(canonicalAccount).sort(byId),
-    exchangeRates: rows(model?.exchangeRates).map(canonicalExchangeRate).sort(byId),
+    accounts: rows(model?.accounts).map(canonicalAccountV2).sort(byId),
+    exchangeRates: rows(model?.exchangeRates).map(canonicalExchangeRateV2).sort(byId),
     transactions: rows(model?.transactions).map(canonicalTransactionV2).sort(byId),
-    postings: rows(model?.postings).map(canonicalPosting).sort(byId),
-    links: rows(model?.links).map(canonicalLink).sort(byId),
+    postings: rows(model?.postings).map(canonicalPostingV2).sort(byId),
+    links: rows(model?.links).map(canonicalLinkV2).sort(byId),
     entities: entities.map(canonicalEntityV2).sort(
       (left, right) => `${left.entityType}:${left.id}`.localeCompare(`${right.entityType}:${right.id}`),
     ),
