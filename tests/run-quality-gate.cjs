@@ -115,6 +115,7 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'p10_004_consistent_canonical_read', 'run-p10-004-consistent-canonical-read.cjs'],
   ['UNIT_RUNTIME', 'p10_006_canonical_backup_writer', 'run-p10-006-canonical-backup-writer.cjs'],
   ['UNIT_RUNTIME', 'p10_007_canonical_backup_decoder', 'run-p10-007-canonical-backup-decoder.cjs'],
+  ['UNIT_RUNTIME', 'p10_008_canonical_restore_stage', 'run-p10-008-canonical-restore-stage.cjs'],
   ['UNIT_RUNTIME', 'home_hidden_amounts', 'run-home-hidden-amounts.cjs'],
   ['UNIT_RUNTIME', 'performance_data', 'performance-data-runtime-v512.test.cjs'],
   ['UNIT_RUNTIME', 'performance_generator', 'performance-generator-runtime-v51.test.cjs'],
