@@ -276,6 +276,40 @@ export const clearColdArchives = async (namespace = 'guest') => {
   return true;
 };
 
+// P10-009 — raw transaction-scoped primitives. These do not own the write queue or
+// start a transaction; P10-010 will call them only from its one reviewed restore
+// transaction alongside the hot ledger and restore-epoch transition.
+export const clearColdArchiveNamespaceInTransaction = async ({ database, namespace } = {}) => {
+  const target = String(namespace || '').trim();
+  if (!database || !target) throw new Error('cold_archive_transaction_namespace_invalid');
+  await database.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', target);
+};
+
+export const replaceColdArchiveNamespaceFromStageInTransaction = async ({
+  database, namespace, stageNamespace,
+} = {}) => {
+  const target = String(namespace || '').trim();
+  const stage = String(stageNamespace || '').trim();
+  if (!database || !target || !stage || target === stage) {
+    throw new Error('cold_archive_transaction_stage_invalid');
+  }
+  await clearColdArchiveNamespaceInTransaction({ database, namespace: target });
+  await database.runAsync(
+    `INSERT INTO cold_archive_years
+       (namespace, scope, year, archived_at, checksum, transaction_count, income, expense, net, metadata_json)
+     SELECT ?, scope, year, archived_at, checksum, transaction_count, income, expense, net, metadata_json
+       FROM cold_archive_years WHERE namespace = ?`,
+    target, stage,
+  );
+  await database.runAsync(
+    `INSERT INTO cold_archive_transactions
+       (namespace, scope, year, id, date_iso, ts, wallet_id, category_id, flow_type, search_text, payload_json)
+     SELECT ?, scope, year, id, date_iso, ts, wallet_id, category_id, flow_type, search_text, payload_json
+       FROM cold_archive_transactions WHERE namespace = ?`,
+    target, stage,
+  );
+};
+
 // Exporting/restoring the cold archive is intentionally explicit and happens only
 // for a backup/restore operation. Day-to-day screens never hydrate every archived
 // year into JavaScript memory.
@@ -328,28 +362,10 @@ export const replaceColdArchives = async (namespace = 'guest', archives = []) =>
 
   try {
     await enqueueLedgerWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
-      await txn.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', ns);
-      if (incoming.length) {
-        await txn.runAsync(
-          `INSERT INTO cold_archive_years
-             (namespace, scope, year, archived_at, checksum, transaction_count, income, expense, net, metadata_json)
-           SELECT ?, scope, year, archived_at, checksum, transaction_count, income, expense, net, metadata_json
-             FROM cold_archive_years
-            WHERE namespace = ?`,
-          ns,
-          stageNamespace,
-        );
-        await txn.runAsync(
-          `INSERT INTO cold_archive_transactions
-             (namespace, scope, year, id, date_iso, ts, wallet_id, category_id, flow_type, search_text, payload_json)
-           SELECT ?, scope, year, id, date_iso, ts, wallet_id, category_id, flow_type, search_text, payload_json
-             FROM cold_archive_transactions
-            WHERE namespace = ?`,
-          ns,
-          stageNamespace,
-        );
-      }
-      await txn.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', stageNamespace);
+      await replaceColdArchiveNamespaceFromStageInTransaction({
+        database: txn, namespace: ns, stageNamespace,
+      });
+      await clearColdArchiveNamespaceInTransaction({ database: txn, namespace: stageNamespace });
     }));
     return true;
   } catch (error) {

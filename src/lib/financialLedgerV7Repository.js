@@ -7,6 +7,11 @@ import {
   FINANCIAL_LEDGER_SCHEMA_VERSION,
 } from './financialLedgerV7Model';
 import { cloudWorkspaceCfg, mergeCloudWorkspaceCfg } from './cloudWorkspaceMetadata.js';
+import {
+  clearColdArchiveNamespaceInTransaction,
+  ensureColdArchiveSchema,
+  replaceColdArchiveNamespaceFromStageInTransaction,
+} from './localArchiveRepository';
 
 const readyDatabases = new WeakSet();
 const readyDatabasePromises = new WeakMap();
@@ -841,109 +846,147 @@ export const beginLedgerRestoreEpochV8 = async ({
   }));
 };
 
+// P10-009 — caller must supply the transaction-scoped executor owned by the one
+// restore transaction. It intentionally never enqueues or begins/commits itself.
+export const advanceLedgerRestoreEpochInTransactionV8 = async ({
+  namespace = 'guest', expectedFromEpoch, toEpoch, database,
+} = {}) => {
+  const txn = database;
+  if (!txn) throw new Error('restore_epoch_transaction_required');
+  const target = String(namespace || '').trim();
+  if (!target) throw new Error('restore_epoch_namespace_required');
+  const key = restoreIntentMetaKey(target);
+
+  const intentRow = await txn.getFirstAsync(
+    `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+    key,
+  );
+  const intent = parseJson(intentRow?.value, null);
+  if (!intent) throw new Error('restore_epoch_commit_without_intent');
+
+  const identity = await txn.getFirstAsync(
+    `SELECT namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version
+       FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
+    target,
+  );
+  if (!identity?.ledger_id) throw new Error('restore_epoch_identity_missing');
+
+    // Read the outgoing epoch's activation marker before the CAS so the new epoch
+    // can record whether it supersedes a durably activated V2 epoch.
+  const supersededState = await txn.getFirstAsync(
+    `SELECT activated_at FROM ledger_sync_state_v8
+      WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+    String(identity.ledger_id), Number(identity.restore_epoch),
+  );
+    // The outgoing epoch may itself be an unactivated epoch that superseded a
+    // durably activated one. Without carrying that fact forward, a second
+    // consecutive advance would report previouslyActivated:false and the ledger
+    // would silently read as an ordinary V1 ledger again.
+  const outgoingPendingRow = await txn.getFirstAsync(
+    `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+    epochActivationPendingKey(target, identity.ledger_id, identity.restore_epoch),
+  );
+  const outgoingPending = parseJson(outgoingPendingRow?.value, null);
+  const supersedesActivatedEpoch = !!supersededState?.activated_at
+    || outgoingPending?.previouslyActivated === true;
+
+  const from = Number(expectedFromEpoch ?? intent.fromEpoch);
+  const next = Number(toEpoch ?? intent.toEpoch);
+  if (String(intent.ledgerId) !== String(identity.ledger_id)
+      || Number(identity.restore_epoch) !== from
+      || Number(intent.fromEpoch) !== from
+      || Number(intent.toEpoch) !== next
+      || next !== from + 1) {
+    throw new Error('restore_epoch_commit_conflict');
+  }
+
+  const now = new Date().toISOString();
+  const updated = await txn.runAsync(
+    `UPDATE ledger_sync_identity_v8
+        SET restore_epoch=?,updated_at=?
+      WHERE namespace=? AND ledger_id=? AND restore_epoch=?`,
+    next, now, target, String(identity.ledger_id), from,
+  );
+  if (Number(updated?.changes || 0) !== 1) {
+    throw new Error('restore_epoch_local_compare_and_swap_failed');
+  }
+
+    // Start the new epoch with an empty cursor. Old outbox/inbox rows stay as
+    // immutable evidence under the superseded epoch and are never selected as
+    // current-epoch transport.
+  await txn.runAsync(
+    `INSERT OR IGNORE INTO ledger_sync_state_v8
+     (ledger_id,restore_epoch,last_server_sequence,last_success_at,last_device_id,updated_at)
+     VALUES (?,?,0,NULL,NULL,?)`,
+    String(identity.ledger_id), next, now,
+  );
+  await txn.runAsync(`DELETE FROM ledger_v7_meta WHERE key=?`, key);
+
+    // The new epoch starts unactivated by contract: it must complete its own
+    // bootstrap + activation. Superseded evidence stays in place as immutable
+    // history and is never carried forward.
+  await txn.runAsync(
+    `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+    epochActivationPendingKey(target, identity.ledger_id, next),
+    safeJson({
+      version: 1,
+      namespace: target,
+      ledgerId: String(identity.ledger_id),
+      fromEpoch: from,
+      toEpoch: next,
+      supersededActivatedAt: supersededState?.activated_at
+        ? String(supersededState.activated_at)
+        : (outgoingPending?.supersededActivatedAt || null),
+      previouslyActivated: supersedesActivatedEpoch,
+      recordedAt: now,
+    }),
+    now,
+  );
+  return {
+    namespace: target,
+    ledgerId: String(identity.ledger_id),
+    fromEpoch: from,
+    restoreEpoch: next,
+    protocolVersion: Math.max(2, Number(identity.protocol_version || 2)),
+  };
+};
+
 export const commitLedgerRestoreEpochV8 = async ({
   namespace = 'guest', expectedFromEpoch, toEpoch, database = null,
 } = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return null;
   await ensureFinancialLedgerV7(db);
-  const target = String(namespace || '').trim();
-  const key = restoreIntentMetaKey(target);
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, txn => advanceLedgerRestoreEpochInTransactionV8({
+    namespace, expectedFromEpoch, toEpoch, database: txn,
+  })));
+};
 
-  return enqueueWrite(async () => runLedgerExclusiveTransaction(db, async (txn) => {
-    const intentRow = await txn.getFirstAsync(
-      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
-      key,
-    );
-    const intent = parseJson(intentRow?.value, null);
-    if (!intent) throw new Error('restore_epoch_commit_without_intent');
-
-    const identity = await txn.getFirstAsync(
-      `SELECT namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version
-         FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
-      target,
-    );
-    if (!identity?.ledger_id) throw new Error('restore_epoch_identity_missing');
-
-    // Read the outgoing epoch's activation marker before the CAS so the new epoch
-    // can record whether it supersedes a durably activated V2 epoch.
-    const supersededState = await txn.getFirstAsync(
-      `SELECT activated_at FROM ledger_sync_state_v8
-        WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
-      String(identity.ledger_id), Number(identity.restore_epoch),
-    );
-    // The outgoing epoch may itself be an unactivated epoch that superseded a
-    // durably activated one. Without carrying that fact forward, a second
-    // consecutive advance would report previouslyActivated:false and the ledger
-    // would silently read as an ordinary V1 ledger again.
-    const outgoingPendingRow = await txn.getFirstAsync(
-      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
-      epochActivationPendingKey(target, identity.ledger_id, identity.restore_epoch),
-    );
-    const outgoingPending = parseJson(outgoingPendingRow?.value, null);
-    const supersedesActivatedEpoch = !!supersededState?.activated_at
-      || outgoingPending?.previouslyActivated === true;
-
-    const from = Number(expectedFromEpoch ?? intent.fromEpoch);
-    const next = Number(toEpoch ?? intent.toEpoch);
-    if (String(intent.ledgerId) !== String(identity.ledger_id)
-        || Number(identity.restore_epoch) !== from
-        || Number(intent.fromEpoch) !== from
-        || Number(intent.toEpoch) !== next
-        || next !== from + 1) {
-      throw new Error('restore_epoch_commit_conflict');
-    }
-
-    const now = new Date().toISOString();
-    const updated = await txn.runAsync(
-      `UPDATE ledger_sync_identity_v8
-          SET restore_epoch=?,updated_at=?
-        WHERE namespace=? AND ledger_id=? AND restore_epoch=?`,
-      next, now, target, String(identity.ledger_id), from,
-    );
-    if (Number(updated?.changes || 0) !== 1) {
-      throw new Error('restore_epoch_local_compare_and_swap_failed');
-    }
-
-    // Start the new epoch with an empty cursor. Old outbox/inbox rows stay as
-    // immutable evidence under the superseded epoch and are never selected as
-    // current-epoch transport.
-    await txn.runAsync(
-      `INSERT OR IGNORE INTO ledger_sync_state_v8
-       (ledger_id,restore_epoch,last_server_sequence,last_success_at,last_device_id,updated_at)
-       VALUES (?,?,0,NULL,NULL,?)`,
-      String(identity.ledger_id), next, now,
-    );
-    await txn.runAsync(`DELETE FROM ledger_v7_meta WHERE key=?`, key);
-
-    // The new epoch starts unactivated by contract: it must complete its own
-    // bootstrap + activation. Superseded evidence stays in place as immutable
-    // history and is never carried forward.
-    await txn.runAsync(
-      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
-      epochActivationPendingKey(target, identity.ledger_id, next),
-      safeJson({
-        version: 1,
-        namespace: target,
-        ledgerId: String(identity.ledger_id),
-        fromEpoch: from,
-        toEpoch: next,
-        supersededActivatedAt: supersededState?.activated_at
-          ? String(supersededState.activated_at)
-          : (outgoingPending?.supersededActivatedAt || null),
-        previouslyActivated: supersedesActivatedEpoch,
-        recordedAt: now,
-      }),
-      now,
-    );
-    return {
-      namespace: target,
-      ledgerId: String(identity.ledger_id),
-      fromEpoch: from,
-      restoreEpoch: next,
-      protocolVersion: Math.max(2, Number(identity.protocol_version || 2)),
-    };
-  }));
+// P10-009 boundary: P10-010 receives raw writers only through this callback. This
+// is the single queue + exclusive transaction that may combine hot ledger, Cold
+// Archive, restore metadata and the V8 epoch CAS. Nothing here promotes a ledger.
+export const runFinancialRestorePromotionTransactionV8 = async ({ database = null, task } = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  if (typeof task !== 'function') throw new Error('financial_restore_transaction_task_required');
+  await ensureFinancialLedgerV7(db);
+  await ensureColdArchiveSchema();
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, txn => task(Object.freeze({
+    database: txn,
+    clearFinancialNamespace: namespace => clearFinancialNamespaceRowsInTransactionV7(txn, namespace),
+    copyFinancialNamespaceFromStage: options => copyFinancialNamespaceFromStageInTransactionV7({
+      ...options, database: txn,
+    }),
+    clearColdArchiveNamespace: namespace => clearColdArchiveNamespaceInTransaction({
+      database: txn, namespace,
+    }),
+    replaceColdArchiveNamespaceFromStage: options => replaceColdArchiveNamespaceFromStageInTransaction({
+      ...options, database: txn,
+    }),
+    advanceRestoreEpoch: options => advanceLedgerRestoreEpochInTransactionV8({
+      ...options, database: txn,
+    }),
+  }))));
 };
 
 export const abortLedgerRestoreEpochV8 = async ({ namespace = 'guest', database = null } = {}) => {
@@ -1209,7 +1252,7 @@ export const finalizeFinancialBootstrapStageV8 = async ({
       String(bootstrapId), now, String(ledgerId), Number(restoreEpoch),
       Math.max(0, Number(state.checkpoint_outbox_sequence || 0)),
     );
-    await clearFinancialNamespaceRows(txn, String(state.stage_namespace));
+    await clearFinancialNamespaceRowsInTransactionV7(txn, String(state.stage_namespace));
     await txn.runAsync(
       `UPDATE ledger_bootstrap_state_v8
           SET status='finalized',finalized_at=?,last_error=NULL
@@ -3807,14 +3850,66 @@ export const applyRemoteLedgerMutationsV7 = async ({
   });
 };
 
-const clearFinancialNamespaceRows = async (db, namespace) => {
-  await db.runAsync(`DELETE FROM ledger_transaction_links_v7 WHERE namespace=?`, namespace);
-  await db.runAsync(`DELETE FROM ledger_postings_v7 WHERE namespace=?`, namespace);
-  await db.runAsync(`DELETE FROM ledger_financial_transactions_v7 WHERE namespace=?`, namespace);
-  await db.runAsync(`DELETE FROM ledger_exchange_rates_v7 WHERE namespace=?`, namespace);
-  await db.runAsync(`DELETE FROM ledger_accounts_v7 WHERE namespace=?`, namespace);
-  await db.runAsync(`DELETE FROM ledger_entities_v7 WHERE namespace=?`, namespace);
-  await db.runAsync(`DELETE FROM ledger_workspace_state_v7 WHERE namespace=?`, namespace);
+// P10-009 — transaction-scoped only. This does not enqueue or begin/commit a
+// transaction, so P10-010 can combine ledger, archive and epoch changes atomically.
+export const clearFinancialNamespaceRowsInTransactionV7 = async (db, namespace) => {
+  const target = String(namespace || '').trim();
+  if (!db || !target) throw new Error('financial_v7_transaction_namespace_invalid');
+  await db.runAsync(`DELETE FROM ledger_transaction_links_v7 WHERE namespace=?`, target);
+  await db.runAsync(`DELETE FROM ledger_postings_v7 WHERE namespace=?`, target);
+  await db.runAsync(`DELETE FROM ledger_financial_transactions_v7 WHERE namespace=?`, target);
+  await db.runAsync(`DELETE FROM ledger_exchange_rates_v7 WHERE namespace=?`, target);
+  await db.runAsync(`DELETE FROM ledger_accounts_v7 WHERE namespace=?`, target);
+  await db.runAsync(`DELETE FROM ledger_entities_v7 WHERE namespace=?`, target);
+  await db.runAsync(`DELETE FROM ledger_workspace_state_v7 WHERE namespace=?`, target);
+};
+
+export const copyFinancialNamespaceFromStageInTransactionV7 = async ({
+  database, namespace, stageNamespace,
+} = {}) => {
+  const target = String(namespace || '').trim();
+  const stage = String(stageNamespace || '').trim();
+  if (!database || !target || !stage || target === stage) {
+    throw new Error('financial_v7_transaction_stage_invalid');
+  }
+  await database.runAsync(
+    `INSERT INTO ledger_accounts_v7
+     (namespace,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at)
+     SELECT ?,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at
+       FROM ledger_accounts_v7 WHERE namespace=?`, target, stage,
+  );
+  await database.runAsync(
+    `INSERT INTO ledger_exchange_rates_v7
+     (namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)
+     SELECT ?,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at
+       FROM ledger_exchange_rates_v7 WHERE namespace=?`, target, stage,
+  );
+  await database.runAsync(
+    `INSERT INTO ledger_financial_transactions_v7
+     (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
+      idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)
+     SELECT ?,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
+            idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at
+       FROM ledger_financial_transactions_v7 WHERE namespace=?`, target, stage,
+  );
+  await database.runAsync(
+    `INSERT INTO ledger_postings_v7
+     (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
+     SELECT ?,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at
+       FROM ledger_postings_v7 WHERE namespace=?`, target, stage,
+  );
+  await database.runAsync(
+    `INSERT INTO ledger_transaction_links_v7
+     (namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)
+     SELECT ?,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at
+       FROM ledger_transaction_links_v7 WHERE namespace=?`, target, stage,
+  );
+  await database.runAsync(
+    `INSERT INTO ledger_entities_v7
+     (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
+     SELECT ?,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at
+       FROM ledger_entities_v7 WHERE namespace=?`, target, stage,
+  );
 };
 
 export const clearFinancialWorkspaceV7 = async ({ namespace = 'guest', database = null } = {}) => {
@@ -3824,7 +3919,7 @@ export const clearFinancialWorkspaceV7 = async ({ namespace = 'guest', database 
   const target = String(namespace || '').trim();
   if (!target) return false;
   await enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
-    await clearFinancialNamespaceRows(txn, target);
+    await clearFinancialNamespaceRowsInTransactionV7(txn, target);
     await txn.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=?`, target);
     await txn.runAsync(`DELETE FROM ledger_inbox_v2 WHERE namespace=?`, target);
     await txn.runAsync(`DELETE FROM ledger_sync_state_v7 WHERE namespace=?`, target);
@@ -3885,7 +3980,7 @@ export const stageFinancialWorkspaceV7 = async ({ stageNamespace, commands = [],
   if (!namespace.includes('::shadow-stage::')) throw new Error('financial_v7_shadow_stage_namespace_invalid');
   return enqueueWrite(async () => {
     await runLedgerExclusiveTransaction(db, async (txn) => {
-      await clearFinancialNamespaceRows(txn, namespace);
+      await clearFinancialNamespaceRowsInTransactionV7(txn, namespace);
       for (const command of commands) await insertCommandWithoutOutbox(txn, command);
       for (const entity of entities) await upsertEntity(txn, entity);
       const now = new Date().toISOString();
@@ -3905,7 +4000,7 @@ export const discardFinancialWorkspaceStageV7 = async ({ stageNamespace, databas
   const namespace = String(stageNamespace || '').trim();
   if (!namespace.includes('::shadow-stage::')) return false;
   await ensureFinancialLedgerV7(db);
-  await enqueueWrite(() => runLedgerExclusiveTransaction(db, (txn) => clearFinancialNamespaceRows(txn, namespace)));
+  await enqueueWrite(() => runLedgerExclusiveTransaction(db, (txn) => clearFinancialNamespaceRowsInTransactionV7(txn, namespace)));
   return true;
 };
 
@@ -3929,45 +4024,10 @@ export const promoteFinancialWorkspaceStageV7 = async ({
       if (resetPendingOutbox) {
         await txn.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=? AND acknowledged_at IS NULL`, target);
       }
-      await clearFinancialNamespaceRows(txn, target);
-      await txn.runAsync(
-        `INSERT INTO ledger_accounts_v7
-         (namespace,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at)
-         SELECT ?,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at
-           FROM ledger_accounts_v7 WHERE namespace=?`, target, stage,
-      );
-      await txn.runAsync(
-        `INSERT INTO ledger_exchange_rates_v7
-         (namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)
-         SELECT ?,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at
-           FROM ledger_exchange_rates_v7 WHERE namespace=?`, target, stage,
-      );
-      await txn.runAsync(
-        `INSERT INTO ledger_financial_transactions_v7
-         (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
-          idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)
-         SELECT ?,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
-                idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at
-           FROM ledger_financial_transactions_v7 WHERE namespace=?`, target, stage,
-      );
-      await txn.runAsync(
-        `INSERT INTO ledger_postings_v7
-         (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
-         SELECT ?,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at
-           FROM ledger_postings_v7 WHERE namespace=?`, target, stage,
-      );
-      await txn.runAsync(
-        `INSERT INTO ledger_transaction_links_v7
-         (namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)
-         SELECT ?,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at
-           FROM ledger_transaction_links_v7 WHERE namespace=?`, target, stage,
-      );
-      await txn.runAsync(
-        `INSERT INTO ledger_entities_v7
-         (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
-         SELECT ?,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at
-           FROM ledger_entities_v7 WHERE namespace=?`, target, stage,
-      );
+      await clearFinancialNamespaceRowsInTransactionV7(txn, target);
+      await copyFinancialNamespaceFromStageInTransactionV7({
+        database: txn, namespace: target, stageNamespace: stage,
+      });
       await txn.runAsync(
         `INSERT INTO ledger_workspace_state_v7
          (namespace,source_mode,schema_version,shadow_checksum,shadow_verified_at,cutover_at,last_reconciled_at,payload_json,updated_at)
@@ -3980,7 +4040,7 @@ export const promoteFinancialWorkspaceStageV7 = async ({
          VALUES (?,?,?,?,?,?,?,?,?)`,
         target, runId, checksum, checksum, safeJson(sourceCounts), safeJson(targetCounts), '[]', 1, now,
       );
-      await clearFinancialNamespaceRows(txn, stage);
+      await clearFinancialNamespaceRowsInTransactionV7(txn, stage);
     });
     return { supported: true, ok: true, cutoverAt: now, checksum, sourceMode: 'sqlite' };
   });
@@ -3997,7 +4057,7 @@ export const cloneFinancialWorkspaceV7 = async ({ sourceNamespace, targetNamespa
   if (!sourceState) return { supported: true, ok: false, reason: 'clone_source_missing' };
   return enqueueWrite(async () => {
     await runLedgerExclusiveTransaction(db, async (txn) => {
-      await clearFinancialNamespaceRows(txn, target);
+      await clearFinancialNamespaceRowsInTransactionV7(txn, target);
       await txn.runAsync(
         `INSERT INTO ledger_accounts_v7(namespace,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at)
          SELECT ?,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at FROM ledger_accounts_v7 WHERE namespace=?`,

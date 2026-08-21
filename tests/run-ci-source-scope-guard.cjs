@@ -49,7 +49,19 @@ assert.ok(fs.existsSync(script), 'the shared scope script must exist');
   console.log(`[PASS] all ${usesAllowlist.length} allowlist-gated workflows call the shared script`);
 }
 
-const bash = (cwd, args) => spawnSync('bash', [script, ...args], {
+// GitHub runners expose bash on PATH. The desktop Windows test environment normally
+// has Git for Windows but does not put its bash on PATH, so find that same executable
+// explicitly rather than reporting a misleading scope-gate assertion failure.
+const bashExecutable = process.platform === 'win32'
+  ? [
+    process.env.MYFI_BASH_PATH,
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+    'bash',
+  ].find(candidate => typeof candidate === 'string' && (candidate === 'bash' || fs.existsSync(candidate)))
+  : 'bash';
+
+const bash = (cwd, args) => spawnSync(bashExecutable, [script, ...args], {
   cwd,
   encoding: 'utf8',
   env: { ...process.env, LC_ALL: 'C' },

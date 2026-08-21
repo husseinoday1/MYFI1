@@ -45,6 +45,14 @@ source = source
     "import { cloudWorkspaceCfg, mergeCloudWorkspaceCfg } from './cloudWorkspaceMetadata.js';",
     metadataSource,
   )
+  .replace(
+    /import \{[\s\S]*?\} from '\.\/localArchiveRepository';/,
+    [
+      'const ensureColdArchiveSchema = async () => true;',
+      'const clearColdArchiveNamespaceInTransaction = async () => true;',
+      'const replaceColdArchiveNamespaceFromStageInTransaction = async () => true;',
+    ].join('\n'),
+  )
   .replace(/export const /g, 'const ')
   .replace(/export async function /g, 'async function ');
 
