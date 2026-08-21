@@ -47,7 +47,7 @@ module.exports = {
   SEMANTIC_HASH_V2_VERSION, SEMANTIC_HASH_V3_VERSION,
   canonicalizeFinancialLedger, semanticHashV1, semanticMetricsV1, compareSemanticLedgerV1,
   canonicalizeFinancialLedgerV2, semanticHashV2, semanticMetricsV2, compareSemanticLedgerV2,
-  canonicalizeFinancialLedgerV3, semanticHashV3,
+  compareCanonicalTextV3, stableSemanticJsonV3, canonicalizeFinancialLedgerV3, semanticHashV3,
 };
 `;
 
@@ -66,6 +66,8 @@ const {
   semanticHashV2,
   semanticMetricsV2,
   compareSemanticLedgerV2,
+  compareCanonicalTextV3,
+  stableSemanticJsonV3,
   canonicalizeFinancialLedgerV3,
   semanticHashV3,
 } = compiled.exports;
@@ -308,7 +310,43 @@ assert.equal(semanticHashV3(unicodeOrdered), semanticHashV3(unicodeReordered),
 assert.deepEqual(
   canonicalizeFinancialLedgerV3(unicodeOrdered).accounts.map(item => item.id),
   ['é', 'z', 'ä', 'أ', '𝄞'],
-  'V3 must use the documented explicit Unicode scalar order, not a UI locale order',
+  'V3 must use the documented UTF-8 byte order, not a UI locale order',
+);
+const utf8ByteCompare = (left, right) => {
+  const leftBytes = Buffer.from(left, 'utf8');
+  const rightBytes = Buffer.from(right, 'utf8');
+  const length = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) {
+    if (leftBytes[index] !== rightBytes[index]) return leftBytes[index] - rightBytes[index];
+  }
+  return leftBytes.length - rightBytes.length;
+};
+const utf8Samples = ['é', 'z', 'ä', 'أ', '𝄞', '"', '\\', 'a\u0000', 'a'];
+assert.deepEqual(
+  utf8Samples.slice().sort((left, right) => utf8ByteCompare(left, right)).map(value => value),
+  utf8Samples.slice().sort(compareCanonicalTextV3).map(value => value),
+  'V3 ordering must agree with an independent UTF-8 byte comparator',
+);
+const malformedUnicode = ledger({
+  accounts: [{ id: '\ud800', accountType: 'wallet', scope: 'personal', currencyCode: 'IQD', status: 'active' }],
+});
+const malformedCanonical = canonicalizeFinancialLedgerV3(malformedUnicode);
+assert.equal(malformedCanonical.accounts[0].id, '\ud800',
+  'the malformed fixture must reach the canonical V3 serializer unchanged');
+assert.throws(
+  () => stableSemanticJsonV3(malformedCanonical),
+  /semantic_hash_v3_malformed_unicode/,
+  'V3 must reject malformed Unicode instead of creating a non-portable proof',
+);
+assert.throws(
+  () => semanticHashV3(malformedUnicode),
+  /semantic_hash_v3_malformed_unicode/,
+  'the V3 hash wrapper must preserve malformed-Unicode rejection',
+);
+assert.throws(
+  () => compareCanonicalTextV3('\ud800', 'valid-id'),
+  /semantic_hash_v3_malformed_unicode/,
+  'V3 must reject malformed Unicode before it can affect collection order',
 );
 
 const originalLocaleCompare = String.prototype.localeCompare;
@@ -334,6 +372,14 @@ const v3Source = moduleText.match(
 assert.ok(v3Source, 'V3 canonicaliser and hash must remain present');
 assert.doesNotMatch(v3Source[0], /localeCompare|Intl\.Collator/,
   'V3 ordered paths must not call locale-sensitive comparison');
+const v3ComparatorSource = moduleText.match(
+  /export const compareCanonicalTextV3[\s\S]*?\n};/,
+);
+assert.ok(v3ComparatorSource, 'V3 comparator must remain present');
+assert.doesNotMatch(v3ComparatorSource[0], /localeCompare|Intl\.Collator/,
+  'V3 comparator must not call locale-sensitive comparison');
+assert.match(v3ComparatorSource[0], /TextEncoder\(\)\.encode/,
+  'V3 comparator must compare an explicit UTF-8 byte representation');
 console.log('[PASS] V3 semantic ordering is deterministic across locale collators');
 
 // --- comparison reports how, not just that ----------------------------------

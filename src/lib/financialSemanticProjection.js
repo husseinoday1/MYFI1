@@ -70,25 +70,34 @@ export const stableSemanticJson = (value) => {
   return JSON.stringify(value);
 };
 
-// V3 is deliberately not locale-aware. It compares the raw Unicode scalar values
-// in a JS string, falling back naturally to an unpaired UTF-16 code unit when a
-// malformed string reaches the boundary. That keeps every input totally ordered
-// without normalising, folding or otherwise changing a financial identifier.
-// For well-formed strings this has the same ordering as their UTF-8 byte sequence.
-export const compareCanonicalTextV3 = (leftValue, rightValue) => {
-  const left = String(leftValue ?? '');
-  const right = String(rightValue ?? '');
-  let leftOffset = 0;
-  let rightOffset = 0;
-  while (leftOffset < left.length && rightOffset < right.length) {
-    const leftCodePoint = left.codePointAt(leftOffset);
-    const rightCodePoint = right.codePointAt(rightOffset);
-    if (leftCodePoint !== rightCodePoint) return leftCodePoint < rightCodePoint ? -1 : 1;
-    leftOffset += leftCodePoint > 0xffff ? 2 : 1;
-    rightOffset += rightCodePoint > 0xffff ? 2 : 1;
+// V3 is deliberately not locale-aware. It compares the UTF-8 bytes that the
+// canonical serializer hashes, not a device/UI collation. An unpaired surrogate
+// has no stable scalar-value representation across JSON/UTF-8 boundaries, so a
+// restore proof rejects it rather than making an arbitrary tie-break choice.
+const assertWellFormedCanonicalTextV3 = value => {
+  const textValue = String(value ?? '');
+  for (let index = 0; index < textValue.length; index += 1) {
+    const unit = textValue.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = textValue.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) throw new Error('semantic_hash_v3_malformed_unicode');
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      throw new Error('semantic_hash_v3_malformed_unicode');
+    }
   }
-  if (leftOffset === left.length && rightOffset === right.length) return 0;
-  return leftOffset === left.length ? -1 : 1;
+  return textValue;
+};
+
+export const compareCanonicalTextV3 = (leftValue, rightValue) => {
+  const left = new TextEncoder().encode(assertWellFormedCanonicalTextV3(leftValue));
+  const right = new TextEncoder().encode(assertWellFormedCanonicalTextV3(rightValue));
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1;
+  }
+  if (left.length === right.length) return 0;
+  return left.length < right.length ? -1 : 1;
 };
 
 export const stableSemanticJsonV3 = (value) => {
@@ -98,6 +107,7 @@ export const stableSemanticJsonV3 = (value) => {
     const keys = Object.keys(value).sort(compareCanonicalTextV3);
     return `{${keys.map(key => `${JSON.stringify(key)}:${stableSemanticJsonV3(value[key])}`).join(',')}}`;
   }
+  if (typeof value === 'string') return JSON.stringify(assertWellFormedCanonicalTextV3(value));
   if (typeof value === 'number' && !Number.isFinite(value)) return 'null';
   return JSON.stringify(value);
 };
