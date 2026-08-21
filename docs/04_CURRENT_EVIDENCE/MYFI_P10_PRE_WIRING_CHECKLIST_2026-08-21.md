@@ -40,6 +40,25 @@ on this path.
 `idempotent === true`, but it reaches that through the outer early return at line 170,
 not through this branch. A fix needs a test that forces the interleaving.
 
+### A2. Promotion must refuse a stage built over a moved ledger
+
+Added 2026-08-21, when the user chose Strategy B on the device measurements
+(`MYFI_P10_STRATEGY_B_DECISION_2026-08-21.md`).
+
+Staging now runs outside the maintenance lock, so the live ledger can be written while a
+stage is being built. Promotion must capture the live generation, ledger identity and
+restore epoch when staging starts, re-read all three inside the promotion transaction,
+and fail closed on any difference — discarding the stage rather than repairing or
+merging.
+
+Without it, a transaction the user records during a long restore is silently overwritten
+when the stage promotes: no error, no warning, and visible only as money that vanished.
+Strategy A avoided this by construction; B has to prevent it deliberately.
+
+**Not implemented.** `promoteCanonicalRestoreStageV11` currently checks the epoch and the
+stage proof but nothing that would detect a live write during staging. The proof this is
+done is a test that mutates the live ledger mid-staging and requires promotion to refuse.
+
 ---
 
 ## B. Production gate — approval required, not a code change
