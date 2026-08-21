@@ -367,6 +367,13 @@ future phase, not just Phase 9:
    object into any diagnostic payload under `src/dev/` — summarize
    (ids/counts) before it's ever eligible to be logged.
 
+7. **Before any device measurement or diagnosis, verify the installed APK's
+   build commit actually matches the branch HEAD you think you're testing.**
+   Discovered 2026-08-21: an hour was spent diagnosing a "still slow"
+   startup bug that had already been fixed 4 commits earlier — nobody
+   checked whether the phone's installed build matched HEAD before
+   measuring. Measure the *installed* build, not the pulled branch.
+
 **Explicitly declined (2026-08-20):** a separate staging Supabase project
 isolated from the "Production"-labeled one. Do not re-propose this unless a
 concrete incident makes the case again.
