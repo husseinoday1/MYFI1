@@ -76,6 +76,25 @@ nothing is wired and the client fails closed rather than returning success on an
 error — which is exactly what makes it easy to walk into later, as a restore that cannot
 advance its epoch rather than as a missing migration.
 
+**Correction, 2026-08-21: it is not purely additive, and the earlier wording here
+understated it.** Read before approving. The 292-line file does four things:
+
+1. `alter table public.financial_restore_events_v2` — adds three nullable columns to a
+   live table, then adds a CHECK constraint `not valid` and validates it. Existing rows
+   pass because the constraint accepts all-null. This is the safe pattern.
+2. Creates three indexes on that live table, all partial and `if not exists`.
+3. `create or replace function public.advance_financial_restore_epoch_v2` — **replaces
+   the function already in production**, the one the shipped app calls. The signature is
+   unchanged, but the body is new and now rejects any `p_reason` other than
+   `controlled_recovery`.
+4. `revoke all` then `grant execute` on both v2 and v3 — changes permissions on a live
+   function.
+
+Only `p19RestoreEpochDeviceGate.js` calls v2, and it passes `controlled_recovery`, so the
+replacement should not break the shipped app — that was verified by grep, not by running
+it. But "adds a new RPC" was the wrong summary for a migration that rewrites a live
+function and alters a live table, and the difference matters to whoever approves it.
+
 **Decision (Planning & Audit, 2026-08-21):** it stays unapplied. Not as a side effect of
 wiring, of a test, or of anything else. Applying it needs the coordinator's direct
 approval and its own round: preflight against the live schema, reviewed migration, apply,
