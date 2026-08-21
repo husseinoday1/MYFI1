@@ -15,6 +15,7 @@ src/lib/backupData.js
 src/lib/financialBackupV2.js
 src/lib/financialLedgerV7Migration.js
 src/lib/financialLedgerV7Repository.js
+src/lib/financialMaintenanceBarrier.js
 src/lib/financialRestoreValidator.js
 src/lib/financialSemanticProjection.js
 src/lib/ledgerDatabase.js

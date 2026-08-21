@@ -10,16 +10,32 @@ const pendingMaintenance = [];
 const listeners = new Set();
 
 const safeReason = value => String(value || 'financial_maintenance').trim() || 'financial_maintenance';
+const safePresentation = value => value === 'silent' ? 'silent' : 'blocking';
 
-export const getFinancialMaintenanceSnapshot = () => ({
-  blocked: !!activeMaintenance || pendingMaintenance.length > 0,
-  active: !!activeMaintenance,
-  pending: pendingMaintenance.length > 0,
-  reason: activeMaintenance?.reason || pendingMaintenance[0]?.reason || null,
-  activeId: activeMaintenance?.id || null,
-  pendingCount: pendingMaintenance.length,
-  startedAt: activeMaintenance?.startedAt || null,
-});
+// A maintenance task always fences writers. Its presentation is independent:
+// routine preflight work must not make the mounted UI flash, while a task that
+// can replace financial state remains visibly blocking.
+const firstVisibleMaintenance = () => {
+  if (activeMaintenance?.presentation === 'blocking') return activeMaintenance;
+  return pendingMaintenance.find(item => item.presentation === 'blocking') || null;
+};
+
+export const getFinancialMaintenanceSnapshot = () => {
+  const visibleMaintenance = firstVisibleMaintenance();
+  return {
+    blocked: !!activeMaintenance || pendingMaintenance.length > 0,
+    // `visible` is intentionally not an alias for `blocked`: the barrier still
+    // protects data during silent maintenance, without tearing the user's
+    // current screen behind a full-screen progress layer.
+    visible: !!visibleMaintenance,
+    active: !!activeMaintenance,
+    pending: pendingMaintenance.length > 0,
+    reason: activeMaintenance?.reason || pendingMaintenance[0]?.reason || null,
+    activeId: activeMaintenance?.id || null,
+    pendingCount: pendingMaintenance.length,
+    startedAt: activeMaintenance?.startedAt || null,
+  };
+};
 
 const publishFinancialMaintenance = () => {
   const snapshot = getFinancialMaintenanceSnapshot();
@@ -46,6 +62,7 @@ const removePending = id => {
 
 export async function runFinancialMaintenanceTask({
   reason = 'financial_maintenance',
+  presentation = 'blocking',
   beforeEnter = null,
   afterExit = null,
 } = {}, task) {
@@ -54,6 +71,7 @@ export async function runFinancialMaintenanceTask({
   const request = {
     id: `maintenance-${nextMaintenanceId++}`,
     reason: safeReason(reason),
+    presentation: safePresentation(presentation),
     requestedAt: new Date().toISOString(),
   };
   pendingMaintenance.push(request);

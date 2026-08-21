@@ -16,6 +16,7 @@ assert(barrier.includes('runFinancialMaintenanceTask'));
 assert(barrier.includes('subscribeFinancialMaintenance'));
 assert(barrier.includes('pendingMaintenance.push(request)'));
 assert(barrier.includes('activeMaintenance = {'));
+assert(barrier.includes("presentation = 'blocking'") && barrier.includes('visible: !!visibleMaintenance'));
 
 assert(sync.includes("from '../../lib/financialMaintenanceBarrier'"));
 assert(sync.includes("from '../../lib/ledgerDatabase'"));
@@ -26,7 +27,8 @@ assert(sync.includes("P19-015A2: serialize every auth/account workspace transiti
 assert(sync.includes("P19-015A2: canonical cutover is a maintenance operation"));
 assert(sync.includes("P19-015A2 auto-cutover reuses outer maintenance"));
 assert(sync.includes("await get().activateFinancialV7Cutover({ maintenanceOwned: true });"));
-assert(sync.includes("P19-015A2: cloud recovery temporarily owns the maintenance barrier"));
+assert(sync.includes('hasSteadyFinancialCloudRecoveryStateV2'));
+assert(sync.includes("presentation: 'blocking'"));
 assert(sync.includes("insideSync: true"));
 assert(sync.includes("maintenanceOwned: true"));
 assert(sync.includes("isFinancialMaintenanceBlocked()"));
@@ -39,7 +41,7 @@ assert(data.includes("maintenanceOwned: true"));
 assert(app.includes("P19-015A2: startup barrier"));
 assert(app.includes("subscribeFinancialMaintenance"));
 assert(app.includes("getFinancialMaintenanceSnapshot"));
-assert(app.includes("financialMaintenance.blocked"));
+assert(app.includes("financialMaintenance.visible"));
 assert(app.includes("جاري تأمين البيانات"));
 assert(app.includes("if (FRESH_TEST_MODE || !ready) return undefined;"));
 

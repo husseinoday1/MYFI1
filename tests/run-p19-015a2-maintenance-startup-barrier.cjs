@@ -68,6 +68,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   assert.equal(pending.blocked, true);
   assert.equal(pending.pending, true);
   assert.equal(pending.active, false);
+  assert.equal(pending.visible, true);
   assert.equal(pending.reason, 'startup_local_load');
 
   const second = runFinancialMaintenanceTask({
@@ -104,6 +105,23 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   }
   assert.equal(failed, true);
   assert.equal(isFinancialMaintenanceBlocked(), false);
+
+  let releaseSilent;
+  const silentGate = new Promise(resolve => { releaseSilent = resolve; });
+  const silent = runFinancialMaintenanceTask({
+    reason: 'routine_sync_preflight',
+    presentation: 'silent',
+  }, async () => {
+    await silentGate;
+    return 'silent-result';
+  });
+  await delay(0);
+  const silentSnapshot = getFinancialMaintenanceSnapshot();
+  assert.equal(silentSnapshot.blocked, true, 'silent maintenance must still fence writers');
+  assert.equal(silentSnapshot.visible, false, 'routine maintenance must not request a full-screen overlay');
+  releaseSilent();
+  assert.equal(await silent, 'silent-result');
+  await waitForFinancialMaintenanceIdle();
 
   unsubscribe();
   await __resetFinancialMaintenanceBarrierForTests();

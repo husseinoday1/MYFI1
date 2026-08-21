@@ -26,12 +26,12 @@ const lines = source.split(/\r?\n/);
 
 // --- the barrier must not gate a return -----------------------------------
 lines.forEach((line, index) => {
-  if (!/financialMaintenance\.blocked/.test(line)) return;
+  if (!/financialMaintenance\.(blocked|visible)/.test(line)) return;
   // A conditional whose body is a return replaces the tree. The overlay form assigns
   // to a variable instead.
   const tail = lines.slice(index, index + 3).join('\n');
   assert.ok(
-    !/^\s*if\s*\([^)]*financialMaintenance\.blocked[^)]*\)\s*\{?\s*$/.test(line)
+    !/^\s*if\s*\([^)]*financialMaintenance\.(blocked|visible)[^)]*\)\s*\{?\s*$/.test(line)
     || !/\breturn\b/.test(tail),
     `App.js:${index + 1}: financialMaintenance.blocked must not gate a return — that `
     + 'unmounts the tree and loses every component\'s state. Render an overlay instead.',
@@ -41,8 +41,8 @@ console.log('[PASS] the barrier does not gate an early return');
 
 // --- the overlay exists and is actually rendered --------------------------
 assert.ok(
-  /const maintenanceOverlay = financialMaintenance\.blocked \?/.test(source),
-  'App.js must build the maintenance view as an overlay value, not a returned tree',
+  /const maintenanceOverlay = financialMaintenance\.visible \?/.test(source),
+  'App.js must show an overlay only for visible maintenance, not routine write fencing',
 );
 assert.ok(
   /StyleSheet\.absoluteFill/.test(source),

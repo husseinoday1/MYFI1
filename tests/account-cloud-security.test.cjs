@@ -26,7 +26,7 @@ assert(identity.includes('uploadProfileAvatar') && identity.includes('removeProf
 assert(
   sync.includes('const hydrateProfile = async (fallbackIdentity = {}) =>')
     && sync.includes('ensureProfileIdentity(supabase, user, fallbackIdentity)')
-    && sync.includes('await hydrateProfile(priorIdentity)'),
+    && sync.includes('hydrateProfileWhenSafe(priorIdentity)'),
   'New-device login must hydrate or seed cloud identity through the account identity boundary',
 );
 assert(identity.includes('const fetched = await fetchProfileIdentity(client, user.id)'), 'The account identity boundary must fetch the cloud profile before seeding it');

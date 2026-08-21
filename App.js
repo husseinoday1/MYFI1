@@ -299,9 +299,19 @@ function AppRoot() {
     let authSubscription = null;
 
     const queueAuthTransition = nextUser => {
+      const nextUserId = String(nextUser?.id || '').trim() || null;
+      const applyTransition = () => {
+        const current = useStore.getState();
+        // Supabase normally emits INITIAL_SESSION as well as returning getSession.
+        // Do not repeat the same workspace/profile transition at cold start.
+        if (current.workspaceReady && (current.user?.id || null) === nextUserId) {
+          return { ok: true, unchangedSession: true };
+        }
+        return setUser(nextUser, { deferProfileHydration: true });
+      };
       const queued = authTransitionQueue.current.then(
-        () => setUser(nextUser),
-        () => setUser(nextUser),
+        applyTransition,
+        applyTransition,
       );
       authTransitionQueue.current = queued.catch(() => undefined);
       return queued;
@@ -698,7 +708,7 @@ function AppRoot() {
   // It is rendered as an overlay below instead. The barrier still does its real work
   // — writes and sync stay paused — but the tree underneath stays mounted, so state
   // survives and in-flight callbacks still have a component to talk to.
-  const maintenanceOverlay = financialMaintenance.blocked ? (
+  const maintenanceOverlay = financialMaintenance.visible ? (
     <View style={[s.splash, StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="auto">
       <StatusBar style="light" />
       <Ionicons name="shield-checkmark-outline" size={42} color="#159A6A" />

@@ -928,6 +928,44 @@ const runVerifiedEmptyShellCloudRecoveryV2 = async ({
   };
 };
 
+// This is deliberately a one-way optimization. It only says that recovery is
+// certainly unnecessary; every uncertain/empty state still takes the existing
+// visibly-blocking, verified recovery path below. Normal V2 sync therefore does
+// not briefly cover the current screen simply to discover that nothing is needed.
+const hasSteadyFinancialCloudRecoveryStateV2 = async ({
+  get,
+  workspaceNamespace,
+  ledgerNamespace,
+  syncUserId,
+} = {}) => {
+  const current = get();
+  if (!current.user || current.user.id !== syncUserId) return null;
+  if (current.cfg.demoMode || !current.workspaceReady || !current.financialLedgerV7Cutover) return null;
+
+  const existingProtocol = await readFinancialSyncProtocolV8({ namespace: ledgerNamespace });
+  const cutoverMarker = await readResetMarker(workspaceNamespace);
+  const markerLedgerId = String(cutoverMarker?.cloudLedgerId || '').trim();
+  const markerRestoreEpoch = Number(cutoverMarker?.cloudRestoreEpoch || 0);
+  const durableCleanV2Cutover = cutoverMarker?.cleanV2Cutover === true
+    && markerLedgerId
+    && markerRestoreEpoch > 0
+    && String(existingProtocol?.ledgerId || '') === markerLedgerId
+    && Number(existingProtocol?.restoreEpoch || 0) === markerRestoreEpoch;
+  if (durableCleanV2Cutover) return 'financial_v2_durable_cutover';
+
+  const wallets = Array.isArray(current.wallets) ? current.wallets : [];
+  const localLooksLikeShell = financialDataCount(current) === 0
+    && !hasCurrencySensitiveFinancialData(current)
+    && wallets.length <= 1;
+  if (!localLooksLikeShell) return 'financial_cloud_recovery_local_has_data';
+
+  const shell = await inspectFinancialEmptyShellV8({ namespace: ledgerNamespace });
+  if (shell?.supported && shell.empty && existingProtocol?.activeProtocolVersion === 2) {
+    return 'financial_v2_already_active';
+  }
+  return null;
+};
+
 const runControlledFinancialV2Activation = async ({
   get,
   set,
@@ -1323,6 +1361,7 @@ export const createSyncSlice = (set, get) => ({
     }
     return runFinancialMaintenanceTask({
       reason: normalizedReason,
+      presentation: options.presentation,
       beforeEnter: async () => {
         if (options.insideSync !== true) await syncQueue.catch(() => false);
         await flushLedgerWrites();
@@ -1417,6 +1456,7 @@ export const createSyncSlice = (set, get) => ({
       preserveWorkspaceOnLogout = true,
       switchToGuest = false,
       maintenanceOwned = false,
+      deferProfileHydration = false,
     } = options || {};
     // P19-015A2: serialize every auth/account workspace transition with local
     // loading, migration, recovery and cutover.
@@ -1522,6 +1562,9 @@ export const createSyncSlice = (set, get) => ({
     const hydrateProfile = async (fallbackIdentity = {}) => {
       try {
         const profile = await ensureProfileIdentity(supabase, user, fallbackIdentity);
+        // A delayed network profile response must never overwrite a subsequent
+        // sign-out or account switch. Local identity already rendered first.
+        if (get().user?.id !== nextUserId) return;
         if (profile?.patch && Object.keys(profile.patch).length) {
           set({ cfg: normalizeCfg({ ...get().cfg, ...profile.patch }) });
           await get().saveLocal({ dirty: false, force: true });
@@ -1529,11 +1572,22 @@ export const createSyncSlice = (set, get) => ({
       } catch (error) {
         console.warn('[STORE] profile hydrate', error);
       }
+      if (get().user?.id !== nextUserId) return;
       await writeActiveLocalLedgerContext({
         namespace: get().workspaceNamespace || transition.namespace,
         linkedUserId: nextUserId,
         identity: localIdentityFromState(get()),
       });
+    };
+
+    const hydrateProfileWhenSafe = async fallbackIdentity => {
+      if (!deferProfileHydration) return hydrateProfile(fallbackIdentity);
+      // Startup first paint must depend on the durable local ledger, not the
+      // optional cloud profile round trip. It refreshes after the UI is ready.
+      Promise.resolve(hydrateProfile(fallbackIdentity)).catch(error => {
+        console.warn('[STORE] deferred profile hydrate', error);
+      });
+      return undefined;
     };
 
     // Re-login to the account already linked to the mounted ledger. Do not
@@ -1555,7 +1609,7 @@ export const createSyncSlice = (set, get) => ({
         linkedUserId: nextUserId,
         identity: priorIdentity,
       });
-      await hydrateProfile(priorIdentity);
+      await hydrateProfileWhenSafe(priorIdentity);
       return { ok: true, namespace: currentNamespace, reusedActiveLedger: true };
     }
 
@@ -1580,7 +1634,7 @@ export const createSyncSlice = (set, get) => ({
     });
 
     const loadedIdentity = localIdentityFromState(get());
-    await hydrateProfile({ ...priorIdentity, ...loadedIdentity });
+    await hydrateProfileWhenSafe({ ...priorIdentity, ...loadedIdentity });
 
     if (transition.shouldOfferGuestTransfer) {
       const guest = await readCanonicalWorkspaceState({
@@ -2153,21 +2207,31 @@ export const createSyncSlice = (set, get) => ({
         const namespace = initial.workspaceNamespace || workspaceNamespaceForSession({ user: initial.user });
         let cloudRecovery = null;
         if (activeLedgerSupported() && initial.financialLedgerV7Cutover) {
-          // P19-015A2: cloud recovery temporarily owns the maintenance barrier.
-          // If another maintenance request arrived while this sync was in-flight,
-          // abort this sync so that request can drain syncQueue and proceed.
+          // A normal sync proves its local V2 state first. Only an actually empty
+          // or uncertain shell enters the blocking recovery path; settings saves
+          // (language, theme, and any future preference) must never flash a
+          // full-screen maintenance layer simply because they schedule a sync.
           if (getFinancialMaintenanceSnapshot().blocked) return false;
-          cloudRecovery = await get().runFinancialMaintenance(
-            'cloud_recovery',
-            () => runVerifiedEmptyShellCloudRecoveryV2({
-              get,
-              set,
-              workspaceNamespace: namespace,
-              ledgerNamespace: getLedgerNamespace(namespace, initial.cfg),
-              syncUserId,
-            }),
-            { insideSync: true, resumeSync: false },
-          );
+          const ledgerNamespace = getLedgerNamespace(namespace, initial.cfg);
+          const steadyReason = await hasSteadyFinancialCloudRecoveryStateV2({
+            get,
+            workspaceNamespace: namespace,
+            ledgerNamespace,
+            syncUserId,
+          });
+          cloudRecovery = steadyReason
+            ? { attempted: false, ok: true, recovered: false, reason: steadyReason }
+            : await get().runFinancialMaintenance(
+                'cloud_recovery',
+                () => runVerifiedEmptyShellCloudRecoveryV2({
+                  get,
+                  set,
+                  workspaceNamespace: namespace,
+                  ledgerNamespace,
+                  syncUserId,
+                }),
+                { insideSync: true, resumeSync: false, presentation: 'blocking' },
+              );
           if (cloudRecovery?.blocked || cloudRecovery?.ok === false) {
             throw new Error(cloudRecovery?.reason || 'financial_cloud_recovery_blocked');
           }

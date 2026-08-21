@@ -444,4 +444,13 @@ assert(startupTiming.includes('stepMs: durations') && startupTiming.includes('re
 assert.equal(startupTiming.includes('AsyncStorage'), false, 'Startup timing must stay in-memory and never persist stale diagnostic evidence');
 assert.equal(startupTiming.includes('amount'), false, 'Startup timing diagnostic must not include financial values');
 
+/* MYFI_GLOBAL_MAINTENANCE_VISIBILITY_AND_STARTUP */
+const syncSlice = fs.readFileSync(path.join(srcRoot, 'store', 'slices', 'useSyncSlice.js'), 'utf8');
+const maintenanceBarrier = fs.readFileSync(path.join(srcRoot, 'lib', 'financialMaintenanceBarrier.js'), 'utf8');
+assert(maintenanceBarrier.includes("presentation = 'blocking'") && maintenanceBarrier.includes('visible: !!visibleMaintenance'), 'Maintenance must keep write fencing separate from whether a full-screen overlay is shown');
+assert(appRoot.includes('const maintenanceOverlay = financialMaintenance.visible ?'), 'The mounted app must only show maintenance UI for explicitly visible work');
+assert(syncSlice.includes('hasSteadyFinancialCloudRecoveryStateV2') && syncSlice.includes("financial_cloud_recovery_local_has_data"), 'Routine V2 sync must prove its existing local state before entering recovery maintenance');
+assert(syncSlice.includes("deferProfileHydration = false") && syncSlice.includes('hydrateProfileWhenSafe'), 'Startup may render durable local data before optional cloud profile hydration');
+assert(appRoot.includes('unchangedSession: true') && appRoot.includes('deferProfileHydration: true'), 'Duplicate cold-start auth events must not repeat workspace/profile hydration');
+
 console.log('MYFI modal and settings UI contract: all assertions passed');
