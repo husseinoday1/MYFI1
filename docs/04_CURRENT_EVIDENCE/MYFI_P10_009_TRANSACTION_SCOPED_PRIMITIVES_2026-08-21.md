@@ -24,6 +24,15 @@ The old V7 stage promotion, Cold Archive replacement, and public epoch-commit AP
 remain present and delegate to the extracted operations, preserving their behavior.
 No pending outbox/inbox rows are deleted by the new primitives.
 
+## Behaviour change recorded
+
+The extracted primitives refuse an empty namespace where the previous inline code
+issued a `DELETE` that matched nothing. One existing caller sits behind that change:
+`finalizeFinancialBootstrapStageV8` now throws — and therefore rolls its transaction
+back — if `stage_namespace` is an empty string, where before it silently deleted no
+rows and carried on. Fail-closed and almost certainly unreachable, but it is a real
+difference on an error path and belongs in the record rather than in a reviewer's head.
+
 ## Verification
 
 - `run-p10-009-transaction-primitives.cjs` proves raw primitives cannot enqueue or
