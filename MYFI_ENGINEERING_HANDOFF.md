@@ -72,82 +72,65 @@ never as current architecture or roadmap.
 
 ---
 
-## 3. Current verified state (updated 2026-08-19, re-verified live against GitHub)
+## 3. Current verified state (updated 2026-08-21 — RE-VERIFY, this drifts fast)
 
-⚠️ **This section drifts fast — this project has multiple active working
-environments (this Windows clone, GitHub Codespaces, separate Codex-style
-patch worktrees under `C:\Users\husse\AppData\Local\MYFI-PATCH-WORKTREES`) all
-pushing to the same GitHub repo. On 2026-08-19 this local Windows clone was
-found 17 commits behind the true remote tip, and a separately-prepared
-handoff doc was 29 commits behind (it named a checkpoint that was already
-superseded by an entire branch generation). Always re-run `git fetch --all
-&& git branch -r --sort=-committerdate | head` before trusting any of this.**
+⚠️ **Re-run `git fetch origin && git log origin/impl/p20-g01-acceptance-apk-2026-08-19 --oneline -10` before trusting anything below.** This project has
+multiple simultaneous contributors pushing to the same branch (a Claude
+"Implementation" session chain, and OpenAI Codex as of 2026-08-21) — treat
+any status snapshot, including this one, as provisional.
 
 ```text
-True current tip (GitHub, verified 2026-08-19):
-  Branch: r05-p20-phase9-restore-epoch-gate
-  HEAD:   fd98f80  "P20-G01 add disposable restore epoch device gate"
-  Pushed: 2026-08-19 10:41 +0300
+Branch: impl/p20-g01-acceptance-apk-2026-08-19 (single active branch — the
+        earlier r05-p19/r05-p20 branch confusion from 2026-08-19 is over,
+        everything lives on this one branch now)
+SQLite schema: V8
 
-This local Windows clone (kept for reference, NOT the tip):
-  Branch: r05-p19-012-empty-shell-cloud-recovery
-  HEAD:   884c349a6a0d624451a375ed7a6026e589985d49 (17 commits behind true tip)
-  Working tree: NOT CLEAN — see the broken-edit warning below; unconfirmed
-  whether it was ever fixed on the later branches.
+Phase 9 (Account Lifecycle Gate): CLOSED — 2026-08-20/21. 9/10 items fully
+  confirmed on real device; item 10 was accepted as data-safety-confirmed
+  with V2-sync-health verification deferred (root Supabase resource
+  constraint, since resolved). Do not describe this as "10/10" — the
+  evidence file is explicit that it's a conditional accept, and that
+  wording distinction has already had to be corrected once.
 
-SQLite schema:    V8 (unchanged since P19-004)
-Current release:  R05 (in progress; R04.1 is CLOSED)
-Active addendum:  MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM.md (ACTIVE, extended by
-                   P19-013's fail-closed atomic V2 remote-apply contract)
-Phase 8:          Operational cutover — real-device PASS (P18-012).
-Phase 9:          STILL OPEN, but materially closer to closing. A real account
-                   has now passed real-device V2 acceptance for the ordinary
-                   path: V2 active, sync OK, a real transaction uploaded and
-                   downloaded, survived app restart, no V1 fallback observed
-                   (P20 evidence, 2026-08-19). The one remaining gate is
-                   P20-G01: real-device proof that the destructive
-                   restore-epoch/recovery handshake is safe, run ONLY against
-                   a disposable/empty test account, with 10 required steps
-                   (build signed acceptance APK → confirm the gate refuses to
-                   run on a non-empty account → run it once on a disposable
-                   account → verify server restore-event evidence → confirm
-                   the real account is untouched afterward). None of the 10
-                   steps are done yet.
-Phase 10:         Still BLOCKED — explicitly may not open until all 10 P20-G01
-                   items pass.
-Patch chain:      P19-001 through P19-013 (P19-013 removed a temporary V7
-                   remote-apply reuse and made V2 apply fail-closed), then
-                   P19-014/014A (diagnostics + local APK build path),
-                   P19-015A1/A2 (SQLite runtime serialization + startup
-                   hardening), P19-015B0/B1 (ledger-identity forensics +
-                   adoption preflight), four "P19 FINAL" commits (V2
-                   cutover/bootstrap/causal-order hardening), then "P20 FINAL"
-                   (fixed a real sync bug: a rotating signed avatar-image URL
-                   was being treated as part of canonical workspace state and
-                   causing spurious sync revision bumps — now excluded from
-                   equality checks), then P20-G01 (current tip).
-```
+Phase 10 (Atomic Backup/Restore Engine): OPEN, in active progress.
+  Architecture decided and real-device-validated: canonical SQLite read
+  model -> semantic hash proof -> strict decoder -> isolated staging ->
+  ATOMIC promotion (Strategy B: staging happens OUTSIDE the maintenance
+  lock, only the final promotion + epoch handshake are locked — proven
+  ~25x faster than locking the whole staging phase at 100k rows; the
+  tradeoff this buys is a hard requirement that promotion detect any live
+  ledger write that happened during unlocked staging and refuse rather
+  than silently overwrite it — this is enforced by an atomic per-write
+  "ledger generation" counter, including cold-archive writes). P10-004
+  through P10-012 done and merged. P10-013 (Undo via the same restore
+  engine, using a new locale-independent V3 semantic hash since V2's
+  ordering was found to be locale-dependent) is in progress in reviewed
+  slices. P10-014 (final device performance/fault-injection proof) not
+  started. Full design: docs/04_CURRENT_EVIDENCE/MYFI_PHASE10_BACKUP_RESTORE_RESEARCH_2026-08-20.md
+  and Codex's own execution-audit doc in the same folder (search
+  "MYFI_PHASE10" and "MYFI_P10_" for the full evidence trail — there are
+  many dated files, each one commit's worth of independently-reviewed
+  work). A Supabase migration for P10-012's cloud RPC exists in the repo
+  but is DELIBERATELY NOT APPLIED to the live database — it's dormant,
+  unwired code; applying it needs its own explicit user-approved
+  preflight/review/apply/postcheck pass, not a side effect of a code push.
 
-**⚠️ Uncommitted change found in the working tree on 2026-08-19 (local Windows
-clone, branch `r05-p19-012-empty-shell-cloud-recovery`) — status on later
-branches not reconfirmed:**
+All 5 real bugs the user found in daily use (broken restore confirmation,
+UI flash + nav reset, blocking sync screen, decorative +/- buttons, slow
+cold start) are FIXED and confirmed on device. The cold-start fix in
+particular: measure the *installed APK's actual commit*, not the branch tip,
+before trusting a device timing number — a stale-build measurement wasted
+real time here.
 
-`src/lib/financialLedgerV7Repository.js` had one uncommitted line change that
-looked like a broken/accidental edit, not a real patch:
-
-```diff
--        activationEvidence
-+    activationEvidence,
-         && String(activationEvidence.ledgerId || '') === identity.ledgerId
-```
-
-This turns a valid `&&`-chain operand into `activationEvidence, && ...`, which
-is not syntactically valid as written and (if it did parse) would silently
-change `activationEvidenceValid` logic in the V8 sync protocol reader — the
-exact function that gates whether V2 activation evidence is trusted. Given
-P19-013/P20 work landed cleanly afterward on GitHub, this was likely a stray
-local edit that was never pushed — but confirm it's gone before trusting this
-file again, don't assume.
+Team structure as of 2026-08-21 (see docs/00_MYFI_CANONICAL_AUTHORITY.md
+"Standing Engineering Rules" for the full rule list this implies):
+Codex is the day-to-day executor on Phase 10; a Claude "Implementation"
+session chain (numbered: Implementation, Implementation 2, ...) is the
+primary/backup executor and — critically — the mandatory independent
+reviewer for everything Codex writes before it may be pushed. This
+review-before-push gate has been breached by accident twice; treat it as
+non-negotiable going forward. Whichever AI is acting as engineer here
+should expect this same review relationship to apply to its own commits.
 
 **Known regression pattern to watch for:** P18-016 documented that after V7
 cutover, the legacy `user_data` snapshot merge must never again be used as a
