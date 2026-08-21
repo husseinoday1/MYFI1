@@ -5,7 +5,11 @@ const assert = require('node:assert/strict');
 
 const root = path.resolve(__dirname, '..');
 const sourcePath = path.join(root, 'src/store/multiDeviceSync.js');
-let source = fs.readFileSync(sourcePath, 'utf8');
+const metadataPath = path.join(root, 'src/lib/cloudWorkspaceMetadata.js');
+const metadata = fs.readFileSync(metadataPath, 'utf8').replace(/export const /g, 'const ');
+let source = fs.readFileSync(sourcePath, 'utf8')
+  .replace(/import \{ cloudWorkspaceCfg, mergeCloudWorkspaceCfg \} from '\.\.\/lib\/cloudWorkspaceMetadata\.js';\r?\n/, '');
+source = `${metadata}\n${source}`;
 source = source.replace(/export const /g, 'const ');
 source += '\nmodule.exports = { valuesEqual, mergeArray3, sameWorkspaceData, mergeWorkspaceStates };\n';
 const sandbox = { module: { exports: {} }, exports: {}, console };
@@ -54,7 +58,7 @@ assert.equal(sameWorkspaceData(state({ cfg: { currency: 'IQD', lang: 'ar' } }), 
   const remote = state({ cfg: { currency: 'EUR', lang: 'en' } });
   const merged = mergeWorkspaceStates({ base, local, remote, conflicts });
   assert.equal(merged.cfg.currency, 'USD');
-  assert.equal(merged.cfg.lang, 'en');
+  assert.equal(merged.cfg.lang, 'ar', 'device-local language must not merge from cloud state');
   assert.ok(conflicts.some(x => String(x.path).includes('cfg.currency')), 'scalar conflict should be recorded');
 }
 

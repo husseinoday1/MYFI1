@@ -10,6 +10,7 @@ import {
   runFinancialMaintenanceTask,
 } from '../../lib/financialMaintenanceBarrier';
 import { canonicalWorkspaceCfg, mergeWorkspaceStates, sameWorkspaceData } from '../multiDeviceSync';
+import { mergeCloudWorkspaceCfg } from '../../lib/cloudWorkspaceMetadata.js';
 import {
   isNeverRetrySyncError,
   isTransientCloudSyncError,
@@ -41,6 +42,7 @@ import {
   clearFinancialWorkspaceV7,
   proveFinancialLedgerInvariantsV7,
   commitEntityChangesV7,
+  persistFinancialLocalPreferencesV7,
   activateFinancialSyncProtocolV2V8,
   readFinancialSyncProtocolV8,
   inspectFinancialEmptyShellV8,
@@ -383,7 +385,7 @@ const stateFromFinancialV7 = (workspace, fallbackCfg = DEF_CFG) => {
       commitments: workspace?.commitments || [],
     },
     cats: workspace?.cats?.length ? workspace.cats : DEF_CATS,
-    cfg: financialWorkspace.cfg || fallbackCfg,
+    cfg: mergeCloudWorkspaceCfg(fallbackCfg, financialWorkspace.cfg),
     notif: financialWorkspace.notif || DEF_NOTIF,
     dirty: false,
     cloudRevision: Number(financialWorkspace.cloudRevision || 0),
@@ -2007,7 +2009,7 @@ export const createSyncSlice = (set, get) => ({
     }
   },
 
-  saveLocal: async ({ dirty = true, force = false } = {}) => {
+  saveLocal: async ({ dirty = true, force = false, localOnly = false } = {}) => {
     const current = get();
     const updatedAt = new Date().toISOString();
     const nextDirty = dirty ? true : current.dirty;
@@ -2035,21 +2037,27 @@ export const createSyncSlice = (set, get) => ({
       // snapshot, otherwise older SQLite transactions could be mistaken for
       // deletions. Persist only the small workspace/config entity here; every
       // financial command/entity mutation commits to V7 at its own boundary.
-      const committed = await commitEntityChangesV7({
-        namespace: getLedgerNamespace(current.workspaceNamespace, clean.cfg),
-        changes: [{
-          entityType: 'workspace',
-          id: 'workspace',
-          payload: {
-            cfg: canonicalWorkspaceCfg(clean.cfg),
-            notif: clean.notif,
-            cloudRevision: Number(clean.cloudRevision || 0),
-          },
-        }],
-      });
-      if (committed.supported && !committed.ok) {
-        throw new Error(committed.reason || 'financial_v7_workspace_metadata_commit_failed');
+      const ledgerNamespace = getLedgerNamespace(current.workspaceNamespace, clean.cfg);
+      if (!localOnly) {
+        const committed = await commitEntityChangesV7({
+          namespace: ledgerNamespace,
+          changes: [{
+            entityType: 'workspace',
+            id: 'workspace',
+            payload: {
+              cfg: canonicalWorkspaceCfg(clean.cfg),
+              cloudRevision: Number(clean.cloudRevision || 0),
+            },
+          }],
+        });
+        if (committed.supported && !committed.ok) {
+          throw new Error(committed.reason || 'financial_v7_workspace_metadata_commit_failed');
+        }
       }
+      const preferencesPersisted = await persistFinancialLocalPreferencesV7({
+        namespace: ledgerNamespace, cfg: clean.cfg, notif: clean.notif,
+      });
+      if (!preferencesPersisted) throw new Error('financial_v7_local_preferences_persist_failed');
       if (force && financialDataCount(clean) === 0) {
         await writeResetMarker(current.workspaceNamespace, { pendingCloudSync: !!current.user });
       }
@@ -2453,7 +2461,6 @@ export const createSyncSlice = (set, get) => ({
                 entityType: 'workspace', id: 'workspace',
                 payload: {
                   cfg: canonicalWorkspaceCfg(finalState.cfg),
-                  notif: finalState.notif,
                   cloudRevision: revisionValue,
                 },
               }],

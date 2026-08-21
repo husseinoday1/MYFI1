@@ -1,3 +1,5 @@
+import { cloudWorkspaceCfg, mergeCloudWorkspaceCfg } from '../lib/cloudWorkspaceMetadata.js';
+
 const isObject = value => (
   value !== null
   && typeof value === 'object'
@@ -204,17 +206,7 @@ export const mergeArray3 = (
   ];
 };
 
-export const canonicalWorkspaceCfg = cfg => (
-  Object.fromEntries(
-    Object.entries(cfg || {}).filter(([key]) => key !== 'avatarUri'),
-  )
-);
-
-const localDerivedWorkspaceCfg = cfg => (
-  Object.prototype.hasOwnProperty.call(cfg || {}, 'avatarUri')
-    ? { avatarUri: String(cfg?.avatarUri || '') }
-    : {}
-);
+export const canonicalWorkspaceCfg = cfg => cloudWorkspaceCfg(cfg);
 
 const dataView = state => ({
   trans: state?.trans || [],
@@ -281,16 +273,16 @@ export const mergeWorkspaceStates = ({
       [],
       { path: 'cats', conflicts },
     ),
-    cfg: {
-      ...mergeValue3(
+    cfg: mergeCloudWorkspaceCfg(
+      local.cfg,
+      mergeValue3(
         canonicalWorkspaceCfg(b.cfg),
         canonicalWorkspaceCfg(local.cfg),
         canonicalWorkspaceCfg(remote.cfg),
         'cfg',
         conflicts,
       ),
-      ...localDerivedWorkspaceCfg(local.cfg),
-    },
+    ),
     // Notification preferences are still local-only in the current
     // cloud schema, so never discard this device's notification config.
     notif: local.notif || remote.notif || {},

@@ -12,14 +12,18 @@ const multi = read('src/store/multiDeviceSync.js');
 const repo = read('src/lib/financialLedgerV7Repository.js');
 const sync = read('src/store/slices/useSyncSlice.js');
 const gate = read('tests/run-quality-gate.cjs');
+const cloudMetadata = read('src/lib/cloudWorkspaceMetadata.js');
 
 must(multi.includes('export const canonicalWorkspaceCfg = cfg =>'), 'canonical workspace cfg helper exists');
-must(multi.includes("filter(([key]) => key !== 'avatarUri')"), 'avatarUri is excluded from canonical cfg');
+must(multi.includes("from '../lib/cloudWorkspaceMetadata.js'"), 'workspace sync uses the shared cloud data-minimization boundary');
+must(cloudMetadata.includes("'currency'"), 'cloud workspace allowlist retains the base currency');
+must(cloudMetadata.includes('CLOUD_WORKSPACE_CFG_KEYS'), 'cloud workspace metadata uses an explicit allowlist');
 must(multi.includes('cfg: canonicalWorkspaceCfg(state?.cfg)'), 'sameWorkspaceData uses canonical cfg');
-must(multi.includes('...localDerivedWorkspaceCfg(local.cfg)'), 'merge keeps local derived avatar URI');
+must(multi.includes('mergeCloudWorkspaceCfg('), 'merge keeps device-local configuration while applying cloud financial metadata');
 
 must(repo.includes('const canonicalFinancialEntityPayload = (entityType, payload) =>'), 'V7 entity canonicalizer exists');
-must(repo.includes('safeJson(canonicalFinancialEntityPayload(entity.entityType, entity.payload))'), 'V7 storage strips derived workspace URI');
+must(repo.includes('safeJson(canonicalFinancialEntityPayload(entity.entityType, entity.payload))'), 'V7 storage applies the cloud data-minimization boundary');
+must(repo.includes('persistFinancialLocalPreferencesV7'), 'V7 persists local preferences without sending them through the outbox');
 must(repo.includes('payload: canonicalFinancialEntityPayload(entity.entityType, entity.payload),'), 'prepared local entity is canonical before outbox');
 must(repo.includes('payload: canonicalFinancialEntityPayload(String(item.entityType), item.payload ?? null),'), 'workspace equality input is canonical');
 
@@ -32,7 +36,9 @@ must(sync.includes('[P20_V2_SYNC_CONTEXT]'), 'V2 startup context is observable')
 must(sync.includes('[P20_V2_MUTATION_STATE]'), 'V2 mutation result is observable');
 must(gate.includes("'p20-v2-client-closure.test.cjs'"), 'P20 contract is in static quality gate');
 
-const runtimeSource = multi
+const runtimeSource = cloudMetadata
+  .replace(/\bexport const /g, 'const ')
+  .concat('\n', multi.replace(/import \{ cloudWorkspaceCfg, mergeCloudWorkspaceCfg \} from \'\.\.\/lib\/cloudWorkspaceMetadata\.js\';\r?\n/, ''))
   .replace(/\bexport const /g, 'const ')
   .concat('\nreturn { canonicalWorkspaceCfg, sameWorkspaceData, mergeWorkspaceStates };');
 const api = new Function(runtimeSource)();
@@ -52,18 +58,21 @@ const remote = {
 
 must(api.sameWorkspaceData(local, remote), 'signed avatar URL rotation is a semantic no-op');
 must(
-  !api.sameWorkspaceData(local, { ...remote, cfg: { ...remote.cfg, avatarPath: 'user/other-avatar' } }),
-  'stable avatarPath change remains a semantic change',
+  api.sameWorkspaceData(local, { ...remote, cfg: { ...remote.cfg, avatarPath: 'user/other-avatar' } }),
+  'account avatar path is not financial workspace data',
 );
 
 const conflicts = [];
 const merged = api.mergeWorkspaceStates({ base, local, remote, conflicts });
-must(merged.cfg.avatarPath === 'user/avatar', 'merge preserves canonical avatarPath');
+must(merged.cfg.avatarPath === 'user/avatar', 'merge preserves local account metadata');
 must(merged.cfg.avatarUri === 'signed://local', 'merge preserves local derived avatarUri for display');
+must(merged.cfg.theme === 'dark', 'merge preserves this device theme');
 must(conflicts.length === 0, 'derived avatarUri rotation creates no merge conflict');
 
 const canonical = api.canonicalWorkspaceCfg(local.cfg);
-must(!Object.prototype.hasOwnProperty.call(canonical, 'avatarUri'), 'canonical cfg omits avatarUri');
-must(canonical.avatarPath === 'user/avatar', 'canonical cfg retains avatarPath');
+must(JSON.stringify(canonical) === JSON.stringify({ currency: 'IQD' }), 'canonical cfg sends only reviewed financial workspace metadata');
+['avatarUri', 'avatarPath', 'theme', 'lang', 'defaultWalletId', 'homeBalancesHidden', 'phone', 'accountConsentAccepted'].forEach(key => {
+  must(!Object.prototype.hasOwnProperty.call(canonical, key), `${key} remains local-only`);
+});
 
 console.log('P20 FINAL V2 CLIENT CLOSURE CONTRACT: PASS');

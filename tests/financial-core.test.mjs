@@ -306,7 +306,7 @@ const mergedWorkspace = mergeWorkspaceStates({
 assert.equal(mergedWorkspace.trans[0].title, 'Local title', 'device merge must retain the current device value for a true scalar conflict');
 assert.equal(mergedWorkspace.trans[0].amt, -25, 'device merge must retain non-conflicting remote fields');
 assert(syncConflicts.some(item => item.path === 'trans[tx-1].title'), 'device merge must record the conflicted field path');
-assert(syncConflicts.some(item => item.path === 'cfg.theme'), 'device merge must record settings conflicts too');
+assert(!syncConflicts.some(item => item.path === 'cfg.theme'), 'device-local settings must not create a cloud merge conflict');
 const deletionConflicts = [];
 mergeWorkspaceStates({
   base: { goals: [{ id: 'goal-1', name: 'Trip' }] },

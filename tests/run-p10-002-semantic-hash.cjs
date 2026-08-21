@@ -21,6 +21,8 @@ const filename = path.join(root, 'src/lib/financialSemanticProjection.js');
 // The real canonicaliser from the repository, extracted rather than re-implemented —
 // re-implementing it here would defeat the point of the test.
 const repoSource = fs.readFileSync(path.join(root, 'src/lib/financialLedgerV7Repository.js'), 'utf8');
+const metadataSource = fs.readFileSync(path.join(root, 'src/lib/cloudWorkspaceMetadata.js'), 'utf8')
+  .replace(/export const /g, 'const ');
 const canonicalMatch = repoSource.match(
   /export const canonicalFinancialEntityPayload = \(entityType, payload\) => \{[\s\S]*?\n\};/,
 );
@@ -31,7 +33,7 @@ let source = fs.readFileSync(filename, 'utf8')
   .replace(/import \{ bytesToHex \} from '@noble\/hashes\/utils';/, "const { bytesToHex } = require('@noble/hashes/utils');")
   .replace(
     /import \{ canonicalFinancialEntityPayload \} from '\.\/financialLedgerV7Repository';/,
-    canonicalMatch[0].replace('export const ', 'const '),
+    `${metadataSource}\n${canonicalMatch[0].replace('export const ', 'const ')}`,
   )
   .replace(/export const /g, 'const ');
 

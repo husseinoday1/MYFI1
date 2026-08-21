@@ -6,6 +6,7 @@ import {
   buildFinancialLedgerCommand,
   FINANCIAL_LEDGER_SCHEMA_VERSION,
 } from './financialLedgerV7Model';
+import { cloudWorkspaceCfg, mergeCloudWorkspaceCfg } from './cloudWorkspaceMetadata.js';
 
 const readyDatabases = new WeakSet();
 const readyDatabasePromises = new WeakMap();
@@ -2487,13 +2488,11 @@ export const canonicalFinancialEntityPayload = (entityType, payload) => {
       || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return payload;
   }
-  const cfg = payload.cfg;
-  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return payload;
+  const { cfg, notif, ...rest } = payload;
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return rest;
   return {
-    ...payload,
-    cfg: Object.fromEntries(
-      Object.entries(cfg).filter(([key]) => key !== 'avatarUri'),
-    ),
+    ...rest,
+    cfg: cloudWorkspaceCfg(cfg),
   };
 };
 
@@ -3232,11 +3231,18 @@ export const readFinancialWorkspaceV7 = async ({ namespace = 'guest', database =
       if (payload) transactions.push({ ...payload, revision: Math.max(1, Number(row.revision || payload.revision || 1)) });
     }
   }
+  const statePayload = parseJson(state?.payload_json, {});
+  const syncedWorkspace = entities.workspace?.[0] || statePayload;
+  const localPreferences = statePayload?.localPreferences || {};
   return {
     trans: transactions,
     debts: entities.debt || [], goals: entities.goal || [], commitments: entities.commitment || [],
     budgets: entities.budget || [], recurringRules: entities.recurring_rule || [], cats: entities.category || [], wallets: entities.wallet || [],
-    workspace: entities.workspace?.[0] || parseJson(state?.payload_json, {}),
+    workspace: {
+      ...syncedWorkspace,
+      cfg: mergeCloudWorkspaceCfg(localPreferences.cfg, syncedWorkspace?.cfg),
+      notif: localPreferences.notif || syncedWorkspace?.notif || {},
+    },
     sourceMode: state?.source_mode || 'shadow',
     transactionCacheBounded: !!safeLimit,
     transactionCacheLimit: safeLimit,
@@ -3439,6 +3445,29 @@ export const setFinancialWorkspaceStateV7 = async ({ namespace = 'guest', source
     reconciledAt, safeJson(payload), now,
   ));
   return true;
+};
+
+// Local-only settings live beside the financial workspace but are never placed
+// in its outbox. This keeps them durable across app restarts without turning a
+// language/theme/privacy choice into a cloud mutation.
+export const persistFinancialLocalPreferencesV7 = async ({ namespace = 'guest', cfg = {}, notif = {}, database = null } = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return false;
+  await ensureFinancialLedgerV7(db);
+  const now = new Date().toISOString();
+  return enqueueWrite(async () => {
+    const state = await db.getFirstAsync(
+      `SELECT payload_json FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1`,
+      namespace,
+    );
+    if (!state) return false;
+    const payload = parseJson(state.payload_json, {}) || {};
+    await db.runAsync(
+      `UPDATE ledger_workspace_state_v7 SET payload_json=?,updated_at=? WHERE namespace=?`,
+      safeJson({ ...payload, localPreferences: { cfg, notif } }), now, namespace,
+    );
+    return true;
+  });
 };
 
 export const readPendingLedgerMutationsV7 = async ({ namespace = 'guest', limit = 100, database = null } = {}) => {
@@ -4086,7 +4115,7 @@ export const reconcileFinancialWorkspaceV7 = async ({
   )));
   desiredEntities.push({
     entityType: 'workspace', id: 'workspace',
-    payload: { cfg: workspace?.cfg || {}, notif: workspace?.notif || {}, cloudRevision: Number(workspace?.cloudRevision || 0) },
+    payload: { cfg: cloudWorkspaceCfg(workspace?.cfg), cloudRevision: Number(workspace?.cloudRevision || 0) },
   });
   const existingEntities = new Map((projection?.entities || []).map(item => [`${item.entityType}:${item.id}`, item]));
   const desiredKeys = new Set(desiredEntities.map(item => `${item.entityType}:${item.id}`));

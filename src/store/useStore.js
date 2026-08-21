@@ -115,7 +115,9 @@ export const useStore = create((set, get) => {
           ? { ...(current.cfg.enabledModules || {}), ...effectivePatch.enabledModules }
           : current.cfg.enabledModules,
       });
-      if (newCfg.enabledModules?.wallets || effectivePatch.defaultWalletId || effectivePatch.currency || effectivePatch.profileType || effectivePatch.activeScope) {
+      const budgetMetadataChanged = Object.prototype.hasOwnProperty.call(effectivePatch, 'categoryBudgets')
+        || Object.prototype.hasOwnProperty.call(effectivePatch, 'categoryBudgetsByMonth');
+      if (baseCurrencyChanging) {
         const prepared = prepareWalletData({
           wallets: walletsForCfg,
           trans: current.trans,
@@ -137,15 +139,18 @@ export const useStore = create((set, get) => {
         return { ok: true, reason: baseCurrencyLocked ? 'base_currency_locked' : null, currencyChanged: !baseCurrencyLocked };
       }
       coreSet({ cfg: newCfg });
-      await get().saveLocal();
-      get().scheduleCloudSync?.('settings');
+      // UI/device preferences are durable locally but do not create a cloud
+      // mutation. Budget entities are financial and already have explicit V7
+      // mutations, so they only use this path to schedule that existing outbox.
+      await get().saveLocal({ dirty: budgetMetadataChanged, localOnly: !budgetMetadataChanged });
+      if (budgetMetadataChanged) get().scheduleCloudSync?.('settings_financial');
       return { ok: true, reason: baseCurrencyLocked ? 'base_currency_locked' : null, currencyChanged: !baseCurrencyLocked };
     },
 
     setNotif: async (patch) => {
       const newNotif = { ...get().notif, ...patch };
       coreSet({ notif: newNotif });
-      await get().saveLocal({ dirty: false });
+      await get().saveLocal({ dirty: false, localOnly: true });
     },
 
     setCategoryBudget: async (categoryId, amount, date = new Date()) => {

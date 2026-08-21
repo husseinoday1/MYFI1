@@ -15,6 +15,8 @@ const Module = require('node:module');
 
 const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const filename = path.join(root, 'src/lib/financialLedgerV7Repository.js');
+const metadataSource = fs.readFileSync(path.join(root, 'src/lib/cloudWorkspaceMetadata.js'), 'utf8')
+  .replace(/export const /g, 'const ');
 
 let source = fs.readFileSync(filename, 'utf8');
 source = source
@@ -38,6 +40,10 @@ source = source
       'const buildFinancialLedgerCommand = () => null;',
       'const FINANCIAL_LEDGER_SCHEMA_VERSION = 8;',
     ].join('\n'),
+  )
+  .replace(
+    "import { cloudWorkspaceCfg, mergeCloudWorkspaceCfg } from './cloudWorkspaceMetadata.js';",
+    metadataSource,
   )
   .replace(/export const /g, 'const ')
   .replace(/export async function /g, 'async function ');

@@ -12,6 +12,7 @@ src/components/AppPrimitives.js
 src/dev/p19RestoreEpochDeviceGate.js
 src/dev/phase10RestoreBenchmarkHarness.js
 src/lib/backupData.js
+src/lib/cloudWorkspaceMetadata.js
 src/lib/financialBackupV2.js
 src/lib/financialLedgerV7Migration.js
 src/lib/financialLedgerV7Repository.js
@@ -30,3 +31,5 @@ src/screens/ReportsScreen.js
 src/screens/SettingsLegacyScreen.js
 src/screens/SettingsScreen.js
 src/store/slices/useSyncSlice.js
+src/store/multiDeviceSync.js
+src/store/useStore.js
