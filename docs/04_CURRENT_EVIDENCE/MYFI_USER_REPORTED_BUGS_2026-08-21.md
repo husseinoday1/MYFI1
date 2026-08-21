@@ -81,3 +81,83 @@ nothing), not a display-only issue. Treat with the same priority as Bug 3
 Bug 3 investigation must be read-only/diagnostic first (no modification to
 the user's real backup files or real financial data) until root cause is
 understood — standard real-data-safety rule applies.
+
+---
+
+## Resolution status — 2026-08-21, MYFI Implementation
+
+| Bug | State | Commit |
+|---|---|---|
+| 1 — cold start latency | instrumented, awaiting device numbers | `03db96b` |
+| 2 — full-screen flash / navigation reset | fixed | `abe8fd7` |
+| 3 — restore appears to fail | fixed, and it was never failing | `abe8fd7` |
+| 4 — blocking screen during sync | fixed by the same change | `abe8fd7` |
+| 5 — non-functional +/- buttons | fixed | `0609cf8` |
+
+### Bugs 2, 3 and 4 were one defect
+
+`App.js:644` returned a full-screen maintenance view when
+`financialMaintenance.blocked` went true. That does not hide the app — it unmounts it,
+and when the barrier lifts the tree is rebuilt with every component's state gone.
+
+Bug 2 is that teardown seen directly. Bug 4 is the same screen, reported as intrusive.
+Bug 3 is the same mechanism with a much worse read: restore calls the barrier itself
+(`dataSlice.js:616`), so SettingsScreen unmounted mid-await and
+`setRestoreResultOpen(true)` ran against a component that no longer existed.
+
+**The restore had already succeeded. Only its confirmation was lost.** `importBackup`
+completes in the store, which does not care that the component went away. A user
+retrying on the assumption of failure was re-running an operation that had worked.
+
+The maintenance screen is now an overlay over a still-mounted tree, in all four
+branches that can be on screen when it fires.
+
+### Duplicate protection confirmed by the user
+
+Checked on the real device after the fix: transaction counts show **no duplication**,
+including after repeated manual sync. So the idempotency protection held through the
+period when restores were being retried under the false impression that they had
+failed. Worth recording as its own result — it was never directly tested before, and it
+is the thing that would have turned a confusing bug into a damaging one.
+
+### Bug 5 was a missing prop
+
+`HistoryScreen` and `ReportsScreen` declare `onAddExpense`/`onAddIncome` with no-op
+defaults, and `App.js` rendered both with no props at all. The empty-state +/- buttons
+did nothing: no crash, no log, nothing visible in review. The no-op defaults are what
+made it silent — they turn a forgotten prop into a decorative button.
+
+### Regression guards added
+
+- `tests/app-maintenance-overlay.test.cjs` — the barrier must never gate a `return`.
+- `tests/screen-action-props-wired.test.cjs` — an action prop a screen declares must be
+  supplied where it is rendered.
+
+Both fail against the pre-fix source.
+
+---
+
+## Guiding principle for later work — ordinary sync should be invisible
+
+From the user, 2026-08-21. Recorded as direction, not a queued task; it does not
+displace the current measure-first priority on bug 1.
+
+Ordinary sync should have **no visible effect at all** — no screen, no flash, no
+interruption — and should wait until the user has finished editing rather than firing
+on every individual change.
+
+The overlay fix is a step toward this and not the destination. It stops sync from
+destroying UI state, but the maintenance panel is still shown for ordinary sync, which
+is exactly what the user is asking to stop seeing. The remaining work is roughly:
+
+1. Debounce the barrier so a burst of edits triggers one maintenance window, not one
+   per change.
+2. Distinguish maintenance that genuinely must block the user — restore, destructive
+   recovery — from ordinary sync, which should not surface at all.
+3. Show the panel only for the first kind.
+
+Point 2 is the substantive one and needs care: the barrier currently has a single
+"blocked" state used by every caller
+(`dataSlice.js:176/494/616`, `useSyncSlice.js:1427/1611/1739/1937/2160/2686/2867`), so
+telling the two kinds apart means giving callers a way to declare intent, not guessing
+from context at the call site.
