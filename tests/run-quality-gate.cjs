@@ -117,6 +117,7 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'p10_007_canonical_backup_decoder', 'run-p10-007-canonical-backup-decoder.cjs'],
   ['UNIT_RUNTIME', 'p10_008_canonical_restore_stage', 'run-p10-008-canonical-restore-stage.cjs'],
   ['UNIT_RUNTIME', 'p10_009_transaction_primitives', 'run-p10-009-transaction-primitives.cjs'],
+  ['UNIT_RUNTIME', 'p10_010_atomic_local_promotion', 'run-p10-010-atomic-local-promotion.cjs'],
   ['UNIT_RUNTIME', 'home_hidden_amounts', 'run-home-hidden-amounts.cjs'],
   ['UNIT_RUNTIME', 'ci_source_scope_guard', 'run-ci-source-scope-guard.cjs'],
   ['UNIT_RUNTIME', 'performance_data', 'performance-data-runtime-v512.test.cjs'],

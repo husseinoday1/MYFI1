@@ -20,6 +20,7 @@ import { validateCanonicalLedgerStructure } from './financialRestoreValidator';
 
 const RESTORE_STAGE_MARKER = '::restore-stage::';
 let restoreStageSequence = 0;
+const restoreStageMetaKey = stageNamespace => `canonical_restore_stage_v11:${text(stageNamespace).trim()}`;
 
 const safeJson = value => {
   try { return JSON.stringify(value ?? null); } catch { return 'null'; }
@@ -150,6 +151,10 @@ const clearRestoreStageRows = async (db, namespace) => {
   await db.runAsync('DELETE FROM ledger_accounts_v7 WHERE namespace=?', namespace);
   await db.runAsync('DELETE FROM ledger_entities_v7 WHERE namespace=?', namespace);
   await db.runAsync('DELETE FROM ledger_workspace_state_v7 WHERE namespace=?', namespace);
+  // The readiness record is deliberately scoped to the stage namespace. It is not
+  // financial data, but it must disappear with an abandoned or promoted stage so a
+  // later restore cannot mistake stale proof for current proof.
+  await db.runAsync('DELETE FROM ledger_v7_meta WHERE key=?', restoreStageMetaKey(namespace));
 };
 
 const writeStageRows = async (db, namespace, data) => {
@@ -246,6 +251,25 @@ const writeStageRows = async (db, namespace, data) => {
     `INSERT INTO ledger_workspace_state_v7
      (namespace,source_mode,schema_version,payload_json,updated_at) VALUES (?,?,?,?,?)`,
     namespace, 'shadow', FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson({ cfg: data.financialConfig }), now,
+  );
+};
+
+const writeRestoreStageReadiness = async ({ db, namespace, decoded, proof }) => {
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+    restoreStageMetaKey(namespace),
+    safeJson({
+      version: 1,
+      state: 'ready',
+      namespace,
+      ledgerId: text(decoded?.data?.ledgerId),
+      semanticHash: text(proof?.semanticHash).toLowerCase(),
+      counts: proof?.counts || {},
+      validatorVersion: Number(proof?.validatorVersion || 0),
+      provedAt: now,
+    }),
+    now,
   );
 };
 
@@ -380,6 +404,17 @@ export const stageCanonicalRestoreV11 = async ({ namespace, stageNamespace, deco
   if (!proof.ok) {
     await discardCanonicalRestoreStageV11({ namespace: target, stageNamespace: stage, database: db });
     return proof;
+  }
+  try {
+    // P10-010 reads this marker inside its final exclusive transaction. The marker
+    // binds the private stage namespace to the proof just performed here; it carries
+    // identifiers, a hash and counts only, never financial payloads or amounts.
+    await enqueueLedgerWrite(() => runLedgerExclusiveTransaction(db, executor => (
+      writeRestoreStageReadiness({ db: executor, namespace: stage, decoded, proof: proof.proof })
+    )));
+  } catch {
+    await discardCanonicalRestoreStageV11({ namespace: target, stageNamespace: stage, database: db });
+    return refused('canonical_restore_stage_readiness_write_failed');
   }
   return { supported: true, ok: true, namespace: target, stageNamespace: stage, ...proof };
 };

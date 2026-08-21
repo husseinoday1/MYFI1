@@ -115,12 +115,19 @@ const decoded = {
   const writeNamespaces = calls
     .filter(call => !call.read && /ledger_|cold_archive/.test(call.sql))
     .flatMap(call => call.args.filter(value => typeof value === 'string' && value.includes('user:')));
-  assert.ok(writeNamespaces.every(value => value === stageNamespace),
+  assert.ok(writeNamespaces.every(value => value.includes(stageNamespace)),
     'P10-008 must not write the live namespace');
   const transactionWrite = calls.find(call => call.sql.includes('INSERT INTO ledger_financial_transactions_v7'));
   assert.equal(transactionWrite.args[1], 'tx-1');
   assert.equal(transactionWrite.args[12], 'expense:tx-1', 'stored idempotency key must be written directly');
   assert.equal(transactionWrite.args[13], 'device-1', 'stored device provenance must be written directly');
+  const readinessWrite = calls.find(call => call.sql.includes('INSERT OR REPLACE INTO ledger_v7_meta')
+    && String(call.args[0] || '').startsWith('canonical_restore_stage_v11:'));
+  assert.ok(readinessWrite, 'a proved stage must leave a local READY marker for P10-010');
+  const readiness = JSON.parse(readinessWrite.args[1]);
+  assert.equal(readiness.namespace, stageNamespace);
+  assert.equal(readiness.semanticHash, 'proof');
+  assert.deepEqual(readiness.counts, expectedCounts);
   console.log('[PASS] stages direct canonical rows only in a distinct restore namespace');
 
   const writesBeforeRefusal = calls.filter(call => !call.read).length;
@@ -136,6 +143,9 @@ const decoded = {
   assert.equal(await discardCanonicalRestoreStageV11({ namespace, stageNamespace, database: db }), true);
   assert.equal(await discardCanonicalRestoreStageV11({ namespace, stageNamespace: namespace, database: db }), false,
     'discard refuses a live namespace');
+  assert.ok(calls.some(call => call.sql.includes('DELETE FROM ledger_v7_meta WHERE key=?')
+    && String(call.args[0] || '').startsWith('canonical_restore_stage_v11:')),
+  'discard must remove the stage READY marker with its rows');
   console.log('[PASS] cleanup can target only an explicitly-shaped restore stage');
 
   const moduleText = fs.readFileSync(filename, 'utf8');
