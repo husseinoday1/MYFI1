@@ -1,0 +1,8 @@
+.github/p20-final-v2-client-closure-allowed-source.txt
+.github/workflows/p20-final-v2-client-closure.yml
+docs/04_CURRENT_EVIDENCE/MYFI_P20_V2_CLIENT_CLOSURE_PLAN_2026-08-19.md
+src/lib/financialLedgerV7Repository.js
+src/store/multiDeviceSync.js
+src/store/slices/useSyncSlice.js
+tests/p20-v2-client-closure.test.cjs
+tests/run-quality-gate.cjs

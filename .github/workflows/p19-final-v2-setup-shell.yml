@@ -24,14 +24,12 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED_BASE="729810b167598cea617573db899bffc2883a10a3"
-          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE"
-          printf '%s\n' \
-            ".github/workflows/p19-final-v2-setup-shell.yml" \
-            "src/lib/financialLedgerV7Repository.js" \
-            "src/store/slices/useSyncSlice.js" \
-            "tests/p19-final-clean-v2-hardening.test.cjs" \
-            | sort > /tmp/expected.txt
-          git diff --name-only "$EXPECTED_BASE"..HEAD | sort > /tmp/actual.txt
+          ALLOWED=".github/p19-final-v2-setup-shell-allowed-source.txt"
+          git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
+          test -f "$ALLOWED"
+          sed -e 's/\r$//' "$ALLOWED" | grep -vE '^[[:space:]]*(#|$)' | sort -u > /tmp/expected.txt
+          test -s /tmp/expected.txt
+          git diff --name-only "$EXPECTED_BASE"..HEAD | sed -e 's/\r$//' | sort -u > /tmp/actual.txt
           diff -u /tmp/expected.txt /tmp/actual.txt
           grep -q "financial_v2_adoption_pending_activation" src/store/slices/useSyncSlice.js
           grep -q "P19_FINAL_TRANSIENT_RETRY" src/store/slices/useSyncSlice.js

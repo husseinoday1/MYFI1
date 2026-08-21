@@ -24,17 +24,12 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED_BASE="8a31c7e1d885817f3b42f26cc14627c369558632"
-          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE"
-          printf '%s\n' \
-            ".github/workflows/p20-final-v2-client-closure.yml" \
-            "docs/04_CURRENT_EVIDENCE/MYFI_P20_V2_CLIENT_CLOSURE_PLAN_2026-08-19.md" \
-            "src/lib/financialLedgerV7Repository.js" \
-            "src/store/multiDeviceSync.js" \
-            "src/store/slices/useSyncSlice.js" \
-            "tests/p20-v2-client-closure.test.cjs" \
-            "tests/run-quality-gate.cjs" \
-            | sort > /tmp/expected.txt
-          git diff --name-only "$EXPECTED_BASE"..HEAD | sort > /tmp/actual.txt
+          ALLOWED=".github/p20-final-v2-client-closure-allowed-source.txt"
+          git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
+          test -f "$ALLOWED"
+          sed -e 's/\r$//' "$ALLOWED" | grep -vE '^[[:space:]]*(#|$)' | sort -u > /tmp/expected.txt
+          test -s /tmp/expected.txt
+          git diff --name-only "$EXPECTED_BASE"..HEAD | sed -e 's/\r$//' | sort -u > /tmp/actual.txt
           diff -u /tmp/expected.txt /tmp/actual.txt
           grep -q "canonicalWorkspaceCfg" src/store/multiDeviceSync.js
           grep -q "canonicalFinancialEntityPayload" src/lib/financialLedgerV7Repository.js

@@ -1,0 +1,5 @@
+.github/p19-final-v2-setup-shell-allowed-source.txt
+.github/workflows/p19-final-v2-setup-shell.yml
+src/lib/financialLedgerV7Repository.js
+src/store/slices/useSyncSlice.js
+tests/p19-final-clean-v2-hardening.test.cjs
