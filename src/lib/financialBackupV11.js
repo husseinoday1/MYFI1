@@ -19,7 +19,7 @@ export const CANONICAL_BACKUP_V11_DATA_VERSION = 11;
 
 const finiteCount = value => Math.max(0, Number.isSafeInteger(Number(value)) ? Number(value) : 0);
 
-const manifestCounts = (canonical = {}) => ({
+export const canonicalBackupV11ManifestCounts = (canonical = {}) => ({
   transactions: finiteCount(canonical?.transactions?.length),
   postings: finiteCount(canonical?.postings?.length),
   links: finiteCount(canonical?.links?.length),
@@ -62,7 +62,7 @@ export const buildCanonicalBackupV11 = ({ source, createdAt = new Date().toISOSt
     semanticHash,
     createdAt: String(createdAt),
     ledgerId: String(source.ledger.ledgerId),
-    counts: manifestCounts(data),
+    counts: canonicalBackupV11ManifestCounts(data),
   };
   return {
     supported: true,
