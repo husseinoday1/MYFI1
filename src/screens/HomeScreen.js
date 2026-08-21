@@ -12,7 +12,7 @@ import AddTransModal from '../components/AddTransModal';
 import { filterByActiveScope, filterFeatureEntities, filterTransactionsByEnabledFeatures, getActiveScope, getModules, getTransactionDisplayAmount } from '../lib/modules';
 import { getDefaultWalletId, getWalletAvailableBalances, getWalletBaseAvailableTotal, getWalletLabel, normalizeWallets } from '../lib/wallets';
 import { formatCommitmentDate, formatCommitmentMonth, getUpcomingCommitments } from '../lib/commitments';
-import { MetricCard, SectionTitle, Touchable as TouchableOpacity } from '../components/AppPrimitives';
+import { FinancialDirectionMark, MetricCard, SectionTitle, Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { RADIUS, SHADOW, SPACE, TYPE, weight } from '../lib/tokens';
 import ActionMenu from '../components/ActionMenu';
 import { describeSmartSource } from '../lib/smartEntry';
@@ -328,7 +328,7 @@ export default function HomeScreen({
     if (item.key === 'income') {
       return {
         ...item,
-        icon: 'arrow-down-circle-outline',
+        direction: 'income',
         label: L.income,
         value: effectiveMonthSummary.inc === 0 ? `0 ${sym}` : `+${fmt(effectiveMonthSummary.inc)} ${sym}`,
         color: th.inc,
@@ -338,7 +338,7 @@ export default function HomeScreen({
     if (item.key === 'expense') {
       return {
         ...item,
-        icon: 'arrow-up-circle-outline',
+        direction: 'expense',
         label: L.expense,
         value: effectiveMonthSummary.exp === 0 ? `0 ${sym}` : `-${fmt(effectiveMonthSummary.exp)} ${sym}`,
         color: th.exp,
@@ -654,7 +654,7 @@ export default function HomeScreen({
   };
 
 
-  const renderMoneyTile = ({ icon, label, value, color, bg, onPress }, width = '49%') => (
+  const renderMoneyTile = ({ icon, direction, label, value, color, bg, onPress }, width = '49%') => (
     <TouchableOpacity
       style={[s.tile, { width }]}
       onPress={onPress}
@@ -663,6 +663,7 @@ export default function HomeScreen({
         th={th}
         lang={cfg.lang}
         icon={icon}
+        direction={direction}
         label={label}
         value={moneyText(value)}
         tone={color}
@@ -1018,13 +1019,13 @@ export default function HomeScreen({
             {C.emptyBody}
           </Text>
           <View style={[s.emptyActions, { flexDirection: rowDir }]}>
-            <TouchableOpacity onPress={onAddIncome} style={[s.emptyAction, { backgroundColor: th.primSoft, borderColor: `${th.primary}44` }]}>
-              <Ionicons name="arrow-down-outline" size={15} color={th.primary} />
-              <Text style={{ color: th.primary, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة دخل' : 'Add income'}</Text>
+            <TouchableOpacity onPress={onAddIncome} style={[s.emptyAction, { backgroundColor: th.incBg, borderColor: `${th.inc}44` }]}>
+              <FinancialDirectionMark kind="income" color={th.inc} size={17} lang={cfg.lang} />
+              <Text style={{ color: th.inc, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة دخل' : 'Add income'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={onAddExpense} style={[s.emptyAction, { backgroundColor: th.primary, borderColor: th.primary }]}>
-              <Ionicons name="arrow-up-outline" size={15} color={th.onPrimary} />
-              <Text style={{ color: th.onPrimary, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة مصروف' : 'Add expense'}</Text>
+            <TouchableOpacity onPress={onAddExpense} style={[s.emptyAction, { backgroundColor: th.expBg, borderColor: `${th.exp}44` }]}>
+              <FinancialDirectionMark kind="expense" color={th.exp} size={17} lang={cfg.lang} />
+              <Text style={{ color: th.exp, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة مصروف' : 'Add expense'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1162,8 +1163,8 @@ export default function HomeScreen({
             <Text style={[s.quickEntryTitle, { color: th.sub, textAlign: align }]}>{C.quickActions}</Text>
             <View style={[s.quickEntryRow, { flexDirection: rowDir }]}>
               {[
-                { key: 'expense', label: isAr ? 'مصروف' : 'Expense', icon: 'arrow-down-outline', color: th.exp, onPress: onAddExpense },
-                { key: 'income', label: isAr ? 'دخل' : 'Income', icon: 'arrow-up-outline', color: th.inc, onPress: onAddIncome },
+                { key: 'expense', label: isAr ? 'مصروف' : 'Expense', direction: 'expense', color: th.exp, onPress: onAddExpense },
+                { key: 'income', label: isAr ? 'دخل' : 'Income', direction: 'income', color: th.inc, onPress: onAddIncome },
                 modules.wallets && canTransfer
                   ? { key: 'transfer', label: isAr ? 'تحويل' : 'Transfer', icon: 'swap-horizontal-outline', color: th.primary, onPress: onTransfer }
                   : null,
@@ -1171,7 +1172,9 @@ export default function HomeScreen({
               ].filter(Boolean).map(action => (
                 <TouchableOpacity key={action.key} onPress={action.onPress} style={[s.quickEntryAction, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
                   <View style={[s.quickEntryIcon, { backgroundColor: `${action.color}18`, borderColor: `${action.color}44` }]}>
-                    <Ionicons name={action.icon} size={18} color={action.color} />
+                    {action.direction
+                      ? <FinancialDirectionMark kind={action.direction} color={action.color} size={20} lang={cfg.lang} />
+                      : <Ionicons name={action.icon} size={18} color={action.color} />}
                   </View>
                   <Text numberOfLines={1} adjustsFontSizeToFit style={[s.quickEntryLabel, { color: th.text }]}>
                     {action.label}

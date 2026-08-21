@@ -43,10 +43,16 @@ export default function ArchiveScreen() {
   const [lockedPackage, setLockedPackage] = useState(null);
   const [archivePasswordMode, setArchivePasswordMode] = useState(null);
   const [archivePassword, setArchivePassword] = useState('');
+  const [archivePasswordVisible, setArchivePasswordVisible] = useState(false);
   const [pendingArchiveYear, setPendingArchiveYear] = useState(null);
   const [localArchives, setLocalArchives] = useState([]);
   const [archiveSection, setArchiveSection] = useState('timeline');
   const now = new Date();
+
+  useEffect(() => {
+    if (!archivePasswordMode) setArchivePasswordVisible(false);
+  }, [archivePasswordMode]);
+
   const align = isAr ? 'right' : 'left';
   const rowDir = isAr ? 'row-reverse' : 'row';
   const displayTrans = (
@@ -802,16 +808,26 @@ export default function ArchiveScreen() {
                 ? (isAr ? 'لا يمكن استعادة الملف إذا نسيت كلمة المرور.' : 'The archive cannot be restored if you forget this password.')
                 : (isAr ? 'أدخل كلمة المرور المستخدمة عند إنشاء الملف.' : 'Enter the password used to create this file.')}
             </Text>
-            <TextInput
-              value={archivePassword}
-              onChangeText={setArchivePassword}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder={isAr ? 'كلمة المرور' : 'Password'}
-              placeholderTextColor={th.sub}
-              style={[s.passwordInput, { backgroundColor: th.input, borderColor: th.border, color: th.text }]}
-            />
+            <View style={[s.passwordField, { backgroundColor: th.input, borderColor: th.border }]}>
+              <TextInput
+                value={archivePassword}
+                onChangeText={setArchivePassword}
+                secureTextEntry={!archivePasswordVisible}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder={isAr ? 'كلمة المرور' : 'Password'}
+                placeholderTextColor={th.sub}
+                style={[s.passwordInput, { color: th.text }]}
+              />
+              <TouchableOpacity
+                onPress={() => setArchivePasswordVisible(value => !value)}
+                accessibilityRole="button"
+                accessibilityLabel={archivePasswordVisible ? (isAr ? 'إخفاء كلمة المرور' : 'Hide password') : (isAr ? 'إظهار كلمة المرور' : 'Show password')}
+                style={s.passwordEye}
+              >
+                <Ionicons name={archivePasswordVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color={th.sub} />
+              </TouchableOpacity>
+            </View>
             <View style={[s.passwordActions, { flexDirection: rowDir }]}>
               <TouchableOpacity onPress={() => setArchivePasswordMode(null)} style={[s.passwordBtn, { backgroundColor: th.cardHigh }]}>
                 <Text style={{ color: th.sub, ...weight('900') }}>{isAr ? 'إلغاء' : 'Cancel'}</Text>
@@ -874,7 +890,9 @@ const s = StyleSheet.create({
   empty: { minHeight: 180, borderRadius: 16, borderWidth: 0.5, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', padding: 18 },
   modalOverlay: { flex: 1, padding: 20, alignItems: 'center', justifyContent: 'center' },
   passwordCard: { width: '100%', maxWidth: 440, borderRadius: 18, borderWidth: 1, padding: 16, gap: 12 },
-  passwordInput: { minHeight: 48, borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, textAlign: 'left', writingDirection: 'ltr' },
+  passwordField: { minHeight: 48, borderRadius: 12, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
+  passwordInput: { flex: 1, minHeight: 46, paddingHorizontal: 12, textAlign: 'left', writingDirection: 'ltr' },
+  passwordEye: { width: 48, minHeight: 46, alignItems: 'center', justifyContent: 'center' },
   passwordActions: { gap: 8 },
   passwordBtn: { flex: 1, minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
 });

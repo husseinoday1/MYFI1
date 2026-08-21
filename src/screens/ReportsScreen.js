@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
-import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
+import { FinancialDirectionMark, Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import WalletBalanceCard from '../components/WalletBalanceCard';
 import { getSymbol } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
@@ -769,13 +769,13 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
             <Text style={[s.emptyReportTitle, { color: th.text }]}>{ar ? 'لا توجد بيانات لهذه الفترة' : 'No data for this period'}</Text>
             <Text style={[s.emptyReportBody, { color: th.sub }]}>{ar ? 'هذه الفترة فارغة. أضف حركة واحدة، وسيبني MYFI التقرير والتفاصيل تلقائياً.' : 'This period is empty. Add one entry and MYFI will build the report and details automatically.'}</Text>
             <View style={[s.emptyReportActions, { flexDirection: rowDir }]}>
-              <TouchableOpacity onPress={onAddIncome} style={[s.emptyReportAction, { backgroundColor: th.primSoft, borderColor: `${th.primary}44` }]}>
-                <Ionicons name="arrow-down-outline" size={15} color={th.primary} />
-                <Text style={{ color: th.primary, fontSize: 11, ...weight('900') }}>{ar ? 'إضافة دخل' : 'Add income'}</Text>
+              <TouchableOpacity onPress={onAddIncome} style={[s.emptyReportAction, { backgroundColor: th.incBg, borderColor: `${th.inc}44` }]}>
+                <FinancialDirectionMark kind="income" color={th.inc} size={17} lang={cfg.lang} />
+                <Text style={{ color: th.inc, fontSize: 11, ...weight('900') }}>{ar ? 'إضافة دخل' : 'Add income'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={onAddExpense} style={[s.emptyReportAction, { backgroundColor: th.primary, borderColor: th.primary }]}>
-                <Ionicons name="arrow-up-outline" size={15} color={th.onPrimary} />
-                <Text style={{ color: th.onPrimary, fontSize: 11, ...weight('900') }}>{ar ? 'إضافة مصروف' : 'Add expense'}</Text>
+              <TouchableOpacity onPress={onAddExpense} style={[s.emptyReportAction, { backgroundColor: th.expBg, borderColor: `${th.exp}44` }]}>
+                <FinancialDirectionMark kind="expense" color={th.exp} size={17} lang={cfg.lang} />
+                <Text style={{ color: th.exp, fontSize: 11, ...weight('900') }}>{ar ? 'إضافة مصروف' : 'Add expense'}</Text>
               </TouchableOpacity>
             </View>
           </View>

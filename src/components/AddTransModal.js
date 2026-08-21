@@ -18,7 +18,7 @@ import { getSymbol } from '../lib/constants';
 import { today, isISODate } from '../utils/calc';
 import { filterByActiveScope, getEntryScope, getModules, normalizeScope } from '../lib/modules';
 import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel, sortWalletsByDefault } from '../lib/wallets';
-import { Touchable as TouchableOpacity } from './AppPrimitives';
+import { FinancialDirectionMark, Touchable as TouchableOpacity } from './AppPrimitives';
 import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 import DateField from './DateField';
 import SmartImageViewerModal from './SmartImageViewerModal';
@@ -938,8 +938,8 @@ export default function AddTransModal({
     modules.commitments ? { k: 'commitment', l: cfg.lang === 'ar' ? 'التزام' : 'Commitment' } : null,
   ].filter(Boolean);
   const seg = [
-    { k: 'exp', l: cfg.lang === 'ar' ? 'صرف' : 'Expense', icon: 'arrow-down-outline', tone: th.exp },
-    { k: 'inc', l: cfg.lang === 'ar' ? 'دخل' : 'Income', icon: 'arrow-up-outline', tone: th.inc },
+    { k: 'exp', l: cfg.lang === 'ar' ? 'صرف' : 'Expense', direction: 'expense', tone: th.exp },
+    { k: 'inc', l: cfg.lang === 'ar' ? 'دخل' : 'Income', direction: 'income', tone: th.inc },
     modules.wallets && canTransfer ? { k: 'transfer', l: transferLabel, icon: 'repeat-outline', tone: th.primary } : null,
     smartEntryAvailable ? { k: 'smart', l: cfg.lang === 'ar' ? 'ذكي' : 'Smart', icon: 'sparkles-outline', tone: th.warn } : null,
     planningSeg.length > 0 ? { k: 'planning', l: cfg.lang === 'ar' ? 'المتابعات' : 'Tracking' } : null,
@@ -1278,7 +1278,9 @@ export default function AddTransModal({
                       },
                     ]}
                   >
-                    <Ionicons name={sg.icon || 'ellipse-outline'} size={18} color={color} />
+                    {sg.direction
+                      ? <FinancialDirectionMark kind={sg.direction} color={color} size={20} lang={cfg.lang} />
+                      : <Ionicons name={sg.icon || 'ellipse-outline'} size={18} color={color} />}
                     <Text numberOfLines={1} adjustsFontSizeToFit style={{ color, ...weight('900'), fontSize: 13, lineHeight: 18 }}>
                       {sg.l}
                     </Text>

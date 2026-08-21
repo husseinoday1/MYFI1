@@ -5,7 +5,7 @@ import { TH } from '../lib/theme';
 import { COUNTRIES, CURRENCIES, detectSystemLang } from '../lib/constants';
 import { useStore } from '../store/useStore';
 import { DEFAULT_WALLET_ID } from '../lib/wallets';
-import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
+import { FinancialDirectionMark, Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { defaultScopeForProfile, profileModuleDefaults } from '../lib/modules';
 import { getOnboardingPreview } from '../lib/onboardingPreview';
 import { weight } from '../lib/tokens';
@@ -195,8 +195,8 @@ function HeroSlide({ th, isAr, T, preview }) {
           <View style={[s.walletBadge, { backgroundColor: th.primSoft }]}><Ionicons name="wallet-outline" size={19} color={th.primary} /></View>
         </View>
         <View style={[s.moneyGrid, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-          <MoneyTile th={th} label={preview.income} value={preview.incomeValue} tone={th.inc} icon="arrow-down-outline" />
-          <MoneyTile th={th} label={preview.expense} value={preview.expenseValue} tone={th.exp} icon="arrow-up-outline" />
+          <MoneyTile th={th} label={preview.income} value={preview.incomeValue} tone={th.inc} direction="income" isAr={isAr} />
+          <MoneyTile th={th} label={preview.expense} value={preview.expenseValue} tone={th.exp} direction="expense" isAr={isAr} />
         </View>
         <View style={s.chartWrap}>
           <View style={[s.chartHead, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
@@ -214,11 +214,11 @@ function HeroSlide({ th, isAr, T, preview }) {
   );
 }
 
-function MoneyTile({ th, label, value, tone, icon }) {
+function MoneyTile({ th, label, value, tone, direction, isAr }) {
   return (
     <View style={[s.moneyTile, { backgroundColor: th.cardHigh }]}>
       <View style={[s.moneyTileHead, { flexDirection: 'row' }]}>
-        <Ionicons name={icon} size={13} color={tone} />
+        <FinancialDirectionMark kind={direction} color={tone} size={15} lang={isAr ? 'ar' : 'en'} />
         <Text style={[s.moneyTileLabel, { color: th.sub }]}>{label}</Text>
       </View>
       <Text style={[s.moneyTileValue, { color: tone }]}>{value}</Text>

@@ -6,6 +6,9 @@
 # and blank lines are ignored.
 App.js
 eas.json
+src/components/AccountDeleteModal.js
+src/components/AddTransModal.js
+src/components/AppPrimitives.js
 src/dev/p19RestoreEpochDeviceGate.js
 src/dev/phase10RestoreBenchmarkHarness.js
 src/lib/backupData.js
@@ -17,6 +20,11 @@ src/lib/financialSemanticProjection.js
 src/lib/ledgerDatabase.js
 src/lib/localArchiveRepository.js
 src/lib/syncErrorClassification.js
+src/screens/ArchiveScreen.js
+src/screens/HistoryScreen.js
 src/screens/HomeScreen.js
+src/screens/OnboardingScreen.js
+src/screens/ReportsScreen.js
+src/screens/SettingsLegacyScreen.js
 src/screens/SettingsScreen.js
 src/store/slices/useSyncSlice.js

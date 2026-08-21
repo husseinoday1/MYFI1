@@ -6,15 +6,20 @@ import { weight } from '../lib/tokens';
 
 export default function AccountDeleteModal({ visible, onClose, onConfirm, th, lang = 'ar', busy = false }) {
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const ar = lang === 'ar';
 
   useEffect(() => {
-    if (!visible) setPassword('');
+    if (!visible) {
+      setPassword('');
+      setPasswordVisible(false);
+    }
   }, [visible]);
 
   const close = () => {
     if (busy) return;
     setPassword('');
+    setPasswordVisible(false);
     onClose?.();
   };
 
@@ -34,19 +39,30 @@ export default function AccountDeleteModal({ visible, onClose, onConfirm, th, la
           <Text style={[s.body, { color: th.sub }]}>
             {ar ? 'أدخل كلمة المرور للتأكيد النهائي.' : 'Enter your password for final confirmation.'}
           </Text>
-          <TextInput
-            value={password}
-            onChangeText={setPassword}
-            editable={!busy}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoComplete="password"
-            textContentType="password"
-            placeholder={ar ? 'كلمة المرور' : 'Password'}
-            placeholderTextColor={th.faint}
-            style={[s.input, { backgroundColor: th.cardHigh, borderColor: th.border, color: th.text }]}
-          />
+          <View style={[s.passwordField, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              editable={!busy}
+              secureTextEntry={!passwordVisible}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="password"
+              textContentType="password"
+              placeholder={ar ? 'كلمة المرور' : 'Password'}
+              placeholderTextColor={th.faint}
+              style={[s.passwordInput, { color: th.text }]}
+            />
+            <TouchableOpacity
+              onPress={() => setPasswordVisible(value => !value)}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={passwordVisible ? (ar ? 'إخفاء كلمة المرور' : 'Hide password') : (ar ? 'إظهار كلمة المرور' : 'Show password')}
+              style={s.eyeButton}
+            >
+              <Ionicons name={passwordVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color={th.sub} />
+            </TouchableOpacity>
+          </View>
           <View style={[s.actions, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
             <TouchableOpacity onPress={close} disabled={busy} style={[s.cancel, { backgroundColor: th.cardHigh }]}>
               <Text style={{ color: th.sub, ...weight('900') }}>{ar ? 'رجوع' : 'Back'}</Text>
@@ -67,7 +83,9 @@ const s = StyleSheet.create({
   icon: { width: 52, height: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 19, lineHeight: 25, ...weight('900'), marginTop: 14 },
   body: { fontSize: 12, lineHeight: 18, ...weight('700'), textAlign: 'center', marginTop: 5 },
-  input: { width: '100%', minHeight: 52, borderRadius: 15, borderWidth: 1, paddingHorizontal: 14, marginTop: 18, textAlign: 'left', writingDirection: 'ltr' },
+  passwordField: { width: '100%', minHeight: 52, borderRadius: 15, borderWidth: 1, marginTop: 18, flexDirection: 'row', alignItems: 'center' },
+  passwordInput: { flex: 1, minHeight: 50, paddingHorizontal: 14, textAlign: 'left', writingDirection: 'ltr' },
+  eyeButton: { width: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   actions: { width: '100%', gap: 9, marginTop: 14 },
   cancel: { flex: 1, minHeight: 48, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   delete: { flex: 1.5, minHeight: 48, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },

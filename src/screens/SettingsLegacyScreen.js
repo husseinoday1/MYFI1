@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
-import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
+import { FinancialDirectionMark, Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { COUNTRIES, CURRENCIES, ICON_OPTIONS, CAT_COLORS, DEF_HOME_CARDS, DEF_HOME_SECTIONS, getSymbol } from '../lib/constants';
 import { CATEGORY_FLOWS, categoryFlowLabel, getCategoriesForFlow, normalizeCategoryFlow } from '../lib/categories';
 import { checkSupabaseHealth, supabase } from '../lib/supabase';
@@ -454,8 +454,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
     .map(item => ({
     ...item,
     icon:
-      item.key === 'income' ? 'arrow-down-circle-outline'
-        : item.key === 'expense' ? 'arrow-up-circle-outline'
+      item.key === 'income' ? null
+        : item.key === 'expense' ? null
           : item.key === 'net' ? 'pulse-outline'
             : 'calendar-outline',
     label:
@@ -468,6 +468,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
         : item.key === 'expense' ? th.exp
           : item.key === 'net' ? th.primary
             : th.warn,
+    direction: item.key === 'income' ? 'income' : item.key === 'expense' ? 'expense' : null,
   }));
   const tabLabelFor = (key) => {
     if (key === 'home') return L.home;
@@ -584,6 +585,11 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
   const [fileBusy, setFileBusy] = useState(false);
   const [backupPasswordMode, setBackupPasswordMode] = useState(null);
   const [backupPassword, setBackupPassword] = useState('');
+  const [backupPasswordVisible, setBackupPasswordVisible] = useState(false);
+
+  useEffect(() => {
+    if (!backupPasswordMode) setBackupPasswordVisible(false);
+  }, [backupPasswordMode]);
   const importPreview = useMemo(
     () => importPackage?.payload?.data
       ? previewBackupText(JSON.stringify(importPackage.payload.data), cfg.lang)
@@ -2474,16 +2480,26 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
               ? (isAr ? 'احفظ كلمة المرور جيداً؛ لا يمكن استعادة الملف بدونها.' : 'Keep this password safe; the file cannot be restored without it.')
               : (isAr ? 'أدخل كلمة المرور التي استُخدمت عند إنشاء الملف.' : 'Enter the password used when this file was created.')}
           </Text>
-          <TextInput
-            value={backupPassword}
-            onChangeText={setBackupPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder={isAr ? 'كلمة المرور' : 'Password'}
-            placeholderTextColor={th.sub}
-            style={[s.input, { backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'left', writingDirection: 'ltr' }]}
-          />
+          <View style={[s.passwordField, { backgroundColor: th.input, borderColor: th.border }]}>
+            <TextInput
+              value={backupPassword}
+              onChangeText={setBackupPassword}
+              secureTextEntry={!backupPasswordVisible}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder={isAr ? 'كلمة المرور' : 'Password'}
+              placeholderTextColor={th.sub}
+              style={[s.passwordInput, { color: th.text, textAlign: 'left', writingDirection: 'ltr' }]}
+            />
+            <TouchableOpacity
+              onPress={() => setBackupPasswordVisible(value => !value)}
+              accessibilityRole="button"
+              accessibilityLabel={backupPasswordVisible ? (isAr ? 'إخفاء كلمة المرور' : 'Hide password') : (isAr ? 'إظهار كلمة المرور' : 'Show password')}
+              style={s.eyeButton}
+            >
+              <Ionicons name={backupPasswordVisible ? 'eye-off-outline' : 'eye-outline'} size={20} color={th.sub} />
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity
             onPress={submitBackupPassword}
             disabled={fileBusy}
@@ -2631,7 +2647,9 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
                 >
                   <View style={[s.moduleInfo, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
                     <View style={[s.moduleIcon, { backgroundColor: item.visible !== false ? th.primSoft : th.card }]}>
-                      <Ionicons name={item.icon} size={16} color={item.visible !== false ? item.tone : th.sub} />
+                      {item.direction
+                        ? <FinancialDirectionMark kind={item.direction} color={item.visible !== false ? item.tone : th.sub} size={18} lang={cfg.lang} />
+                        : <Ionicons name={item.icon} size={16} color={item.visible !== false ? item.tone : th.sub} />}
                     </View>
                     <Text style={{ color: th.text, fontSize: 13, ...weight('800'), flex: 1, textAlign: isAr ? 'right' : 'left' }}>
                       {item.label}
@@ -2800,8 +2818,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
           />
           <View style={[s.categoryFlowPicker, { flexDirection: isAr ? 'row-reverse' : 'row', backgroundColor: th.cardHigh }]}>
             {[
-              { key: CATEGORY_FLOWS.EXPENSE, label: isAr ? 'صرف' : 'Expense', icon: 'arrow-up-circle-outline', color: th.exp },
-              { key: CATEGORY_FLOWS.INCOME, label: isAr ? 'دخل' : 'Income', icon: 'arrow-down-circle-outline', color: th.inc },
+              { key: CATEGORY_FLOWS.EXPENSE, label: isAr ? 'صرف' : 'Expense', direction: 'expense', color: th.exp },
+              { key: CATEGORY_FLOWS.INCOME, label: isAr ? 'دخل' : 'Income', direction: 'income', color: th.inc },
             ].map(item => {
               const active = newCatFlow === item.key;
               return (
@@ -2810,7 +2828,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
                   onPress={() => setNewCatFlow(item.key)}
                   style={[s.categoryFlowOption, { backgroundColor: active ? `${item.color}22` : 'transparent', borderColor: active ? item.color : 'transparent' }]}
                 >
-                  <Ionicons name={item.icon} size={16} color={active ? item.color : th.sub} />
+                  <FinancialDirectionMark kind={item.direction} color={active ? item.color : th.sub} size={18} lang={cfg.lang} />
                   <Text style={{ color: active ? item.color : th.sub, fontSize: 12, ...weight('900') }}>{item.label}</Text>
                 </TouchableOpacity>
               );

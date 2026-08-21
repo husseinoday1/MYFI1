@@ -8,6 +8,18 @@ export const rtl = (lang) => lang === 'ar';
 export const textAlign = (lang) => (rtl(lang) ? 'right' : 'left');
 export const rowDirection = (lang) => (rtl(lang) ? 'row-reverse' : 'row');
 
+export function FinancialDirectionMark({ kind, color, size = 16, lang = 'ar', style }) {
+  const income = kind === 'income' || kind === 'inc';
+  return (
+    <Text
+      accessibilityLabel={income ? (lang === 'ar' ? 'دخل' : 'Income') : (lang === 'ar' ? 'مصروف' : 'Expense')}
+      style={[{ color, fontSize: size, lineHeight: size + 2, fontWeight: '900', textAlign: 'center' }, style]}
+    >
+      {income ? '+' : '-'}
+    </Text>
+  );
+}
+
 export function Touchable(props) {
   const {
     onPress,
@@ -191,6 +203,7 @@ export function MetricCard({
   th,
   lang = 'ar',
   icon,
+  direction,
   label,
   value,
   tone,
@@ -216,7 +229,7 @@ export function MetricCard({
       ]}
     >
       <View style={[s.metricTop, { flexDirection: center ? 'column' : rowDirection(lang) }]}>
-        {!!icon && (
+        {!!(icon || direction) && (
           <View style={[
             s.metricIcon,
             iconPlain && s.metricIconPlain,
@@ -225,7 +238,9 @@ export function MetricCard({
               borderColor: iconPlain ? 'transparent' : `${color}30`,
             },
           ]}>
-            <Ionicons name={icon} size={16} color={color} />
+            {direction
+              ? <FinancialDirectionMark kind={direction} color={color} size={18} lang={lang} />
+              : <Ionicons name={icon} size={16} color={color} />}
           </View>
         )}
         <Text

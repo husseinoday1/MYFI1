@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
-import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
+import { FinancialDirectionMark, Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { STR } from '../lib/strings';
 import { getSymbol } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
@@ -601,8 +601,8 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
 
   const typeOptions = [
     { value: 'all', label: L.filterAll, icon: 'albums-outline' },
-    { value: 'inc', label: L.filterInc, icon: 'arrow-down-outline' },
-    { value: 'exp', label: L.filterExp, icon: 'arrow-up-outline' },
+    { value: 'inc', label: L.filterInc, direction: 'income', color: th.inc },
+    { value: 'exp', label: L.filterExp, direction: 'expense', color: th.exp },
     { value: 'transfer', label: T.transfer, icon: 'swap-horizontal-outline' },
     { value: 'goal', label: T.saving, icon: 'flag-outline' },
     { value: 'debt', label: cfg.lang === 'ar' ? 'دين' : 'Debt', icon: 'card-outline' },
@@ -656,7 +656,9 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
                   }}
                   style={[s.filterOption, { backgroundColor: active ? th.primSoft : 'transparent', flexDirection: rowDir }]}
                 >
-                  <Ionicons name={option.icon || 'ellipse-outline'} size={17} color={optionColor} />
+                  {option.direction
+                    ? <FinancialDirectionMark kind={option.direction} color={optionColor} size={19} lang={cfg.lang} />
+                    : <Ionicons name={option.icon || 'ellipse-outline'} size={17} color={optionColor} />}
                   <Text style={{ flex: 1, color: active ? th.primary : th.text, fontSize: 13, ...weight(active ? '900' : '700'), textAlign: align, writingDirection }}>
                     {option.label}
                   </Text>
@@ -719,13 +721,13 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
               </TouchableOpacity>
             ) : (
               <View style={[s.emptyActionRow, { flexDirection: rowDir }]}>
-                <TouchableOpacity onPress={onAddIncome} style={[s.emptyActionWide, { backgroundColor: th.primSoft, borderColor: `${th.primary}44` }]}>
-                  <Ionicons name="arrow-down-outline" size={15} color={th.primary} />
-                  <Text style={{ color: th.primary, fontSize: 11, ...weight('900') }}>{cfg.lang === 'ar' ? 'إضافة دخل' : 'Add income'}</Text>
+                <TouchableOpacity onPress={onAddIncome} style={[s.emptyActionWide, { backgroundColor: th.incBg, borderColor: `${th.inc}44` }]}>
+                  <FinancialDirectionMark kind="income" color={th.inc} size={17} lang={cfg.lang} />
+                  <Text style={{ color: th.inc, fontSize: 11, ...weight('900') }}>{cfg.lang === 'ar' ? 'إضافة دخل' : 'Add income'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={onAddExpense} style={[s.emptyActionWide, { backgroundColor: th.primary, borderColor: th.primary }]}>
-                  <Ionicons name="arrow-up-outline" size={15} color={th.onPrimary} />
-                  <Text style={{ color: th.onPrimary, fontSize: 11, ...weight('900') }}>{cfg.lang === 'ar' ? 'إضافة مصروف' : 'Add expense'}</Text>
+                <TouchableOpacity onPress={onAddExpense} style={[s.emptyActionWide, { backgroundColor: th.expBg, borderColor: `${th.exp}44` }]}>
+                  <FinancialDirectionMark kind="expense" color={th.exp} size={17} lang={cfg.lang} />
+                  <Text style={{ color: th.exp, fontSize: 11, ...weight('900') }}>{cfg.lang === 'ar' ? 'إضافة مصروف' : 'Add expense'}</Text>
                 </TouchableOpacity>
               </View>
             )}

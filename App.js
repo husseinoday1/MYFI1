@@ -306,6 +306,21 @@ function AppRoot() {
       return queued;
     };
 
+    // Cold start spends 5-10 seconds on the splash during an ordinary daily launch.
+    // `ready` is only raised at the end of this whole sequence, and the sequence
+    // includes a network round trip, so the first paint waits on Supabase.
+    //
+    // Measure before reordering. Reordering startup is where this project has
+    // produced its worst bugs before, so the order gets changed once, against real
+    // numbers from a real device, not against a reading of the code.
+    //
+    // Durations only. Nothing here touches a balance or an id.
+    const startupClock = Date.now();
+    const startupMarks = {};
+    const mark = (name) => {
+      startupMarks[name] = Date.now() - startupClock;
+    };
+
     (async () => {
       if (FRESH_TEST_MODE) {
         await clearVaultSnapshot(FRESH_TEST_NAMESPACE);
@@ -317,6 +332,7 @@ function AppRoot() {
       }
 
       await loadLocal();
+      mark('loadLocal');
       if (!active) return;
 
       const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -328,18 +344,37 @@ function AppRoot() {
 
       try {
         const { data } = await supabase.auth.getSession();
+        mark('getSession');
         await queueAuthTransition(data?.session?.user ?? null);
       } catch (error) {
+        // Mark the failure too. A missing getSession mark would otherwise read the
+        // same whether the call threw in 20ms or hung for 8 seconds first.
+        mark('getSessionFailed');
         console.warn('[MYFI:STARTUP_SESSION]', String(error?.message || error || 'session_read_failed'));
         await queueAuthTransition(null);
       }
 
       await authTransitionQueue.current.catch(() => undefined);
+      mark('authTransition');
       if (!active) return;
       const completed = await AsyncStorage.getItem(STORAGE.ONBOARD);
+      mark('onboardFlag');
       setShowOnboard(FORCE_ONBOARDING || completed !== 'true');
       setReady(true);
+      mark('ready');
+      // One line, one launch. The gaps between marks are where the seconds are: if
+      // getSession dominates, the fix is to stop blocking first paint on it.
+      //
+      // `ready` marks the moment React is told to render, NOT the moment pixels
+      // appear. If these numbers add up to far less than the delay the user feels,
+      // the cost is downstream in the first render, not in this sequence, and
+      // reordering startup would fix nothing. Read them with that in mind.
+      console.log('[MYFI:STARTUP_TIMING]', JSON.stringify(startupMarks));
     })().catch(error => {
+      // A launch that failed part-way is the one we most want numbers from, so the
+      // marks collected before the throw are reported here too.
+      mark('failed');
+      console.log('[MYFI:STARTUP_TIMING]', JSON.stringify(startupMarks));
       console.error('[MYFI:STARTUP_BARRIER]', String(error?.message || error || 'startup_failed'));
       if (active) setReady(true);
     });

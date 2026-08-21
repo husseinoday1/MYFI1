@@ -61,6 +61,12 @@ const newItemModal = fs.readFileSync(path.join(srcRoot, 'components', 'NewItemMo
 const notificationCenter = fs.readFileSync(path.join(srcRoot, 'components', 'NotificationCenterModal.js'), 'utf8');
 const walletBalanceCard = fs.readFileSync(path.join(srcRoot, 'components', 'WalletBalanceCard.js'), 'utf8');
 const homeCenter = fs.readFileSync(path.join(srcRoot, 'components', 'HomeCenterModal.js'), 'utf8');
+const appPrimitives = fs.readFileSync(path.join(srcRoot, 'components', 'AppPrimitives.js'), 'utf8');
+const accountDelete = fs.readFileSync(path.join(srcRoot, 'components', 'AccountDeleteModal.js'), 'utf8');
+const passwordRecovery = fs.readFileSync(path.join(srcRoot, 'components', 'PasswordRecoveryModal.js'), 'utf8');
+const archive = fs.readFileSync(path.join(srcRoot, 'screens', 'ArchiveScreen.js'), 'utf8');
+const auth = fs.readFileSync(path.join(srcRoot, 'screens', 'AuthScreen.js'), 'utf8');
+const theme = fs.readFileSync(path.join(srcRoot, 'lib', 'theme.js'), 'utf8');
 const demoData = fs.readFileSync(path.join(srcRoot, 'store', 'demoData.js'), 'utf8');
 const monthsLib = fs.readFileSync(path.join(srcRoot, 'lib', 'months.js'), 'utf8');
 assert(addModal.includes('style={StyleSheet.absoluteFill} onPress={handleClose}'), 'Transaction modal must dismiss from an independent backdrop');
@@ -79,8 +85,8 @@ assert(addModal.includes("seg.filter(sg => sg.k !== 'planning')"), 'General entr
 assert(addModal.includes("smartEntryAvailable ? { k: 'smart'"), 'Smart input must be an explicit top-level entry mode');
 assert(addModal.includes("{smartOpen ? ("), 'Smart input panel must render only after the user enters smart mode');
 assert(addModal.includes("(!smartOpen && type === sg.k)"), 'Smart entry must not visually select another transaction mode at the same time');
-assert(addModal.includes("icon: 'arrow-down-outline'"), 'Expense mode must use a valid down-arrow icon');
-assert(addModal.includes("icon: 'arrow-up-outline'"), 'Income mode must use a valid up-arrow icon');
+assert(addModal.includes("direction: 'expense', tone: th.exp"), 'Expense mode must use the red minus direction mark');
+assert(addModal.includes("direction: 'income', tone: th.inc"), 'Income mode must use the green plus direction mark');
 assert.equal(addModal.includes('arrow-down-left'), false, 'Expense mode must not use unsupported Ionicons names');
 assert.equal(addModal.includes('arrow-up-right'), false, 'Income mode must not use unsupported Ionicons names');
 assert.equal(addModal.includes('{isSmartLaunch ? ('), false, 'Smart input must not render automatically for every money entry');
@@ -243,8 +249,8 @@ assert(home.includes('attentionHeader'), 'Important states must use the shared a
 assert(home.includes('expandedRecentId'), 'Home transactions must expose inline expandable details');
 assert(home.includes('detailsToggle'), 'Home transaction rows must use a down-arrow details toggle');
 assert(home.includes('inlineDetails'), 'Home transaction details must appear in place');
-assert(home.includes("icon: 'arrow-down-outline', color: th.exp"), 'Home expense quick action must use the down arrow');
-assert(home.includes("icon: 'arrow-up-outline', color: th.inc"), 'Home income quick action must use the up arrow');
+assert(home.includes("direction: 'expense', color: th.exp"), 'Home expense quick action must use the red minus direction mark');
+assert(home.includes("direction: 'income', color: th.inc"), 'Home income quick action must use the green plus direction mark');
 assert.equal(home.includes('payCommitment(item.id'), false, 'Home commitment actions must open the wallet-aware payment modal');
 assert(home.includes('onQuickCommitment(item.id)'), 'Home commitment actions must route through the wallet-aware payment modal');
 assert(home.includes('postponeCommitmentFromHome') && home.includes('deferCommitment'), 'Home commitment tasks must expose the existing deferral action');
@@ -412,5 +418,19 @@ assert(reports.includes('const reportRows = [') && reports.includes("key: 'compa
 assert(reports.includes('reportRows.map((item, index) =>') && reports.includes('reportInlineDetail'), 'Each report detail must expand directly below the selected report row');
 assert.equal(reports.includes('s.reportCompareRow'), false, 'Comparison must not use a visually different top-level row');
 assert.equal(reports.includes('reportCompareText'), false, 'Legacy comparison-row styling must be removed');
+
+/* MYFI_UX_POLISH_INCOME_EXPENSE_AND_PASSWORDS */
+assert(appPrimitives.includes("{income ? '+' : '-'}"), 'Income and expense direction must render as explicit plus/minus marks');
+assert(home.includes("backgroundColor: th.incBg") && home.includes("backgroundColor: th.expBg"), 'Home income and expense actions must use semantic green/red surfaces');
+assert(history.includes("direction: 'income', color: th.inc") && history.includes("direction: 'expense', color: th.exp"), 'History income and expense choices must use green plus/red minus semantics');
+assert(reports.includes('kind="income" color={th.inc}') && reports.includes('kind="expense" color={th.exp}'), 'Report empty-state actions must use green plus/red minus semantics');
+assert(onboarding.includes('direction="income"') && onboarding.includes('direction="expense"'), 'Onboarding preview must use plus/minus direction marks');
+assert(legacySettings.includes("direction: item.key === 'income' ? 'income' : item.key === 'expense' ? 'expense' : null"), 'Advanced Home metric settings must use plus/minus direction marks');
+assert(legacySettings.includes("direction: 'expense', color: th.exp") && legacySettings.includes("direction: 'income', color: th.inc"), 'Category flow choices must use red minus/green plus semantics');
+assert(theme.includes('inc: BRAND_GREEN') && theme.includes("exp: '#C74F5C'") && theme.includes("exp: '#E06B76'"), 'Light and dark themes must preserve green income and red expense colors');
+assert(accountDelete.includes('secureTextEntry={!passwordVisible}') && accountDelete.includes("passwordVisible ? 'eye-off-outline' : 'eye-outline'"), 'Account deletion password must have a show/hide control');
+assert(archive.includes('secureTextEntry={!archivePasswordVisible}') && archive.includes("archivePasswordVisible ? 'eye-off-outline' : 'eye-outline'"), 'Archive password must have a show/hide control');
+assert(legacySettings.includes('secureTextEntry={!backupPasswordVisible}') && legacySettings.includes("backupPasswordVisible ? 'eye-off-outline' : 'eye-outline'"), 'Legacy backup password must have a show/hide control');
+assert(auth.includes('secureTextEntry={!passwordVisible}') && passwordRecovery.includes('secureTextEntry={!passwordVisible}') && passwordRecovery.includes('secureTextEntry={!confirmationVisible}'), 'Authentication and recovery password fields must retain show/hide controls');
 
 console.log('MYFI modal and settings UI contract: all assertions passed');
