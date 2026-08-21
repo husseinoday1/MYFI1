@@ -20,6 +20,7 @@ src/lib/financialSemanticProjection.js
 src/lib/ledgerDatabase.js
 src/lib/localArchiveRepository.js
 src/lib/syncErrorClassification.js
+src/lib/startupTiming.js
 src/screens/ArchiveScreen.js
 src/screens/HistoryScreen.js
 src/screens/HomeScreen.js

@@ -51,6 +51,7 @@ import { PRODUCT_NAME } from '../lib/productIdentity';
 import { collectP19LocalSqliteDiagnostics } from '../dev/p19LocalSqliteDiagnostics';
 import { P19_RESTORE_EPOCH_DEVICE_GATE_ENABLED, runP19RestoreEpochDeviceGate } from '../dev/p19RestoreEpochDeviceGate';
 import { PHASE10_RESTORE_BENCHMARK_ENABLED, runPhase10RestoreBenchmarkHarness } from '../dev/phase10RestoreBenchmarkHarness';
+import { readStartupTiming } from '../lib/startupTiming';
 
 const pageCopy = (lang = 'ar') => {
   const ar = lang === 'ar';
@@ -740,6 +741,22 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
   // Phase 10 benchmark. Kept out of runLocalSqliteDiagnostics on purpose: that
   // function carries the P20-G01 acceptance gate, which is Phase 9 closure evidence,
   // and it should not grow branches for unrelated work.
+  // Bug 1's numbers, put where the person measuring can reach them. Reuses the
+  // diagnostic text box and its "Copy evidence" button rather than adding a second way
+  // to get numbers off the device: the user has done that one before and it worked.
+  const showStartupTiming = () => {
+    const timing = readStartupTiming();
+    if (!timing) {
+      // Only possible before the launch sequence finishes, which means the panel is
+      // not reachable yet — say so rather than showing an empty box.
+      Alert.alert('', cfg.lang === 'ar'
+        ? 'لم يكتمل تسجيل الإقلاع بعد. أعد فتح التطبيق ثم افتح هذه الصفحة.'
+        : 'The launch has not finished recording yet. Reopen the app, then open this page.');
+      return;
+    }
+    setLocalSqliteDiagnostic(JSON.stringify(timing, null, 2));
+  };
+
   const runPhase10Benchmark = async () => {
     if (localSqliteDiagnosticBusy) return;
     // One tap generates and stages 1k, 10k, 50k and 100k synthetic transactions in
@@ -1098,6 +1115,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
             localSqliteDiagnostic={localSqliteDiagnostic}
             onRunLocalSqliteDiagnostic={runLocalSqliteDiagnostics}
             onRunPhase10Benchmark={runPhase10Benchmark}
+            onShowStartupTiming={showStartupTiming}
             onCopyLocalSqliteDiagnostic={copyLocalSqliteDiagnostic}
             lastSyncedAt={lastSyncedAt}
             editIdentity={editIdentity}
@@ -1403,6 +1421,7 @@ function AccountPage({
   th, isAr, T, user, cfg, accountName, accountEmail, accountInitial, syncState, lastSyncError, online, dirty, lastSyncedAt,
   localSqliteDiagnosticBusy, localSqliteDiagnostic, onRunLocalSqliteDiagnostic, onCopyLocalSqliteDiagnostic,
   onRunPhase10Benchmark,
+  onShowStartupTiming,
   editIdentity, setEditIdentity, nameDraft, setNameDraft, onSaveIdentity, onPickAvatar, onRemoveAvatar, onOpenAuth,
   onSync, onDevices, onPasswordReset, onSignOut, onDeleteAccount,
 }) {
@@ -1501,6 +1520,17 @@ function AccountPage({
                 onPress={onRunPhase10Benchmark}
               />
             ) : null}
+            {/* Bug 1: startup timing, read from memory. Durations only. */}
+            <MenuRow
+              th={th}
+              isAr={isAr}
+              icon="timer-outline"
+              title={isAr ? 'توقيت فتح التطبيق' : 'App startup timing'}
+              subtitle={isAr
+                ? 'يعرض زمن كل خطوة من آخر فتحة، ثم انسخ الدليل'
+                : 'Shows how long each startup step took on this launch, then copy the evidence'}
+              onPress={onShowStartupTiming}
+            />
             {/* P19-014A_LOCAL_SQLITE_DIAGNOSTICS_UI: manual, read-only local evidence only. */}
             <MenuRow
               th={th}

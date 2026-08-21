@@ -42,6 +42,7 @@ import {
   getFinancialMaintenanceSnapshot,
   subscribeFinancialMaintenance,
 } from './src/lib/financialMaintenanceBarrier';
+import { recordStartupTiming } from './src/lib/startupTiming';
 
 const FORCE_ONBOARDING = process.env.EXPO_PUBLIC_FORCE_ONBOARDING === '1';
 const FRESH_TEST_MODE = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
@@ -369,11 +370,16 @@ function AppRoot() {
       // appear. If these numbers add up to far less than the delay the user feels,
       // the cost is downstream in the first render, not in this sequence, and
       // reordering startup would fix nothing. Read them with that in mind.
+      // Kept in memory as well as logged, so the numbers can be read from the
+      // Settings diagnostic panel instead of requiring adb from a workstation. The
+      // person who needs to produce them is holding a phone.
+      recordStartupTiming(startupMarks, 'completed');
       console.log('[MYFI:STARTUP_TIMING]', JSON.stringify(startupMarks));
     })().catch(error => {
       // A launch that failed part-way is the one we most want numbers from, so the
       // marks collected before the throw are reported here too.
       mark('failed');
+      recordStartupTiming(startupMarks, 'failed');
       console.log('[MYFI:STARTUP_TIMING]', JSON.stringify(startupMarks));
       console.error('[MYFI:STARTUP_BARRIER]', String(error?.message || error || 'startup_failed'));
       if (active) setReady(true);

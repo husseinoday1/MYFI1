@@ -67,6 +67,7 @@ const passwordRecovery = fs.readFileSync(path.join(srcRoot, 'components', 'Passw
 const archive = fs.readFileSync(path.join(srcRoot, 'screens', 'ArchiveScreen.js'), 'utf8');
 const auth = fs.readFileSync(path.join(srcRoot, 'screens', 'AuthScreen.js'), 'utf8');
 const theme = fs.readFileSync(path.join(srcRoot, 'lib', 'theme.js'), 'utf8');
+const startupTiming = fs.readFileSync(path.join(srcRoot, 'lib', 'startupTiming.js'), 'utf8');
 const demoData = fs.readFileSync(path.join(srcRoot, 'store', 'demoData.js'), 'utf8');
 const monthsLib = fs.readFileSync(path.join(srcRoot, 'lib', 'months.js'), 'utf8');
 assert(addModal.includes('style={StyleSheet.absoluteFill} onPress={handleClose}'), 'Transaction modal must dismiss from an independent backdrop');
@@ -432,5 +433,15 @@ assert(accountDelete.includes('secureTextEntry={!passwordVisible}') && accountDe
 assert(archive.includes('secureTextEntry={!archivePasswordVisible}') && archive.includes("archivePasswordVisible ? 'eye-off-outline' : 'eye-outline'"), 'Archive password must have a show/hide control');
 assert(legacySettings.includes('secureTextEntry={!backupPasswordVisible}') && legacySettings.includes("backupPasswordVisible ? 'eye-off-outline' : 'eye-outline'"), 'Legacy backup password must have a show/hide control');
 assert(auth.includes('secureTextEntry={!passwordVisible}') && passwordRecovery.includes('secureTextEntry={!passwordVisible}') && passwordRecovery.includes('secureTextEntry={!confirmationVisible}'), 'Authentication and recovery password fields must retain show/hide controls');
+
+/* MYFI_STARTUP_TIMING_DEVICE_EVIDENCE */
+assert(appRoot.includes("import { recordStartupTiming } from './src/lib/startupTiming';"), 'App startup must retain the timing recorder');
+assert(appRoot.includes("recordStartupTiming(startupMarks, 'completed');") && appRoot.includes("recordStartupTiming(startupMarks, 'failed');"), 'Completed and failed launches must both preserve timing evidence');
+assert(settings.includes("import { readStartupTiming } from '../lib/startupTiming';"), 'Settings must read the in-memory startup timing evidence');
+assert(settings.includes('const showStartupTiming = () => {') && settings.includes('onShowStartupTiming={showStartupTiming}'), 'Settings must wire startup timing into Account');
+assert(settings.includes("title={isAr ? 'توقيت فتح التطبيق' : 'App startup timing'}"), 'Account must expose a phone-friendly startup timing action');
+assert(startupTiming.includes('stepMs: durations') && startupTiming.includes('readyMeansReactWasToldToRender: true'), 'Timing evidence must expose step durations and the first-render caveat');
+assert.equal(startupTiming.includes('AsyncStorage'), false, 'Startup timing must stay in-memory and never persist stale diagnostic evidence');
+assert.equal(startupTiming.includes('amount'), false, 'Startup timing diagnostic must not include financial values');
 
 console.log('MYFI modal and settings UI contract: all assertions passed');
