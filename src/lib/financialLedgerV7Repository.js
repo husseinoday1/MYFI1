@@ -456,10 +456,12 @@ export const ensureLedgerSyncIdentityV8 = async ({
   });
 };
 
-export const readLedgerSyncIdentityV8 = async ({ namespace = 'guest', database = null } = {}) => {
+export const readLedgerSyncIdentityV8 = async ({
+  namespace = 'guest', database = null, schemaReady = false,
+} = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return null;
-  await ensureFinancialLedgerV7(db);
+  if (!schemaReady) await ensureFinancialLedgerV7(db);
   const row = await db.getFirstAsync(
     `SELECT namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version,created_at,updated_at
        FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`,
@@ -3249,10 +3251,12 @@ export const readFinancialWorkspaceV7 = async ({ namespace = 'guest', database =
   };
 };
 
-export const readFinancialProjectionV7 = async ({ namespace = 'guest', database = null } = {}) => {
+export const readFinancialProjectionV7 = async ({
+  namespace = 'guest', database = null, schemaReady = false,
+} = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return null;
-  await ensureFinancialLedgerV7(db);
+  if (!schemaReady) await ensureFinancialLedgerV7(db);
   const [transactionRows, entityRows, postingRows, linkRows, accountRows, rateRows] = await Promise.all([
     db.getAllAsync(
       `SELECT id,revision,payload_json,archive_year,archived_at,deleted_at FROM ledger_financial_transactions_v7 WHERE namespace=? ORDER BY id`,
@@ -3421,10 +3425,12 @@ export const proveFinancialLedgerInvariantsV7 = async ({ namespace = 'guest', da
   };
 };
 
-export const getFinancialWorkspaceStateV7 = async ({ namespace = 'guest', database = null } = {}) => {
+export const getFinancialWorkspaceStateV7 = async ({
+  namespace = 'guest', database = null, schemaReady = false,
+} = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return null;
-  await ensureFinancialLedgerV7(db);
+  if (!schemaReady) await ensureFinancialLedgerV7(db);
   return db.getFirstAsync(`SELECT * FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1`, namespace);
 };
 

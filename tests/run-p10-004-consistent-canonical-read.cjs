@@ -17,7 +17,8 @@
 //
 // runLedgerReadTransaction itself is exercised directly against a fake connection,
 // including the ordering guarantee that it serialises with queued writes rather than
-// racing them.
+// racing them. The fake deliberately hands the callback a distinct transaction
+// object: using the ambient database would make this test fail.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -66,25 +67,24 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
     /ledger_read_transaction_unavailable/,
   );
   await assert.rejects(
-    () => runLedgerReadTransaction({ withTransactionAsync: async fn => fn() }, 'not a function'),
+    () => runLedgerReadTransaction({ withExclusiveTransactionAsync: async fn => fn() }, 'not a function'),
     /ledger_read_transaction_task_required/,
   );
   console.log('[PASS] refuses a handle or task it cannot honour');
 
   {
     const events = [];
+    const txn = { token: 'transaction-scoped-handle' };
     const db = {
-      withTransactionAsync: async task => {
+      withExclusiveTransactionAsync: async task => {
         events.push('open');
-        await task();
+        await task(txn);
         events.push('commit');
       },
     };
     const value = await runLedgerReadTransaction(db, async handle => {
       events.push('read');
-      // expo-sqlite hands withTransactionAsync no argument, so the callback has to
-      // receive the same database object or callers would query outside the snapshot.
-      assert.equal(handle, db, 'the task must be given the handle the transaction is open on');
+      assert.equal(handle, txn, 'the task must be given the transaction-scoped handle');
       return 'snapshot';
     });
     assert.equal(value, 'snapshot', 'the task result is the return value');
@@ -102,7 +102,7 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
       order.push('write');
     });
     const read = runLedgerReadTransaction(
-      { withTransactionAsync: async task => task() },
+      { withExclusiveTransactionAsync: async task => task({}) },
       async () => { order.push('read'); },
     );
     await Promise.all([slowWrite, read]);
@@ -114,13 +114,13 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
     // A failed read must not wedge the queue for everything after it.
     await assert.rejects(
       () => runLedgerReadTransaction(
-        { withTransactionAsync: async task => task() },
+        { withExclusiveTransactionAsync: async task => task({}) },
         async () => { throw new Error('read_exploded'); },
       ),
       /read_exploded/,
     );
     const after = await runLedgerReadTransaction(
-      { withTransactionAsync: async task => task() },
+      { withExclusiveTransactionAsync: async task => task({}) },
       async () => 'still working',
     );
     assert.equal(after, 'still working');
@@ -134,7 +134,7 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
     // just looks frozen with nothing to diagnose. It has to name itself instead.
     await assert.rejects(
       () => runLedgerReadTransaction(
-        { withTransactionAsync: async task => task() },
+        { withExclusiveTransactionAsync: async task => task({}) },
         async () => enqueueLedgerWrite(async () => 'unreachable'),
       ),
       /ledger_queue_reentrant_from_read_transaction/,
@@ -152,7 +152,7 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
     for (const attempt of [1, 2]) {
       await assert.rejects(
         () => runLedgerReadTransaction(
-          { withTransactionAsync: async task => task() },
+          { withExclusiveTransactionAsync: async task => task({}) },
           async () => { throw new Error('boom_' + attempt); },
         ),
         new RegExp('boom_' + attempt),
@@ -172,7 +172,7 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
         /import \{[\s\S]*?\} from '\.\/localArchiveRepository';/,
         [
           'const getColdArchiveNamespace = (ns) => ns;',
-          "const exportColdArchives = async () => { globalThis.__EVENTS__.push('read:archives'); return globalThis.__ARCHIVES__; };",
+          "const exportColdArchives = async (_namespace, { database } = {}) => { globalThis.__EVENTS__.push('read:archives:' + String(database)); return globalThis.__ARCHIVES__; };",
           "const ensureColdArchiveSchema = async () => { globalThis.__EVENTS__.push('warm:archives'); return true; };",
         ].join('\n'),
       )
@@ -180,9 +180,9 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
         /import \{[\s\S]*?\} from '\.\/ledgerDatabase';/,
         [
           'const getLedgerDb = async () => globalThis.__DB__;',
-          'const runLedgerReadTransaction = async (db, task) => {',
+          'const runLedgerReadTransaction = async (_db, task) => {',
           "  globalThis.__EVENTS__.push('txn:open');",
-          '  try { return await task(db); } finally { globalThis.__EVENTS__.push(\'txn:close\'); }',
+          "  try { return await task('THE_TXN'); } finally { globalThis.__EVENTS__.push('txn:close'); }",
           '};',
         ].join('\n'),
       )
@@ -190,9 +190,9 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
         /import \{[\s\S]*?\} from '\.\/financialLedgerV7Repository';/,
         [
           "const ensureFinancialLedgerV7 = async () => { globalThis.__EVENTS__.push('warm:ledger'); return true; };",
-          "const readFinancialProjectionV7 = async ({ database }) => { globalThis.__EVENTS__.push('read:projection:' + String(database)); return globalThis.__PROJECTION__; };",
-          "const readLedgerSyncIdentityV8 = async () => { globalThis.__EVENTS__.push('read:identity'); return null; };",
-          "const getFinancialWorkspaceStateV7 = async () => { globalThis.__EVENTS__.push('read:workspace'); return null; };",
+          "const readFinancialProjectionV7 = async ({ database, schemaReady }) => { globalThis.__EVENTS__.push('read:projection:' + String(database) + ':' + String(schemaReady)); return globalThis.__PROJECTION__; };",
+          "const readLedgerSyncIdentityV8 = async ({ database, schemaReady }) => { globalThis.__EVENTS__.push('read:identity:' + String(database) + ':' + String(schemaReady)); return null; };",
+          "const getFinancialWorkspaceStateV7 = async ({ database, schemaReady }) => { globalThis.__EVENTS__.push('read:workspace:' + String(database) + ':' + String(schemaReady)); return null; };",
         ].join('\n'),
       ),
     ['readCanonicalBackupSource'],
@@ -212,10 +212,10 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
     'warm:ledger',
     'warm:archives',
     'txn:open',
-    'read:projection:THE_DB',
-    'read:identity',
-    'read:workspace',
-    'read:archives',
+    'read:projection:THE_TXN:true',
+    'read:identity:THE_TXN:true',
+    'read:workspace:THE_TXN:true',
+    'read:archives:THE_TXN',
     'txn:close',
   ], 'schemas warm first, then every canonical read happens inside one open transaction');
   console.log('[PASS] one transaction covers ledger, identity, workspace and archives');
@@ -223,7 +223,7 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
 
   // The projection reader must be handed the transaction's handle. Passing the
   // ambient connection instead would read outside the snapshot while looking correct.
-  assert.ok(events.includes('read:projection:THE_DB'),
+  assert.ok(events.includes('read:projection:THE_TXN:true'),
     'the projection must be read through the handle the transaction is open on');
 
   // --- 3. the second run, not just the first --------------------------------
@@ -236,10 +236,10 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
     'warm:ledger',
     'warm:archives',
     'txn:open',
-    'read:projection:THE_DB',
-    'read:identity',
-    'read:workspace',
-    'read:archives',
+    'read:projection:THE_TXN:true',
+    'read:identity:THE_TXN:true',
+    'read:workspace:THE_TXN:true',
+    'read:archives:THE_TXN',
     'txn:close',
   ], 'the second consecutive export must behave exactly like the first');
   assert.deepEqual(second.counts, first.counts);

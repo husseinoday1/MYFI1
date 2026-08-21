@@ -68,12 +68,9 @@ export const readCanonicalBackupSource = async ({
   // promotion possible later (Step 5). They are part of financial truth, so a backup
   // that omits them is incomplete.
   //
-  // exportColdArchives takes no database handle — it always resolves the default
-  // ledger connection. Every other reader here honours `database`, so a caller that
-  // passes an isolated handle (the restore stage in Step 4) would get staged ledger
-  // rows beside LIVE archives and never be told. Reading two different sources into
-  // one model that claims to be a single ledger is precisely the class of mistake
-  // that produced the cutover parity failure, so refuse rather than mislead.
+  // A supplied database is deliberately not supported yet: the restore stage has not
+  // defined its stage namespace contract. Keep that boundary fail-closed rather than
+  // mixing staged ledger rows with live namespaces by accident.
   //
   // P10-004 moved this ahead of the reads: it depends only on the argument, so there
   // is no reason to open a snapshot and read the whole ledger before refusing it.
@@ -82,8 +79,8 @@ export const readCanonicalBackupSource = async ({
       supported: true,
       ok: false,
       reason: 'canonical_backup_isolated_database_unsupported',
-      detail: "exportColdArchives cannot read from a supplied database handle; "
-        + "reading it would mix staged ledger rows with live archives.",
+      detail: "restore-stage canonical reads are not implemented yet; "
+        + "the live backup reader only accepts the canonical ledger connection.",
     };
   }
 
@@ -105,15 +102,20 @@ export const readCanonicalBackupSource = async ({
   // computed later certifies that torn pair as sound. The research names this the
   // consistent-read requirement; it is what makes the semantic hash mean anything.
   //
-  // exportColdArchives resolves the same shared connection internally, so its queries
-  // are inside this transaction too. That is exactly why the isolated-handle refusal
-  // above has to stay: the moment a caller supplies a different handle, the archives
-  // silently come from somewhere else.
+  // The transaction callback supplies an exclusive, transaction-scoped executor.
+  // Every reader below receives it explicitly; using the ambient connection for even
+  // one archive query would defeat the point-in-time guarantee.
   const snapshot = await runLedgerReadTransaction(db, async (executor) => ({
-    projection: await readFinancialProjectionV7({ namespace: ledgerNamespace, database: executor }),
-    identity: await readLedgerSyncIdentityV8({ namespace: ledgerNamespace, database: executor }),
-    workspaceState: await getFinancialWorkspaceStateV7({ namespace: ledgerNamespace, database: executor }),
-    archives: await exportColdArchives(archiveNamespace),
+    projection: await readFinancialProjectionV7({
+      namespace: ledgerNamespace, database: executor, schemaReady: true,
+    }),
+    identity: await readLedgerSyncIdentityV8({
+      namespace: ledgerNamespace, database: executor, schemaReady: true,
+    }),
+    workspaceState: await getFinancialWorkspaceStateV7({
+      namespace: ledgerNamespace, database: executor, schemaReady: true,
+    }),
+    archives: await exportColdArchives(archiveNamespace, { database: executor }),
   }));
 
   const { projection, identity, workspaceState, archives } = snapshot;

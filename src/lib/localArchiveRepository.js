@@ -195,8 +195,10 @@ export const storeColdArchiveYears = async ({ namespace = 'guest', archives = []
 // in one snapshot, so it needs this done up front.
 export const ensureColdArchiveSchema = async () => !!(await openDb());
 
-export const listColdArchiveYears = async (namespace = 'guest') => {
-  const db = await openDb();
+export const listColdArchiveYears = async (namespace = 'guest', { database = null } = {}) => {
+  // A canonical backup owns an already-warmed, transaction-scoped handle. Resolving
+  // the ambient connection here would put archive reads outside that snapshot.
+  const db = database || await openDb();
   if (!db) return [];
   const ns = normalizeNamespace(namespace);
   const rows = await db.getAllAsync(
@@ -219,8 +221,10 @@ export const listColdArchiveYears = async (namespace = 'guest') => {
   }));
 };
 
-export const loadColdArchiveYear = async ({ namespace = 'guest', year, scope = 'personal' } = {}) => {
-  const db = await openDb();
+export const loadColdArchiveYear = async ({
+  namespace = 'guest', year, scope = 'personal', database = null,
+} = {}) => {
+  const db = database || await openDb();
   if (!db) return null;
   const ns = normalizeNamespace(namespace);
   const targetYear = Number(year);
@@ -275,12 +279,14 @@ export const clearColdArchives = async (namespace = 'guest') => {
 // Exporting/restoring the cold archive is intentionally explicit and happens only
 // for a backup/restore operation. Day-to-day screens never hydrate every archived
 // year into JavaScript memory.
-export const exportColdArchives = async (namespace = 'guest') => {
+export const exportColdArchives = async (namespace = 'guest', { database = null } = {}) => {
   const ns = normalizeNamespace(namespace);
-  const headers = await listColdArchiveYears(ns);
+  const headers = await listColdArchiveYears(ns, { database });
   const result = [];
   for (const header of headers) {
-    const loaded = await loadColdArchiveYear({ namespace: ns, year: header.year, scope: header.scope });
+    const loaded = await loadColdArchiveYear({
+      namespace: ns, year: header.year, scope: header.scope, database,
+    });
     if (!loaded?.payload?.data) continue;
     result.push({
       year: header.year,

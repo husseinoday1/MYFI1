@@ -57,10 +57,10 @@ export async function runLedgerExclusiveTransaction(database, task) {
 // is the nested-transaction failure enqueueLedgerWrite exists to prevent. The cost is
 // an export that waits its turn; the alternative is a backup that is quietly wrong.
 //
-// Deferred, not exclusive: never write through this. expo-sqlite passes no handle to
-// withTransactionAsync, so the callback receives the same database object — anything
-// it queries through that handle is inside the transaction, and anything reached by a
-// different handle is not.
+// This must be exclusive. Expo documents that withTransactionAsync is not exclusive:
+// unrelated async queries may enter that transaction. A financial backup must not
+// certify a graph assembled around an unrelated write. withExclusiveTransactionAsync
+// supplies a transaction-scoped handle; every query in `task` has to use that handle.
 //
 // Callers must warm every schema-readiness path (ensureFinancialLedgerV7,
 // ensureColdArchiveSchema) BEFORE calling this. Those enqueue their own work and the
@@ -68,18 +68,17 @@ export async function runLedgerExclusiveTransaction(database, task) {
 // ledger_queue_reentrant_from_read_transaction instead of hanging, which is the only
 // reason that mistake is findable at all.
 export async function runLedgerReadTransaction(database, task) {
-  if (!database || typeof database.withTransactionAsync !== 'function') {
+  if (!database || typeof database.withExclusiveTransactionAsync !== 'function') {
     throw new Error('ledger_read_transaction_unavailable');
   }
   if (typeof task !== 'function') throw new Error('ledger_read_transaction_task_required');
   return enqueueLedgerWrite(async () => {
     readTransactionDepth += 1;
     try {
-      let result;
-      await database.withTransactionAsync(async () => {
-        result = await task(database);
-      });
-      return result;
+      // Keep the reentrancy guard raised until COMMIT/ROLLBACK finishes. Returning
+      // the promise without awaiting would enter `finally` immediately and allow a
+      // nested queue write during the still-open snapshot.
+      return await runLedgerExclusiveTransaction(database, task);
     } finally {
       readTransactionDepth -= 1;
     }
