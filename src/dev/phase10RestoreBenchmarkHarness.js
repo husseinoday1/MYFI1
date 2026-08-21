@@ -11,7 +11,6 @@ import {
   clearFinancialWorkspaceV7,
   discardFinancialWorkspaceStageV7,
   promoteFinancialWorkspaceStageV7,
-  readFinancialProjectionV7,
   readFinancialWorkspaceV7,
   stageFinancialWorkspaceV7,
 } from '../lib/financialLedgerV7Repository';
@@ -66,15 +65,6 @@ const nowMs = () => (
 
 const roundMs = value => Math.round(Number(value || 0) * 1000) / 1000;
 
-const projectionCounts = projection => ({
-  transactions: rows(projection?.transactions).length,
-  postings: rows(projection?.postings).length,
-  links: rows(projection?.links).length,
-  accounts: rows(projection?.accounts).length,
-  exchangeRates: rows(projection?.exchangeRates).length,
-  entities: rows(projection?.entities).length,
-});
-
 const sourceProjectionCounts = projection => ({
   transactions: rows(projection?.document?.transactions).length,
   postings: rows(projection?.document?.postings).length,
@@ -93,8 +83,33 @@ const sameCounts = (left, right) => (
   && left.entities === right.entities
 );
 
-const hasProjectionRows = projection => (
-  Object.values(projectionCounts(projection)).some(value => Number(value || 0) !== 0)
+const countFromRow = row => Math.max(0, Number(row?.row_count || 0));
+
+// The benchmark needs structural counts, not row payloads. Pulling 100k
+// transactions plus their postings over the native bridge solely to call
+// `.length` exhausts an ordinary Android heap before a measurement exists.
+// Keep this verification inside SQLite and return six scalar values only.
+const readProjectionCounts = async ({ db, namespace }) => {
+  const [transactions, postings, links, accounts, exchangeRates, entities] = await Promise.all([
+    db.getFirstAsync('SELECT COUNT(*) AS row_count FROM ledger_financial_transactions_v7 WHERE namespace=?', namespace),
+    db.getFirstAsync('SELECT COUNT(*) AS row_count FROM ledger_postings_v7 WHERE namespace=?', namespace),
+    db.getFirstAsync('SELECT COUNT(*) AS row_count FROM ledger_transaction_links_v7 WHERE namespace=?', namespace),
+    db.getFirstAsync('SELECT COUNT(*) AS row_count FROM ledger_accounts_v7 WHERE namespace=?', namespace),
+    db.getFirstAsync('SELECT COUNT(*) AS row_count FROM ledger_exchange_rates_v7 WHERE namespace=?', namespace),
+    db.getFirstAsync('SELECT COUNT(*) AS row_count FROM ledger_entities_v7 WHERE namespace=?', namespace),
+  ]);
+  return {
+    transactions: countFromRow(transactions),
+    postings: countFromRow(postings),
+    links: countFromRow(links),
+    accounts: countFromRow(accounts),
+    exchangeRates: countFromRow(exchangeRates),
+    entities: countFromRow(entities),
+  };
+};
+
+const hasProjectionRows = counts => (
+  Object.values(counts || {}).some(value => Number(value || 0) !== 0)
 );
 
 const assertDisposableCurrentAccount = async db => {
@@ -143,8 +158,8 @@ const cleanupTierNamespaces = async ({ db, namespace, stageNamespace }) => {
   // Verify that the namespace-scoped financial projection is empty after cleanup.
   try {
     const [stageAfter, targetAfter] = await Promise.all([
-      readFinancialProjectionV7({ namespace: stageNamespace, database: db }),
-      readFinancialProjectionV7({ namespace, database: db }),
+      readProjectionCounts({ db, namespace: stageNamespace }),
+      readProjectionCounts({ db, namespace }),
     ]);
     if (hasProjectionRows(stageAfter)) cleanupErrors.push('stage_projection_not_empty_after_cleanup');
     if (hasProjectionRows(targetAfter)) cleanupErrors.push('target_projection_not_empty_after_cleanup');
@@ -204,8 +219,8 @@ export async function runPhase10RestoreBenchmarkHarness({
 
       // Synthetic fixture generation is benchmark setup, not part of restore time.
       // It is deliberately excluded from totalRestoreMs.
-      const workspace = await buildPerformanceTestWorkspaceAsync({}, tier.id);
-      const coldArchives = rows(workspace?.__performanceArchives);
+      let workspace = await buildPerformanceTestWorkspaceAsync({}, tier.id);
+      let coldArchives = rows(workspace?.__performanceArchives);
 
       const canonicalStarted = nowMs();
       const projection = buildFinancialShadowProjectionV7({
@@ -214,6 +229,11 @@ export async function runPhase10RestoreBenchmarkHarness({
         coldArchives,
       });
       const canonicalBuildRawMs = nowMs() - canonicalStarted;
+      // The projection is now the sole source for staging. Releasing the fixture
+      // lets Hermes collect the duplicate synthetic document before native SQLite
+      // work begins on the largest tier.
+      workspace = null;
+      coldArchives = null;
 
       const stageStarted = nowMs();
       const stagedWrite = await stageFinancialWorkspaceV7({
@@ -227,17 +247,14 @@ export async function runPhase10RestoreBenchmarkHarness({
       assertHarness(stagedWrite?.ok === true, `stage_failed:${tier.id}`, stagedWrite);
 
       const stageReadbackStarted = nowMs();
-      const stagedReadback = await readFinancialProjectionV7({
-        namespace: stageNamespace,
-        database: db,
-      });
+      const stagedReadback = await readProjectionCounts({ db, namespace: stageNamespace });
       const stageReadbackRawMs = nowMs() - stageReadbackStarted;
 
       // This harness does not reimplement the migration module's private semantic
       // checksum/metrics helpers. It performs only a structural count guard before
       // promotion so a visibly incomplete disposable stage is never promoted.
       const sourceCounts = sourceProjectionCounts(projection);
-      const targetCounts = projectionCounts(stagedReadback);
+      const targetCounts = stagedReadback;
       assertHarness(
         sameCounts(sourceCounts, targetCounts),
         `stage_structural_count_mismatch:${tier.id}`,
@@ -260,13 +277,10 @@ export async function runPhase10RestoreBenchmarkHarness({
       assertHarness(promoted?.ok === true, `promotion_failed:${tier.id}`, promoted);
 
       const postCommitStarted = nowMs();
-      const postCommitReadback = await readFinancialProjectionV7({
-        namespace,
-        database: db,
-      });
+      const postCommitReadback = await readProjectionCounts({ db, namespace });
       const postCommitReadbackRawMs = nowMs() - postCommitStarted;
 
-      const promotedCounts = projectionCounts(postCommitReadback);
+      const promotedCounts = postCommitReadback;
       assertHarness(
         sameCounts(targetCounts, promotedCounts),
         `post_commit_structural_count_mismatch:${tier.id}`,
