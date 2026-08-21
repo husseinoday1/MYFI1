@@ -4,7 +4,8 @@
 **Branch:** `impl/p20-g01-acceptance-apk-2026-08-19`
 **Verified remote/HEAD:** `f39a75179004dc408c93a8e7f408d16db073c12a`
 **Freshness check:** `git fetch --all` completed at 2026-08-21T13:27:36+03:00; `origin/impl/p20-g01-acceptance-apk-2026-08-19` still resolves to the SHA above.
-**Working state:** this evidence describes the local, uncommitted P10-010 patch atop that SHA. It is **not accepted or pushed** yet.
+**Implementation commit (local only):** `dcc5ca5c884fc75c0257e73859cfd28772a59d76`
+**Working state:** this evidence describes that local P10-010 implementation atop the verified remote SHA. It is **not accepted or pushed** yet.
 **Runtime / schema:** Expo `~54.0.36`, React Native `0.81.5`, `expo-sqlite ~16.0.10`; financial SQLite V8 / ledger model V7.
 **Data/schema/cloud impact:** no device database was opened, no user data changed, no SQLite migration/table meaning changed, and no Supabase request/schema/data operation occurred.
 
