@@ -26,9 +26,13 @@
 
 import { sha256 } from '@noble/hashes/sha2';
 import { bytesToHex } from '@noble/hashes/utils';
+import { pickFinancialBackupConfig } from './backupData';
 import { canonicalFinancialEntityPayload } from './financialLedgerV7Repository';
 
+// V1 remains frozen for historical diagnostics. V2 is the first definition allowed
+// to certify a Phase-10 restore package, so its scope is deliberately explicit.
 export const SEMANTIC_HASH_VERSION = 1;
+export const SEMANTIC_HASH_V2_VERSION = 2;
 export const SEMANTIC_HASH_ALGORITHM = 'SHA-256';
 
 const rows = value => (Array.isArray(value) ? value : []);
@@ -66,6 +70,24 @@ export const stableSemanticJson = (value) => {
 };
 
 const byId = (left, right) => String(left?.id ?? '').localeCompare(String(right?.id ?? ''));
+const byArchiveKey = (left, right) => (
+  `${String(left?.year ?? '')}:${String(left?.scope ?? '')}`
+    .localeCompare(`${String(right?.year ?? '')}:${String(right?.scope ?? '')}`)
+);
+
+const parseObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const sortRecordsById = (value) => rows(value).slice().sort(byId);
 
 // ---------------------------------------------------------------------------
 // Field policy
@@ -176,6 +198,64 @@ const canonicalArchive = (archive) => {
   };
 };
 
+// Phase 10 V2 policy
+// -------------------
+// A logical restore promises the complete user-entered financial records, including
+// cold archive records. It does not promise device presentation/preferences. The
+// same allowlist that the existing backup format uses defines the only workspace cfg
+// fields that are financial; theme, language, privacy controls, notifications and
+// device identity cannot make an otherwise identical ledger fail proof.
+const canonicalFinancialConfigV2 = (workspace = {}) => {
+  const state = parseObject(workspace?.payloadJson ?? workspace?.payload);
+  const localCfg = state?.localPreferences?.cfg || state?.cfg || {};
+  return pickFinancialBackupConfig(localCfg);
+};
+
+const canonicalTransactionV2 = transaction => ({
+  id: text(transaction?.id),
+  revision: minor(transaction?.revision),
+  deletedAt: text(transaction?.deletedAt),
+  archivedAt: text(transaction?.archivedAt),
+  archiveYear: transaction?.archiveYear ?? null,
+  // The payload is the canonical user-entered transaction record. Do not reduce it
+  // to an amount subset: title, note, transfer/FX fields, links and future approved
+  // financial fields must all be detected if a stage read-back loses or changes one.
+  payload: transaction?.payload ?? null,
+});
+
+const canonicalEntityV2 = entity => ({
+  entityType: text(entity?.entityType),
+  id: text(entity?.id),
+  revision: minor(entity?.revision),
+  deletedAt: text(entity?.deletedAt),
+  payload: canonicalFinancialEntityPayload(entity?.entityType, entity?.payload ?? null),
+});
+
+const canonicalArchiveDataV2 = (data = {}) => {
+  const source = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  const result = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (key === 'cfg') {
+      result.cfg = pickFinancialBackupConfig(value || {});
+    } else if (Array.isArray(value)) {
+      // Archive collections are sets of records. Their physical read order is not
+      // financial truth, but every record field remains in the semantic document.
+      result[key] = sortRecordsById(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+};
+
+const canonicalArchiveV2 = archive => ({
+  year: archive?.year ?? null,
+  scope: text(archive?.scope),
+  checksum: text(archive?.checksum),
+  summary: archive?.summary ?? {},
+  data: canonicalArchiveDataV2(archive?.data),
+});
+
 /**
  * Reduce a canonical read model (Step 1) to the form the semantic hash is taken over.
  * Pure and order-insensitive: collections are sorted, object keys are sorted at
@@ -206,6 +286,34 @@ export const canonicalizeFinancialLedger = (model = {}) => {
 
 export const semanticHashV1 = (model = {}) => bytesToHex(
   sha256(new TextEncoder().encode(stableSemanticJson(canonicalizeFinancialLedger(model)))),
+);
+
+/**
+ * Phase-10 restore proof. V1 remains available above for old diagnostic evidence;
+ * do not substitute this under its old version number.
+ */
+export const canonicalizeFinancialLedgerV2 = (model = {}) => {
+  const entities = model?.entities && !Array.isArray(model.entities)
+    ? Object.values(model.entities).flat()
+    : rows(model?.entities);
+  return {
+    semanticHashVersion: SEMANTIC_HASH_V2_VERSION,
+    ledgerId: text(model?.ledger?.ledgerId),
+    financialConfig: canonicalFinancialConfigV2(model?.workspace),
+    accounts: rows(model?.accounts).map(canonicalAccount).sort(byId),
+    exchangeRates: rows(model?.exchangeRates).map(canonicalExchangeRate).sort(byId),
+    transactions: rows(model?.transactions).map(canonicalTransactionV2).sort(byId),
+    postings: rows(model?.postings).map(canonicalPosting).sort(byId),
+    links: rows(model?.links).map(canonicalLink).sort(byId),
+    entities: entities.map(canonicalEntityV2).sort(
+      (left, right) => `${left.entityType}:${left.id}`.localeCompare(`${right.entityType}:${right.id}`),
+    ),
+    archives: rows(model?.archives).map(canonicalArchiveV2).sort(byArchiveKey),
+  };
+};
+
+export const semanticHashV2 = (model = {}) => bytesToHex(
+  sha256(new TextEncoder().encode(stableSemanticJson(canonicalizeFinancialLedgerV2(model)))),
 );
 
 /**
@@ -247,6 +355,20 @@ export const semanticMetricsV1 = (model = {}) => {
   };
 };
 
+export const semanticMetricsV2 = (model = {}) => {
+  const canonical = canonicalizeFinancialLedgerV2(model);
+  const v1Metrics = semanticMetricsV1(model);
+  return {
+    ...v1Metrics,
+    financialConfigKeys: Object.keys(canonical.financialConfig).sort(),
+    archiveRecords: canonical.archives.reduce((sum, archive) => (
+      sum + Object.values(archive.data || {}).reduce((inner, value) => (
+        inner + (Array.isArray(value) ? value.length : 0)
+      ), 0)
+    ), 0),
+  };
+};
+
 /**
  * Compare two ledgers that must be identical — a decoded backup against the staged
  * SQLite read-back, for instance. Both sides go through the same canonicaliser; that
@@ -272,5 +394,23 @@ export const compareSemanticLedgerV1 = (expected = {}, actual = {}) => {
   // returning an empty differences list that reads like "no difference".
   if (!differences.length) differences.push({ metric: 'row_content_only' });
 
+  return { ok: false, expectedHash, actualHash, differences };
+};
+
+export const compareSemanticLedgerV2 = (expected = {}, actual = {}) => {
+  const expectedHash = semanticHashV2(expected);
+  const actualHash = semanticHashV2(actual);
+  if (expectedHash === actualHash) {
+    return { ok: true, expectedHash, actualHash, differences: [] };
+  }
+  const expectedMetrics = semanticMetricsV2(expected);
+  const actualMetrics = semanticMetricsV2(actual);
+  const differences = [];
+  for (const key of Object.keys(expectedMetrics)) {
+    if (stableSemanticJson(expectedMetrics[key]) !== stableSemanticJson(actualMetrics[key])) {
+      differences.push({ metric: key });
+    }
+  }
+  if (!differences.length) differences.push({ metric: 'row_content_only' });
   return { ok: false, expectedHash, actualHash, differences };
 };

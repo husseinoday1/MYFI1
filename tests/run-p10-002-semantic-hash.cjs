@@ -23,6 +23,8 @@ const filename = path.join(root, 'src/lib/financialSemanticProjection.js');
 const repoSource = fs.readFileSync(path.join(root, 'src/lib/financialLedgerV7Repository.js'), 'utf8');
 const metadataSource = fs.readFileSync(path.join(root, 'src/lib/cloudWorkspaceMetadata.js'), 'utf8')
   .replace(/export const /g, 'const ');
+const backupDataSource = fs.readFileSync(path.join(root, 'src/lib/backupData.js'), 'utf8')
+  .replace(/export const /g, 'const ');
 const canonicalMatch = repoSource.match(
   /export const canonicalFinancialEntityPayload = \(entityType, payload\) => \{[\s\S]*?\n\};/,
 );
@@ -31,6 +33,7 @@ assert.ok(canonicalMatch, 'canonicalFinancialEntityPayload must remain exported 
 let source = fs.readFileSync(filename, 'utf8')
   .replace(/import \{ sha256 \} from '@noble\/hashes\/sha2';/, "const { sha256 } = require('@noble/hashes/sha2');")
   .replace(/import \{ bytesToHex \} from '@noble\/hashes\/utils';/, "const { bytesToHex } = require('@noble/hashes/utils');")
+  .replace(/import \{ pickFinancialBackupConfig \} from '\.\/backupData';/, backupDataSource)
   .replace(
     /import \{ canonicalFinancialEntityPayload \} from '\.\/financialLedgerV7Repository';/,
     `${metadataSource}\n${canonicalMatch[0].replace('export const ', 'const ')}`,
@@ -40,7 +43,9 @@ let source = fs.readFileSync(filename, 'utf8')
 source += `
 module.exports = {
   SEMANTIC_HASH_VERSION, SEMANTIC_HASH_ALGORITHM,
+  SEMANTIC_HASH_V2_VERSION,
   canonicalizeFinancialLedger, semanticHashV1, semanticMetricsV1, compareSemanticLedgerV1,
+  canonicalizeFinancialLedgerV2, semanticHashV2, semanticMetricsV2, compareSemanticLedgerV2,
 };
 `;
 
@@ -51,9 +56,13 @@ compiled._compile(source, filename);
 
 const {
   SEMANTIC_HASH_VERSION,
+  SEMANTIC_HASH_V2_VERSION,
   semanticHashV1,
   semanticMetricsV1,
   compareSemanticLedgerV1,
+  semanticHashV2,
+  semanticMetricsV2,
+  compareSemanticLedgerV2,
 } = compiled.exports;
 
 const ledger = (overrides = {}) => ({
@@ -85,6 +94,18 @@ const ledger = (overrides = {}) => ({
   entities: {
     wallet: [{ entityType: 'wallet', id: 'w1', revision: 1, deletedAt: null, payload: { id: 'w1', currency: 'IQD' } }],
     workspace: [{ entityType: 'workspace', id: 'ws', revision: 1, deletedAt: null, payload: { cfg: { currency: 'IQD' } } }],
+  },
+  workspace: {
+    payloadJson: JSON.stringify({
+      localPreferences: {
+        cfg: {
+          currency: 'IQD', profileType: 'personal', activeScope: 'personal',
+          enabledModules: { goals: true }, defaultWalletId: 'w1',
+          categoryBudgets: { food: 50000 }, categoryBudgetsByMonth: {},
+          archiveSummaries: [], theme: 'dark', lang: 'ar', bioLock: true,
+        },
+      },
+    }),
   },
   archives: [],
   ...overrides,
@@ -162,6 +183,79 @@ console.log('[PASS] collection order and key order are irrelevant');
 assert.match(semanticHashV1(sourceSide), /^[0-9a-f]{64}$/, 'must be a SHA-256 hex digest');
 assert.equal(SEMANTIC_HASH_VERSION, 1);
 console.log('[PASS] hash is a versioned SHA-256 digest');
+
+// --- V2: full logical restore proof ----------------------------------------
+const v2Source = ledger({
+  archives: [{
+    year: 2024,
+    scope: 'personal',
+    checksum: 'archive-checksum',
+    summary: { year: 2024, count: 1, net: -25000 },
+    data: {
+      trans: [{
+        id: 'archive-t1', title: 'historic rent', note: 'paid in cash', dateISO: '2024-02-01',
+        walletId: 'w1', cat: 'housing', amt: -25000, baseAmount: -25000,
+        historicalFx: { base: 'IQD', rate: 1 },
+      }],
+      debts: [{ id: 'archive-debt', title: 'old loan', amount: 120000, status: 'settled' }],
+      wallets: [{ id: 'w1', label: 'Cash', currency: 'IQD' }],
+      cfg: {
+        currency: 'IQD', profileType: 'personal', activeScope: 'personal',
+        categoryBudgets: { housing: 25000 }, theme: 'light', lang: 'en',
+      },
+      archiveScope: 'personal',
+    },
+  }],
+});
+
+assert.equal(SEMANTIC_HASH_V2_VERSION, 2);
+assert.match(semanticHashV2(v2Source), /^[0-9a-f]{64}$/, 'V2 must be a SHA-256 hex digest');
+
+const changedLiveRecord = ledger();
+changedLiveRecord.transactions[0].payload.note = 'corrected receipt reference';
+assert.notEqual(semanticHashV2(ledger()), semanticHashV2(changedLiveRecord),
+  'a user-entered live transaction field omitted by V1 must change V2');
+
+const changedArchiveRecord = JSON.parse(JSON.stringify(v2Source));
+changedArchiveRecord.archives[0].data.trans[0].note = 'different historic note';
+assert.notEqual(semanticHashV2(v2Source), semanticHashV2(changedArchiveRecord),
+  'every archived transaction field must be covered by V2');
+
+const changedArchiveEntity = JSON.parse(JSON.stringify(v2Source));
+changedArchiveEntity.archives[0].data.debts[0].title = 'different archived record';
+assert.notEqual(semanticHashV2(v2Source), semanticHashV2(changedArchiveEntity),
+  'archived financial entities must be covered by V2');
+
+const changedFinancialConfig = JSON.parse(JSON.stringify(v2Source));
+changedFinancialConfig.workspace.payloadJson = JSON.stringify({
+  localPreferences: { cfg: { currency: 'USD', profileType: 'personal', activeScope: 'personal' } },
+});
+assert.notEqual(semanticHashV2(v2Source), semanticHashV2(changedFinancialConfig),
+  'financial workspace configuration must be covered by V2');
+
+const changedDeviceOnlyConfig = JSON.parse(JSON.stringify(v2Source));
+const deviceOnlyCfg = JSON.parse(changedDeviceOnlyConfig.workspace.payloadJson);
+deviceOnlyCfg.localPreferences.cfg.theme = 'light';
+deviceOnlyCfg.localPreferences.cfg.lang = 'en';
+deviceOnlyCfg.localPreferences.cfg.bioLock = false;
+changedDeviceOnlyConfig.workspace.payloadJson = JSON.stringify(deviceOnlyCfg);
+changedDeviceOnlyConfig.archives[0].data.cfg.theme = 'dark';
+changedDeviceOnlyConfig.archives[0].data.cfg.lang = 'ar';
+assert.equal(semanticHashV2(v2Source), semanticHashV2(changedDeviceOnlyConfig),
+  'theme, language and device-only privacy choices must not enter the restore proof');
+
+const reorderedArchive = JSON.parse(JSON.stringify(v2Source));
+reorderedArchive.archives[0].data.trans.unshift({ id: 'archive-t0', title: 'older', amt: -1 });
+const reorderedArchiveAgain = JSON.parse(JSON.stringify(reorderedArchive));
+reorderedArchiveAgain.archives[0].data.trans.reverse();
+assert.equal(semanticHashV2(reorderedArchive), semanticHashV2(reorderedArchiveAgain),
+  'archive record order must not change V2');
+
+const v2Difference = compareSemanticLedgerV2(v2Source, changedArchiveRecord);
+assert.equal(v2Difference.ok, false);
+assert.ok(v2Difference.differences.length > 0, 'V2 content-only drift must never be silent');
+assert.ok(semanticMetricsV2(v2Source).archiveRecords >= 3, 'V2 metrics must describe archive coverage');
+console.log('[PASS] V2 covers full live/archive records and financial config only');
 
 // --- comparison reports how, not just that ----------------------------------
 const same = compareSemanticLedgerV1(sourceSide, persistedSide);
