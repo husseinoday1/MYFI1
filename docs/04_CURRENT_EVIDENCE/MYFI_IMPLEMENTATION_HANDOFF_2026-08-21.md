@@ -108,3 +108,91 @@ diagnostic payloads that summarise rather than publish a user's money.
 The last one has an automated control now — `tests/dev-diagnostic-payload-privacy.test.cjs`
 — because three separate leaks appeared in one day and reviewer attention is not a
 control.
+
+---
+
+# Second handoff — 2026-08-21, Implementation → Implementation 2
+
+Context exhausted. Branch state: `341b047` on origin, tree clean, `test:gate` 91/0,
+every commit below confirmed green in CI.
+
+## What I did after the branch came back to me
+
+| Bug | Result | Commit |
+|---|---|---|
+| 2, 3, 4 | one defect — `App.js:644` returned the maintenance screen instead of overlaying it, unmounting the tree | `abe8fd7` |
+| 5 | `App.js` rendered History and Reports with no props; their no-op defaults made the +/- buttons decorative | `0609cf8` |
+| 1 | instrumented, not fixed — measure before reordering startup | `03db96b` |
+
+Bug 3's finding is the one that mattered: **the restore was succeeding all along**, and
+only its confirmation was lost when SettingsScreen unmounted mid-await. The user had
+been retrying an operation that had already worked. Duplicate protection held — the
+user confirmed transaction counts show no duplication.
+
+Three regression guards added, all of which fail against the pre-fix source:
+`app-maintenance-overlay`, `screen-action-props-wired`, and (earlier) the
+diagnostic-payload privacy control.
+
+## Pick this up first: the user could not follow my measurement request
+
+I asked for two sets of device numbers and the user said plainly that they did not
+understand what I was asking for. That is my failure of explanation, not theirs, and it
+is the live blocker — both remaining decisions are waiting on numbers that nobody has
+been able to produce yet.
+
+What is actually needed, in plain terms:
+
+**Number set 1 — why the app is slow to open.** After installing a build from
+`03db96b` or later, opening the app once writes a single line to the device log. That
+line says how many milliseconds each startup step took. It settles whether the delay is
+the network call, the local database work, or neither.
+
+**Number set 2 — how long a restore takes at scale.** A button in Settings → Account
+generates test data at four sizes and times the staging and promotion of each. It
+decides whether restore staging can run inside the maintenance lock (Strategy A) or has
+to move outside it (Strategy B).
+
+Both come from the same build, so one device session covers both. The second one runs
+for minutes with the app looking frozen, and it must only be run on a disposable
+account.
+
+**Suggestion:** do not ask for `adb logcat` output. The user is testing on a real
+phone in ordinary daily use, not at a workstation. Either surface the startup timing in
+the same Settings diagnostic panel the benchmark already uses — where "Copy evidence"
+already exists and the user has used it successfully before — or walk them through it
+step by step. The mechanism for getting numbers out of the device should be the one
+they have already done, not a new one.
+
+## How to read the numbers when they arrive
+
+Two caveats, both deliberately recorded inside the payloads so they cannot be read
+without them:
+
+- `mark('ready')` is when React is told to render, **not** when pixels appear. If the
+  marks sum to far less than the delay the user feels, the cost is in the first render
+  and reordering startup fixes nothing — while touching the code path that produced
+  this project's worst bugs.
+- `maintenanceBlockedMs` is a **lower bound**. `begin`/`commitLedgerRestoreEpochV8` are
+  excluded from the measurement, and production runs those under the same lock.
+
+Also worth knowing before Strategy A vs B: promotion already scales well —
+`promoteFinancialWorkspaceStageV7` moves rows with `INSERT INTO ... SELECT` inside
+SQLite. **Staging** is the row-by-row JS part, and that is what the lock window is
+actually made of. That is the number that decides it.
+
+## Direction recorded, not queued
+
+The user wants ordinary sync to be **invisible** — no screen, no flash — and debounced
+until editing stops. The overlay fix is a step toward that, not the destination: the
+maintenance panel still shows for ordinary sync, which is exactly what they asked to
+stop seeing. The hard part is that the barrier has one `blocked` state shared by eleven
+call sites, so separating "must block the user" from "should never surface" means
+letting callers declare intent rather than inferring it.
+
+## Still open
+
+- Phase 10 Step 4 (isolated staging engine) — waiting on number set 2.
+- Bug 1 fix — waiting on number set 1.
+- `finance_data` still scheduled for Phase 13/19 removal; it cascades now, which is a
+  stopgap.
+- Supabase advisors deliberately not acted on until the benchmark exists.
