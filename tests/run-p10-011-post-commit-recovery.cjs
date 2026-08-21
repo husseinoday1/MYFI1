@@ -342,9 +342,9 @@ const coordinatorAdapters = () => ({
       },
     });
     assert.equal(winningRecovery.ok, true);
-    assert.equal(staleRecovery.ok, false);
-    assert.equal(staleRecovery.reason, 'canonical_restore_reload_state_changed',
-      'a stale reload callback must not overwrite the newer durable state');
+    assert.equal(staleRecovery.ok, true);
+    assert.equal(staleRecovery.idempotent, true,
+      'a stale reload callback must accept the matching durable result without overwriting it');
     const completed = await readCanonicalRestoreRecoveryStateV11({ namespace, database });
     assert.equal(completed.recovery.status, 'local_reloaded_reconciliation_required');
     const repeated = await recoverCanonicalRestoreAfterCommitV11({ namespace, database, reload: async () => ({ ok: true }) });

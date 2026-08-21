@@ -205,9 +205,7 @@ export const recoverCanonicalRestoreAfterCommitV11 = async ({
         `SELECT ledger_id,restore_epoch FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`, target,
       );
       if (!validRestoreState(state, target)
-          || text(state.status) !== 'local_promoted_pending_reload'
           || text(state.operationId).toLowerCase() !== text(beforeReload.operationId).toLowerCase()
-          || Number(state.stateVersion) !== Number(beforeReload.stateVersion)
           || text(state.ledgerId) !== text(beforeReload.ledgerId)
           || text(state.semanticHash).toLowerCase() !== actualHash
           || !sameCounts(state.counts, actualCounts)
@@ -217,6 +215,10 @@ export const recoverCanonicalRestoreAfterCommitV11 = async ({
       }
       if (text(state.status) === 'local_reloaded_reconciliation_required') {
         return { idempotent: true, reloadedAt: state.reloadedAt || null };
+      }
+      if (text(state.status) !== 'local_promoted_pending_reload'
+          || Number(state.stateVersion) !== Number(beforeReload.stateVersion)) {
+        throw new Error('canonical_restore_reload_state_changed');
       }
       const reloadedAt = new Date().toISOString();
       await txn.runAsync(
