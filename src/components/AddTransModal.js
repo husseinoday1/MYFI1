@@ -11,6 +11,7 @@ import {
   useAudioRecorder,
 } from 'expo-audio';
 import { useStore } from '../store/useStore';
+import { useAutomaticSyncInteractionHold } from '../hooks/useAutomaticSyncInteractionHold';
 import { SUPABASE_KEY, SUPABASE_URL, supabase } from '../lib/supabase';
 import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
@@ -165,6 +166,7 @@ export default function AddTransModal({
   initialMode = 'exp', initialDebtId = null, initialGoalId = null, initialCommitmentId = null,
   draftData = null, focusedEntry = false,
 }) {
+  useAutomaticSyncInteractionHold(visible, 'transaction_editor');
   const { addTrans, addTransfer, editTrans, deleteTrans, undoLastTransactionDelete, payDebt, saveGoal, payCommitment, debts, goals, commitments, wallets, cats, cfg, trans } = useStore();
   const th  = TH[cfg.theme] || TH.dark;
   const L   = STR[cfg.lang]  || STR.ar;

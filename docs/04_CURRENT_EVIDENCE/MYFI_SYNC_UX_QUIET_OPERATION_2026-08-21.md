@@ -14,7 +14,8 @@
 1. Normal startup/local V8 reads and session resume begin as **silent** maintenance: the write/sync fence remains active, but the mounted UI is not covered by the “Securing financial data” screen.
 2. The same fence is promoted to a visible exclusive operation only after the code has established that it is actually going to migrate/cut over SQLite, restore a verified legacy cloud snapshot, or adopt an immutable verified cloud ledger identity.
 3. A successful manual no-op sync now records the time the check actually completed on that phone. It does not write a dummy update to Supabase merely to refresh the displayed time.
-4. Automatic post-save sync waits for a 1.2 second quiet period; consecutive completed saves coalesce into one scheduled attempt. Existing forms persist only on their explicit save/confirm path, so editing a draft does not itself create a sync job.
+4. Automatic post-save sync waits for a 1.2 second quiet period; consecutive completed saves coalesce into one scheduled attempt.
+5. Financial editor holds now cover transaction entry/editing, new tracker entry, and Tracker Lab tracker/payment editing. While any of those editors is open, any pending automatic sync is cancelled and no automatic or transient-retry sync starts. Closing the final editor schedules one quiet follow-up if local data is dirty. Manual sync remains available.
 
 ## Supabase/resource effect
 
@@ -25,12 +26,13 @@
 ## Verification performed locally
 
 - `node tests/run-p19-015a2-maintenance-startup-barrier.cjs .` — passed, including silent-to-visible promotion.
-- `npm.cmd run test:gate` — **92 passed, 0 failed, 11 environment-required skips**.
+- `node tests/run-automatic-sync-interaction-hold.cjs .` — passed; two overlapping editors retain the hold until both release.
+- `npm.cmd run test:gate` after the editor-hold addition — **94 passed, 0 failed, 11 environment-required skips**.
 - No APK built, installed, signed, published, committed, or pushed in this patch state.
 
-## Deliberately still open
+## Deliberately bounded
 
-The quiet period prevents a save-triggered sync from running between closely spaced completed edits. A separate UI interaction-hold layer is still needed before claiming that automatic sync waits for **every** open editor/modal across all screens. It should be added only after a focused inventory of edit surfaces, so an incomplete flag cannot accidentally leave synchronization paused forever.
+The hold applies to financial **editing** surfaces, not passive viewing, reports, alerts, or manual sync. This is intentional: stopping sync for every modal would make ordinary read-only navigation silently delay a pending financial write. Any newly added financial editor must use the same lifecycle hook; the static contract names the three current entry families.
 
 ## Phase-boundary note for Claude
 

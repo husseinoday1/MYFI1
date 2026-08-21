@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View, Text, TextInput, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
+import { useAutomaticSyncInteractionHold } from '../hooks/useAutomaticSyncInteractionHold';
 import { TH } from '../lib/theme';
 import { getSymbol } from '../lib/constants';
 import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
@@ -170,6 +171,7 @@ export default function TrackersLabScreen({
   const [expandedPaymentHistoryId, setExpandedPaymentHistoryId] = useState(null);
   const [editTrackerDraft, setEditTrackerDraft] = useState(null);
   const [editPaymentDraft, setEditPaymentDraft] = useState(null);
+  useAutomaticSyncInteractionHold(!!editTrackerDraft || !!editPaymentDraft, 'tracker_editor');
   const [paymentSelection, setPaymentSelection] = useState({ ownerId: null, ids: [] });
   const currentMonth = monthKey(today());
   const trackers = useMemo(() => {

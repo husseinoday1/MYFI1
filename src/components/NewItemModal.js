@@ -3,6 +3,7 @@ import { View, Text, Modal, TextInput, ScrollView, Pressable, StyleSheet, Switch
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store/useStore';
+import { useAutomaticSyncInteractionHold } from '../hooks/useAutomaticSyncInteractionHold';
 import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
 import { CURRENCIES, getSymbol } from '../lib/constants';
@@ -78,6 +79,7 @@ const modalCopy = (lang = 'ar') => {
 };
 
 export default function NewItemModal({ visible, kind, onClose, preset = null }) {
+  useAutomaticSyncInteractionHold(visible, 'new_tracker_editor');
   const { addDebt, addGoal, addCommitment, setCfg, cfg, wallets, cats, trans } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;

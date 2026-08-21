@@ -13,6 +13,11 @@ import {
 import { canonicalWorkspaceCfg, mergeWorkspaceStates, sameWorkspaceData } from '../multiDeviceSync';
 import { mergeCloudWorkspaceCfg } from '../../lib/cloudWorkspaceMetadata.js';
 import {
+  acquireAutomaticSyncInteractionHold,
+  isAutomaticSyncInteractionHeld,
+  releaseAutomaticSyncInteractionHold,
+} from '../../lib/automaticSyncInteractionHold';
+import {
   isNeverRetrySyncError,
   isTransientCloudSyncError,
   syncDiagnosticCode,
@@ -142,6 +147,7 @@ const armTransientCloudRetry = (get, syncUserId, error) => {
         || current.user.id !== syncUserId
         || current.cfg.demoMode
         || !current.workspaceReady
+        || isAutomaticSyncInteractionHeld()
         || isFinancialMaintenanceBlocked()) {
       return;
     }
@@ -317,13 +323,20 @@ const armScheduledCloudSync = (get, reason, attempt = 0) => {
     scheduledSyncTimer = null;
     return false;
   }
+  // A finance editor owns its draft until it closes. Do not begin an automatic
+  // network round-trip underneath it; its release schedules one quiet follow-up.
+  if (isAutomaticSyncInteractionHeld()) {
+    if (scheduledSyncTimer) clearTimeout(scheduledSyncTimer);
+    scheduledSyncTimer = null;
+    return false;
+  }
   if (scheduledSyncTimer) clearTimeout(scheduledSyncTimer);
   const delay = SCHEDULED_SYNC_DELAYS_MS[Math.min(scheduledSyncAttempt, SCHEDULED_SYNC_DELAYS_MS.length - 1)];
   scheduledSyncTimer = setTimeout(async () => {
     scheduledSyncTimer = null;
     const current = get();
     // P19-015A2: a timer that fired after a maintenance request must stand down.
-    if (isFinancialMaintenanceBlocked()) return;
+    if (isFinancialMaintenanceBlocked() || isAutomaticSyncInteractionHeld()) return;
     if (!current.user || current.cfg.demoMode || !current.workspaceReady || !current.dirty) {
       scheduledSyncAttempt = 0;
       return;
@@ -1807,6 +1820,25 @@ export const createSyncSlice = (set, get) => ({
   scheduleCloudSync: (reason = 'local_change') => {
     scheduledSyncAttempt = 0;
     return armScheduledCloudSync(get, reason, 0);
+  },
+
+  acquireAutomaticSyncInteractionHold: (reason = 'financial_editor') => {
+    const token = acquireAutomaticSyncInteractionHold(reason);
+    if (scheduledSyncTimer) {
+      clearTimeout(scheduledSyncTimer);
+      scheduledSyncTimer = null;
+    }
+    return token;
+  },
+
+  releaseAutomaticSyncInteractionHold: token => {
+    const released = releaseAutomaticSyncInteractionHold(token);
+    if (!released || isAutomaticSyncInteractionHeld()) return released;
+    const current = get();
+    if (current.user && !current.cfg.demoMode && current.workspaceReady && current.dirty) {
+      armScheduledCloudSync(get, 'editor_closed', 0);
+    }
+    return released;
   },
 
   loadLocal: async (requestedNamespace = null, options = {}) => {
