@@ -82,3 +82,29 @@ device acceptance or cloud recovery. Those remain P10-011/P10-012 work. In
 particular, P10-010 is **not closed** until independent review, a clean pre-push
 review, push and a confirmed green CI run. No APK or device test is requested by this
 local transaction proof.
+
+## Conditions before this is wired to anything live
+
+Independent review raised two defects. The user's decision on 2026-08-21 was to push
+as-is and fix both before this module is connected to the app, on the grounds that it
+is still isolated and reaches nothing live. Recorded here rather than left in a review
+thread, because "we will fix it later" is only true if later has somewhere to look.
+
+Neither is a data-safety defect: the transaction rolls back correctly in every case
+the fault-injection test covers.
+
+1. **Failure reasons are flattened.** The final `catch` preserves only reasons already
+   prefixed `canonical_restore_promotion_`; every other cause becomes the single string
+   `canonical_restore_promotion_failed`. So `restore_epoch_local_compare_and_swap_failed`
+   — which means specifically that another restore moved the epoch underneath this one —
+   arrives at the caller indistinguishable from a disk error or a constraint violation.
+   This is the most safety-critical operation in the app, and this project has already
+   lost a day to a failure that reported the wrong cause. Preserve the underlying
+   message rather than replacing it.
+
+2. **`validCounts` passes on an empty object.** It is `Object.values(...).every(...)`,
+   which is vacuously true for `{}`, and `financialRestoreStageV11` stores
+   `counts: proof?.counts || {}`. A proof carrying no counts therefore satisfies the
+   count check, leaving only the semantic hash guarding the stage. Not reachable today,
+   but a guard that passes on emptiness stops guarding exactly when its input is
+   malformed.
