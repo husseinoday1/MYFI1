@@ -1393,23 +1393,68 @@ export const createSyncSlice = (set, get) => ({
       clearTimeout(scheduledSyncTimer);
       scheduledSyncTimer = null;
     }
-    return runFinancialMaintenanceTask({
-      reason: normalizedReason,
-      presentation: options.presentation,
-      beforeEnter: async () => {
-        if (options.insideSync !== true) await syncQueue.catch(() => false);
-        await flushLedgerWrites();
-        await new Promise(resolve => setTimeout(resolve, 0));
-        await flushLedgerWrites();
-      },
-      afterExit: async () => {
-        if (options.resumeSync === false) return;
-        const current = get();
-        if (current.user && !current.cfg.demoMode && current.workspaceReady && current.dirty) {
-          armScheduledCloudSync(get, options.resumeSyncReason || normalizedReason, 0);
+    // Bug 1 instrumentation. Cold start measured 1.6-3.2s inside this one call
+    // ('session_login_transition'), 63% of the whole launch, and the same on an almost
+    // empty account — so the cost is fixed overhead here, not the size of anyone's
+    // ledger. What was not known is which half: waiting for the queues to go quiet, or
+    // the work the task then does.
+    //
+    // Measured at this boundary rather than inside setUser, because setUser is long,
+    // heavily branched, and is the startup ordering this project says produced its worst
+    // bugs. Narrow here first, then go deeper only where the number points.
+    //
+    // Durations and the reason string only. Nothing here reads a balance, an id or a row.
+    const clock = Date.now();
+    const marks = { reason: normalizedReason };
+    // Report once, whoever gets there first. A maintenance request that fails before
+    // its task ever runs is the one most worth a number, and logging only from inside
+    // the task would lose exactly that case — the same way the startup marks once
+    // reported nothing for a launch that threw. A missing taskMs then says plainly
+    // that the task never started.
+    let reported = false;
+    const report = () => {
+      if (reported) return;
+      reported = true;
+      marks.totalMs = Date.now() - clock;
+      console.log('[MYFI:MAINTENANCE_TIMING]', JSON.stringify(marks));
+    };
+
+    try {
+      return await runFinancialMaintenanceTask({
+        reason: normalizedReason,
+        presentation: options.presentation,
+        beforeEnter: async () => {
+          const enterStarted = Date.now();
+          // Time spent before this callback runs is time queued behind another
+          // maintenance operation, which is a different problem from a slow drain.
+          marks.queueWaitMs = enterStarted - clock;
+          if (options.insideSync !== true) await syncQueue.catch(() => false);
+          const syncDrained = Date.now();
+          marks.syncDrainMs = syncDrained - enterStarted;
+          await flushLedgerWrites();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          await flushLedgerWrites();
+          marks.writerFlushMs = Date.now() - syncDrained;
+        },
+        afterExit: async () => {
+          if (options.resumeSync === false) return;
+          const current = get();
+          if (current.user && !current.cfg.demoMode && current.workspaceReady && current.dirty) {
+            armScheduledCloudSync(get, options.resumeSyncReason || normalizedReason, 0);
+          }
+        },
+      }, async (...args) => {
+        const taskStarted = Date.now();
+        try {
+          return await task(...args);
+        } finally {
+          marks.taskMs = Date.now() - taskStarted;
+          report();
         }
-      },
-    }, task);
+      });
+    } finally {
+      report();
+    }
   },
 
   previewNormalizedCloud: async ({ baseline } = {}) => {
