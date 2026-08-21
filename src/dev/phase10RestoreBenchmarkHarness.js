@@ -140,6 +140,77 @@ const assertDisposableCurrentAccount = async db => {
   }
 };
 
+const BENCHMARK_NAMESPACE_PREFIX = '__myfi_phase10_benchmark__:';
+
+// Tables the benchmark writes rows into under its own namespaces.
+const BENCHMARK_NAMESPACED_TABLES = Object.freeze([
+  'ledger_financial_transactions_v7',
+  'ledger_postings_v7',
+  'ledger_transaction_links_v7',
+  'ledger_entities_v7',
+  'ledger_accounts_v7',
+  'ledger_exchange_rates_v7',
+  'ledger_workspace_state_v7',
+]);
+
+// Every run gets a fresh runId, so namespaces from a previous run are invisible to
+// this one and its `finally` cleanup can never reach them. A process death runs no
+// `finally` at all — which is exactly what happened on 2026-08-21, when the harness
+// was killed by an OutOfMemoryError mid-tier and left its staging rows behind.
+//
+// So cleanup cannot only run at the end. It also has to run at the start, against
+// whatever the last run failed to remove.
+//
+// The LIKE pattern is escaped: `_` is a single-character wildcard in SQL LIKE, and
+// this prefix is mostly underscores. Unescaped, it would match namespaces that merely
+// resemble the benchmark's and delete a workspace that is not ours.
+const sweepOrphanedBenchmarkNamespaces = async (db) => {
+  const pattern = `${BENCHMARK_NAMESPACE_PREFIX.replace(/_/g, '\\_')}%`;
+  const orphans = new Set();
+
+  for (const table of BENCHMARK_NAMESPACED_TABLES) {
+    const found = await db.getAllAsync(
+      `SELECT DISTINCT namespace FROM ${table} WHERE namespace LIKE ? ESCAPE '\\'`,
+      pattern,
+    );
+    for (const row of rows(found)) {
+      const value = String(row?.namespace || '').trim();
+      // Belt and braces: never act on a namespace that does not literally start with
+      // the prefix, whatever the LIKE returned.
+      if (value.startsWith(BENCHMARK_NAMESPACE_PREFIX)) orphans.add(value);
+    }
+  }
+
+  if (!orphans.size) return { swept: 0, namespaces: [] };
+
+  // Stages first: clearing a target while its stage still references it is pointless
+  // work, and the stage is the larger of the two.
+  const ordered = [...orphans].sort((left, right) => (
+    Number(right.includes('::shadow-stage::')) - Number(left.includes('::shadow-stage::'))
+  ));
+
+  const failures = [];
+  for (const orphan of ordered) {
+    try {
+      if (orphan.includes('::shadow-stage::')) {
+        await discardFinancialWorkspaceStageV7({ stageNamespace: orphan, database: db });
+      } else {
+        await clearFinancialWorkspaceV7({ namespace: orphan, database: db });
+      }
+    } catch (error) {
+      failures.push(`${orphan}:${String(error?.message || error)}`);
+    }
+  }
+
+  const evidence = { swept: ordered.length, namespaces: ordered, failures };
+  console.log('[PHASE10_RESTORE_BENCHMARK_SWEPT_ORPHANS]', JSON.stringify(evidence));
+  // A sweep that cannot finish means the database still holds rows this run would
+  // measure alongside its own. Refuse rather than report a number built on someone
+  // else's leftovers.
+  assertHarness(!failures.length, 'orphan_sweep_failed', evidence);
+  return evidence;
+};
+
 const cleanupTierNamespaces = async ({ db, namespace, stageNamespace }) => {
   const cleanupErrors = [];
 
@@ -195,6 +266,17 @@ export async function runPhase10RestoreBenchmarkHarness({
   // the benchmark namespace. The benchmark itself never reads, rewrites, or syncs
   // that account's financial rows.
   await assertDisposableCurrentAccount(db);
+
+  // Before measuring anything, remove what a previously killed run left behind.
+  //
+  // Deliberately after the disposable-account check, not before it: the ledger tables
+  // are created by ensureFinancialLedgerV7, which the check above reaches through
+  // readFinancialWorkspaceV7. Sweeping first would query tables that may not exist yet
+  // on a fresh install. Safe in this order because benchmark namespaces are prefixed
+  // and separate, so orphans never count against the disposable check — if that ever
+  // stops being true, this has to move up and ensure the schema itself, or a blocked
+  // account could never sweep the leftovers that were blocking it.
+  await sweepOrphanedBenchmarkNamespaces(db);
 
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const baseNamespace = `__myfi_phase10_benchmark__:${runId}`;
@@ -307,7 +389,7 @@ export async function runPhase10RestoreBenchmarkHarness({
         + postCommitReadbackRawMs
       );
 
-      results.push({
+      const tierResult = {
         tierId: String(tier.id),
         transactions: Number(tier.transactions),
 
@@ -335,7 +417,17 @@ export async function runPhase10RestoreBenchmarkHarness({
         sqliteSizeBefore: null,
         sqliteSizeStaged: null,
         sqliteSizeAfter: null,
-      });
+      };
+
+      // Emitted per tier, not only in the summary at the end.
+      //
+      // On 2026-08-21 this harness ran for six and a half minutes on a real phone and
+      // was then killed by an OutOfMemoryError partway through. The 1k, 10k and 50k
+      // measurements had almost certainly completed, and every one of them died with
+      // the process, because results were logged once after the whole loop. A tool
+      // whose entire job is to survive long enough to report has to report as it goes.
+      console.log('[PHASE10_RESTORE_BENCHMARK_TIER]', JSON.stringify(tierResult));
+      results.push(tierResult);
     } catch (error) {
       operationError = error;
       throw error;
