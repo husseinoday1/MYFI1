@@ -56,7 +56,9 @@ const db = new AsyncSqlite();
     db.native.prepare('INSERT INTO ledger_entities_v7 VALUES (?,?,?,?,?,?,?,?)').run(namespace, 'wallet', 'a', 1, null, '{}', now, now);
     db.native.prepare('INSERT INTO cold_archive_years VALUES (?,?,?,?,?,?,?,?,?,?)').run(namespace, 'personal', 2025, now, 'a', 1, 0, 1, -1, '{}');
     db.native.prepare('INSERT INTO cold_archive_years VALUES (?,?,?,?,?,?,?,?,?,?)').run(namespace, 'business', 2024, now, 'b', 1, 0, 1, -1, '{}');
-    for (const [scope, year, id] of [['personal', 2025, 'r-02'], ['personal', 2025, 'r-01'], ['business', 2024, 'r-01']]) {
+    db.native.prepare('INSERT INTO cold_archive_years VALUES (?,?,?,?,?,?,?,?,?,?)').run(namespace, 'z', 999, now, 'c', 1, 0, 1, -1, '{}');
+    db.native.prepare('INSERT INTO cold_archive_years VALUES (?,?,?,?,?,?,?,?,?,?)').run(namespace, 'a', 10000, now, 'd', 1, 0, 1, -1, '{}');
+    for (const [scope, year, id] of [['personal', 2025, 'r-02'], ['personal', 2025, 'r-01'], ['business', 2024, 'r-01'], ['z', 999, 'r-01'], ['a', 10000, 'r-01']]) {
       db.native.prepare('INSERT INTO cold_archive_transactions VALUES (?,?,?,?,?)').run(namespace, scope, year, id, JSON.stringify({ id, amt: -1 }));
     }
 
@@ -79,9 +81,11 @@ const db = new AsyncSqlite();
     const entities = await readCanonicalRowBatchV3({ database: db, namespace, section: 'entities', maxRows: 8, maxBytes: 64 * 1024 });
     assert.deepEqual(entities.rows.map(row => `${row.entityType}:${row.id}`), ['goal:a', 'wallet:a', 'wallet:b']);
     const headers = await readCanonicalRowBatchV3({ database: db, namespace, section: 'archiveHeaders', maxRows: 8, maxBytes: 64 * 1024 });
-    assert.deepEqual(headers.rows.map(row => `${row.year}:${row.scope}`), ['2024:business', '2025:personal']);
-    const records = await readCanonicalRowBatchV3({ database: db, namespace, section: 'archiveRecords', maxRows: 2, maxBytes: 64 * 1024 });
-    assert.equal(records.hasMore, true); assert.deepEqual(records.rows.map(row => `${row.scope}:${row.year}:${row.id}`), ['business:2024:r-01', 'personal:2025:r-01']);
+    assert.deepEqual(headers.rows.map(row => `${row.year}:${row.scope}`), ['10000:a', '2024:business', '2025:personal', '999:z'],
+      'archive headers must use V3 year:scope UTF-8 text order, not numeric year order');
+    const records = await readCanonicalRowBatchV3({ database: db, namespace, section: 'archiveRecords', maxRows: 8, maxBytes: 64 * 1024 });
+    assert.deepEqual(records.rows.map(row => `${row.year}:${row.scope}:${row.id}`), ['10000:a:r-01', '2024:business:r-01', '2025:personal:r-01', '2025:personal:r-02', '999:z:r-01'],
+      'archive records must group and page by the same V3 archive key before record id');
 
     const config = await readCanonicalRowBatchV3({ database: db, namespace, section: 'financialConfig' });
     assert.equal(config.ok, true); assert.equal(config.rows.length, 1); assert.equal(config.rows[0].sourceMode, 'sqlite');
@@ -89,6 +93,8 @@ const db = new AsyncSqlite();
     const sourceText = fs.readFileSync(filename, 'utf8');
     assert.equal(sourceText.includes('getAllAsync'), false, 'bounded source must not materialize a whole query result');
     assert.ok(sourceText.includes('getEachAsync'), 'bounded source must use Expo SQLite iteration');
+    assert.ok(sourceText.includes("CAST(year AS TEXT) || ':' || scope"), 'archive SQL must use the exact V3 year:scope key');
+    assert.equal(sourceText.includes('ORDER BY year ASC'), false, 'archive SQL must not revert to numeric year ordering');
     console.log('MYFI P10-013 BOUNDED CANONICAL ROW SOURCE: PASS');
   } finally {
     db.close();

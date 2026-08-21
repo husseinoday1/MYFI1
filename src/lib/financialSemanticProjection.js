@@ -89,9 +89,14 @@ const assertWellFormedCanonicalTextV3 = value => {
   return textValue;
 };
 
-export const compareCanonicalTextV3 = (leftValue, rightValue) => {
-  const left = new TextEncoder().encode(assertWellFormedCanonicalTextV3(leftValue));
-  const right = new TextEncoder().encode(assertWellFormedCanonicalTextV3(rightValue));
+// One encoder is enough for this module. More importantly, the sort helpers below
+// retain each encoded key, so a large canonical document does not allocate two byte
+// arrays again for every O(N log N) comparator call.
+const canonicalTextEncoderV3 = new TextEncoder();
+const encodeCanonicalTextV3 = value => canonicalTextEncoderV3.encode(
+  assertWellFormedCanonicalTextV3(value),
+);
+const compareCanonicalBytesV3 = (left, right) => {
   const length = Math.min(left.length, right.length);
   for (let index = 0; index < length; index += 1) {
     if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1;
@@ -100,11 +105,30 @@ export const compareCanonicalTextV3 = (leftValue, rightValue) => {
   return left.length < right.length ? -1 : 1;
 };
 
+export const compareCanonicalTextV3 = (leftValue, rightValue) => {
+  return compareCanonicalBytesV3(
+    encodeCanonicalTextV3(leftValue),
+    encodeCanonicalTextV3(rightValue),
+  );
+};
+
+const sortByCanonicalTextV3 = (values, keyForValue) => values.map(value => ({
+  value,
+  key: keyForValue(value),
+  bytes: null,
+})).sort((left, right) => {
+  // Preserve the old comparator's lazy malformed-Unicode behaviour for a
+  // one-element collection, while still encoding every compared key only once.
+  if (!left.bytes) left.bytes = encodeCanonicalTextV3(left.key);
+  if (!right.bytes) right.bytes = encodeCanonicalTextV3(right.key);
+  return compareCanonicalBytesV3(left.bytes, right.bytes);
+}).map(item => item.value);
+
 export const stableSemanticJsonV3 = (value) => {
   if (value === null || value === undefined) return 'null';
   if (Array.isArray(value)) return `[${value.map(stableSemanticJsonV3).join(',')}]`;
   if (typeof value === 'object') {
-    const keys = Object.keys(value).sort(compareCanonicalTextV3);
+    const keys = sortByCanonicalTextV3(Object.keys(value), key => key);
     return `{${keys.map(key => `${JSON.stringify(key)}:${stableSemanticJsonV3(value[key])}`).join(',')}}`;
   }
   if (typeof value === 'string') return JSON.stringify(assertWellFormedCanonicalTextV3(value));
@@ -131,9 +155,7 @@ const parseObject = (value) => {
 };
 
 const sortRecordsById = (value) => rows(value).slice().sort(byId);
-const sortRecordsByIdV3 = (value) => rows(value).slice().sort(
-  (left, right) => compareCanonicalTextV3(left?.id, right?.id),
-);
+const sortRecordsByIdV3 = (value) => sortByCanonicalTextV3(rows(value), record => record?.id);
 
 // ---------------------------------------------------------------------------
 // Field policy
@@ -414,37 +436,32 @@ export const canonicalizeFinancialLedgerV3 = (model = {}) => {
     semanticHashVersion: SEMANTIC_HASH_V3_VERSION,
     ledgerId: text(model?.ledger?.ledgerId),
     financialConfig: canonicalFinancialConfigV2(model?.workspace),
-    accounts: rows(model?.accounts).map(canonicalAccountV2).sort(
-      (left, right) => compareCanonicalTextV3(left?.id, right?.id),
+    accounts: sortByCanonicalTextV3(
+      rows(model?.accounts).map(canonicalAccountV2), row => row?.id,
     ),
-    exchangeRates: rows(model?.exchangeRates).map(canonicalExchangeRateV2).sort(
-      (left, right) => compareCanonicalTextV3(left?.id, right?.id),
+    exchangeRates: sortByCanonicalTextV3(
+      rows(model?.exchangeRates).map(canonicalExchangeRateV2), row => row?.id,
     ),
-    transactions: rows(model?.transactions).map(canonicalTransactionV2).sort(
-      (left, right) => compareCanonicalTextV3(left?.id, right?.id),
+    transactions: sortByCanonicalTextV3(
+      rows(model?.transactions).map(canonicalTransactionV2), row => row?.id,
     ),
-    postings: rows(model?.postings).map(canonicalPostingV2).sort(
-      (left, right) => compareCanonicalTextV3(left?.id, right?.id),
+    postings: sortByCanonicalTextV3(
+      rows(model?.postings).map(canonicalPostingV2), row => row?.id,
     ),
-    links: rows(model?.links).map(canonicalLinkV2).sort(
-      (left, right) => compareCanonicalTextV3(left?.id, right?.id),
+    links: sortByCanonicalTextV3(
+      rows(model?.links).map(canonicalLinkV2), row => row?.id,
     ),
-    entities: entities.map(canonicalEntityV2).sort(
-      (left, right) => compareCanonicalTextV3(
-        `${left.entityType}:${left.id}`, `${right.entityType}:${right.id}`,
-      ),
+    entities: sortByCanonicalTextV3(
+      entities.map(canonicalEntityV2), row => `${row.entityType}:${row.id}`,
     ),
-    archives: rows(model?.archives).map(canonicalArchiveV3).sort(
-      (left, right) => compareCanonicalTextV3(
-        `${String(left?.year ?? '')}:${String(left?.scope ?? '')}`,
-        `${String(right?.year ?? '')}:${String(right?.scope ?? '')}`,
-      ),
+    archives: sortByCanonicalTextV3(
+      rows(model?.archives).map(canonicalArchiveV3), row => `${String(row?.year ?? '')}:${String(row?.scope ?? '')}`,
     ),
   };
 };
 
 export const semanticHashCanonicalV3 = (canonical = {}) => bytesToHex(
-  sha256(new TextEncoder().encode(stableSemanticJsonV3(canonical))),
+  sha256(canonicalTextEncoderV3.encode(stableSemanticJsonV3(canonical))),
 );
 
 export const semanticHashV3 = (model = {}) => semanticHashCanonicalV3(

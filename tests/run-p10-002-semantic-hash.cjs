@@ -378,8 +378,14 @@ const v3ComparatorSource = moduleText.match(
 assert.ok(v3ComparatorSource, 'V3 comparator must remain present');
 assert.doesNotMatch(v3ComparatorSource[0], /localeCompare|Intl\.Collator/,
   'V3 comparator must not call locale-sensitive comparison');
-assert.match(v3ComparatorSource[0], /TextEncoder\(\)\.encode/,
+assert.match(moduleText, /const canonicalTextEncoderV3 = new TextEncoder\(\)/,
+  'V3 must allocate one module-scoped UTF-8 encoder');
+assert.doesNotMatch(v3ComparatorSource[0], /new TextEncoder/,
+  'V3 comparator must not allocate encoders for every sort comparison');
+assert.match(v3ComparatorSource[0], /encodeCanonicalTextV3/,
   'V3 comparator must compare an explicit UTF-8 byte representation');
+assert.match(moduleText, /const sortByCanonicalTextV3[\s\S]*?\.bytes = encodeCanonicalTextV3/,
+  'V3 hot-path sorting must encode each key before comparison rather than in the comparator');
 console.log('[PASS] V3 semantic ordering is deterministic across locale collators');
 
 // --- comparison reports how, not just that ----------------------------------

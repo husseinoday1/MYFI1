@@ -26,6 +26,9 @@ const parseJson = value => {
 };
 const utf8Bytes = value => new TextEncoder().encode(JSON.stringify(value)).byteLength;
 const validPositiveInteger = value => Number.isSafeInteger(Number(value)) && Number(value) > 0;
+// This must stay byte-for-byte compatible with the V3 semantic archive key.
+const archiveOrderKeyV3 = (year, scope) => `${String(year)}:${text(scope)}`;
+const archiveOrderSqlV3 = "(CAST(year AS TEXT) || ':' || scope) COLLATE BINARY";
 
 const readBudget = ({ maxRows, maxBytes }) => {
   const policy = CANONICAL_ROW_SOURCE_V3_BATCH_POLICY;
@@ -50,24 +53,22 @@ const cursorEntity = cursor => {
 };
 
 const cursorArchiveHeader = cursor => {
-  if (cursor === null || cursor === undefined) return { ok: true, year: null, scope: null };
-  if (!isObject(cursor) || !Number.isInteger(Number(cursor.year))
-      || !Object.prototype.hasOwnProperty.call(cursor, 'scope')) return { ok: false };
-  return { ok: true, year: Number(cursor.year), scope: text(cursor.scope) };
+  if (cursor === null || cursor === undefined) return { ok: true, archiveKey: null };
+  if (!isObject(cursor) || !Object.prototype.hasOwnProperty.call(cursor, 'archiveKey')) return { ok: false };
+  return { ok: true, archiveKey: text(cursor.archiveKey) };
 };
 
 const cursorArchiveRecord = cursor => {
-  if (cursor === null || cursor === undefined) return { ok: true, scope: null, year: null, id: null };
-  if (!isObject(cursor) || !Number.isInteger(Number(cursor.year))
-      || !Object.prototype.hasOwnProperty.call(cursor, 'scope')
+  if (cursor === null || cursor === undefined) return { ok: true, archiveKey: null, id: null };
+  if (!isObject(cursor) || !Object.prototype.hasOwnProperty.call(cursor, 'archiveKey')
       || !Object.prototype.hasOwnProperty.call(cursor, 'id')) return { ok: false };
-  return { ok: true, scope: text(cursor.scope), year: Number(cursor.year), id: text(cursor.id) };
+  return { ok: true, archiveKey: text(cursor.archiveKey), id: text(cursor.id) };
 };
 
 const rowId = row => ({ id: text(row.id) });
 const rowEntity = row => ({ entityType: text(row.entity_type), id: text(row.id) });
-const rowArchiveHeader = row => ({ year: Number(row.year), scope: text(row.scope) });
-const rowArchiveRecord = row => ({ scope: text(row.scope), year: Number(row.year), id: text(row.id) });
+const rowArchiveHeader = row => ({ archiveKey: archiveOrderKeyV3(row.year, row.scope) });
+const rowArchiveRecord = row => ({ archiveKey: archiveOrderKeyV3(row.year, row.scope), id: text(row.id) });
 
 const mapAccount = row => ({
   id: text(row.id), accountType: text(row.account_type), scope: text(row.scope),
@@ -150,13 +151,13 @@ const sectionQuery = ({ section, namespace, cursor, limit }) => {
   }
   if (section === 'archiveHeaders') {
     const current = cursorArchiveHeader(cursor); if (!current.ok) return null;
-    const where = current.year === null ? '' : ' AND (year > ? OR (year = ? AND scope COLLATE BINARY > ?))';
-    return { sql: `SELECT scope,year,archived_at,checksum,transaction_count,income,expense,net,metadata_json FROM cold_archive_years WHERE namespace=?${where} ORDER BY year ASC,scope COLLATE BINARY LIMIT ?`, params: current.year === null ? [...base, limit] : [...base, current.year, current.year, current.scope, limit], map: mapArchiveHeader, next: rowArchiveHeader };
+    const where = current.archiveKey === null ? '' : ` AND ${archiveOrderSqlV3} > ?`;
+    return { sql: `SELECT scope,year,archived_at,checksum,transaction_count,income,expense,net,metadata_json FROM cold_archive_years WHERE namespace=?${where} ORDER BY ${archiveOrderSqlV3} LIMIT ?`, params: current.archiveKey === null ? [...base, limit] : [...base, current.archiveKey, limit], map: mapArchiveHeader, next: rowArchiveHeader };
   }
   if (section === 'archiveRecords') {
     const current = cursorArchiveRecord(cursor); if (!current.ok) return null;
-    const where = current.scope === null ? '' : ' AND (scope COLLATE BINARY > ? OR (scope COLLATE BINARY = ? AND (year > ? OR (year = ? AND id COLLATE BINARY > ?))))';
-    return { sql: `SELECT scope,year,id,payload_json FROM cold_archive_transactions WHERE namespace=?${where} ORDER BY scope COLLATE BINARY,year ASC,id COLLATE BINARY LIMIT ?`, params: current.scope === null ? [...base, limit] : [...base, current.scope, current.scope, current.year, current.year, current.id, limit], map: mapArchiveRecord, next: rowArchiveRecord };
+    const where = current.archiveKey === null ? '' : ` AND (${archiveOrderSqlV3} > ? OR (${archiveOrderSqlV3} = ? AND id COLLATE BINARY > ?))`;
+    return { sql: `SELECT scope,year,id,payload_json FROM cold_archive_transactions WHERE namespace=?${where} ORDER BY ${archiveOrderSqlV3},id COLLATE BINARY LIMIT ?`, params: current.archiveKey === null ? [...base, limit] : [...base, current.archiveKey, current.archiveKey, current.id, limit], map: mapArchiveRecord, next: rowArchiveRecord };
   }
   return null;
 };
