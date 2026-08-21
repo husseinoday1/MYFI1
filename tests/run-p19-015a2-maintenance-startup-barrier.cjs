@@ -14,6 +14,7 @@ module.exports = {
   getFinancialMaintenanceSnapshot,
   isFinancialMaintenanceBlocked,
   isFinancialMaintenanceActive,
+  promoteActiveFinancialMaintenancePresentation,
   subscribeFinancialMaintenance,
   runFinancialMaintenanceTask,
   waitForFinancialMaintenanceIdle,
@@ -27,6 +28,7 @@ const {
   getFinancialMaintenanceSnapshot,
   isFinancialMaintenanceBlocked,
   isFinancialMaintenanceActive,
+  promoteActiveFinancialMaintenancePresentation,
   subscribeFinancialMaintenance,
   runFinancialMaintenanceTask,
   waitForFinancialMaintenanceIdle,
@@ -122,6 +124,28 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   releaseSilent();
   assert.equal(await silent, 'silent-result');
   await waitForFinancialMaintenanceIdle();
+
+  let releasePromotion;
+  const promotionGate = new Promise(resolve => { releasePromotion = resolve; });
+  const promoted = runFinancialMaintenanceTask({
+    reason: 'verified_restore',
+    presentation: 'silent',
+  }, async () => {
+    assert.equal(getFinancialMaintenanceSnapshot().visible, false);
+    assert.equal(promoteActiveFinancialMaintenancePresentation(), true);
+    assert.equal(getFinancialMaintenanceSnapshot().visible, true);
+    await promotionGate;
+    return 'promoted-result';
+  });
+  await delay(0);
+  assert.equal(getFinancialMaintenanceSnapshot().visible, true,
+    'a verified restore may promote a silent fence to a visible exclusive operation');
+  releasePromotion();
+  assert.equal(await promoted, 'promoted-result');
+  await waitForFinancialMaintenanceIdle();
+  assert.equal(getFinancialMaintenanceSnapshot().visible, false);
+  assert.equal(promoteActiveFinancialMaintenancePresentation(), false,
+    'there is no active task to promote after maintenance becomes idle');
 
   unsubscribe();
   await __resetFinancialMaintenanceBarrierForTests();

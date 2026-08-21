@@ -26,7 +26,8 @@ assert(!sync.includes('currency: current.cfg.currency,\n      }));'), 'guest mer
 
 assert(historyScreen.includes('ledgerPageCoversFallback(visible, filteredFallback, 250)'), 'History must reject incomplete SQLite pages');
 assert(historyScreen.includes('item.allocationWalletAmount ?? item.allocationAmount'), 'History must display goal-saving native amount');
-assert(sync.includes('SCHEDULED_SYNC_DELAYS_MS = [700, 3000, 10000, 30000]'), 'automatic sync retry schedule missing');
+assert(sync.includes('POST_EDIT_SYNC_QUIET_PERIOD_MS = 1200'), 'post-edit quiet period missing');
+assert(sync.includes('SCHEDULED_SYNC_DELAYS_MS = [POST_EDIT_SYNC_QUIET_PERIOD_MS, 3000, 10000, 30000]'), 'automatic sync retry schedule missing');
 assert(sync.includes('armScheduledCloudSync(get, scheduledSyncReason, scheduledSyncAttempt + 1)'), 'automatic sync retry must re-arm after a failed sync');
 assert(app.includes("if (syncConflict.type === 'merged_changes' && !syncConflict.cloud)"), 'merged-change conflict branch missing');
 assert(app.includes("resolveSyncConflict('dismiss').finally"), 'informational merged-change prompt should be dismissed without overlapping alert');

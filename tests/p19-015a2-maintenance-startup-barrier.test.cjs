@@ -17,6 +17,7 @@ assert(barrier.includes('subscribeFinancialMaintenance'));
 assert(barrier.includes('pendingMaintenance.push(request)'));
 assert(barrier.includes('activeMaintenance = {'));
 assert(barrier.includes("presentation = 'blocking'") && barrier.includes('visible: !!visibleMaintenance'));
+assert(barrier.includes('promoteActiveFinancialMaintenancePresentation'));
 
 assert(sync.includes("from '../../lib/financialMaintenanceBarrier'"));
 assert(sync.includes("from '../../lib/ledgerDatabase'"));
@@ -28,7 +29,9 @@ assert(sync.includes("P19-015A2: canonical cutover is a maintenance operation"))
 assert(sync.includes("P19-015A2 auto-cutover reuses outer maintenance"));
 assert(sync.includes("await get().activateFinancialV7Cutover({ maintenanceOwned: true });"));
 assert(sync.includes('hasSteadyFinancialCloudRecoveryStateV2'));
-assert(sync.includes("presentation: 'blocking'"));
+assert(sync.includes("presentation: 'silent'"));
+assert(sync.includes('onExclusiveTransition: promoteActiveFinancialMaintenancePresentation'));
+assert(sync.includes('promoteActiveFinancialMaintenancePresentation();'));
 assert(sync.includes("insideSync: true"));
 assert(sync.includes("maintenanceOwned: true"));
 assert(sync.includes("isFinancialMaintenanceBlocked()"));

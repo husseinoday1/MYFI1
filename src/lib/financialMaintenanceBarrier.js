@@ -48,6 +48,21 @@ const publishFinancialMaintenance = () => {
 export const isFinancialMaintenanceBlocked = () => getFinancialMaintenanceSnapshot().blocked;
 export const isFinancialMaintenanceActive = () => !!activeMaintenance;
 
+// A routine operation starts silent so the already-mounted UI does not flash.
+// Its owner may promote the *active* fence only after it has established that
+// it is about to replace financial state (restore, migration, or cutover).
+// The fence itself never changes: writes and sync remain paused throughout.
+export const promoteActiveFinancialMaintenancePresentation = () => {
+  if (!activeMaintenance || activeMaintenance.presentation === 'blocking') return false;
+  activeMaintenance = {
+    ...activeMaintenance,
+    presentation: 'blocking',
+    presentationPromotedAt: new Date().toISOString(),
+  };
+  publishFinancialMaintenance();
+  return true;
+};
+
 export const subscribeFinancialMaintenance = listener => {
   if (typeof listener !== 'function') return () => {};
   listeners.add(listener);

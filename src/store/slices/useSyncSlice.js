@@ -7,6 +7,7 @@ import { flushLedgerWrites } from '../../lib/ledgerDatabase';
 import {
   getFinancialMaintenanceSnapshot,
   isFinancialMaintenanceBlocked,
+  promoteActiveFinancialMaintenancePresentation,
   runFinancialMaintenanceTask,
 } from '../../lib/financialMaintenanceBarrier';
 import { canonicalWorkspaceCfg, mergeWorkspaceStates, sameWorkspaceData } from '../multiDeviceSync';
@@ -77,7 +78,12 @@ let scheduledSyncReason = 'local_change';
 let scheduledSyncAttempt = 0;
 let transientSyncRetryTimer = null;
 let transientSyncRetryAttempt = 0;
-const SCHEDULED_SYNC_DELAYS_MS = [700, 3000, 10000, 30000];
+// A local save is the boundary where the user has finished an edit. Wait for a
+// quiet period so several completed edits become one cloud round-trip; never
+// start cloud work while a form is still being edited (forms only save on their
+// explicit save/confirm action).
+const POST_EDIT_SYNC_QUIET_PERIOD_MS = 1200;
+const SCHEDULED_SYNC_DELAYS_MS = [POST_EDIT_SYNC_QUIET_PERIOD_MS, 3000, 10000, 30000];
 const TRANSIENT_SYNC_RETRY_DELAYS_MS = [1500, 5000, 15000, 30000];
 
 // Classification moved to src/lib/syncErrorClassification.js. It used to match
@@ -593,7 +599,14 @@ const runVerifiedEmptyShellCloudRecoveryV2 = async ({
   workspaceNamespace,
   ledgerNamespace,
   syncUserId,
+  onExclusiveTransition = null,
 } = {}) => {
+  let exclusivePresentationRequested = false;
+  const presentExclusiveOperation = () => {
+    if (exclusivePresentationRequested) return;
+    exclusivePresentationRequested = true;
+    try { onExclusiveTransition?.(); } catch {}
+  };
   const current = get();
   if (!current.user || current.user.id !== syncUserId) {
     return { attempted: false, ok: false, reason: 'financial_cloud_recovery_session_changed' };
@@ -733,6 +746,9 @@ const runVerifiedEmptyShellCloudRecoveryV2 = async ({
       return { attempted: true, ok: false, reason, source };
     }
 
+    // This is no longer a routine pull: the immutable local ledger identity
+    // is about to change to the verified cloud identity.
+    presentExclusiveOperation();
     const adoption = await adoptUnbootstrappedCloudLedgerIdentityV8({
       namespace: ledgerNamespace,
       cloudLedgerId,
@@ -843,6 +859,9 @@ const runVerifiedEmptyShellCloudRecoveryV2 = async ({
   };
   const remoteState = stateFromSnapshot(snapshot, current.cfg || DEF_CFG);
 
+  // Only a verified legacy snapshot reaches this point. Its promotion replaces
+  // the local financial workspace, so it is intentionally visible and fenced.
+  presentExclusiveOperation();
   await restoreSnapshotAsOperationalV7({
     workspaceNamespace,
     snapshot,
@@ -867,7 +886,7 @@ const runVerifiedEmptyShellCloudRecoveryV2 = async ({
     throw new Error('financial_cloud_recovery_roundtrip_mismatch');
   }
 
-  const syncedAt = source.cloudUpdatedAt || new Date().toISOString();
+  const syncedAt = new Date().toISOString();
   const canonicalSnapshot = snapshotFromState(full, {
     dirty: false,
     cloudRevision: source.cloudRevision,
@@ -1469,7 +1488,9 @@ export const createSyncSlice = (set, get) => ({
       return get().runFinancialMaintenance(
         reason,
         () => get().setUser(user, { ...(options || {}), maintenanceOwned: true }),
-        { resumeSync: false },
+        // Session resume/account loading is ordinary local work. If it discovers
+        // a migration or cutover, loadLocal promotes this same fence explicitly.
+        { resumeSync: false, presentation: 'silent' },
       );
     }
     if (FRESH_TEST_MODE) {
@@ -1795,7 +1816,9 @@ export const createSyncSlice = (set, get) => ({
       return get().runFinancialMaintenance(
         requestedNamespace ? 'local_load' : 'startup_local_load',
         () => get().loadLocal(requestedNamespace, { ...(options || {}), maintenanceOwned: true }),
-        { resumeSync: false },
+        // Fast V8 reads must not cover the mounted app with a maintenance screen.
+        // A real migration/cutover promotes this active fence below.
+        { resumeSync: false, presentation: 'silent' },
       );
     }
     const namespace = requestedNamespace || await readActiveLocalLedgerNamespace();
@@ -1916,6 +1939,9 @@ export const createSyncSlice = (set, get) => ({
         try {
           const ledgerNamespace = getLedgerNamespace(namespace, loaded.cfg);
           const coldArchives = await exportColdArchives(getColdArchiveNamespace(namespace, loaded.cfg));
+          // The existing V8 early-return above handles normal startup. Reaching
+          // the legacy/shadow path means SQLite may be migrated or promoted now.
+          promoteActiveFinancialMaintenancePresentation();
           const migration = await runFinancialShadowMigrationV7({
             namespace: ledgerNamespace,
             workspace: loaded,
@@ -2237,8 +2263,11 @@ export const createSyncSlice = (set, get) => ({
                   workspaceNamespace: namespace,
                   ledgerNamespace,
                   syncUserId,
+                  onExclusiveTransition: promoteActiveFinancialMaintenancePresentation,
                 }),
-                { insideSync: true, resumeSync: false, presentation: 'blocking' },
+                // First inspect the remote source silently. The recovery helper
+                // promotes the fence only if it will adopt an identity or restore.
+                { insideSync: true, resumeSync: false, presentation: 'silent' },
               );
           if (cloudRecovery?.blocked || cloudRecovery?.ok === false) {
             throw new Error(cloudRecovery?.reason || 'financial_cloud_recovery_blocked');
@@ -2430,12 +2459,15 @@ export const createSyncSlice = (set, get) => ({
           return String(marker.resetAt || '') > syncStartedAt;
         };
 
-        const persistSynced = async ({ revision, syncedAt, syncConflict = null }) => {
+        const persistSynced = async ({ revision, syncConflict = null }) => {
           if (get().user?.id !== syncUserId) return false;
           resetTransientCloudRetry();
           if (await supersededByReset()) return false;
           const revisionValue = Number(revision || 0);
-          const syncedAtValue = syncedAt || new Date().toISOString();
+          // This describes the successful check on *this device*, not the last
+          // time another device changed cloud data. A clean manual pull therefore
+          // updates the visible time without creating a cloud write.
+          const syncedAtValue = new Date().toISOString();
           set({
             dirty: false,
             cloudRevision: revisionValue,
