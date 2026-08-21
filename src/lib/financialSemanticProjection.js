@@ -312,8 +312,14 @@ export const canonicalizeFinancialLedgerV2 = (model = {}) => {
   };
 };
 
-export const semanticHashV2 = (model = {}) => bytesToHex(
-  sha256(new TextEncoder().encode(stableSemanticJson(canonicalizeFinancialLedgerV2(model)))),
+// Exported for the V11 package writer/decoder pair. They must hash the exact same
+// canonical document rather than try to reverse-engineer a source model first.
+export const semanticHashCanonicalV2 = (canonical = {}) => bytesToHex(
+  sha256(new TextEncoder().encode(stableSemanticJson(canonical))),
+);
+
+export const semanticHashV2 = (model = {}) => semanticHashCanonicalV2(
+  canonicalizeFinancialLedgerV2(model),
 );
 
 /**

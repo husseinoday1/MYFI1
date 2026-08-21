@@ -113,6 +113,7 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'p10_002_semantic_hash', 'run-p10-002-semantic-hash.cjs'],
   ['UNIT_RUNTIME', 'p10_003_restore_validator', 'run-p10-003-restore-validator.cjs'],
   ['UNIT_RUNTIME', 'p10_004_consistent_canonical_read', 'run-p10-004-consistent-canonical-read.cjs'],
+  ['UNIT_RUNTIME', 'p10_006_canonical_backup_writer', 'run-p10-006-canonical-backup-writer.cjs'],
   ['UNIT_RUNTIME', 'home_hidden_amounts', 'run-home-hidden-amounts.cjs'],
   ['UNIT_RUNTIME', 'performance_data', 'performance-data-runtime-v512.test.cjs'],
   ['UNIT_RUNTIME', 'performance_generator', 'performance-generator-runtime-v51.test.cjs'],
