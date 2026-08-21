@@ -75,3 +75,41 @@ parse costs sit outside it and would add to `totalRestore`, not to the lock wind
 
 Also unmeasured: the epoch handshake itself, which is the gap between this lower bound and
 the true production lock.
+
+## The epoch handshake, measured
+
+Every number above carries `maintenanceBlockedIsLowerBound` because it excludes
+`beginLedgerRestoreEpochV8` and `commitLedgerRestoreEpochV8`. Measured on the same
+device via the P19 restore-epoch gate on build `3719187`, epoch 1 → 2, gate PASS:
+
+```
+beginMs             6 ms     local exclusive transaction
+serverAdvanceMs   581 ms     Supabase RPC round trip
+commitMs            7 ms     local exclusive transaction
+localHandshakeMs   13 ms
+```
+
+**The local half is 13 ms.** The lower bound was understating the SQLite work by
+almost nothing, which is the reassuring half of the answer.
+
+**The server round trip is 581 ms**, and in production it sits inside the same fence.
+So the figure to add to `maintenanceBlockedMs` is roughly 594 ms, not 13.
+
+### This inverts the picture for ordinary ledgers
+
+At 100,000 transactions the handshake is noise: 0.59 s on top of an 8.45 s promotion.
+
+At 1,000 transactions the promotion is 51 ms and the handshake is 594 ms — **the lock is
+more than 90% network wait**. Most real users are far closer to the 1k end than the 100k
+end, so for them a Strategy B restore does not block on database work at all. It blocks
+on one Supabase call.
+
+Two consequences worth carrying into the lock budget:
+
+1. Optimising SQLite further buys nothing for a typical ledger. The remaining cost is a
+   round trip, and the way to shrink a round trip is to not be inside the fence for it,
+   or to accept it as the floor.
+2. 581 ms is one sample on one network, on Wi-Fi, with a warm connection. A slow or
+   flaky mobile connection makes this seconds, and it is the one component of the lock
+   window that is not under the app's control. Any predeclared fence budget has to be
+   stated against a network assumption, not as a single number.
