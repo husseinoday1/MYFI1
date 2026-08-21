@@ -97,19 +97,61 @@ Both are plausible readings of the same app. `authTransition` measured between 1
 first launch after a reboot or a long idle would be slower still. The perceived figure
 also includes the launcher's own animation before the process is asked to start.
 
-## Recommendation
+## Resolved — and this file measured a build that was already obsolete
 
-Do not reorder `getSession`; it costs 10–13 ms. Instrument inside
-`runFinancialMaintenance('session_login_transition')` — queue drain, each flush, the
-inner `loadLocal`, the migration and cutover checks — ship that build, measure again, and
-only then decide. The target is worth it: about two thirds of a cold start.
+Re-measured on `0671762` with per-phase maintenance instrumentation installed, four
+consecutive cold starts:
 
-## How these measurements were taken
+```
+ready                     52 ms, 52 ms, 69 ms, 52 ms
+session_login_transition  9-18 ms total (queueWait 0, syncDrain 0, writerFlush 4-13, task 5)
+```
 
-`adb shell am force-stop` followed by `am start -W`, with `logcat -v time` so process
-start, first frame and the JS marks share one clock. Five cold starts.
+Everything above measured 2467 ms for the same mark. Cold start is now about
+**fifty times faster**, and the maintenance transition — the thing this file spent its
+length accusing — does 5 ms of work.
 
-**This closes and reopens the app repeatedly, which is visible and alarming to whoever is
-holding the phone.** It was done here without warning the user first, and they reported
-the app "exiting and re-entering by itself" while it was happening. Ask before driving
-someone's device, not after.
+**The fix was already in the branch before any of this instrumentation.** `2e1cbab`,
+"Fix global sync flicker and startup auth wait", landed at 08:13. Supabase emits
+`INITIAL_SESSION` through the auth listener *and* returns the same session from
+`getSession()`, so cold start was running the entire workspace and profile transition
+**twice**. That commit skips the duplicate when the workspace is already ready for the
+same user, and defers profile hydration — a network call — out of the blocking path.
+
+Every 1.6–3.2 s figure in this file was captured from an APK built before that commit.
+The phone was still running the old build; the fix existed in git and had not been
+installed. Nobody was wrong about the numbers — they were real — but they described
+software that had already been superseded.
+
+### What that means for this file's earlier conclusions
+
+- "The recorded hypothesis is disproven" — **too strong, and partly wrong.** `getSession()`
+  really does cost 10–13 ms on a warm session, so moving *that call* would have saved
+  nothing. But `03db96b`'s instinct that first paint was blocked on auth work was
+  closer to correct than this file allowed: the cost was in the transition the auth
+  result triggers, and in profile hydration inside it. The right fix was adjacent to
+  the suspected one, not unrelated to it.
+- "Instrument inside the transition, then decide" — done, and it confirmed a fix rather
+  than diagnosing a fault. The instrumentation stays: it is what proves cold start is
+  fast now, and it will show immediately if this regresses.
+- The ~3.9 s total and the 63% share are historical. They describe the pre-`2e1cbab`
+  build only.
+
+### One cost that has not gone away
+
+The first launch after installing the new APK reported `getSession: 1978 ms` with the
+transition after it at 3 ms. So when the session genuinely has to be refreshed rather
+than read from cache, that wait is still real — it simply is not paid twice any more,
+and it does not drag a full workspace transition behind it. Worth knowing before anyone
+declares startup finished.
+
+## Method note
+
+`adb shell am force-stop` then `am start`, with `logcat -v time` so process start, first
+frame and the JS marks share one clock.
+
+**Two lessons paid for here.** First: measure the build that is installed, not the branch
+that is checked out — the phone had an APK four commits behind and nothing said so.
+Second: force-stopping and relaunching repeatedly is visible and alarming to whoever is
+holding the phone. It was done here without warning the user first, and they reported the
+app "exiting and re-entering by itself" while it was happening.
