@@ -188,3 +188,26 @@ connect to or change the real MYFI Supabase project.
 - P10-012 implementation is locally green but still pending review/push/CI and the
   documented PostgreSQL runtime acceptance gate before live use.
 - P10-013 and P10-014 have not started.
+
+## The migration is NOT APPLIED to the live database — read this before wiring
+
+`supabase/migrations/20260821115320_p10_012_proof_bound_restore_epoch_v3.sql` exists in
+this repository and creates `advance_financial_restore_epoch_v3`. It has **not** been
+applied to project `qihahfufuupgivnjzmfe`. Verified on 2026-08-21 by listing the applied
+migrations: the newest is `20260820162710_finance_data_id_fkey_on_delete_cascade`.
+
+Meanwhile `financialRestoreEpochV3Client.js` calls `supabase.rpc('advance_financial_restore_epoch_v3')`.
+So the repository says the function exists and the database says it does not.
+
+**Decision (Planning & Audit, 2026-08-21):** it stays unapplied. The migration is not to
+be run against production as a side effect of wiring, of a test, or of anything else.
+Applying it requires the coordinator's direct approval and its own full round —
+preflight against the live schema, reviewed migration, apply, postcheck.
+
+**Why this is written down rather than remembered:** nothing is wired today (all four
+P10-011/P10-012 modules have zero callers, and the client fails closed rather than
+returning success on an RPC error), so the divergence is inert. That is exactly what
+makes it dangerous. Whoever connects this next inherits a repo that promises a function
+the database has never had, and the failure will surface as a restore that cannot
+advance its epoch — symptoms a long way from the cause. This project has already lost a
+day to a failure that reported the wrong reason.
