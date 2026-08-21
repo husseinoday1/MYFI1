@@ -85,6 +85,11 @@ local transaction proof.
 
 ## Conditions before this is wired to anything live
 
+> **These conditions now live in one place:**
+> `docs/04_CURRENT_EVIDENCE/MYFI_P10_PRE_WIRING_CHECKLIST_2026-08-21.md` collects every
+> Phase 10 pre-wiring condition. Both conditions below were fixed in P10-011/P10-012 and are recorded there as closed, with evidence.
+
+
 Independent review raised two defects. The user's decision on 2026-08-21 was to push
 as-is and fix both before this module is connected to the app, on the grounds that it
 is still isolated and reaches nothing live. Recorded here rather than left in a review

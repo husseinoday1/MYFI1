@@ -191,6 +191,11 @@ connect to or change the real MYFI Supabase project.
 
 ## The migration is NOT APPLIED to the live database — read this before wiring
 
+> **These conditions now live in one place:**
+> `docs/04_CURRENT_EVIDENCE/MYFI_P10_PRE_WIRING_CHECKLIST_2026-08-21.md` collects every
+> Phase 10 pre-wiring condition. The migration gate below is item B1 there.
+
+
 `supabase/migrations/20260821115320_p10_012_proof_bound_restore_epoch_v3.sql` exists in
 this repository and creates `advance_financial_restore_epoch_v3`. It has **not** been
 applied to project `qihahfufuupgivnjzmfe`. Verified on 2026-08-21 by listing the applied
