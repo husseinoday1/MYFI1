@@ -4,7 +4,8 @@
 **Branch:** `impl/p20-g01-acceptance-apk-2026-08-19`
 **Verified remote/HEAD:** `37868db1136088971cc8b52f6c1ccf0f6e67b3a3`
 **Freshness check:** `git fetch --all` completed before this record; the branch remote resolves to the SHA above.
-**Working state:** this describes the local uncommitted P10-010 review fixes and P10-011 patch atop that SHA. It is not pushed or accepted yet.
+**Implementation commit:** `6e3533a` (`feat(phase10): add post-commit restore recovery`), created locally atop that SHA.
+**Working state:** the implementation is committed locally. It is not pushed, CI-accepted or Phase-closed yet.
 **Runtime / schema:** Expo `~54.0.36`, React Native `0.81.5`, `expo-sqlite ~16.0.10`; financial SQLite V8 / ledger model V7.
 **Data/schema/cloud impact:** no device database or user data was opened, no migration/table meaning changed, and no Supabase request/schema/data operation occurred.
 
