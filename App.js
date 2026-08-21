@@ -641,28 +641,43 @@ function AppRoot() {
     );
   }
 
-  if (financialMaintenance.blocked) {
-    return (
-      <View style={s.splash}>
-        <StatusBar style="light" />
-        <Ionicons name="shield-checkmark-outline" size={42} color="#159A6A" />
-        <Text style={s.splashTitle}>
-          {cfg.lang === 'ar' ? 'جاري تأمين البيانات' : 'Securing financial data'}
-        </Text>
-        <Text style={[s.splashSubtitle, { textAlign: 'center', maxWidth: 320 }]}>
-          {cfg.lang === 'ar'
-            ? 'تتوقف الكتابة والمزامنة مؤقتاً حتى تكتمل العملية بأمان.'
-            : 'Writes and sync are temporarily paused until this operation completes safely.'}
-        </Text>
-      </View>
-    );
-  }
+  // The maintenance screen used to `return` here, replacing the whole tree. That does
+  // not hide the app, it unmounts it — and when the barrier lifts the tree is rebuilt
+  // from scratch, so every component loses its state. Two reported bugs came from
+  // exactly that:
+  //
+  //   - Toggling a feature ran the barrier, so Settings was torn down and rebuilt at
+  //     its root page. The user saw a flash and found themselves back at the top.
+  //   - Restore calls the barrier itself (dataSlice.js:616). SettingsScreen unmounted
+  //     mid-await, so when importBackup resolved, setRestoreResultOpen(true) ran
+  //     against a component that no longer existed. The restore had already
+  //     succeeded; only the confirmation was lost, which reads to the user as a
+  //     failed restore.
+  //
+  // It is rendered as an overlay below instead. The barrier still does its real work
+  // — writes and sync stay paused — but the tree underneath stays mounted, so state
+  // survives and in-flight callbacks still have a component to talk to.
+  const maintenanceOverlay = financialMaintenance.blocked ? (
+    <View style={[s.splash, StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="auto">
+      <StatusBar style="light" />
+      <Ionicons name="shield-checkmark-outline" size={42} color="#159A6A" />
+      <Text style={s.splashTitle}>
+        {cfg.lang === 'ar' ? 'جاري تأمين البيانات' : 'Securing financial data'}
+      </Text>
+      <Text style={[s.splashSubtitle, { textAlign: 'center', maxWidth: 320 }]}>
+        {cfg.lang === 'ar'
+          ? 'تتوقف الكتابة والمزامنة مؤقتاً حتى تكتمل العملية بأمان.'
+          : 'Writes and sync are temporarily paused until this operation completes safely.'}
+      </Text>
+    </View>
+  ) : null;
 
   if (showOnboard) {
     return (
       <SafeAreaView edges={['top', 'right', 'bottom', 'left']} style={[{ flex: 1, backgroundColor: th.bg }, dirStyle]}>
         <StatusBar style={statusStyle(th)} />
         <OnboardingScreen cfg={cfg} onDone={finishOnboard} />
+        {maintenanceOverlay}
       </SafeAreaView>
     );
   }
@@ -683,6 +698,7 @@ function AppRoot() {
             <Text style={{ color: th.onPrimary, fontWeight: '900', fontSize: 15 }}>{L.unlockApp}</Text>
           </PressableScale>
         </View>
+        {maintenanceOverlay}
       </SafeAreaView>
     );
   }
@@ -701,6 +717,7 @@ function AppRoot() {
         <View style={{ flex: 1 }}>
           <ArchiveScreen />
         </View>
+        {maintenanceOverlay}
       </SafeAreaView>
     );
   }
@@ -1018,6 +1035,7 @@ function AppRoot() {
         onCancel={rollbackMergedChanges}
         onClose={keepMergeChanges}
       />
+      {maintenanceOverlay}
     </SafeAreaView>
   );
 }

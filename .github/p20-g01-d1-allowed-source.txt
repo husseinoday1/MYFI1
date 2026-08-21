@@ -4,6 +4,7 @@
 #
 # Add a file here in the same commit that first changes it. Lines starting with #
 # and blank lines are ignored.
+App.js
 eas.json
 src/dev/p19RestoreEpochDeviceGate.js
 src/dev/phase10RestoreBenchmarkHarness.js

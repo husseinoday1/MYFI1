@@ -39,7 +39,7 @@ jobs:
           sed -e 's/\r$//' "$ALLOWED" | grep -vE '^[[:space:]]*(#|$)' | sort -u > /tmp/expected.txt
           test -s /tmp/expected.txt
           git diff --name-only "$ACCEPTED_GATE"..HEAD -- \
-            src android app.json eas.json package.json package-lock.json \
+            App.js src android app.json eas.json package.json package-lock.json \
             | sort > /tmp/actual.txt
           diff -u /tmp/expected.txt /tmp/actual.txt
           echo "SOURCE_BASE=$ACCEPTED_GATE" >> "$GITHUB_ENV"
