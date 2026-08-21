@@ -400,10 +400,33 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
   const deviceId = await getOrCreateDeviceId();
   const fromEpoch = Number(identity.restoreEpoch);
   const toEpoch = fromEpoch + 1;
+  // The restore benchmark measures stage write, readback and promotion, and states in
+  // its own payload that maintenanceBlockedMs is a lower bound because it excludes this
+  // handshake. Production holds the same lock across both halves of it, so the gap
+  // between that lower bound and the real window is exactly what is timed here.
+  //
+  // begin and commit are the two local exclusive transactions. The server RPC between
+  // them is timed separately: it is also inside the production fence, but it is a
+  // network cost, and mixing a round trip into a SQLite number would hide both.
+  const handshakeMarks = {};
+  // Reported from a finally rather than after a successful commit. A handshake that
+  // fails partway — the RPC times out, the CAS is refused — is the one whose cost is
+  // least understood, and logging only on the happy path would lose it. A missing
+  // commitMs then says plainly which half did not run.
+  const reportHandshake = () => {
+    if (handshakeMarks.commitMs !== undefined) {
+      // The two local transactions only. This is the number to add to
+      // maintenanceBlockedMs to get the production lock window.
+      handshakeMarks.localHandshakeMs = Number(handshakeMarks.beginMs || 0) + handshakeMarks.commitMs;
+    }
+    console.log('[MYFI:RESTORE_EPOCH_HANDSHAKE_TIMING]', JSON.stringify(handshakeMarks));
+  };
+  const beginStarted = Date.now();
   const intent = await beginLedgerRestoreEpochV8({
     namespace: ledgerNamespace,
     operation: 'controlled_recovery',
   });
+  handshakeMarks.beginMs = Date.now() - beginStarted;
   if (!intent
       || String(intent.ledgerId || '') !== String(identity.ledgerId)
       || Number(intent.fromEpoch || 0) !== fromEpoch
@@ -414,6 +437,7 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
   let serverAdvanced = false;
   let serverResult = null;
   try {
+    const serverStarted = Date.now();
     const { data, error } = await supabase.rpc('advance_financial_restore_epoch_v2', {
       p_ledger_id: identity.ledgerId,
       p_expected_epoch: fromEpoch,
@@ -421,6 +445,7 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
       p_reason: 'controlled_recovery',
       p_device_id: String(deviceId || ''),
     });
+    handshakeMarks.serverAdvanceMs = Date.now() - serverStarted;
     if (error) throw error;
     serverResult = normalizeRpcObject(data);
     if (!serverResult
@@ -431,11 +456,13 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
     }
     serverAdvanced = true;
 
+    const commitStarted = Date.now();
     const committed = await commitLedgerRestoreEpochV8({
       namespace: ledgerNamespace,
       expectedFromEpoch: fromEpoch,
       toEpoch,
     });
+    handshakeMarks.commitMs = Date.now() - commitStarted;
     if (!committed
         || String(committed.ledgerId || '') !== String(identity.ledgerId)
         || Number(committed.restoreEpoch || 0) !== toEpoch) {
@@ -462,6 +489,8 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
     };
     console.error('[P20_G01_RESTORE_EPOCH_GATE_FAIL]', JSON.stringify(failure));
     return failure;
+  } finally {
+    reportHandshake();
   }
 
   // Everything below runs AFTER the restore epoch has already advanced on both the
@@ -593,6 +622,7 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
     deleteLocalInterlock: 'PASS_FAIL_CLOSED',
     backupRestoreInterlock: 'PASS_FAIL_CLOSED',
     localIntentCommitted: true,
+    handshakeTimingMs: handshakeMarks,
     serverAdvanced: serverResult?.advanced === true || serverResult?.idempotent === true,
     serverIdempotent: serverResult?.idempotent === true,
     restoreEventCount: eventRows.length,
