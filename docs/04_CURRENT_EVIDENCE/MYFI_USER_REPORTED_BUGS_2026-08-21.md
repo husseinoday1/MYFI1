@@ -44,6 +44,21 @@ means restore may not be functionally working *at all* right now for
 current users, which is a more urgent, live issue than the Phase 10
 architecture work.**
 
+## Bug 4 — "stop using / don't add data" blocking screen during sync
+
+Additional detail from the user (2026-08-21): sometimes during sync —
+especially with larger data volumes, or after the app sat idle/unused for a
+while — a screen appears telling the user to stop using the app or adding
+data until sync finishes (exact wording not verified, paraphrased by user).
+Also: feature show/hide (per Bug 2's Enabled Features flow) flickers
+repeatedly across the app in general, not only on that one screen.
+
+Possibly related to Bug 2 (same "full re-render" pattern) and to the
+maintenance-barrier/sync-pause mechanism already in the codebase — worth
+checking whether this blocking screen is the maintenance barrier UI
+surfacing too aggressively/too often, or firing on ordinary sync rather
+than only during restore/migration.
+
 ## Priority ordering (Planning & Audit)
 
 1. Bug 3 (restore silently fails) — investigate first, real users depend on
