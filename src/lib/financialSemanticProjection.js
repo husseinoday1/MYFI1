@@ -156,6 +156,29 @@ const parseObject = (value) => {
 
 const sortRecordsById = (value) => rows(value).slice().sort(byId);
 const sortRecordsByIdV3 = (value) => sortByCanonicalTextV3(rows(value), record => record?.id);
+const archiveYearStorageOrderV3 = value => {
+  const year = Number(value);
+  if (!Number.isSafeInteger(year)) throw new Error('semantic_hash_v3_archive_year_invalid');
+  return year;
+};
+const sortArchivesByStorageOrderV3 = values => values.map(value => ({
+  value,
+  scope: value?.scope,
+  scopeBytes: null,
+  year: null,
+  yearReady: false,
+})).sort((left, right) => {
+  // The archive tables are keyed by namespace, scope, year[, id]. Keep the V3
+  // document in the same order so a bounded source can use the primary-key index.
+  if (!left.scopeBytes) left.scopeBytes = encodeCanonicalTextV3(left.scope);
+  if (!right.scopeBytes) right.scopeBytes = encodeCanonicalTextV3(right.scope);
+  const scopeOrder = compareCanonicalBytesV3(left.scopeBytes, right.scopeBytes);
+  if (scopeOrder) return scopeOrder;
+  if (!left.yearReady) { left.year = archiveYearStorageOrderV3(left.value?.year); left.yearReady = true; }
+  if (!right.yearReady) { right.year = archiveYearStorageOrderV3(right.value?.year); right.yearReady = true; }
+  if (left.year === right.year) return 0;
+  return left.year < right.year ? -1 : 1;
+}).map(item => item.value);
 
 // ---------------------------------------------------------------------------
 // Field policy
@@ -454,9 +477,7 @@ export const canonicalizeFinancialLedgerV3 = (model = {}) => {
     entities: sortByCanonicalTextV3(
       entities.map(canonicalEntityV2), row => `${row.entityType}:${row.id}`,
     ),
-    archives: sortByCanonicalTextV3(
-      rows(model?.archives).map(canonicalArchiveV3), row => `${String(row?.year ?? '')}:${String(row?.scope ?? '')}`,
-    ),
+    archives: sortArchivesByStorageOrderV3(rows(model?.archives).map(canonicalArchiveV3)),
   };
 };
 

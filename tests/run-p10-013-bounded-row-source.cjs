@@ -15,12 +15,14 @@ compiled._compile(source, filename);
 const { CANONICAL_ROW_SOURCE_V3_SECTIONS, readCanonicalRowBatchV3 } = compiled.exports;
 
 class AsyncSqlite {
-  constructor() { this.native = new DatabaseSync(':memory:'); this.iteratorCalls = 0; }
+  constructor() { this.native = new DatabaseSync(':memory:'); this.iteratorCalls = 0; this.iteratorQueries = []; }
   async execAsync(sql) { this.native.exec(sql); }
   async getFirstAsync(sql, ...params) { return this.native.prepare(sql).get(...params.flat()) || null; }
   getEachAsync(sql, ...params) {
     this.iteratorCalls += 1;
-    const rows = this.native.prepare(sql).all(...params.flat());
+    const query = { sql, params: params.flat() };
+    this.iteratorQueries.push(query);
+    const rows = this.native.prepare(sql).all(...query.params);
     return (async function* each() { for (const row of rows) yield row; })();
   }
   close() { this.native.close(); }
@@ -80,12 +82,16 @@ const db = new AsyncSqlite();
 
     const entities = await readCanonicalRowBatchV3({ database: db, namespace, section: 'entities', maxRows: 8, maxBytes: 64 * 1024 });
     assert.deepEqual(entities.rows.map(row => `${row.entityType}:${row.id}`), ['goal:a', 'wallet:a', 'wallet:b']);
-    const headers = await readCanonicalRowBatchV3({ database: db, namespace, section: 'archiveHeaders', maxRows: 8, maxBytes: 64 * 1024 });
-    assert.deepEqual(headers.rows.map(row => `${row.year}:${row.scope}`), ['10000:a', '2024:business', '2025:personal', '999:z'],
-      'archive headers must use V3 year:scope UTF-8 text order, not numeric year order');
-    const records = await readCanonicalRowBatchV3({ database: db, namespace, section: 'archiveRecords', maxRows: 8, maxBytes: 64 * 1024 });
-    assert.deepEqual(records.rows.map(row => `${row.year}:${row.scope}:${row.id}`), ['10000:a:r-01', '2024:business:r-01', '2025:personal:r-01', '2025:personal:r-02', '999:z:r-01'],
-      'archive records must group and page by the same V3 archive key before record id');
+    const headers = await readCanonicalRowBatchV3({ database: db, namespace, section: 'archiveHeaders', maxRows: 2, maxBytes: 64 * 1024 });
+    const moreHeaders = await readCanonicalRowBatchV3({ database: db, namespace, section: 'archiveHeaders', cursor: headers.nextCursor, maxRows: 2, maxBytes: 64 * 1024 });
+    assert.equal(headers.hasMore, true); assert.equal(moreHeaders.hasMore, false);
+    assert.deepEqual([...headers.rows, ...moreHeaders.rows].map(row => `${row.scope}:${row.year}`), ['a:10000', 'business:2024', 'personal:2025', 'z:999'],
+      'archive headers must use V3/primary-key scope then numeric-year order');
+    const records = await readCanonicalRowBatchV3({ database: db, namespace, section: 'archiveRecords', maxRows: 2, maxBytes: 64 * 1024 });
+    const moreRecords = await readCanonicalRowBatchV3({ database: db, namespace, section: 'archiveRecords', cursor: records.nextCursor, maxRows: 8, maxBytes: 64 * 1024 });
+    assert.equal(records.hasMore, true); assert.equal(moreRecords.hasMore, false);
+    assert.deepEqual([...records.rows, ...moreRecords.rows].map(row => `${row.scope}:${row.year}:${row.id}`), ['a:10000:r-01', 'business:2024:r-01', 'personal:2025:r-01', 'personal:2025:r-02', 'z:999:r-01'],
+      'archive records must use the V3/primary-key scope, year, id order');
 
     const config = await readCanonicalRowBatchV3({ database: db, namespace, section: 'financialConfig' });
     assert.equal(config.ok, true); assert.equal(config.rows.length, 1); assert.equal(config.rows[0].sourceMode, 'sqlite');
@@ -93,8 +99,14 @@ const db = new AsyncSqlite();
     const sourceText = fs.readFileSync(filename, 'utf8');
     assert.equal(sourceText.includes('getAllAsync'), false, 'bounded source must not materialize a whole query result');
     assert.ok(sourceText.includes('getEachAsync'), 'bounded source must use Expo SQLite iteration');
-    assert.ok(sourceText.includes("CAST(year AS TEXT) || ':' || scope"), 'archive SQL must use the exact V3 year:scope key');
-    assert.equal(sourceText.includes('ORDER BY year ASC'), false, 'archive SQL must not revert to numeric year ordering');
+    assert.ok(sourceText.includes('ORDER BY scope COLLATE BINARY,year ASC'), 'archive SQL must retain primary-key order');
+    assert.equal(sourceText.includes('CAST(year AS TEXT)'), false, 'archive SQL must not use an unindexed computed sort expression');
+    for (const table of ['cold_archive_years', 'cold_archive_transactions']) {
+      const query = db.iteratorQueries.find(item => item.sql.includes(`FROM ${table}`) && item.params.length > 2);
+      const plan = db.native.prepare(`EXPLAIN QUERY PLAN ${query.sql}`).all(...query.params);
+      assert.ok(plan.some(row => /USING (?:COVERING )?INDEX/i.test(row.detail)), `${table} must use its primary-key index`);
+      assert.equal(plan.some(row => /TEMP B-TREE/i.test(row.detail)), false, `${table} must not build a temporary sort for each batch`);
+    }
     console.log('MYFI P10-013 BOUNDED CANONICAL ROW SOURCE: PASS');
   } finally {
     db.close();

@@ -312,6 +312,19 @@ assert.deepEqual(
   ['é', 'z', 'ä', 'أ', '𝄞'],
   'V3 must use the documented UTF-8 byte order, not a UI locale order',
 );
+const storageOrderedArchives = ledger({
+  archives: [
+    { year: 999, scope: 'z', checksum: 'a', data: {} },
+    { year: 10000, scope: 'a', checksum: 'b', data: {} },
+    { year: 2025, scope: 'personal', checksum: 'c', data: {} },
+    { year: 2024, scope: 'business', checksum: 'd', data: {} },
+  ],
+});
+assert.deepEqual(
+  canonicalizeFinancialLedgerV3(storageOrderedArchives).archives.map(item => `${item.scope}:${item.year}`),
+  ['a:10000', 'business:2024', 'personal:2025', 'z:999'],
+  'V3 archive order must equal SQLite primary-key order: scope, year',
+);
 const utf8ByteCompare = (left, right) => {
   const leftBytes = Buffer.from(left, 'utf8');
   const rightBytes = Buffer.from(right, 'utf8');
@@ -386,6 +399,8 @@ assert.match(v3ComparatorSource[0], /encodeCanonicalTextV3/,
   'V3 comparator must compare an explicit UTF-8 byte representation');
 assert.match(moduleText, /const sortByCanonicalTextV3[\s\S]*?\.bytes = encodeCanonicalTextV3/,
   'V3 hot-path sorting must encode each key before comparison rather than in the comparator');
+assert.match(moduleText, /const sortArchivesByStorageOrderV3[\s\S]*?scope[\s\S]*?year/,
+  'V3 archive ordering must follow the indexed SQLite storage key');
 console.log('[PASS] V3 semantic ordering is deterministic across locale collators');
 
 // --- comparison reports how, not just that ----------------------------------
