@@ -131,6 +131,13 @@ let promotionSource = fs.readFileSync(promotionFilename, 'utf8')
     `const cloudWorkspaceCfg = cfg => cfg?.currency === undefined ? {} : { currency: cfg.currency };
 const mergeCloudWorkspaceCfg = (localCfg = {}, cloudCfg = {}) => ({ ...(localCfg || {}), ...cloudWorkspaceCfg(cloudCfg) });`,
   )
+  .replace(
+    /import \{ CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS \} from '\.\/financialBackupV11';/,
+    `const CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS = Object.freeze([
+  'transactions', 'postings', 'links', 'accounts', 'exchangeRates', 'entities',
+  'coldArchiveBundles', 'coldArchiveRecords',
+]);`,
+  )
   .replace(/export const /g, 'const ');
 promotionSource += `\nmodule.exports = { promoteCanonicalRestoreStageV11 };\n`;
 globalThis.__P10_REPOSITORY__ = repository;
@@ -142,7 +149,10 @@ const now = '2026-08-21T12:00:00.000Z';
 const namespace = 'account:disposable';
 const stageOne = `${namespace}::restore-stage::one`;
 const hashOne = 'a'.repeat(64);
-const counts = Object.freeze({ accounts: 1, transactions: 1, postings: 1, coldArchiveBundles: 1, coldArchiveRecords: 1 });
+const counts = Object.freeze({
+  accounts: 1, transactions: 1, postings: 1, links: 0, exchangeRates: 0, entities: 0,
+  coldArchiveBundles: 1, coldArchiveRecords: 1,
+});
 const proof = Object.freeze({ semanticHash: hashOne, counts, validatorVersion: 2 });
 const stageMetaKey = stage => `canonical_restore_stage_v11:${stage}`;
 const intentKey = `restore_intent:${namespace}`;
@@ -230,6 +240,15 @@ const snapshot = async () => {
   await seedIntent(7);
 
   const before = await snapshot();
+  const emptyCounts = await promoteCanonicalRestoreStageV11({
+    namespace, stageNamespace: stageOne,
+    stageProof: { semanticHash: hashOne, counts: {}, validatorVersion: 2 },
+    expectedFromEpoch: 7, toEpoch: 8, database,
+  });
+  assert.equal(emptyCounts.ok, false, 'an empty count object is malformed proof, not a valid zero-row ledger');
+  assert.equal(emptyCounts.reason, 'canonical_restore_promotion_proof_invalid');
+  assert.deepEqual(await snapshot(), before, 'empty counts must fail before any live mutation');
+
   const rejected = await promoteCanonicalRestoreStageV11({
     namespace, stageNamespace: stageOne,
     stageProof: { ...proof, semanticHash: 'c'.repeat(64) },
@@ -238,6 +257,17 @@ const snapshot = async () => {
   assert.equal(rejected.ok, false, 'a caller-supplied proof cannot replace the stored READY proof');
   assert.equal(rejected.reason, 'canonical_restore_promotion_precondition_failed');
   assert.deepEqual(await snapshot(), before, 'a readiness mismatch must fail before any live mutation');
+
+  const classifiedFailure = await promoteCanonicalRestoreStageV11({
+    namespace, stageNamespace: stageOne, stageProof: proof, expectedFromEpoch: 7, toEpoch: 8, database,
+    faultInjector: point => {
+      if (point === 'before_live_clear') throw new Error('restore_epoch_local_compare_and_swap_failed');
+    },
+  });
+  assert.equal(classifiedFailure.ok, false);
+  assert.equal(classifiedFailure.reason, 'restore_epoch_local_compare_and_swap_failed',
+    'an operational failure must retain its classified cause for safe recovery');
+  assert.deepEqual(await snapshot(), before, 'a classified failure must leave every SQLite domain unchanged');
 
   const boundaries = [
     'before_live_clear', 'after_live_clear', 'after_hot_copy', 'after_archive_replace',

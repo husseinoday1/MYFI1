@@ -8,6 +8,7 @@ import {
   FINANCIAL_LEDGER_SCHEMA_VERSION,
   runFinancialRestorePromotionTransactionV8,
 } from './financialLedgerV7Repository';
+import { CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS } from './financialBackupV11';
 import { cloudWorkspaceCfg, mergeCloudWorkspaceCfg } from './cloudWorkspaceMetadata.js';
 
 const RESTORE_STAGE_MARKER = '::restore-stage::';
@@ -39,9 +40,13 @@ const safeJson = (value) => {
 };
 
 const validHash = value => /^[a-f0-9]{64}$/i.test(text(value));
-const validCounts = value => isObject(value) && Object.values(value).every(item => (
-  Number.isInteger(Number(item)) && Number(item) >= 0
-));
+const validCounts = value => isObject(value)
+  && Object.keys(value).length === CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS.length
+  && CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS.every(key => (
+    Object.prototype.hasOwnProperty.call(value, key)
+    && Number.isSafeInteger(Number(value[key]))
+    && Number(value[key]) >= 0
+  ));
 const sameCounts = (left, right) => {
   const leftKeys = Object.keys(left || {}).sort();
   const rightKeys = Object.keys(right || {}).sort();
@@ -212,9 +217,10 @@ export const promoteCanonicalRestoreStageV11 = async ({
       };
     }});
   } catch (error) {
-    const reason = text(error?.message);
-    return failure(reason.startsWith('canonical_restore_promotion_')
-      ? reason
-      : 'canonical_restore_promotion_failed');
+    // Callers need the real classified failure: an epoch CAS race, an SQLite
+    // constraint rejection and a storage failure lead to different safe recovery
+    // actions. These paths throw stable codes/engine messages only; no financial
+    // payload is appended here or logged by this module.
+    return failure(text(error?.message).trim() || 'canonical_restore_promotion_failed');
   }
 };

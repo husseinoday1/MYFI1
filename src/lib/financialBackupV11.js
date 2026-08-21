@@ -16,6 +16,16 @@ import {
 
 export const CANONICAL_BACKUP_V11_FORMAT = 'MYFI_CANONICAL_LEDGER_BACKUP';
 export const CANONICAL_BACKUP_V11_DATA_VERSION = 11;
+export const CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS = Object.freeze([
+  'transactions',
+  'postings',
+  'links',
+  'accounts',
+  'exchangeRates',
+  'entities',
+  'coldArchiveBundles',
+  'coldArchiveRecords',
+]);
 
 const finiteCount = value => Math.max(0, Number.isSafeInteger(Number(value)) ? Number(value) : 0);
 

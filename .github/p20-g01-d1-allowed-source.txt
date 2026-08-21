@@ -24,6 +24,7 @@ src/lib/financialLedgerV7Repository.js
 src/lib/financialMaintenanceBarrier.js
 src/lib/financialRestoreStageV11.js
 src/lib/financialRestorePromotionV11.js
+src/lib/financialRestoreRecoveryV11.js
 src/lib/financialRestoreValidator.js
 src/lib/financialSemanticProjection.js
 src/lib/ledgerDatabase.js
