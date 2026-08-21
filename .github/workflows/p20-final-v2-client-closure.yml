@@ -24,13 +24,9 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED_BASE="8a31c7e1d885817f3b42f26cc14627c369558632"
-          ALLOWED=".github/p20-final-v2-client-closure-allowed-source.txt"
-          git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
-          test -f "$ALLOWED"
-          sed -e 's/\r$//' "$ALLOWED" | grep -vE '^[[:space:]]*(#|$)' | sort -u > /tmp/expected.txt
-          test -s /tmp/expected.txt
-          git diff --name-only "$EXPECTED_BASE"..HEAD | sed -e 's/\r$//' | sort -u > /tmp/actual.txt
-          diff -u /tmp/expected.txt /tmp/actual.txt
+          bash .github/scripts/verify-source-scope.sh \
+            "$EXPECTED_BASE" \
+            ".github/p20-final-v2-client-closure-allowed-source.txt"
           grep -q "canonicalWorkspaceCfg" src/store/multiDeviceSync.js
           grep -q "canonicalFinancialEntityPayload" src/lib/financialLedgerV7Repository.js
           grep -q "P20_V2_SYNC_CONTEXT" src/store/slices/useSyncSlice.js

@@ -30,18 +30,14 @@ jobs:
         run: |
           set -euo pipefail
           ACCEPTED_GATE="fd98f80dd1eb2f7aca9ad23d5d06aa64940e8ba0"
-          git merge-base --is-ancestor "$ACCEPTED_GATE" HEAD
           # The allowed set lives in .github/p20-g01-d1-allowed-source.txt so it is
           # reviewed like code and edited in one obvious place. Anything appearing in
           # shipped source that is not listed there fails the build, and vice versa.
-          ALLOWED=".github/p20-g01-d1-allowed-source.txt"
-          test -f "$ALLOWED"
-          sed -e 's/\r$//' "$ALLOWED" | grep -vE '^[[:space:]]*(#|$)' | sort -u > /tmp/expected.txt
-          test -s /tmp/expected.txt
-          git diff --name-only "$ACCEPTED_GATE"..HEAD -- \
-            App.js src android app.json eas.json package.json package-lock.json \
-            | sort > /tmp/actual.txt
-          diff -u /tmp/expected.txt /tmp/actual.txt
+          # The pathspec is what keeps docs and tests out of the comparison.
+          bash .github/scripts/verify-source-scope.sh \
+            "$ACCEPTED_GATE" \
+            ".github/p20-g01-d1-allowed-source.txt" \
+            App.js src android app.json eas.json package.json package-lock.json
           echo "SOURCE_BASE=$ACCEPTED_GATE" >> "$GITHUB_ENV"
           echo "[PASS] accepted P20-G01 baseline and diagnostic-only source scope verified"
 

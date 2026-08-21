@@ -23,13 +23,9 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED_BASE="93b0a94fb9b080026883488c9d420aa3b600027e"
-          ALLOWED=".github/p19-final-clean-v2-hardening-allowed-source.txt"
-          git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
-          test -f "$ALLOWED"
-          sed -e 's/\r$//' "$ALLOWED" | grep -vE '^[[:space:]]*(#|$)' | sort -u > /tmp/expected.txt
-          test -s /tmp/expected.txt
-          git diff --name-only "$EXPECTED_BASE"..HEAD | sed -e 's/\r$//' | sort -u > /tmp/actual.txt
-          diff -u /tmp/expected.txt /tmp/actual.txt
+          bash .github/scripts/verify-source-scope.sh \
+            "$EXPECTED_BASE" \
+            ".github/p19-final-clean-v2-hardening-allowed-source.txt"
           grep -q "adoptUnbootstrappedCloudLedgerIdentityV8" src/lib/financialLedgerV7Repository.js
           grep -q "P19_FINAL_V2_ACTIVE" src/store/slices/useSyncSlice.js
           grep -q "P19_FINAL_V2_SYNC_OK" src/store/slices/useSyncSlice.js

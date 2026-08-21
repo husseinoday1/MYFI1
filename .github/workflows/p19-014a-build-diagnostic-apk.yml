@@ -23,21 +23,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EXPECTED_BASE="e124ed30330d6492c109db65c708f1afb3e4f2a8"
-          ALLOWED=".github/p19-014a-build-diagnostic-apk-allowed-source.txt"
-
-          git merge-base --is-ancestor "$EXPECTED_BASE" HEAD || {
-            echo "[FAIL] P19-014A base commit is not an ancestor of HEAD"
-            exit 1
-          }
-
-          test -f "$ALLOWED"
-          sed -e 's/\r$//' "$ALLOWED" | grep -vE '^[[:space:]]*(#|$)' | sort -u > /tmp/expected.txt
-          test -s /tmp/expected.txt
-          git diff --name-only "$EXPECTED_BASE"..HEAD | sed -e 's/\r$//' | sort -u > /tmp/actual.txt
-          diff -u /tmp/expected.txt /tmp/actual.txt
-
-          echo "[PASS] P19-014A ancestry and repo-tracked patch scope verified"
+          bash .github/scripts/verify-source-scope.sh \
+            "e124ed30330d6492c109db65c708f1afb3e4f2a8" \
+            ".github/p19-014a-build-diagnostic-apk-allowed-source.txt"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
