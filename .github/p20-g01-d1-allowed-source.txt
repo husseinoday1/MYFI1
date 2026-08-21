@@ -16,6 +16,7 @@ src/hooks/useAutomaticSyncInteractionHold.js
 src/lib/automaticSyncInteractionHold.js
 src/lib/backupData.js
 src/lib/cloudWorkspaceMetadata.js
+src/lib/financialCanonicalRowSourceV3.js
 src/lib/financialBackupV11.js
 src/lib/financialBackupV11Decoder.js
 src/lib/financialBackupV2.js
