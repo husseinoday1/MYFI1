@@ -16,5 +16,6 @@ src/lib/financialSemanticProjection.js
 src/lib/ledgerDatabase.js
 src/lib/localArchiveRepository.js
 src/lib/syncErrorClassification.js
+src/screens/HomeScreen.js
 src/screens/SettingsScreen.js
 src/store/slices/useSyncSlice.js

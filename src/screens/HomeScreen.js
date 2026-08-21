@@ -546,7 +546,7 @@ export default function HomeScreen({
               </Text>
             </View>
             <Text style={{ color: semanticColor, ...weight('900'), fontSize: 15 }}>
-              {isTransfer ? fmt(t.transferAmount) : `${amount > 0 ? '+' : '-'}${fmt(amount)}`} {sym}
+              {moneyText(`${isTransfer ? fmt(t.transferAmount) : `${amount > 0 ? '+' : '-'}${fmt(amount)}`} ${sym}`)}
             </Text>
           </Pressable>
           {recentSelection.selecting ? (
@@ -647,7 +647,7 @@ export default function HomeScreen({
           </Text>
         </View>
         <Text style={{ color: amount > 0 ? th.inc : th.exp, ...weight('900'), fontSize: 15 }}>
-          {amount > 0 ? '+' : '-'}{fmt(amount)} {sym}
+          {moneyText(`${amount > 0 ? '+' : '-'}${fmt(amount)} ${sym}`)}
         </Text>
       </TouchableOpacity>
     );
@@ -774,7 +774,7 @@ export default function HomeScreen({
               </Text>
             </View>
             <Text style={{ color: recurringAmountColor, ...weight('900'), fontSize: 13 }} numberOfLines={1}>
-              {Number(item.amt || 0) >= 0 ? '+' : '-'}{fmt(amount)} {sym}
+              {moneyText(`${Number(item.amt || 0) >= 0 ? '+' : '-'}${fmt(amount)} ${sym}`)}
             </Text>
           </View>
           <View style={[importantS.actions, { flexDirection: rowDir }]}>
