@@ -59,6 +59,15 @@ checking whether this blocking screen is the maintenance barrier UI
 surfacing too aggressively/too often, or firing on ordinary sync rather
 than only during restore/migration.
 
+## Bug 5 — Non-functional +/- quick-add buttons on History/Reports (HIGH PRIORITY)
+
+Reported 2026-08-21. The empty-state prompt on History/Reports (add
+expense/income when no transactions exist) shows +/- action buttons that
+are **purely decorative — pressing them does not add an expense or income**.
+This is a real functional defect (a button that looks actionable but does
+nothing), not a display-only issue. Treat with the same priority as Bug 3
+(restore) — misleading non-functional UI on a financial action.
+
 ## Priority ordering (Planning & Audit)
 
 1. Bug 3 (restore silently fails) — investigate first, real users depend on
