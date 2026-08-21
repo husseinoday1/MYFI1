@@ -33,6 +33,7 @@ import { canonicalFinancialEntityPayload } from './financialLedgerV7Repository';
 // to certify a Phase-10 restore package, so its scope is deliberately explicit.
 export const SEMANTIC_HASH_VERSION = 1;
 export const SEMANTIC_HASH_V2_VERSION = 2;
+export const SEMANTIC_HASH_V3_VERSION = 3;
 export const SEMANTIC_HASH_ALGORITHM = 'SHA-256';
 
 const rows = value => (Array.isArray(value) ? value : []);
@@ -69,6 +70,38 @@ export const stableSemanticJson = (value) => {
   return JSON.stringify(value);
 };
 
+// V3 is deliberately not locale-aware. It compares the raw Unicode scalar values
+// in a JS string, falling back naturally to an unpaired UTF-16 code unit when a
+// malformed string reaches the boundary. That keeps every input totally ordered
+// without normalising, folding or otherwise changing a financial identifier.
+// For well-formed strings this has the same ordering as their UTF-8 byte sequence.
+export const compareCanonicalTextV3 = (leftValue, rightValue) => {
+  const left = String(leftValue ?? '');
+  const right = String(rightValue ?? '');
+  let leftOffset = 0;
+  let rightOffset = 0;
+  while (leftOffset < left.length && rightOffset < right.length) {
+    const leftCodePoint = left.codePointAt(leftOffset);
+    const rightCodePoint = right.codePointAt(rightOffset);
+    if (leftCodePoint !== rightCodePoint) return leftCodePoint < rightCodePoint ? -1 : 1;
+    leftOffset += leftCodePoint > 0xffff ? 2 : 1;
+    rightOffset += rightCodePoint > 0xffff ? 2 : 1;
+  }
+  if (leftOffset === left.length && rightOffset === right.length) return 0;
+  return leftOffset === left.length ? -1 : 1;
+};
+
+export const stableSemanticJsonV3 = (value) => {
+  if (value === null || value === undefined) return 'null';
+  if (Array.isArray(value)) return `[${value.map(stableSemanticJsonV3).join(',')}]`;
+  if (typeof value === 'object') {
+    const keys = Object.keys(value).sort(compareCanonicalTextV3);
+    return `{${keys.map(key => `${JSON.stringify(key)}:${stableSemanticJsonV3(value[key])}`).join(',')}}`;
+  }
+  if (typeof value === 'number' && !Number.isFinite(value)) return 'null';
+  return JSON.stringify(value);
+};
+
 const byId = (left, right) => String(left?.id ?? '').localeCompare(String(right?.id ?? ''));
 const byArchiveKey = (left, right) => (
   `${String(left?.year ?? '')}:${String(left?.scope ?? '')}`
@@ -88,6 +121,9 @@ const parseObject = (value) => {
 };
 
 const sortRecordsById = (value) => rows(value).slice().sort(byId);
+const sortRecordsByIdV3 = (value) => rows(value).slice().sort(
+  (left, right) => compareCanonicalTextV3(left?.id, right?.id),
+);
 
 // ---------------------------------------------------------------------------
 // Field policy
@@ -268,6 +304,29 @@ const canonicalArchiveV2 = archive => ({
   data: canonicalArchiveDataV2(archive?.data),
 });
 
+const canonicalArchiveDataV3 = (data = {}) => {
+  const source = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  const result = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (key === 'cfg') {
+      result.cfg = pickFinancialBackupConfig(value || {});
+    } else if (Array.isArray(value)) {
+      result[key] = sortRecordsByIdV3(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+};
+
+const canonicalArchiveV3 = archive => ({
+  year: archive?.year ?? null,
+  scope: text(archive?.scope),
+  checksum: text(archive?.checksum),
+  summary: archive?.summary ?? {},
+  data: canonicalArchiveDataV3(archive?.data),
+});
+
 /**
  * Reduce a canonical read model (Step 1) to the form the semantic hash is taken over.
  * Pure and order-insensitive: collections are sorted, object keys are sorted at
@@ -332,6 +391,54 @@ export const semanticHashCanonicalV2 = (canonical = {}) => bytesToHex(
 
 export const semanticHashV2 = (model = {}) => semanticHashCanonicalV2(
   canonicalizeFinancialLedgerV2(model),
+);
+
+// V3 fixes V2's locale-sensitive collection order. V2 remains frozen for legacy
+// package verification; nothing in this isolated primitive upgrades a package or
+// makes a restore caller accept V3 yet.
+export const canonicalizeFinancialLedgerV3 = (model = {}) => {
+  const entities = model?.entities && !Array.isArray(model.entities)
+    ? Object.values(model.entities).flat()
+    : rows(model?.entities);
+  return {
+    semanticHashVersion: SEMANTIC_HASH_V3_VERSION,
+    ledgerId: text(model?.ledger?.ledgerId),
+    financialConfig: canonicalFinancialConfigV2(model?.workspace),
+    accounts: rows(model?.accounts).map(canonicalAccountV2).sort(
+      (left, right) => compareCanonicalTextV3(left?.id, right?.id),
+    ),
+    exchangeRates: rows(model?.exchangeRates).map(canonicalExchangeRateV2).sort(
+      (left, right) => compareCanonicalTextV3(left?.id, right?.id),
+    ),
+    transactions: rows(model?.transactions).map(canonicalTransactionV2).sort(
+      (left, right) => compareCanonicalTextV3(left?.id, right?.id),
+    ),
+    postings: rows(model?.postings).map(canonicalPostingV2).sort(
+      (left, right) => compareCanonicalTextV3(left?.id, right?.id),
+    ),
+    links: rows(model?.links).map(canonicalLinkV2).sort(
+      (left, right) => compareCanonicalTextV3(left?.id, right?.id),
+    ),
+    entities: entities.map(canonicalEntityV2).sort(
+      (left, right) => compareCanonicalTextV3(
+        `${left.entityType}:${left.id}`, `${right.entityType}:${right.id}`,
+      ),
+    ),
+    archives: rows(model?.archives).map(canonicalArchiveV3).sort(
+      (left, right) => compareCanonicalTextV3(
+        `${String(left?.year ?? '')}:${String(left?.scope ?? '')}`,
+        `${String(right?.year ?? '')}:${String(right?.scope ?? '')}`,
+      ),
+    ),
+  };
+};
+
+export const semanticHashCanonicalV3 = (canonical = {}) => bytesToHex(
+  sha256(new TextEncoder().encode(stableSemanticJsonV3(canonical))),
+);
+
+export const semanticHashV3 = (model = {}) => semanticHashCanonicalV3(
+  canonicalizeFinancialLedgerV3(model),
 );
 
 /**

@@ -30,7 +30,8 @@ const canonicalMatch = repoSource.match(
 );
 assert.ok(canonicalMatch, 'canonicalFinancialEntityPayload must remain exported from the repository');
 
-let source = fs.readFileSync(filename, 'utf8')
+const moduleText = fs.readFileSync(filename, 'utf8');
+let source = moduleText
   .replace(/import \{ sha256 \} from '@noble\/hashes\/sha2';/, "const { sha256 } = require('@noble/hashes/sha2');")
   .replace(/import \{ bytesToHex \} from '@noble\/hashes\/utils';/, "const { bytesToHex } = require('@noble/hashes/utils');")
   .replace(/import \{ pickFinancialBackupConfig \} from '\.\/backupData';/, backupDataSource)
@@ -43,9 +44,10 @@ let source = fs.readFileSync(filename, 'utf8')
 source += `
 module.exports = {
   SEMANTIC_HASH_VERSION, SEMANTIC_HASH_ALGORITHM,
-  SEMANTIC_HASH_V2_VERSION,
+  SEMANTIC_HASH_V2_VERSION, SEMANTIC_HASH_V3_VERSION,
   canonicalizeFinancialLedger, semanticHashV1, semanticMetricsV1, compareSemanticLedgerV1,
   canonicalizeFinancialLedgerV2, semanticHashV2, semanticMetricsV2, compareSemanticLedgerV2,
+  canonicalizeFinancialLedgerV3, semanticHashV3,
 };
 `;
 
@@ -57,12 +59,15 @@ compiled._compile(source, filename);
 const {
   SEMANTIC_HASH_VERSION,
   SEMANTIC_HASH_V2_VERSION,
+  SEMANTIC_HASH_V3_VERSION,
   semanticHashV1,
   semanticMetricsV1,
   compareSemanticLedgerV1,
   semanticHashV2,
   semanticMetricsV2,
   compareSemanticLedgerV2,
+  canonicalizeFinancialLedgerV3,
+  semanticHashV3,
 } = compiled.exports;
 
 const ledger = (overrides = {}) => ({
@@ -163,8 +168,10 @@ for (const [label, mutate] of mutations) {
   mutate(mutated);
   assert.notEqual(semanticHashV1(sourceSide), semanticHashV1(mutated),
     `${label} must change the semantic hash`);
+  assert.notEqual(semanticHashV3(sourceSide), semanticHashV3(mutated),
+    `V3 ${label} must change the semantic hash`);
 }
-console.log(`[PASS] all ${mutations.length} financial fields change the hash`);
+console.log(`[PASS] all ${mutations.length} financial fields change the V1 and V3 hash`);
 
 // --- order and key insertion must not matter --------------------------------
 const reordered = ledger();
@@ -254,6 +261,8 @@ changedDeviceOnlyConfig.archives[0].data.cfg.theme = 'dark';
 changedDeviceOnlyConfig.archives[0].data.cfg.lang = 'ar';
 assert.equal(semanticHashV2(v2Source), semanticHashV2(changedDeviceOnlyConfig),
   'theme, language and device-only privacy choices must not enter the restore proof');
+assert.equal(semanticHashV3(v2Source), semanticHashV3(changedDeviceOnlyConfig),
+  'V3 must preserve V2\'s device-only configuration exclusion');
 
 const reorderedArchive = JSON.parse(JSON.stringify(v2Source));
 reorderedArchive.archives[0].data.trans.unshift({ id: 'archive-t0', title: 'older', amt: -1 });
@@ -261,12 +270,71 @@ const reorderedArchiveAgain = JSON.parse(JSON.stringify(reorderedArchive));
 reorderedArchiveAgain.archives[0].data.trans.reverse();
 assert.equal(semanticHashV2(reorderedArchive), semanticHashV2(reorderedArchiveAgain),
   'archive record order must not change V2');
+assert.equal(semanticHashV3(reorderedArchive), semanticHashV3(reorderedArchiveAgain),
+  'archive record order must not change V3');
 
 const v2Difference = compareSemanticLedgerV2(v2Source, changedArchiveRecord);
 assert.equal(v2Difference.ok, false);
 assert.ok(v2Difference.differences.length > 0, 'V2 content-only drift must never be silent');
 assert.ok(semanticMetricsV2(v2Source).archiveRecords >= 3, 'V2 metrics must describe archive coverage');
 console.log('[PASS] V2 covers full live/archive records and financial config only');
+
+// --- V3: deterministic order, independent from device/UI locale ------------
+const unicodeOrdered = ledger({
+  accounts: [
+    { id: '𝄞', accountType: 'wallet', scope: 'personal', currencyCode: 'IQD', status: 'active' },
+    { id: 'أ', accountType: 'wallet', scope: 'personal', currencyCode: 'IQD', status: 'active' },
+    { id: 'ä', accountType: 'wallet', scope: 'personal', currencyCode: 'IQD', status: 'active' },
+    { id: 'z', accountType: 'wallet', scope: 'personal', currencyCode: 'IQD', status: 'active' },
+    { id: 'é', accountType: 'wallet', scope: 'personal', currencyCode: 'IQD', status: 'active' },
+  ],
+  entities: [
+    { entityType: 'wallet', id: 'أ', revision: 1, payload: { currency: 'IQD' } },
+    { entityType: 'wallet', id: 'z', revision: 1, payload: { currency: 'IQD' } },
+  ],
+  archives: [
+    { year: 2025, scope: 'أ', checksum: 'b', data: { trans: [{ id: '𝄞', amt: 1 }] } },
+    { year: 2024, scope: 'z', checksum: 'a', data: { trans: [{ id: 'ä', amt: 2 }] } },
+  ],
+});
+const unicodeReordered = JSON.parse(JSON.stringify(unicodeOrdered));
+unicodeReordered.accounts.reverse();
+unicodeReordered.entities.reverse();
+unicodeReordered.archives.reverse();
+unicodeReordered.archives[0].data.trans.reverse();
+assert.equal(SEMANTIC_HASH_V3_VERSION, 3);
+assert.equal(semanticHashV3(unicodeOrdered), semanticHashV3(unicodeReordered),
+  'V3 must be independent from physical collection order for Arabic and Unicode identifiers');
+assert.deepEqual(
+  canonicalizeFinancialLedgerV3(unicodeOrdered).accounts.map(item => item.id),
+  ['é', 'z', 'ä', 'أ', '𝄞'],
+  'V3 must use the documented explicit Unicode scalar order, not a UI locale order',
+);
+
+const originalLocaleCompare = String.prototype.localeCompare;
+try {
+  const digestByLocale = ['ar', 'sv', 'en-US'].map(locale => {
+    const collator = new Intl.Collator(locale);
+    String.prototype.localeCompare = function patchedLocaleCompare(other) {
+      return collator.compare(String(this), String(other));
+    };
+    return semanticHashV3(unicodeOrdered);
+  });
+  assert.deepEqual(
+    digestByLocale,
+    [digestByLocale[0], digestByLocale[0], digestByLocale[0]],
+    'V3 hash must not depend on Arabic, Swedish or English collation',
+  );
+} finally {
+  String.prototype.localeCompare = originalLocaleCompare;
+}
+const v3Source = moduleText.match(
+  /export const canonicalizeFinancialLedgerV3[\s\S]*?export const semanticHashV3[\s\S]*?\n\);/,
+);
+assert.ok(v3Source, 'V3 canonicaliser and hash must remain present');
+assert.doesNotMatch(v3Source[0], /localeCompare|Intl\.Collator/,
+  'V3 ordered paths must not call locale-sensitive comparison');
+console.log('[PASS] V3 semantic ordering is deterministic across locale collators');
 
 // --- comparison reports how, not just that ----------------------------------
 const same = compareSemanticLedgerV1(sourceSide, persistedSide);
@@ -297,7 +365,6 @@ assert.equal(metrics.currencyTotalsMinor.IQD, 0, 'a balanced transaction nets to
 console.log('[PASS] metrics describe the ledger independently of the hash');
 
 // --- one canonicaliser, not two ----------------------------------------------
-const moduleText = fs.readFileSync(filename, 'utf8');
 assert.ok(
   moduleText.includes("import { canonicalFinancialEntityPayload } from './financialLedgerV7Repository'"),
   'the entity rule must be imported from the module that persists it, never re-implemented here',
