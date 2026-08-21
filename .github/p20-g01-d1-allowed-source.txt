@@ -22,6 +22,7 @@ src/lib/financialBackupV11Decoder.js
 src/lib/financialBackupV2.js
 src/lib/financialLedgerV7Migration.js
 src/lib/financialLedgerV7Repository.js
+src/lib/financialLiveGenerationV13.js
 src/lib/financialMaintenanceBarrier.js
 src/lib/financialRestoreStageV11.js
 src/lib/financialRestorePromotionV11.js
