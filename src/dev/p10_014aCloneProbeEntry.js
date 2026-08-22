@@ -1,4 +1,4 @@
-// MYFI P10-014A-001-R5 — fail-closed same-package / cloned-database probe.
+// MYFI P10-014A-001-R5.2 — fail-closed same-package / cloned-database probe.
 //
 // The APK keeps applicationId com.myfi.app only to enter the original app sandbox.
 // The original ledger is opened query-only solely as the source of SQLite's backup API.
@@ -63,6 +63,7 @@ async function runCloneProbe() {
   const cloneNonce = nonce();
   let sourceFingerprintBefore = null;
   let sourceFingerprintAfter = null;
+  let sourceFileMetadataObservation = null;
   let harnessResult = null;
   let cloneDeleted = false;
 
@@ -80,8 +81,12 @@ async function runCloneProbe() {
     if (queryOnly !== 1) throw new Error('p10_clone_probe_source_not_query_only');
 
     const quick = String(scalar(await source.getFirstAsync('PRAGMA quick_check')) || '').toLowerCase();
+    const sourceJournalMode = String(scalar(await source.getFirstAsync('PRAGMA journal_mode')) || '').toLowerCase();
     const sourceUserVersion = Number(scalar(await source.getFirstAsync('PRAGMA user_version')) || 0);
     const sourceSchemaVersion = Number(scalar(await source.getFirstAsync('PRAGMA schema_version')) || 0);
+    const sourceDataVersion = Number(scalar(await source.getFirstAsync('PRAGMA data_version')) || 0);
+    const sourcePageCount = Number(scalar(await source.getFirstAsync('PRAGMA page_count')) || 0);
+    const sourceFreelistCount = Number(scalar(await source.getFirstAsync('PRAGMA freelist_count')) || 0);
     const ledgerSchemaRow = await source.getFirstAsync(
       "SELECT value FROM ledger_v7_meta WHERE key='schema_version' LIMIT 1",
     );
@@ -95,12 +100,19 @@ async function runCloneProbe() {
     if (Number(ledgerSchemaRow?.value) !== 7) throw new Error('p10_clone_probe_source_ledger_schema_not_7');
     if (Number(sqliteSchemaRow?.value) !== 8) throw new Error('p10_clone_probe_source_sqlite_schema_not_8');
     if (totalChangesBefore !== 0) throw new Error('p10_clone_probe_source_connection_not_pristine');
+    if (sourcePageCount <= 0 || sourceFreelistCount < 0) {
+      throw new Error('p10_clone_probe_source_page_invariants_invalid');
+    }
 
     sourceFingerprintBefore = Object.freeze({
+      journalMode: sourceJournalMode,
       userVersion: sourceUserVersion,
       schemaVersion: sourceSchemaVersion,
-      fileSize: Number(sourceInfoBefore.size || 0),
-      modificationTime: Number(sourceInfoBefore.modificationTime || 0),
+      dataVersion: sourceDataVersion,
+      pageCount: sourcePageCount,
+      freelistCount: sourceFreelistCount,
+      ledgerSchemaVersion: Number(ledgerSchemaRow?.value),
+      sqliteSchemaVersion: Number(sqliteSchemaRow?.value),
       totalChanges: totalChangesBefore,
       queryOnly: true,
     });
@@ -120,36 +132,97 @@ async function runCloneProbe() {
       destDatabaseName: 'main',
     });
 
+    const sourceQuickAfter = String(scalar(await source.getFirstAsync('PRAGMA quick_check')) || '').toLowerCase();
+    const sourceJournalModeAfter = String(scalar(await source.getFirstAsync('PRAGMA journal_mode')) || '').toLowerCase();
     const totalChangesAfter = Number((await source.getFirstAsync('SELECT total_changes() AS n'))?.n || 0);
     const sourceUserVersionAfter = Number(scalar(await source.getFirstAsync('PRAGMA user_version')) || 0);
     const sourceSchemaVersionAfter = Number(scalar(await source.getFirstAsync('PRAGMA schema_version')) || 0);
-    if (totalChangesAfter !== 0
-        || sourceUserVersionAfter !== sourceFingerprintBefore.userVersion
-        || sourceSchemaVersionAfter !== sourceFingerprintBefore.schemaVersion) {
+    const sourceDataVersionAfter = Number(scalar(await source.getFirstAsync('PRAGMA data_version')) || 0);
+    const sourcePageCountAfter = Number(scalar(await source.getFirstAsync('PRAGMA page_count')) || 0);
+    const sourceFreelistCountAfter = Number(scalar(await source.getFirstAsync('PRAGMA freelist_count')) || 0);
+    const ledgerSchemaRowAfter = await source.getFirstAsync(
+      "SELECT value FROM ledger_v7_meta WHERE key='schema_version' LIMIT 1",
+    );
+    const sqliteSchemaRowAfter = await source.getFirstAsync(
+      "SELECT value FROM ledger_v7_meta WHERE key='sqlite_schema_version' LIMIT 1",
+    );
+
+    sourceFingerprintAfter = Object.freeze({
+      journalMode: sourceJournalModeAfter,
+      userVersion: sourceUserVersionAfter,
+      schemaVersion: sourceSchemaVersionAfter,
+      dataVersion: sourceDataVersionAfter,
+      pageCount: sourcePageCountAfter,
+      freelistCount: sourceFreelistCountAfter,
+      ledgerSchemaVersion: Number(ledgerSchemaRowAfter?.value),
+      sqliteSchemaVersion: Number(sqliteSchemaRowAfter?.value),
+      totalChanges: totalChangesAfter,
+      queryOnly: true,
+    });
+
+    if (sourceQuickAfter !== 'ok'
+        || JSON.stringify(sourceFingerprintAfter) !== JSON.stringify(sourceFingerprintBefore)) {
       throw new Error('p10_clone_probe_source_changed_during_backup');
+    }
+
+    const sourceInfoBeforeClose = await FileSystem.getInfoAsync(sourceUri);
+    if (!sourceInfoBeforeClose?.exists
+        || sourceInfoBeforeClose?.isDirectory
+        || Number(sourceInfoBeforeClose?.size || 0) <= 0) {
+      throw new Error('p10_clone_probe_source_database_missing_before_close');
     }
 
     await source.closeAsync();
     source = null;
-    const sourceInfoAfter = await FileSystem.getInfoAsync(sourceUri);
-    if (!sourceInfoAfter?.exists
-        || Number(sourceInfoAfter.size || 0) !== sourceFingerprintBefore.fileSize
-        || Number(sourceInfoAfter.modificationTime || 0) !== sourceFingerprintBefore.modificationTime) {
-      throw new Error('p10_clone_probe_source_file_changed_during_backup');
+
+    const sourceInfoAfterClose = await FileSystem.getInfoAsync(sourceUri);
+    if (!sourceInfoAfterClose?.exists
+        || sourceInfoAfterClose?.isDirectory
+        || Number(sourceInfoAfterClose?.size || 0) <= 0) {
+      throw new Error('p10_clone_probe_source_database_missing_after_close');
     }
-    sourceFingerprintAfter = Object.freeze({
-      userVersion: sourceUserVersionAfter,
-      schemaVersion: sourceSchemaVersionAfter,
-      fileSize: Number(sourceInfoAfter.size || 0),
-      modificationTime: Number(sourceInfoAfter.modificationTime || 0),
-      totalChanges: totalChangesAfter,
-      queryOnly: true,
+
+    sourceFileMetadataObservation = Object.freeze({
+      journalMode: sourceFingerprintBefore.journalMode,
+      beforeOpen: Object.freeze({
+        size: Number(sourceInfoBefore.size || 0),
+        modificationTime: Number(sourceInfoBefore.modificationTime || 0),
+      }),
+      beforeClose: Object.freeze({
+        size: Number(sourceInfoBeforeClose.size || 0),
+        modificationTime: Number(sourceInfoBeforeClose.modificationTime || 0),
+      }),
+      afterClose: Object.freeze({
+        size: Number(sourceInfoAfterClose.size || 0),
+        modificationTime: Number(sourceInfoAfterClose.modificationTime || 0),
+      }),
+      changedBeforeClose: (
+        Number(sourceInfoBeforeClose.size || 0) !== Number(sourceInfoBefore.size || 0)
+        || Number(sourceInfoBeforeClose.modificationTime || 0) !== Number(sourceInfoBefore.modificationTime || 0)
+      ),
+      changedOnClose: (
+        Number(sourceInfoAfterClose.size || 0) !== Number(sourceInfoBeforeClose.size || 0)
+        || Number(sourceInfoAfterClose.modificationTime || 0) !== Number(sourceInfoBeforeClose.modificationTime || 0)
+      ),
     });
 
     await clone.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const cloneQuick = String(scalar(await clone.getFirstAsync('PRAGMA quick_check')) || '').toLowerCase();
     const cloneUserVersion = Number(scalar(await clone.getFirstAsync('PRAGMA user_version')) || 0);
-    if (cloneQuick !== 'ok' || cloneUserVersion !== sourceFingerprintBefore.userVersion) {
+    const cloneSchemaVersion = Number(scalar(await clone.getFirstAsync('PRAGMA schema_version')) || 0);
+    const clonePageCount = Number(scalar(await clone.getFirstAsync('PRAGMA page_count')) || 0);
+    const cloneLedgerSchemaRow = await clone.getFirstAsync(
+      "SELECT value FROM ledger_v7_meta WHERE key='schema_version' LIMIT 1",
+    );
+    const cloneSqliteSchemaRow = await clone.getFirstAsync(
+      "SELECT value FROM ledger_v7_meta WHERE key='sqlite_schema_version' LIMIT 1",
+    );
+    if (cloneQuick !== 'ok'
+        || cloneUserVersion !== sourceFingerprintBefore.userVersion
+        || cloneSchemaVersion !== sourceFingerprintBefore.schemaVersion
+        || clonePageCount !== sourceFingerprintBefore.pageCount
+        || Number(cloneLedgerSchemaRow?.value) !== sourceFingerprintBefore.ledgerSchemaVersion
+        || Number(cloneSqliteSchemaRow?.value) !== sourceFingerprintBefore.sqliteSchemaVersion) {
       throw new Error('p10_clone_probe_clone_verification_failed');
     }
 
@@ -174,11 +247,12 @@ async function runCloneProbe() {
 
     return {
       ok: true,
-      patchId: 'P10-014A-001-R5.1',
+      patchId: 'P10-014A-001-R5.2',
       mode: 'original_package_sqlite_backup_clone',
       originalDatabaseReadOnly: true,
       originalDatabaseMutationByHarness: false,
       sourceFingerprintStable: JSON.stringify(sourceFingerprintBefore) === JSON.stringify(sourceFingerprintAfter),
+      sourceFileMetadataObservation,
       cloneDeletedAfterRun: true,
       harnessResult,
     };
@@ -214,6 +288,7 @@ function CloneProbeApp() {
           originalDatabaseReadOnly: result.originalDatabaseReadOnly,
           originalDatabaseMutationByHarness: result.originalDatabaseMutationByHarness,
           sourceFingerprintStable: result.sourceFingerprintStable,
+          sourceFileMetadataObservation: result.sourceFileMetadataObservation,
         }));
       })
       .catch(error => {
@@ -228,7 +303,7 @@ function CloneProbeApp() {
 
   return (
     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-      <Text>P10-014A R5.1 Clone Probe</Text>
+      <Text>P10-014A R5.2 Clone Probe</Text>
       <Text>{status}</Text>
     </View>
   );

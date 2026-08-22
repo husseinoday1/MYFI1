@@ -56,7 +56,7 @@ for (const required of [
   'stageSourceModeShadow',
   'stageSchemaVersion7',
   'cleanupErrorCaught',
-  "patchId: 'P10-014A-001-R5.1'",
+  "patchId: 'P10-014A-001-R5.2'",
   'cloneDatabaseOnly: P10_014A_CLONE_PROBE_FLAG',
   'originalDatabaseMutationByHarness: false',
   "memoryEvidence: 'EXTERNAL_ADB_REQUIRED'",
@@ -122,11 +122,11 @@ for (const required of [
   "applicationId 'com.myfi.app'",
   'EXPO_PUBLIC_P10_014A_CLONE_PROBE=1',
   'EXPO_PUBLIC_FRESH_TEST=0',
-  'OriginalDatabaseMode=PREVERIFIED_FILE_URI_THEN_QUERY_ONLY_BACKUP_SOURCE',
+  'OriginalDatabaseMode=PREVERIFIED_FILE_URI_THEN_QUERY_ONLY_LOGICAL_IMMUTABILITY_SOURCE',
   'HarnessDatabase=DISPOSABLE_SQLITE_BACKUP_CLONE',
   'OriginalDatabaseMutationByHarness=NO',
   'OriginalInstalledApkMustBeBackedUpByDeviceRunner=YES',
-  'P10-014A-original-package-clone-probe-R5-1',
+  'P10-014A-original-package-clone-probe-R5-2',
 ]) {
   assert(workflow.includes(required), `R5 workflow missing: ${required}`);
 }
@@ -161,17 +161,49 @@ for (const required of [
   "p10_clone_probe_source_database_path_mismatch",
   "p10_clone_probe_clone_database_path_mismatch",
 ]) {
-  assert(entry.includes(required), `R5.1 path-resolution contract missing: ${required}`);
+  assert(entry.includes(required), `R5.2 path-resolution contract missing: ${required}`);
 }
 assert(
   entry.indexOf('const sourceInfoBefore = await FileSystem.getInfoAsync(sourceUri)')
     < entry.indexOf('source = await SQLite.openDatabaseAsync'),
-  'R5.1 must verify source existence before SQLite open/create',
+  'R5.2 must verify source existence before SQLite open/create',
 );
 assert(
   entry.indexOf('p10_clone_probe_source_database_path_mismatch')
     < entry.indexOf("PRAGMA query_only = ON"),
-  'R5.1 must bind opened source handle to preverified path before query-only work',
+  'R5.2 must bind opened source handle to preverified path before query-only work',
 );
 
-console.log('MYFI P10-014A R5.1 ONE-COMMAND CLONE PROBE CONTRACT: PASS');
+for (const required of [
+  "PRAGMA data_version",
+  "PRAGMA page_count",
+  "PRAGMA freelist_count",
+  "sourceFileMetadataObservation",
+  "changedBeforeClose",
+  "changedOnClose",
+  "p10_clone_probe_source_database_missing_before_close",
+  "p10_clone_probe_source_database_missing_after_close",
+]) {
+  assert(entry.includes(required), `R5.2 logical immutability contract missing: ${required}`);
+}
+assert.equal(
+  entry.includes('p10_clone_probe_source_file_changed_during_backup'),
+  false,
+  'R5.2 must not treat WAL close-time main-file metadata changes as financial mutation',
+);
+const r52BackupIndex = entry.indexOf('SQLite.backupDatabaseAsync');
+const r52PostBackupDataVersionIndex = entry.indexOf(
+  "const sourceDataVersionAfter = Number(scalar(await source.getFirstAsync('PRAGMA data_version')) || 0);",
+);
+assert(
+  r52BackupIndex >= 0 && r52PostBackupDataVersionIndex > r52BackupIndex,
+  'R5.2 must retain backup API before post-backup logical revalidation',
+);
+for (const required of [
+  'SourceImmutabilityVerification=QUERY_ONLY_TOTAL_CHANGES_DATA_VERSION_SCHEMA_PAGE_INVARIANTS',
+  'WALCloseFileMetadata=OBSERVATIONAL_NOT_MUTATION_GATE',
+]) {
+  assert(workflow.includes(required), `R5.2 workflow evidence missing: ${required}`);
+}
+
+console.log('MYFI P10-014A R5.2 WAL-AWARE LOGICAL IMMUTABILITY CLONE PROBE CONTRACT: PASS');
