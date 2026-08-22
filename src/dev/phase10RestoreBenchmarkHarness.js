@@ -1067,7 +1067,7 @@ export async function runPhase10RestoreBenchmarkHarness({
   const orphanRecovery = await sweepOrphanedRuns(database);
 
   const base = {
-    patchId: 'P10-014A-001-R5',
+    patchId: 'P10-014A-001-R5.1',
     gate: P10_014A_GATE,
     subgate: 'CORE_STRATEGY_B_DEVICE_PATH',
     acceptanceComplete: false,

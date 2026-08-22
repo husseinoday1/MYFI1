@@ -169,7 +169,7 @@ jobs:
           SHA="$(sha256sum "$APK" | awk '{print $1}')"
           SIZE="$(stat -c%s "$APK")"
           {
-            echo "Patch=P10-014A-001-R5"
+            echo "Patch=P10-014A-001-R5.1"
             echo "Gate=ORIGINAL_PACKAGE_SQLITE_BACKUP_CLONE"
             echo "AcceptanceComplete=NO"
             echo "NextRequiredSubgate=P10-014A-002_FAULT_AND_RESOURCE_MATRIX"
@@ -186,10 +186,11 @@ jobs:
             echo "ApplicationId=com.myfi.app"
             echo "VersionCode=$VERSION_CODE"
             echo "VersionName=$VERSION_NAME"
-            echo "OriginalDatabaseMode=QUERY_ONLY_BACKUP_SOURCE"
+            echo "OriginalDatabaseMode=PREVERIFIED_FILE_URI_THEN_QUERY_ONLY_BACKUP_SOURCE"
             echo "HarnessDatabase=DISPOSABLE_SQLITE_BACKUP_CLONE"
             echo "OriginalDatabaseMutationByHarness=NO"
             echo "CloneCreatedWith=expo-sqlite.backupDatabaseAsync"
+            echo "SourcePathVerification=FILE_URI_PLUS_DATABASE_PATH"
             echo "CloneDeletedAfterRun=REQUIRED"
             echo "OriginalInstalledApkMustBeBackedUpByDeviceRunner=YES"
             echo "OriginalInstalledApkVersionAndCertMustMatchProbe=YES"
@@ -210,7 +211,7 @@ jobs:
       - name: Upload R5 clone-probe APK
         uses: actions/upload-artifact@v4
         with:
-          name: P10-014A-original-package-clone-probe-R5
+          name: P10-014A-original-package-clone-probe-R5-1
           path: |
             android/app/build/outputs/apk/release/app-release.apk
             app-release.apk.sha256

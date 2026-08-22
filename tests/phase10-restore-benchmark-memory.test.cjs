@@ -56,7 +56,7 @@ for (const required of [
   'stageSourceModeShadow',
   'stageSchemaVersion7',
   'cleanupErrorCaught',
-  "patchId: 'P10-014A-001-R5'",
+  "patchId: 'P10-014A-001-R5.1'",
   'cloneDatabaseOnly: P10_014A_CLONE_PROBE_FLAG',
   'originalDatabaseMutationByHarness: false',
   "memoryEvidence: 'EXTERNAL_ADB_REQUIRED'",
@@ -122,11 +122,11 @@ for (const required of [
   "applicationId 'com.myfi.app'",
   'EXPO_PUBLIC_P10_014A_CLONE_PROBE=1',
   'EXPO_PUBLIC_FRESH_TEST=0',
-  'OriginalDatabaseMode=QUERY_ONLY_BACKUP_SOURCE',
+  'OriginalDatabaseMode=PREVERIFIED_FILE_URI_THEN_QUERY_ONLY_BACKUP_SOURCE',
   'HarnessDatabase=DISPOSABLE_SQLITE_BACKUP_CLONE',
   'OriginalDatabaseMutationByHarness=NO',
   'OriginalInstalledApkMustBeBackedUpByDeviceRunner=YES',
-  'P10-014A-original-package-clone-probe-R5',
+  'P10-014A-original-package-clone-probe-R5-1',
 ]) {
   assert(workflow.includes(required), `R5 workflow missing: ${required}`);
 }
@@ -151,4 +151,27 @@ for (const required of [
   assert(allowlist.includes(required), `R5 allowlist missing ${required}`);
 }
 
-console.log('MYFI P10-014A R5 FAIL-CLOSED ORIGINAL-PACKAGE CLONE PROBE CONTRACT: PASS');
+
+for (const required of [
+  "const toFileUri = value =>",
+  "raw.startsWith('file://')",
+  "if (raw.startsWith('/')) return `file://${raw}`",
+  "const databaseHandleUri = database => toFileUri(database?.databasePath)",
+  "{ useNewConnection: true }",
+  "p10_clone_probe_source_database_path_mismatch",
+  "p10_clone_probe_clone_database_path_mismatch",
+]) {
+  assert(entry.includes(required), `R5.1 path-resolution contract missing: ${required}`);
+}
+assert(
+  entry.indexOf('const sourceInfoBefore = await FileSystem.getInfoAsync(sourceUri)')
+    < entry.indexOf('source = await SQLite.openDatabaseAsync'),
+  'R5.1 must verify source existence before SQLite open/create',
+);
+assert(
+  entry.indexOf('p10_clone_probe_source_database_path_mismatch')
+    < entry.indexOf("PRAGMA query_only = ON"),
+  'R5.1 must bind opened source handle to preverified path before query-only work',
+);
+
+console.log('MYFI P10-014A R5.1 ONE-COMMAND CLONE PROBE CONTRACT: PASS');

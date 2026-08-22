@@ -26,9 +26,19 @@ const scalar = row => {
   return values.length ? values[0] : null;
 };
 
+const toFileUri = value => {
+  const raw = String(value || '').trim().replace(/\/+$/, '');
+  if (!raw) throw new Error('p10_clone_probe_database_directory_missing');
+  if (raw.startsWith('file://')) return raw;
+  if (raw.startsWith('/')) return `file://${raw}`;
+  throw new Error('p10_clone_probe_database_directory_invalid');
+};
+
 const databaseUri = name => (
-  `${String(SQLite.defaultDatabaseDirectory || '').replace(/\/+$/, '')}/${name}`
+  `${toFileUri(SQLite.defaultDatabaseDirectory)}/${String(name || '').replace(/^\/+/, '')}`
 );
+
+const databaseHandleUri = database => toFileUri(database?.databasePath);
 
 const nonce = () => (
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
@@ -59,9 +69,12 @@ async function runCloneProbe() {
   try {
     source = await SQLite.openDatabaseAsync(
       LEDGER_DB_NAME,
-      {},
+      { useNewConnection: true },
       SQLite.defaultDatabaseDirectory,
     );
+    if (databaseHandleUri(source) !== sourceUri) {
+      throw new Error('p10_clone_probe_source_database_path_mismatch');
+    }
     await source.execAsync('PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;');
     const queryOnly = Number(scalar(await source.getFirstAsync('PRAGMA query_only')) || 0);
     if (queryOnly !== 1) throw new Error('p10_clone_probe_source_not_query_only');
@@ -94,9 +107,12 @@ async function runCloneProbe() {
 
     clone = await SQLite.openDatabaseAsync(
       cloneName,
-      {},
+      { useNewConnection: true },
       SQLite.defaultDatabaseDirectory,
     );
+    if (databaseHandleUri(clone) !== cloneUri) {
+      throw new Error('p10_clone_probe_clone_database_path_mismatch');
+    }
     await SQLite.backupDatabaseAsync({
       sourceDatabase: source,
       sourceDatabaseName: 'main',
@@ -158,7 +174,7 @@ async function runCloneProbe() {
 
     return {
       ok: true,
-      patchId: 'P10-014A-001-R5',
+      patchId: 'P10-014A-001-R5.1',
       mode: 'original_package_sqlite_backup_clone',
       originalDatabaseReadOnly: true,
       originalDatabaseMutationByHarness: false,
@@ -212,7 +228,7 @@ function CloneProbeApp() {
 
   return (
     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-      <Text>P10-014A R5 Clone Probe</Text>
+      <Text>P10-014A R5.1 Clone Probe</Text>
       <Text>{status}</Text>
     </View>
   );
