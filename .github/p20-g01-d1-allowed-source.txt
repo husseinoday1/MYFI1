@@ -47,3 +47,11 @@ src/screens/TrackersLabScreen.js
 src/store/slices/useSyncSlice.js
 src/store/multiDeviceSync.js
 src/store/useStore.js
+src/lib/financialRestoreCheckpointV13.js
+src/lib/financialRestorePromotionV13.js
+src/lib/financialRestoreProofV13.js
+src/lib/financialRestoreSourceGuardV13.js
+src/lib/financialRestoreSqlValidatorV13.js
+src/lib/financialRestoreStartSnapshotV13.js
+src/lib/financialRestoreUndoV13.js
+src/lib/financialSemanticStreamV3.js
