@@ -1,0 +1,152 @@
+name: P10-014A Local Strategy B Device Gate APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - impl/p10-014a-local-strategy-b-device-gate-2026-08-22
+
+permissions:
+  contents: read
+
+jobs:
+  build-p10-014a-local-strategy-b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout P10-014A branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact green base and diagnostic-only source scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="c39bf6126dc262fc0b53e497a9a0729c9757d20a"
+          bash .github/scripts/verify-source-scope.sh \
+            "$BASE" \
+            ".github/p10-014a-allowed-source.txt" \
+            App.js src android app.json eas.json package.json package-lock.json
+          echo "SOURCE_BASE=$BASE" >> "$GITHUB_ENV"
+          echo "[PASS] P10-014A source scope is diagnostic-only"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Load diagnostic environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const cfg=JSON.parse(fs.readFileSync('eas.json','utf8'));
+          const env=cfg?.build?.preview?.env||{};
+          for(const key of ['EXPO_PUBLIC_SUPABASE_URL','EXPO_PUBLIC_SUPABASE_KEY']){
+            const value=String(env[key]||'').trim();
+            if(!value) throw new Error(`[FAIL] Missing ${key} in eas.json preview env`);
+            fs.appendFileSync(process.env.GITHUB_ENV,`${key}=${value}\n`);
+          }
+          NODE
+          echo "EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE=0" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK=1" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B=1" >> "$GITHUB_ENV"
+          echo "[PASS] P10-014A local-only diagnostic flags enabled"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: P10-014A harness contract
+        run: node tests/phase10-restore-benchmark-memory.test.cjs .
+
+      - name: Static quality gate
+        run: npm run test:gate:static
+
+      - name: Runtime quality gate
+        run: npm run test:gate:runtime
+
+      - name: Android bundle verification
+        run: npm run verify:android
+
+      - name: Verify signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
+          ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
+          test "$ACTUAL" = "$EXPECTED"
+          echo "[PASS] signing certificate matches installed MYFI"
+
+      - name: Build signed P10-014A diagnostic APK
+        working-directory: android
+        env:
+          CI: "true"
+          EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE: "0"
+          EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK: "1"
+          EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B: "1"
+        run: |
+          chmod +x ./gradlew
+          ./gradlew app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Verify P10-014A build evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          SIZE="$(stat -c%s "$APK")"
+          {
+            echo "Patch=P10-014A-001-R1"
+            echo "Gate=LOCAL_STRATEGY_B_ACCEPTANCE"
+            echo "Subgate=CORE_STRATEGY_B_DEVICE_PATH"
+            echo "AcceptanceComplete=NO"
+            echo "NextRequiredSubgate=P10-014A-002_FAULT_AND_RESOURCE_MATRIX"
+            echo "CloudGate=CLOUD_HANDSHAKE_ACCEPTANCE"
+            echo "CloudHandshakeAcceptance=NOT_TESTED"
+            echo "ServerProofSource=synthetic_dev_only"
+            echo "SyntheticProofIsCloudEvidence=NO"
+            echo "GateSupabaseRpcCalled=NO"
+            echo "ProductionRestoreWiring=NO"
+            echo "P10_012_MigrationAppliedByGate=NO"
+            echo "MemoryEvidence=EXTERNAL_ADB_REQUIRED"
+            echo "SourceBase=$SOURCE_BASE"
+            echo "BuildCommit=$(git rev-parse HEAD)"
+            echo "Branch=$(git branch --show-current)"
+            echo "APK=$APK"
+            echo "SHA256=$SHA"
+            echo "SizeBytes=$SIZE"
+            echo "ExpoSDK=54"
+            echo "ReactNative=0.81.5"
+            echo "SQLiteSchemaVersion=8"
+            echo "FinancialDataChangedOutsideBenchmarkNamespaces=NO"
+            echo "SQLiteSchemaChanged=NO"
+            echo "MigrationRequired=NO"
+            echo "SecureStoreChanged=NO"
+            echo "SupabaseSchemaChanged=NO"
+            echo "DeviceAcceptance=PENDING"
+          } | tee P10-014A-build-evidence.txt
+          sha256sum "$APK" | tee app-release.apk.sha256
+
+      - name: Upload P10-014A diagnostic APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: P10-014A-local-strategy-b-device-gate
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            app-release.apk.sha256
+            P10-014A-build-evidence.txt
+          if-no-files-found: error
+          retention-days: 7
