@@ -126,6 +126,40 @@ export const advanceLiveGenerationInTransactionV13 = async ({
   return next;
 };
 
+// Restore identity transition. This never creates metadata: promotion must fail closed
+// if the live token is absent or not exactly bound to the outgoing epoch. The caller
+// owns the same SQLite transaction as the restore-epoch CAS, so either both identity
+// and generation move together or both roll back.
+export const rebindLiveGenerationForRestoreEpochInTransactionV13 = async ({
+  database, namespace, ledgerId, fromRestoreEpoch, toRestoreEpoch,
+} = {}) => {
+  const txn = requireTransaction(database);
+  const fromIdentity = requireIdentity({
+    namespace, ledgerId, restoreEpoch: fromRestoreEpoch,
+  });
+  if (!validEpoch(toRestoreEpoch) || Number(toRestoreEpoch) !== fromIdentity.restoreEpoch + 1) {
+    throw new Error('financial_live_generation_restore_epoch_transition_invalid');
+  }
+  const current = await readTokenRow({ database: txn, identity: fromIdentity });
+  if (current.token.generation >= Number.MAX_SAFE_INTEGER) {
+    throw new Error('financial_live_generation_overflow');
+  }
+  const next = Object.freeze({
+    ...current.token,
+    restoreEpoch: Number(toRestoreEpoch),
+    generation: current.token.generation + 1,
+  });
+  const updated = await txn.runAsync(
+    'UPDATE ledger_v7_meta SET value=?,updated_at=? WHERE key=? AND value=?',
+    serialiseToken(next), new Date().toISOString(),
+    tokenKeyForNamespace(fromIdentity.namespace), current.rawValue,
+  );
+  if (Number(updated?.changes || 0) !== 1) {
+    throw new Error('financial_live_generation_compare_and_swap_failed');
+  }
+  return next;
+};
+
 // This is intentionally a mutation-only bootstrap path. It establishes identity
 // and token together with the caller's real financial mutation; reads and plain
 // advances remain fail-closed and never initialise metadata on their own.

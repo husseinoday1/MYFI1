@@ -14,6 +14,7 @@ import {
 } from './localArchiveRepository';
 import {
   advanceLiveGenerationForMutationInTransactionV13,
+  rebindLiveGenerationForRestoreEpochInTransactionV13,
 } from './financialLiveGenerationV13';
 
 const readyDatabases = new WeakSet();
@@ -914,6 +915,14 @@ export const advanceLedgerRestoreEpochInTransactionV8 = async ({
     throw new Error('restore_epoch_local_compare_and_swap_failed');
   }
 
+  const generation = await rebindLiveGenerationForRestoreEpochInTransactionV13({
+    database: txn,
+    namespace: target,
+    ledgerId: String(identity.ledger_id),
+    fromRestoreEpoch: from,
+    toRestoreEpoch: next,
+  });
+
     // Start the new epoch with an empty cursor. Old outbox/inbox rows stay as
     // immutable evidence under the superseded epoch and are never selected as
     // current-epoch transport.
@@ -950,6 +959,7 @@ export const advanceLedgerRestoreEpochInTransactionV8 = async ({
     ledgerId: String(identity.ledger_id),
     fromEpoch: from,
     restoreEpoch: next,
+    liveGeneration: Number(generation.generation),
     protocolVersion: Math.max(2, Number(identity.protocol_version || 2)),
   };
 };

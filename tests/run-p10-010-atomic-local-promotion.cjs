@@ -68,7 +68,8 @@ const normalizeScope = value => value;`,
   )
   .replace(
     /import \{ advanceLiveGenerationForMutationInTransactionV13 \} from '\.\/financialLiveGenerationV13';/,
-    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used_in_p10_010'); };`,
+    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used_in_p10_010'); };
+const rebindLiveGenerationForRestoreEpochInTransactionV13 = async ({ toRestoreEpoch }) => ({ restoreEpoch: Number(toRestoreEpoch), generation: 1 });`,
   )
   .replace(/export const /g, 'const ');
 archiveSource += `\nmodule.exports = {
@@ -115,7 +116,8 @@ const mergeCloudWorkspaceCfg = (localCfg = {}, cloudCfg = {}) => ({ ...(localCfg
   )
   .replace(
     /import \{[\s\S]*?\} from '\.\/financialLiveGenerationV13';/,
-    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used_in_p10_010'); };`,
+    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used_in_p10_010'); };
+const rebindLiveGenerationForRestoreEpochInTransactionV13 = async ({ toRestoreEpoch }) => ({ restoreEpoch: Number(toRestoreEpoch), generation: 1 });`,
   )
   .replace(/export const /g, 'const ')
   .replace(/export async function /g, 'async function ')

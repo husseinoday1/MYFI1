@@ -54,8 +54,11 @@ source = source
     ].join('\n'),
   )
   .replace(
-    /import \{\s*advanceLiveGenerationForMutationInTransactionV13,?\s*\} from '\.\/financialLiveGenerationV13';/,
-    "const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used'); };",
+    /import \{[\s\S]*?\} from '\.\/financialLiveGenerationV13';/,
+    [
+      'const advanceLiveGenerationForMutationInTransactionV13 = async () => ({ generation: 0 });',
+      'const rebindLiveGenerationForRestoreEpochInTransactionV13 = async ({ fromRestoreEpoch, toRestoreEpoch } = {}) => ({ previousRestoreEpoch: Number(fromRestoreEpoch), restoreEpoch: Number(toRestoreEpoch), generation: 0 });',
+    ].join('\n'),
   )
   .replace(/export const /g, 'const ')
   .replace(/export async function /g, 'async function ');

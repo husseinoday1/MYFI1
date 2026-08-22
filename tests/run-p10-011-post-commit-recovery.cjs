@@ -61,7 +61,8 @@ const runLedgerExclusiveTransaction = (db, task) => globalThis.__P10_EXCLUSIVE__
   .replace(/import \{ defaultScopeForProfile, normalizeScope \} from '\.\/modules';/,
     `const defaultScopeForProfile = () => 'personal'; const normalizeScope = value => value;`)
   .replace(/import \{ advanceLiveGenerationForMutationInTransactionV13 \} from '\.\/financialLiveGenerationV13';/,
-    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used'); };`)
+    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used'); };
+const rebindLiveGenerationForRestoreEpochInTransactionV13 = async ({ toRestoreEpoch }) => ({ restoreEpoch: Number(toRestoreEpoch), generation: 1 });`)
   .replace(/export const /g, 'const ');
 archiveSource += `\nmodule.exports = {
   ensureColdArchiveSchema, clearColdArchiveNamespaceInTransaction,
@@ -91,7 +92,8 @@ const mergeCloudWorkspaceCfg = (localCfg = {}, cloudCfg = {}) => ({ ...(localCfg
     `const { clearColdArchiveNamespaceInTransaction, ensureColdArchiveSchema,
   replaceColdArchiveNamespaceFromStageInTransaction } = globalThis.__P10_ARCHIVE__;`)
   .replace(/import \{[\s\S]*?\} from '\.\/financialLiveGenerationV13';/,
-    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used'); };`)
+    `const advanceLiveGenerationForMutationInTransactionV13 = async () => { throw new Error('not_used'); };
+const rebindLiveGenerationForRestoreEpochInTransactionV13 = async ({ toRestoreEpoch }) => ({ restoreEpoch: Number(toRestoreEpoch), generation: 1 });`)
   .replace(/export const /g, 'const ').replace(/export async function /g, 'async function ').replace(/export function /g, 'function ');
 repositorySource += `\nmodule.exports = {
   FINANCIAL_LEDGER_SCHEMA_VERSION, FINANCIAL_LEDGER_V7_SCHEMA_SQL, FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL,

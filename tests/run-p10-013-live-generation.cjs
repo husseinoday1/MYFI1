@@ -12,6 +12,7 @@ source += `\nmodule.exports = {
   FINANCIAL_LIVE_GENERATION_TOKEN_VERSION, registerLiveGenerationInTransactionV13,
   readLiveGenerationInTransactionV13, advanceLiveGenerationInTransactionV13,
   advanceLiveGenerationForMutationInTransactionV13,
+  rebindLiveGenerationForRestoreEpochInTransactionV13,
 };`;
 const compiled = new Module(filename, module);
 compiled.filename = filename;
@@ -21,6 +22,7 @@ const {
   FINANCIAL_LIVE_GENERATION_TOKEN_VERSION, registerLiveGenerationInTransactionV13,
   readLiveGenerationInTransactionV13, advanceLiveGenerationInTransactionV13,
   advanceLiveGenerationForMutationInTransactionV13,
+  rebindLiveGenerationForRestoreEpochInTransactionV13,
 } = compiled.exports;
 
 class AsyncSqlite {
@@ -85,6 +87,43 @@ const inTransaction = task => db.withExclusiveTransactionAsync(task);
     assert.deepEqual([second.generation, third.generation], [2, 3],
       'two sequential successful operations must each advance exactly once');
 
+    const rebound = await inTransaction(txn => rebindLiveGenerationForRestoreEpochInTransactionV13({
+      database: txn, namespace: alpha.namespace, ledgerId: alpha.ledgerId,
+      fromRestoreEpoch: 7, toRestoreEpoch: 8,
+    }));
+    assert.deepEqual(rebound, { tokenVersion: 1, namespace: alpha.namespace, ledgerId: alpha.ledgerId, restoreEpoch: 8, generation: 4 },
+      'restore epoch transition must rebind and advance generation exactly once');
+    assert.equal((await inTransaction(txn => readLiveGenerationInTransactionV13({
+      database: txn, namespace: alpha.namespace, ledgerId: alpha.ledgerId, restoreEpoch: 8,
+    }))).generation, 4);
+    await assert.rejects(
+      inTransaction(txn => readLiveGenerationInTransactionV13({ database: txn, ...alpha })),
+      /financial_live_generation_binding_invalid/,
+      'outgoing epoch binding must no longer be readable after commit',
+    );
+    await assert.rejects(
+      inTransaction(txn => rebindLiveGenerationForRestoreEpochInTransactionV13({
+        database: txn, namespace: alpha.namespace, ledgerId: alpha.ledgerId,
+        fromRestoreEpoch: 8, toRestoreEpoch: 10,
+      })),
+      /financial_live_generation_restore_epoch_transition_invalid/,
+      'restore generation rebind must only allow epoch + 1',
+    );
+    await assert.rejects(
+      inTransaction(async txn => {
+        const moved = await rebindLiveGenerationForRestoreEpochInTransactionV13({
+          database: txn, namespace: alpha.namespace, ledgerId: alpha.ledgerId,
+          fromRestoreEpoch: 8, toRestoreEpoch: 9,
+        });
+        assert.equal(moved.generation, 5);
+        throw new Error('restore_generation_rollback');
+      }),
+      /restore_generation_rollback/,
+    );
+    assert.equal((await inTransaction(txn => readLiveGenerationInTransactionV13({
+      database: txn, namespace: alpha.namespace, ledgerId: alpha.ledgerId, restoreEpoch: 8,
+    }))).generation, 4, 'rolled-back epoch rebind must not advance durable generation');
+
     const mutationNamespace = 'account:mutation-bootstrap';
     const mutationFirst = await inTransaction(txn => advanceLiveGenerationForMutationInTransactionV13({
       database: txn, namespace: mutationNamespace,
@@ -108,16 +147,16 @@ const inTransaction = task => db.withExclusiveTransactionAsync(task);
 
     await inTransaction(txn => registerLiveGenerationInTransactionV13({ database: txn, ...beta }));
     await inTransaction(txn => advanceLiveGenerationInTransactionV13({ database: txn, ...beta }));
-    assert.equal((await inTransaction(txn => readLiveGenerationInTransactionV13({ database: txn, ...alpha }))).generation, 3);
+    assert.equal((await inTransaction(txn => readLiveGenerationInTransactionV13({ database: txn, ...alpha, restoreEpoch: 8 }))).generation, 4);
     assert.equal((await inTransaction(txn => readLiveGenerationInTransactionV13({ database: txn, ...beta }))).generation, 1,
       'namespaces must retain independent generations');
 
     await assert.rejects(
-      inTransaction(txn => readLiveGenerationInTransactionV13({ database: txn, ...alpha, ledgerId: 'wrong-ledger' })),
+      inTransaction(txn => readLiveGenerationInTransactionV13({ database: txn, ...alpha, ledgerId: 'wrong-ledger', restoreEpoch: 8 })),
       /financial_live_generation_binding_invalid/,
     );
     await assert.rejects(
-      inTransaction(txn => readLiveGenerationInTransactionV13({ database: txn, ...alpha, restoreEpoch: 8 })),
+      inTransaction(txn => readLiveGenerationInTransactionV13({ database: txn, ...alpha, restoreEpoch: 7 })),
       /financial_live_generation_binding_invalid/,
     );
     await db.runAsync(

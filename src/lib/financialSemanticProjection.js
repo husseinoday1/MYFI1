@@ -382,6 +382,18 @@ const canonicalArchiveV3 = archive => ({
   data: canonicalArchiveDataV3(archive?.data),
 });
 
+// P10-013 bounded proof adapters. These export the exact V3 row/config policies
+// already used by canonicalizeFinancialLedgerV3; they do not define a second
+// canonicalizer or change existing hash semantics.
+export const canonicalizeFinancialConfigItemV3 = workspace => canonicalFinancialConfigV2(workspace);
+export const canonicalizeFinancialAccountItemV3 = account => canonicalAccountV2(account);
+export const canonicalizeFinancialExchangeRateItemV3 = rate => canonicalExchangeRateV2(rate);
+export const canonicalizeFinancialTransactionItemV3 = transaction => canonicalTransactionV2(transaction);
+export const canonicalizeFinancialPostingItemV3 = posting => canonicalPostingV2(posting);
+export const canonicalizeFinancialLinkItemV3 = link => canonicalLinkV2(link);
+export const canonicalizeFinancialEntityItemV3 = entity => canonicalEntityV2(entity);
+export const canonicalizeFinancialArchiveMetadataV3 = data => canonicalArchiveDataV3(data);
+
 /**
  * Reduce a canonical read model (Step 1) to the form the semantic hash is taken over.
  * Pure and order-insensitive: collections are sorted, object keys are sorted at
