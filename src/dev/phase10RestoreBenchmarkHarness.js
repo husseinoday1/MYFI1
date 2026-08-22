@@ -44,6 +44,7 @@ import {
 } from '../lib/financialRestoreSqlValidatorV13';
 import { semanticHashNamespaceV3Bounded } from '../lib/financialSemanticStreamV3';
 import { SEMANTIC_HASH_V3_VERSION } from '../lib/financialSemanticProjection';
+import { normalizeCanonicalRestoreProofCountsV13 } from '../lib/financialRestoreProofV13';
 import {
   createStrategyBRestoreIntentV13InTransaction,
   promoteCanonicalRestoreStageV13,
@@ -141,6 +142,11 @@ const zeroCounts = value => (
     entities: 0, coldArchiveBundles: 0, coldArchiveRecords: 0,
   })
 );
+const exactProofCounts = (left, right) => {
+  const a = normalizeCanonicalRestoreProofCountsV13(left);
+  const b = normalizeCanonicalRestoreProofCountsV13(right);
+  return !!a && !!b && Object.keys(a).every(key => a[key] === b[key]);
+};
 
 const withRestoreTransaction = (database, task) => (
   runFinancialRestorePromotionTransactionV8({
@@ -229,44 +235,69 @@ const assertDisposableCurrentAccount = async database => {
 
 
 const readPromotionPreconditionEvidence = async ({
-  database, namespace, operationId, guard,
+  database, namespace, operationId, guard = null,
 }) => withRestoreTransaction(database, async txn => {
+  const effectiveGuard = guard?.ok === true
+    ? guard
+    : await guardRestoreSourceBeforeEpochRpcInTransactionV13({
+      database: txn, namespace, operationId,
+    });
+
+  if (effectiveGuard?.ok !== true) {
+    return Object.freeze({
+      guardOk: false,
+      immutableIntentMatch: false,
+      allMatch: false,
+      failedFields: Object.freeze(['guardOk']),
+      checks: Object.freeze({ guardOk: false }),
+      guardReason: text(effectiveGuard?.reason || 'unknown'),
+      guardDigestPrefix: '',
+    });
+  }
+
   const intent = parseObject((await txn.getFirstAsync(
     'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1',
     `restore_intent:${namespace}`,
   ))?.value);
   const checkpoint = parseObject((await txn.getFirstAsync(
     'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1',
-    `canonical_restore_checkpoint_v13:${namespace}:${guard.snapshot.checkpointId}`,
+    `canonical_restore_checkpoint_v13:${namespace}:${effectiveGuard.snapshot.checkpointId}`,
   ))?.value);
   const stageWorkspace = await txn.getFirstAsync(
     'SELECT source_mode,schema_version FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1',
-    guard.snapshot.stageNamespace,
+    effectiveGuard.snapshot.stageNamespace,
   );
 
-  const immutableIntentMatch = !!intent
-    && intent.version === 3
-    && Number.isSafeInteger(intent.stateVersion) && intent.stateVersion >= 1
-    && intent.namespace === guard.snapshot.namespace
-    && intent.ledgerId === guard.snapshot.ledgerId
-    && intent.operationId === guard.snapshot.operationId
-    && intent.stageNamespace === guard.snapshot.stageNamespace
-    && intent.checkpointId === guard.snapshot.checkpointId
-    && intent.checkpointNamespace === guard.snapshot.checkpointNamespace
-    && Number(intent.fromEpoch) === Number(guard.snapshot.sourceRestoreEpoch)
-    && Number(intent.toEpoch) === Number(guard.snapshot.sourceRestoreEpoch) + 1
-    && Number(intent.sourceLiveGeneration) === Number(guard.snapshot.sourceLiveGeneration)
-    && Number(intent.semanticHashVersion) === Number(guard.snapshot.semanticHashVersion)
-    && intent.incomingSemanticHash === guard.snapshot.incomingSemanticHash
-    && intent.checkpointSemanticHash === guard.checkpoint.semanticHash
-    && Number(intent.validatorVersion) === Number(guard.snapshot.validatorVersion)
-    && countsEqual(intent.incomingCounts, guard.snapshot.incomingCounts)
-    && countsEqual(intent.checkpointCounts, guard.checkpoint.counts)
-    && ['restore', 'undo'].includes(intent.triggerKind)
-    && intent.restoreProofDigest === guard.restoreProofDigest;
+  // Mirrors financialRestorePromotionV13.exactImmutableIntent with strict
+  // equality. Evidence is booleans/field names only: no financial rows/amounts.
+  const immutableChecks = Object.freeze({
+    intentPresent: !!intent,
+    intentVersion3: intent?.version === 3,
+    intentStateVersionValid: Number.isSafeInteger(intent?.stateVersion) && intent.stateVersion >= 1,
+    intentStatusAllowed: ['intent_pending_server', 'server_epoch_proven'].includes(intent?.status),
+    namespaceMatch: intent?.namespace === effectiveGuard.snapshot.namespace,
+    ledgerIdMatch: intent?.ledgerId === effectiveGuard.snapshot.ledgerId,
+    operationIdMatch: intent?.operationId === effectiveGuard.snapshot.operationId,
+    stageNamespaceMatch: intent?.stageNamespace === effectiveGuard.snapshot.stageNamespace,
+    checkpointIdMatch: intent?.checkpointId === effectiveGuard.snapshot.checkpointId,
+    checkpointNamespaceMatch: intent?.checkpointNamespace === effectiveGuard.snapshot.checkpointNamespace,
+    fromEpochStrictMatch: intent?.fromEpoch === effectiveGuard.snapshot.sourceRestoreEpoch,
+    toEpochStrictMatch: intent?.toEpoch === effectiveGuard.snapshot.sourceRestoreEpoch + 1,
+    sourceLiveGenerationStrictMatch: intent?.sourceLiveGeneration === effectiveGuard.snapshot.sourceLiveGeneration,
+    semanticHashVersionStrictMatch: intent?.semanticHashVersion === effectiveGuard.snapshot.semanticHashVersion,
+    incomingSemanticHashMatch: intent?.incomingSemanticHash === effectiveGuard.snapshot.incomingSemanticHash,
+    checkpointSemanticHashMatch: intent?.checkpointSemanticHash === effectiveGuard.checkpoint.semanticHash,
+    validatorVersionStrictMatch: intent?.validatorVersion === effectiveGuard.snapshot.validatorVersion,
+    incomingCountsExact: exactProofCounts(intent?.incomingCounts, effectiveGuard.snapshot.incomingCounts),
+    checkpointCountsExact: exactProofCounts(intent?.checkpointCounts, effectiveGuard.checkpoint.counts),
+    triggerKindValid: ['restore', 'undo'].includes(intent?.triggerKind),
+    restoreProofDigestMatch: intent?.restoreProofDigest === effectiveGuard.restoreProofDigest,
+  });
+  const immutableIntentMatch = Object.values(immutableChecks).every(Boolean);
 
-  return Object.freeze({
-    guardOk: guard?.ok === true,
+  const checks = Object.freeze({
+    guardOk: true,
+    ...immutableChecks,
     immutableIntentMatch,
     intentServerEpochProven: intent?.status === 'server_epoch_proven',
     intentOperationBackupRestore: intent?.operation === 'backup_restore',
@@ -279,6 +310,23 @@ const readPromotionPreconditionEvidence = async ({
     stageWorkspacePresent: !!stageWorkspace,
     stageSourceModeShadow: text(stageWorkspace?.source_mode) === 'shadow',
     stageSchemaVersion7: Number(stageWorkspace?.schema_version) === 7,
+  });
+  const failedFields = Object.freeze(
+    Object.entries(checks).filter(([, value]) => value !== true).map(([name]) => name),
+  );
+
+  return Object.freeze({
+    guardOk: true,
+    immutableIntentMatch,
+    intentServerEpochProven: checks.intentServerEpochProven,
+    checkpointReady: checks.checkpointReady,
+    stageSourceModeShadow: checks.stageSourceModeShadow,
+    stageSchemaVersion7: checks.stageSchemaVersion7,
+    allMatch: failedFields.length === 0,
+    failedFields,
+    checks,
+    guardReason: null,
+    guardDigestPrefix: text(effectiveGuard.restoreProofDigest).slice(0, 12),
   });
 });
 
@@ -630,7 +678,9 @@ const buildCheckpointBounded = async ({ database, namespace, operationId, checkp
   return metrics;
 };
 
-const recordSyntheticServerProof = async ({ database, namespace, operationId, guard, authUserId, deviceId, allowRebind = false }) => {
+const recordSyntheticServerProof = async ({
+  database, namespace, operationId, guard, authUserId, deviceId, allowRebind = false,
+}) => {
   assertGate(P10_014A_LOCAL_FLAG && validBenchmarkNamespace(namespace), 'synthetic_proof_scope_invalid');
   const serverProof = {
     proofSource: SYNTHETIC_SERVER_PROOF_SOURCE,
@@ -648,7 +698,48 @@ const recordSyntheticServerProof = async ({ database, namespace, operationId, gu
     provedAt: new Date().toISOString(),
   };
   assertGate(serverProof.proofSource === SYNTHETIC_SERVER_PROOF_SOURCE, 'synthetic_proof_label_missing');
+
   return withRestoreTransaction(database, async txn => {
+    const key = syntheticProofKey(namespace, operationId);
+    const existingMarker = await txn.getFirstAsync(
+      'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1', key,
+    );
+
+    if (allowRebind) {
+      // Dev-only instrumentation repair. The old implementation changed status
+      // but kept stale immutable fields and attempted server proof before the
+      // rebuild. Delete the stale dev intent + synthetic marker atomically, then
+      // recreate the intent from the freshly re-derived production guard.
+      const intentKey = `restore_intent:${namespace}`;
+      const staleIntentRow = await txn.getFirstAsync(
+        'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1', intentKey,
+      );
+      assertGate(!!staleIntentRow?.value, 'rebind_intent_missing');
+      const deletedIntent = await txn.runAsync(
+        'DELETE FROM ledger_v7_meta WHERE key=? AND value=?',
+        intentKey, String(staleIntentRow.value),
+      );
+      assertGate(Number(deletedIntent?.changes || 0) === 1, 'rebind_intent_delete_failed');
+
+      if (existingMarker?.value != null) {
+        const deletedMarker = await txn.runAsync(
+          'DELETE FROM ledger_v7_meta WHERE key=? AND value=?',
+          key, String(existingMarker.value),
+        );
+        assertGate(Number(deletedMarker?.changes || 0) === 1, 'rebind_marker_clear_failed');
+      }
+
+      await createStrategyBRestoreIntentV13InTransaction({
+        database: txn,
+        guardResult: guard,
+        authUserId,
+        deviceId,
+        triggerKind: 'restore',
+      });
+    } else {
+      assertGate(!existingMarker, 'synthetic_proof_marker_already_exists');
+    }
+
     const intent = await recordStrategyBServerProofV13InTransaction({
       database: txn, namespace, operationId, serverProof,
     });
@@ -668,30 +759,6 @@ const recordSyntheticServerProof = async ({ database, namespace, operationId, gu
       syntheticProofCountsAsCloudEvidence: false,
       recordedAt: new Date().toISOString(),
     };
-    const key = syntheticProofKey(namespace, operationId);
-    const existing = await txn.getFirstAsync('SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1', key);
-    if (existing && allowRebind) {
-      // Dev-only digest rebinding: the intent was built on an earlier guard
-      // derivation whose restoreProofDigest no longer matches the state that
-      // promoteCanonicalRestoreStageV13 will re-derive. Reset the intent to
-      // intent_pending_server and clear the old marker so both can be rebuilt
-      // atomically against the current guard below.
-      const staleIntentRow = await txn.getFirstAsync('SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1', `restore_intent:${namespace}`);
-      const staleIntent = parseObject(staleIntentRow?.value);
-      assertGate(!!staleIntent, 'rebind_intent_missing');
-      const resetIntent = { ...staleIntent, status: 'intent_pending_server' };
-      delete resetIntent.serverEventId;
-      delete resetIntent.serverProvedAt;
-      const resetUpdated = await txn.runAsync(
-        'UPDATE ledger_v7_meta SET value=?,updated_at=? WHERE key=? AND value=?',
-        JSON.stringify(resetIntent), new Date().toISOString(), `restore_intent:${namespace}`, String(staleIntentRow.value),
-      );
-      assertGate(Number(resetUpdated?.changes || 0) === 1, 'rebind_intent_reset_failed');
-      const removed = await txn.runAsync('DELETE FROM ledger_v7_meta WHERE key=?', key);
-      assertGate(Number(removed?.changes || 0) === 1, 'rebind_marker_clear_failed');
-    } else {
-      assertGate(!existing, 'synthetic_proof_marker_already_exists');
-    }
     const inserted = await txn.runAsync(
       'INSERT INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)',
       key, JSON.stringify(durableSyntheticEvidence), durableSyntheticEvidence.recordedAt,
@@ -984,48 +1051,71 @@ const runTier = async ({ database, tier, baseToken }) => {
       );
       syntheticServerProofRecordMs = nowMs() - syntheticStarted;
 
-      const promotionPreconditions = await readPromotionPreconditionEvidence({
+      let promotionPreconditions = await readPromotionPreconditionEvidence({
         database, namespace, operationId, guard,
       });
       console.log('[P10_014A_PROMOTION_PRECONDITION]', JSON.stringify({
         tierId: tier.id,
-        ...promotionPreconditions,
+        allMatch: promotionPreconditions.allMatch,
+        failedFields: promotionPreconditions.failedFields,
+        guardDigestPrefix: promotionPreconditions.guardDigestPrefix,
       }));
 
-      // Dev-only digest rebind (fail-visible): promoteCanonicalRestoreStageV13
-      // re-derives its own guard from the durable state. If any input to
-      // deriveCanonicalRestoreProofDigestV13 changed between the intent build
-      // and the promotion call, the recomputed digest no longer matches
-      // intent.restoreProofDigest and the fail-closed precondition rejects.
-      // Re-derive here with the exact production function; if the digest moved,
-      // atomically rebuild intent + synthetic proof against the fresh guard so
-      // the promotion's own derivation matches. If it still mismatches after a
-      // rebuild, fail loudly instead of letting promotion hide the cause.
+      // Dev-only digest rebind. Re-derive using the exact production guard. The
+      // rebind path now truly recreates the intent/proof if the digest changed.
       let activeGuard = guard;
       const rederiveStarted = nowMs();
-      const redervedGuard = await withRestoreTransaction(database, txn => (
+      const rederivedGuard = await withRestoreTransaction(database, txn => (
         guardRestoreSourceBeforeEpochRpcInTransactionV13({ database: txn, namespace, operationId })
       ));
-      assertGate(redervedGuard?.ok === true, redervedGuard?.reason || 'pre_promotion_rederive_failed');
-      if (redervedGuard.restoreProofDigest !== guard.restoreProofDigest) {
+      assertGate(rederivedGuard?.ok === true, rederivedGuard?.reason || 'pre_promotion_rederive_failed');
+      if (rederivedGuard.restoreProofDigest !== guard.restoreProofDigest) {
         console.log('[P10_014A_DIGEST_REBIND]', JSON.stringify({
           tierId: tier.id,
           previous: text(guard.restoreProofDigest).slice(0, 12),
-          current: text(redervedGuard.restoreProofDigest).slice(0, 12),
+          current: text(rederivedGuard.restoreProofDigest).slice(0, 12),
         }));
         await recordSyntheticServerProof({
-          database, namespace, operationId, guard: redervedGuard, authUserId, deviceId,
+          database, namespace, operationId, guard: rederivedGuard, authUserId, deviceId,
           allowRebind: true,
         });
-        activeGuard = redervedGuard;
+        activeGuard = rederivedGuard;
       }
       const rebindMs = nowMs() - rederiveStarted;
 
       const postRebindPreconditions = await readPromotionPreconditionEvidence({
         database, namespace, operationId, guard: activeGuard,
       });
-      assertGate(postRebindPreconditions.immutableIntentMatch === true && postRebindPreconditions.intentServerEpochProven === true,
-        'post_rebind_precondition_mismatch', { tierId: tier.id });
+      console.log('[P10_014A_PRECONDITION_DIFF]', JSON.stringify({
+        tierId: tier.id,
+        allMatch: postRebindPreconditions.allMatch,
+        failedFields: postRebindPreconditions.failedFields,
+        guardDigestPrefix: postRebindPreconditions.guardDigestPrefix,
+      }));
+      assertGate(postRebindPreconditions.allMatch === true,
+        'post_rebind_precondition_mismatch', {
+          tierId: tier.id,
+          failedFields: postRebindPreconditions.failedFields,
+        });
+
+      // One final fresh-guard transaction immediately before production
+      // promotion. This catches any between-transaction state drift without
+      // exposing financial payloads.
+      const immediatePreconditions = await readPromotionPreconditionEvidence({
+        database, namespace, operationId,
+      });
+      promotionPreconditions = immediatePreconditions;
+      console.log('[P10_014A_PRE_PROMOTION_EXACT]', JSON.stringify({
+        tierId: tier.id,
+        allMatch: immediatePreconditions.allMatch,
+        failedFields: immediatePreconditions.failedFields,
+        guardDigestPrefix: immediatePreconditions.guardDigestPrefix,
+      }));
+      assertGate(immediatePreconditions.allMatch === true,
+        'pre_promotion_exact_precondition_mismatch', {
+          tierId: tier.id,
+          failedFields: immediatePreconditions.failedFields,
+        });
 
       const promotionStarted = nowMs();
       promoted = await promoteCanonicalRestoreStageV13({
@@ -1033,6 +1123,19 @@ const runTier = async ({ database, tier, baseToken }) => {
       });
       atomicPromotionMs = nowMs() - promotionStarted;
       void rebindMs;
+
+      if (promoted?.ok !== true) {
+        const postFailurePreconditions = await readPromotionPreconditionEvidence({
+          database, namespace, operationId,
+        });
+        console.error('[P10_014A_PROMOTION_POSTFAIL_DIFF]', JSON.stringify({
+          tierId: tier.id,
+          reason: text(promoted?.reason || 'unknown'),
+          allMatch: postFailurePreconditions.allMatch,
+          failedFields: postFailurePreconditions.failedFields,
+          guardDigestPrefix: postFailurePreconditions.guardDigestPrefix,
+        }));
+      }
       assertGate(promoted?.ok === true, promoted?.reason || 'atomic_promotion_failed');
     });
     const localFinalFenceMs = nowMs() - localFenceStarted;

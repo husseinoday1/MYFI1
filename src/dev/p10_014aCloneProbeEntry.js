@@ -274,14 +274,14 @@ async function runCloneProbe() {
 }
 
 function CloneProbeApp() {
-  const [status, setStatus] = useState('RUNNING');
+  const [status, setStatus] = useState({ label: 'RUNNING', code: '' });
 
   useEffect(() => {
     let active = true;
     runCloneProbe()
       .then(result => {
         if (!active) return;
-        setStatus('PASS');
+        setStatus({ label: 'PASS', code: '' });
         console.info(LOG, 'PASS', JSON.stringify({
           ok: true,
           patchId: result.patchId,
@@ -294,18 +294,32 @@ function CloneProbeApp() {
       })
       .catch(error => {
         if (!active) return;
-        setStatus('FAIL');
-        console.error(LOG, 'FAIL', JSON.stringify({
-          code: String(error?.message || error || 'unknown').slice(0, 240),
-        }));
+        const code = String(error?.message || error || 'unknown').slice(0, 240);
+        setStatus({ label: 'FAIL', code });
+        console.error(LOG, 'FAIL', JSON.stringify({ code }));
       });
     return () => { active = false; };
   }, []);
 
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-      <Text>P10-014A R5.2 Clone Probe</Text>
-      <Text>{status}</Text>
+    <View style={{
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 24,
+      backgroundColor: '#ffffff',
+    }}>
+      <Text style={{ color: '#111111', fontSize: 20, fontWeight: '700', marginBottom: 12 }}>
+        P10-014A R5.2 Clone Probe
+      </Text>
+      <Text style={{ color: '#111111', fontSize: 18, marginBottom: 10 }}>
+        {status.label}
+      </Text>
+      {!!status.code && (
+        <Text selectable style={{ color: '#111111', fontSize: 13, textAlign: 'center' }}>
+          {status.code}
+        </Text>
+      )}
     </View>
   );
 }

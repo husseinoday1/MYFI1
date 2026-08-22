@@ -50,6 +50,12 @@ for (const required of [
   'runFinancialMaintenanceTask',
   'runFinancialRestorePromotionTransactionV8',
   '[P10_014A_PROMOTION_PRECONDITION]',
+  '[P10_014A_PRECONDITION_DIFF]',
+  '[P10_014A_PRE_PROMOTION_EXACT]',
+  '[P10_014A_PROMOTION_POSTFAIL_DIFF]',
+  'failedFields',
+  'normalizeCanonicalRestoreProofCountsV13',
+  'rebind_intent_delete_failed',
   'immutableIntentMatch',
   'intentServerEpochProven',
   'checkpointReady',
@@ -82,6 +88,9 @@ for (const required of [
   '__MYFI_P10_014A_CLONE_NONCE__',
   "sourceConnectionNotPristine".replace('sourceConnectionNotPristine','p10_clone_probe_source_connection_not_pristine'),
   '[P10_014A_CLONE_PROBE]',
+  "setStatus({ label: 'FAIL', code })",
+  "backgroundColor: '#ffffff'",
+  '{status.code}',
 ]) {
   assert(entry.includes(required), `R5 clone entry missing: ${required}`);
 }
