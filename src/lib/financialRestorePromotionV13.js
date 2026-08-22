@@ -13,6 +13,11 @@ export const RESTORE_INTENT_V13_VERSION = 3;
 export const RESTORE_PROMOTION_V13_VERSION = 1;
 export const RESTORE_UNDO_POINTER_V13_VERSION = 1;
 
+// P10-014A-001 R5.2 device-only diagnostic. Normal MYFI builds do not emit this
+// marker because the clone-probe flag is absent. The marker contains field names
+// and a short proof-digest prefix only; it never logs financial payloads or values.
+const P10_014A_CLONE_PROBE_DIAGNOSTICS = process.env.EXPO_PUBLIC_P10_014A_CLONE_PROBE === '1';
+
 const text = value => String(value ?? '').trim();
 const object = value => !!value && typeof value === 'object' && !Array.isArray(value);
 const parse = value => { try { const v = JSON.parse(String(value ?? '')); return object(v) ? v : null; } catch { return null; } };
@@ -147,10 +152,61 @@ export const promoteCanonicalRestoreStageV13 = async ({
       const checkpoint = parse(checkpointRow?.value);
       const stageWorkspaceRow = await actions.database.getFirstAsync('SELECT source_mode,schema_version,payload_json FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1', guard.snapshot.stageNamespace);
       const currentWorkspaceRow = await actions.database.getFirstAsync('SELECT payload_json FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1', target);
+
+      // Diagnostic mirror of the fail-closed production precondition. Keep the
+      // production if-statement below unchanged; this object only identifies which
+      // exact field was false inside the same exclusive promotion transaction.
+      const promotionPreconditionDiagnosticChecks = Object.freeze({
+        intentPresent: !!intent,
+        intentVersion3: intent?.version === RESTORE_INTENT_V13_VERSION,
+        intentStateVersionValid: Number.isSafeInteger(intent?.stateVersion) && intent.stateVersion >= 1,
+        intentStatusAllowed: ['intent_pending_server', 'server_epoch_proven'].includes(intent?.status),
+        namespaceMatch: intent?.namespace === guard.snapshot.namespace,
+        ledgerIdMatch: intent?.ledgerId === guard.snapshot.ledgerId,
+        operationIdMatch: intent?.operationId === guard.snapshot.operationId,
+        stageNamespaceMatch: intent?.stageNamespace === guard.snapshot.stageNamespace,
+        checkpointIdMatch: intent?.checkpointId === guard.snapshot.checkpointId,
+        checkpointNamespaceMatch: intent?.checkpointNamespace === guard.snapshot.checkpointNamespace,
+        fromEpochStrictMatch: intent?.fromEpoch === guard.snapshot.sourceRestoreEpoch,
+        toEpochStrictMatch: intent?.toEpoch === guard.snapshot.sourceRestoreEpoch + 1,
+        sourceLiveGenerationStrictMatch: intent?.sourceLiveGeneration === guard.snapshot.sourceLiveGeneration,
+        semanticHashVersionStrictMatch: intent?.semanticHashVersion === guard.snapshot.semanticHashVersion,
+        incomingSemanticHashMatch: intent?.incomingSemanticHash === guard.snapshot.incomingSemanticHash,
+        checkpointSemanticHashMatch: intent?.checkpointSemanticHash === guard.checkpoint.semanticHash,
+        validatorVersionStrictMatch: intent?.validatorVersion === guard.snapshot.validatorVersion,
+        incomingCountsExact: exactCounts(intent?.incomingCounts, guard.snapshot.incomingCounts),
+        checkpointCountsExact: exactCounts(intent?.checkpointCounts, guard.checkpoint.counts),
+        triggerKindValid: ['restore', 'undo'].includes(intent?.triggerKind),
+        restoreProofDigestMatch: intent?.restoreProofDigest === guard.restoreProofDigest,
+        immutableIntentCompositeMatch: !!exactImmutableIntent(intent, guard),
+        intentServerEpochProven: intent?.status === 'server_epoch_proven',
+        intentOperationBackupRestore: intent?.operation === 'backup_restore',
+        authUserIdUuid: uuid(intent?.authUserId),
+        serverEventIdUuid: uuid(intent?.serverEventId),
+        deviceIdPresent: !!text(intent?.deviceId),
+        checkpointPresent: !!checkpoint,
+        checkpointReady: checkpoint?.status === 'READY',
+        checkpointOperationMatch: checkpoint?.operationId === operation,
+        stageWorkspacePresent: !!stageWorkspaceRow,
+        stageSourceModeShadow: text(stageWorkspaceRow?.source_mode) === 'shadow',
+        stageSchemaVersionMatch: Number(stageWorkspaceRow?.schema_version) === FINANCIAL_LEDGER_SCHEMA_VERSION,
+      });
+      const promotionPreconditionFailedFields = Object.freeze(
+        Object.entries(promotionPreconditionDiagnosticChecks)
+          .filter(([, value]) => value !== true)
+          .map(([name]) => name),
+      );
+
       if (!exactImmutableIntent(intent, guard) || intent.status !== 'server_epoch_proven' || intent.operation !== 'backup_restore'
           || !uuid(intent.authUserId) || !uuid(intent.serverEventId) || !text(intent.deviceId)
           || !checkpoint || checkpoint.status !== 'READY' || checkpoint.operationId !== operation
           || text(stageWorkspaceRow?.source_mode) !== 'shadow' || Number(stageWorkspaceRow?.schema_version) !== FINANCIAL_LEDGER_SCHEMA_VERSION) {
+        if (P10_014A_CLONE_PROBE_DIAGNOSTICS) {
+          console.error('[P10_014A_PRODUCTION_PRECONDITION_DIFF]', JSON.stringify({
+            failedFields: promotionPreconditionFailedFields,
+            guardDigestPrefix: text(guard.restoreProofDigest).slice(0, 12),
+          }));
+        }
         throw new Error('canonical_restore_promotion_v13_precondition_failed');
       }
       const stagePayload = parse(stageWorkspaceRow.payload_json);

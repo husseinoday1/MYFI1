@@ -31,8 +31,9 @@ jobs:
           echo "SOURCE_BASE=$BASE" >> "$GITHUB_ENV"
           test "$(git diff "$BASE"...HEAD -- App.js src/store src/lib/supabase.js android app.json eas.json package.json package-lock.json | wc -l)" -eq 0
           CHANGED_LIBS="$(git diff --name-only "$BASE"...HEAD -- src/lib | sort)"
-          test "$CHANGED_LIBS" = "src/lib/ledgerDatabase.js"
-          echo "[PASS] only reviewed diagnostic override changed under src/lib"
+          EXPECTED_LIBS=$'src/lib/financialRestorePromotionV13.js\nsrc/lib/ledgerDatabase.js'
+          test "$CHANGED_LIBS" = "$EXPECTED_LIBS"
+          echo "[PASS] only reviewed P10-014A diagnostic files changed under src/lib"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

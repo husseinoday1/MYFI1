@@ -6,6 +6,7 @@ const root = path.resolve(process.argv[2] || '.');
 const source = fs.readFileSync(path.join(root, 'src', 'dev', 'phase10RestoreBenchmarkHarness.js'), 'utf8');
 const entry = fs.readFileSync(path.join(root, 'src', 'dev', 'p10_014aCloneProbeEntry.js'), 'utf8');
 const ledgerDb = fs.readFileSync(path.join(root, 'src', 'lib', 'ledgerDatabase.js'), 'utf8');
+const promotion = fs.readFileSync(path.join(root, 'src', 'lib', 'financialRestorePromotionV13.js'), 'utf8');
 const workflow = fs.readFileSync(
   path.join(root, '.github', 'workflows', 'p10-014a-local-strategy-b-device-gate.yml'),
   'utf8',
@@ -126,6 +127,28 @@ assert(
 );
 
 for (const required of [
+  "P10_014A_CLONE_PROBE_DIAGNOSTICS = process.env.EXPO_PUBLIC_P10_014A_CLONE_PROBE === '1'",
+  'promotionPreconditionDiagnosticChecks',
+  'promotionPreconditionFailedFields',
+  '[P10_014A_PRODUCTION_PRECONDITION_DIFF]',
+  'guardDigestPrefix',
+  'immutableIntentCompositeMatch',
+  'stageSchemaVersionMatch',
+]) {
+  assert(promotion.includes(required), `R5.2 production-transaction diagnostic missing: ${required}`);
+}
+assert(
+  promotion.indexOf('if (P10_014A_CLONE_PROBE_DIAGNOSTICS)')
+    < promotion.indexOf("throw new Error('canonical_restore_promotion_v13_precondition_failed')"),
+  'R5.2 diagnostic marker must execute only on the existing production precondition failure path',
+);
+assert.equal(
+  promotion.includes("console.error('[P10_014A_PRODUCTION_PRECONDITION_DIFF]', JSON.stringify({\n            intent:"),
+  false,
+  'R5.2 production diagnostic must not serialize the restore intent payload',
+);
+
+for (const required of [
   'P10-014A Original Package Clone Probe APK',
   "pkg.main='src/dev/p10_014aCloneProbeEntry.js'",
   "applicationId 'com.myfi.app'",
@@ -156,6 +179,7 @@ for (const required of [
   'src/dev/p10_014aDiagnosticEntry.js',
   'src/dev/p10_014aCloneProbeEntry.js',
   'src/lib/ledgerDatabase.js',
+  'src/lib/financialRestorePromotionV13.js',
 ]) {
   assert(allowlist.includes(required), `R5 allowlist missing ${required}`);
 }
