@@ -29,7 +29,8 @@ jobs:
             ".github/p10-014a-allowed-source.txt" \
             App.js src android app.json eas.json package.json package-lock.json
           echo "SOURCE_BASE=$BASE" >> "$GITHUB_ENV"
-          echo "[PASS] P10-014A source scope is diagnostic-only"
+          test "$(git diff "$BASE"...HEAD -- App.js src/store src/lib/supabase.js android app.json eas.json package.json package-lock.json | wc -l)" -eq 0
+          echo "[PASS] P10-014A production wiring/native/package sources unchanged"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -63,12 +64,13 @@ jobs:
           echo "EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE=0" >> "$GITHUB_ENV"
           echo "EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK=1" >> "$GITHUB_ENV"
           echo "EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B=1" >> "$GITHUB_ENV"
-          echo "[PASS] P10-014A local-only diagnostic flags enabled"
+          echo "EXPO_PUBLIC_FRESH_TEST=1" >> "$GITHUB_ENV"
+          echo "[PASS] P10-014A isolated fresh-test flags enabled"
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: P10-014A harness contract
+      - name: P10-014A harness and bootstrap contract
         run: node tests/phase10-restore-benchmark-memory.test.cjs .
 
       - name: Static quality gate
@@ -77,7 +79,46 @@ jobs:
       - name: Runtime quality gate
         run: npm run test:gate:runtime
 
-      - name: Android bundle verification
+      - name: Select diagnostic entrypoint and isolated Android application id
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+
+          const pkgPath='package.json';
+          const pkg=JSON.parse(fs.readFileSync(pkgPath,'utf8'));
+          if(pkg.main !== 'index.js') throw new Error(`[FAIL] unexpected package main before diagnostic switch: ${pkg.main}`);
+          pkg.main='src/dev/p10_014aDiagnosticEntry.js';
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg,null,2)+'\n');
+
+          const gradlePath='android/app/build.gradle';
+          let gradle=fs.readFileSync(gradlePath,'utf8');
+          const needle="applicationId 'com.myfi.app'";
+          const matches=gradle.split(needle).length-1;
+          if(matches !== 1) throw new Error(`[FAIL] expected one MYFI applicationId, found ${matches}`);
+          gradle=gradle.replace(needle,"applicationId 'com.myfi.app.p10a'");
+          fs.writeFileSync(gradlePath,gradle);
+
+          const stringsPath='android/app/src/main/res/values/strings.xml';
+          let strings=fs.readFileSync(stringsPath,'utf8');
+          const appName=/<string name="app_name">[^<]*<\/string>/;
+          if(!appName.test(strings)) throw new Error('[FAIL] app_name resource missing');
+          strings=strings.replace(appName,'<string name="app_name">MYFI P10-014A</string>');
+          fs.writeFileSync(stringsPath,strings);
+          NODE
+
+          test "$(node -p "require('./package.json').main")" = "src/dev/p10_014aDiagnosticEntry.js"
+          grep -Fq "applicationId 'com.myfi.app.p10a'" android/app/build.gradle
+          grep -Fq '<string name="app_name">MYFI P10-014A</string>' android/app/src/main/res/values/strings.xml
+          echo "[PASS] diagnostic entrypoint + isolated application id prepared in CI workspace only"
+
+      - name: Android diagnostic bundle verification
+        env:
+          EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE: "0"
+          EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK: "1"
+          EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B: "1"
+          EXPO_PUBLIC_FRESH_TEST: "1"
         run: npm run verify:android
 
       - name: Verify signing certificate
@@ -87,15 +128,16 @@ jobs:
           EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
           ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
           test "$ACTUAL" = "$EXPECTED"
-          echo "[PASS] signing certificate matches installed MYFI"
+          echo "[PASS] diagnostic APK signing certificate verified"
 
-      - name: Build signed P10-014A diagnostic APK
+      - name: Build signed isolated P10-014A diagnostic APK
         working-directory: android
         env:
           CI: "true"
           EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE: "0"
           EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK: "1"
           EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B: "1"
+          EXPO_PUBLIC_FRESH_TEST: "1"
         run: |
           chmod +x ./gradlew
           ./gradlew app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
@@ -109,7 +151,7 @@ jobs:
           SHA="$(sha256sum "$APK" | awk '{print $1}')"
           SIZE="$(stat -c%s "$APK")"
           {
-            echo "Patch=P10-014A-001-R1"
+            echo "Patch=P10-014A-001-R2"
             echo "Gate=LOCAL_STRATEGY_B_ACCEPTANCE"
             echo "Subgate=CORE_STRATEGY_B_DEVICE_PATH"
             echo "AcceptanceComplete=NO"
@@ -125,6 +167,11 @@ jobs:
             echo "SourceBase=$SOURCE_BASE"
             echo "BuildCommit=$(git rev-parse HEAD)"
             echo "Branch=$(git branch --show-current)"
+            echo "DiagnosticEntry=src/dev/p10_014aDiagnosticEntry.js"
+            echo "ApplicationId=com.myfi.app.p10a"
+            echo "AppLabel=MYFI P10-014A"
+            echo "FreshTestMode=YES"
+            echo "ProductionAppDataIsolated=YES"
             echo "APK=$APK"
             echo "SHA256=$SHA"
             echo "SizeBytes=$SIZE"
@@ -143,7 +190,7 @@ jobs:
       - name: Upload P10-014A diagnostic APK
         uses: actions/upload-artifact@v4
         with:
-          name: P10-014A-local-strategy-b-device-gate
+          name: P10-014A-local-strategy-b-device-gate-R2
           path: |
             android/app/build/outputs/apk/release/app-release.apk
             app-release.apk.sha256

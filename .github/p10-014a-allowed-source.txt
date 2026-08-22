@@ -1,3 +1,4 @@
-# P10-014A-001 source scope relative to exact green base c39bf6126dc262fc0b53e497a9a0729c9757d20a.
-# This gate is diagnostic-only. No production restore, UI, store, sync, or Supabase source may differ.
+# P10-014A source scope relative to exact green base c39bf6126dc262fc0b53e497a9a0729c9757d20a.
+# Diagnostic-only source. Production App.js/store/sync/Supabase/native source must remain unchanged.
 src/dev/phase10RestoreBenchmarkHarness.js
+src/dev/p10_014aDiagnosticEntry.js

@@ -92,4 +92,50 @@ assert(
   'P10-014A synthetic proof must carry durable non-cloud evidence atomically with the production recorder',
 );
 
-console.log('MYFI P10-014A LOCAL STRATEGY B DEVICE HARNESS CONTRACT: PASS');
+
+const entry = fs.readFileSync(
+  path.join(root, 'src', 'dev', 'p10_014aDiagnosticEntry.js'),
+  'utf8',
+);
+const workflow = fs.readFileSync(
+  path.join(root, '.github', 'workflows', 'p10-014a-local-strategy-b-device-gate.yml'),
+  'utf8',
+);
+const allowlist = fs.readFileSync(
+  path.join(root, '.github', 'p10-014a-allowed-source.txt'),
+  'utf8',
+);
+
+for (const required of [
+  "import '../../index'",
+  "useStore.subscribe(maybeStart)",
+  "state?.workspaceReady",
+  "PHASE10_RESTORE_BENCHMARK_ENABLED",
+  "runPhase10RestoreBenchmarkHarness()",
+  "[P10_014A_DEVICE_GATE]",
+]) {
+  assert(entry.includes(required), `P10-014A diagnostic entry missing: ${required}`);
+}
+assert.equal(entry.includes("import '../../App'"), false, 'Diagnostic entry must use the normal root entry, not bypass app registration');
+assert.equal(entry.includes('supabase'), false, 'Diagnostic entry must not import Supabase');
+
+for (const required of [
+  "pkg.main='src/dev/p10_014aDiagnosticEntry.js'",
+  "applicationId 'com.myfi.app.p10a'",
+  'MYFI P10-014A',
+  'EXPO_PUBLIC_FRESH_TEST=1',
+  'ProductionAppDataIsolated=YES',
+  'DiagnosticEntry=src/dev/p10_014aDiagnosticEntry.js',
+  'ApplicationId=com.myfi.app.p10a',
+  'artifact@v4',
+  'P10-014A-local-strategy-b-device-gate-R2',
+]) {
+  assert(workflow.includes(required), `P10-014A workflow missing isolated diagnostic build contract: ${required}`);
+}
+assert(
+  allowlist.includes('src/dev/phase10RestoreBenchmarkHarness.js')
+  && allowlist.includes('src/dev/p10_014aDiagnosticEntry.js'),
+  'P10-014A allowlist must contain only the reviewed diagnostic source files',
+);
+
+console.log('MYFI P10-014A R2 ISOLATED DEVICE BOOTSTRAP CONTRACT: PASS');
