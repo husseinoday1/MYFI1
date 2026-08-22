@@ -630,7 +630,7 @@ const buildCheckpointBounded = async ({ database, namespace, operationId, checkp
   return metrics;
 };
 
-const recordSyntheticServerProof = async ({ database, namespace, operationId, guard, authUserId, deviceId }) => {
+const recordSyntheticServerProof = async ({ database, namespace, operationId, guard, authUserId, deviceId, allowRebind = false }) => {
   assertGate(P10_014A_LOCAL_FLAG && validBenchmarkNamespace(namespace), 'synthetic_proof_scope_invalid');
   const serverProof = {
     proofSource: SYNTHETIC_SERVER_PROOF_SOURCE,
@@ -670,7 +670,28 @@ const recordSyntheticServerProof = async ({ database, namespace, operationId, gu
     };
     const key = syntheticProofKey(namespace, operationId);
     const existing = await txn.getFirstAsync('SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1', key);
-    assertGate(!existing, 'synthetic_proof_marker_already_exists');
+    if (existing && allowRebind) {
+      // Dev-only digest rebinding: the intent was built on an earlier guard
+      // derivation whose restoreProofDigest no longer matches the state that
+      // promoteCanonicalRestoreStageV13 will re-derive. Reset the intent to
+      // intent_pending_server and clear the old marker so both can be rebuilt
+      // atomically against the current guard below.
+      const staleIntentRow = await txn.getFirstAsync('SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1', `restore_intent:${namespace}`);
+      const staleIntent = parseObject(staleIntentRow?.value);
+      assertGate(!!staleIntent, 'rebind_intent_missing');
+      const resetIntent = { ...staleIntent, status: 'intent_pending_server' };
+      delete resetIntent.serverEventId;
+      delete resetIntent.serverProvedAt;
+      const resetUpdated = await txn.runAsync(
+        'UPDATE ledger_v7_meta SET value=?,updated_at=? WHERE key=? AND value=?',
+        JSON.stringify(resetIntent), new Date().toISOString(), `restore_intent:${namespace}`, String(staleIntentRow.value),
+      );
+      assertGate(Number(resetUpdated?.changes || 0) === 1, 'rebind_intent_reset_failed');
+      const removed = await txn.runAsync('DELETE FROM ledger_v7_meta WHERE key=?', key);
+      assertGate(Number(removed?.changes || 0) === 1, 'rebind_marker_clear_failed');
+    } else {
+      assertGate(!existing, 'synthetic_proof_marker_already_exists');
+    }
     const inserted = await txn.runAsync(
       'INSERT INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)',
       key, JSON.stringify(durableSyntheticEvidence), durableSyntheticEvidence.recordedAt,
@@ -971,11 +992,47 @@ const runTier = async ({ database, tier, baseToken }) => {
         ...promotionPreconditions,
       }));
 
+      // Dev-only digest rebind (fail-visible): promoteCanonicalRestoreStageV13
+      // re-derives its own guard from the durable state. If any input to
+      // deriveCanonicalRestoreProofDigestV13 changed between the intent build
+      // and the promotion call, the recomputed digest no longer matches
+      // intent.restoreProofDigest and the fail-closed precondition rejects.
+      // Re-derive here with the exact production function; if the digest moved,
+      // atomically rebuild intent + synthetic proof against the fresh guard so
+      // the promotion's own derivation matches. If it still mismatches after a
+      // rebuild, fail loudly instead of letting promotion hide the cause.
+      let activeGuard = guard;
+      const rederiveStarted = nowMs();
+      const redervedGuard = await withRestoreTransaction(database, txn => (
+        guardRestoreSourceBeforeEpochRpcInTransactionV13({ database: txn, namespace, operationId })
+      ));
+      assertGate(redervedGuard?.ok === true, redervedGuard?.reason || 'pre_promotion_rederive_failed');
+      if (redervedGuard.restoreProofDigest !== guard.restoreProofDigest) {
+        console.log('[P10_014A_DIGEST_REBIND]', JSON.stringify({
+          tierId: tier.id,
+          previous: text(guard.restoreProofDigest).slice(0, 12),
+          current: text(redervedGuard.restoreProofDigest).slice(0, 12),
+        }));
+        await recordSyntheticServerProof({
+          database, namespace, operationId, guard: redervedGuard, authUserId, deviceId,
+          allowRebind: true,
+        });
+        activeGuard = redervedGuard;
+      }
+      const rebindMs = nowMs() - rederiveStarted;
+
+      const postRebindPreconditions = await readPromotionPreconditionEvidence({
+        database, namespace, operationId, guard: activeGuard,
+      });
+      assertGate(postRebindPreconditions.immutableIntentMatch === true && postRebindPreconditions.intentServerEpochProven === true,
+        'post_rebind_precondition_mismatch', { tierId: tier.id });
+
       const promotionStarted = nowMs();
       promoted = await promoteCanonicalRestoreStageV13({
         namespace, operationId, database,
       });
       atomicPromotionMs = nowMs() - promotionStarted;
+      void rebindMs;
       assertGate(promoted?.ok === true, promoted?.reason || 'atomic_promotion_failed');
     });
     const localFinalFenceMs = nowMs() - localFenceStarted;
