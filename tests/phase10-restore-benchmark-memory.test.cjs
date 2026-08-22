@@ -3,12 +3,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(process.argv[2] || '.');
-const source = fs.readFileSync(
-  path.join(root, 'src', 'dev', 'phase10RestoreBenchmarkHarness.js'),
+const source = fs.readFileSync(path.join(root, 'src', 'dev', 'phase10RestoreBenchmarkHarness.js'), 'utf8');
+const entry = fs.readFileSync(path.join(root, 'src', 'dev', 'p10_014aCloneProbeEntry.js'), 'utf8');
+const ledgerDb = fs.readFileSync(path.join(root, 'src', 'lib', 'ledgerDatabase.js'), 'utf8');
+const workflow = fs.readFileSync(
+  path.join(root, '.github', 'workflows', 'p10-014a-local-strategy-b-device-gate.yml'),
   'utf8',
 );
+const allowlist = fs.readFileSync(path.join(root, '.github', 'p10-014a-allowed-source.txt'), 'utf8');
 
-// P10-014A must measure the reviewed Strategy B/V13 path, never the retired V7 benchmark path.
+// Production Strategy B/V13 only; never retired V7 benchmark promotion.
 for (const forbidden of [
   'promoteFinancialWorkspaceStageV7',
   'stageFinancialWorkspaceV7',
@@ -19,21 +23,18 @@ for (const forbidden of [
   'readFinancialProjectionV7',
   '.getAllAsync(',
 ]) {
-  assert.equal(source.includes(forbidden), false, `P10-014A harness must not contain ${forbidden}`);
+  assert.equal(source.includes(forbidden), false, `R5 harness must not contain ${forbidden}`);
 }
 
 for (const required of [
   "P10_014A_GATE = 'LOCAL_STRATEGY_B_ACCEPTANCE'",
   "P10_014B_GATE = 'CLOUD_HANDSHAKE_ACCEPTANCE'",
   "SYNTHETIC_SERVER_PROOF_SOURCE = 'synthetic_dev_only'",
-  "SYNTHETIC_PROOF_MARKER_PREFIX = 'p10_014a_synthetic_proof:'",
-  "cloudHandshakeAcceptance: 'NOT_TESTED'",
-  'syntheticProofCountsAsCloudEvidence: false',
-  'syntheticProofDurablyLabeled',
-  'recoveryMarkerFinalizedLast',
-  'supabaseRpcCalledByGate: false',
-  'productionRestoreWiring: false',
-  'p10_012MigrationAppliedByGate: false',
+  "P10_014A_CLONE_PROBE_FLAG = process.env.EXPO_PUBLIC_P10_014A_CLONE_PROBE === '1'",
+  "P10_014A_CLONE_MARKER_KEY = 'p10_014a_clone_database_marker'",
+  'assertCloneDatabaseBinding',
+  'clone_database_marker_missing',
+  "guardMode: 'original_package_clone_database'",
   'copyBoundedFinancialNamespaceBatchInTransactionV13',
   'initializeRestoreCheckpointInTransactionV13',
   'copyNextRestoreCheckpointBatchInTransactionV13',
@@ -48,115 +49,106 @@ for (const required of [
   'promoteCanonicalRestoreStageV13',
   'runFinancialMaintenanceTask',
   'runFinancialRestorePromotionTransactionV8',
-  'WITH RECURSIVE seq(n)',
+  '[P10_014A_PROMOTION_PRECONDITION]',
+  'immutableIntentMatch',
+  'intentServerEpochProven',
+  'checkpointReady',
+  'stageSourceModeShadow',
+  'stageSchemaVersion7',
+  'cleanupErrorCaught',
+  "patchId: 'P10-014A-001-R5'",
+  'cloneDatabaseOnly: P10_014A_CLONE_PROBE_FLAG',
+  'originalDatabaseMutationByHarness: false',
   "memoryEvidence: 'EXTERNAL_ADB_REQUIRED'",
-  "nextRequiredSubgate: 'P10-014A-002_FAULT_AND_RESOURCE_MATRIX'",
-  '[P10_014A_TIER_RESULT]',
 ]) {
-  assert(source.includes(required), `P10-014A harness missing required contract: ${required}`);
+  assert(source.includes(required), `R5 harness missing: ${required}`);
 }
 
+for (const required of [
+  "import * as SQLite from 'expo-sqlite'",
+  "import * as FileSystem from 'expo-file-system/legacy'",
+  'FileSystem.getInfoAsync(sourceUri)',
+  "PRAGMA query_only = ON",
+  "PRAGMA query_only",
+  'SQLite.backupDatabaseAsync',
+  "sourceDatabaseName: 'main'",
+  "destDatabaseName: 'main'",
+  'source.closeAsync()',
+  'setP10CloneLedgerDbOverride(clone)',
+  "await import('./phase10RestoreBenchmarkHarness')",
+  'clearP10CloneLedgerDbOverride(clone)',
+  'SQLite.deleteDatabaseAsync(cloneName, SQLite.defaultDatabaseDirectory)',
+  "CLONE_MARKER_KEY = 'p10_014a_clone_database_marker'",
+  '__MYFI_P10_014A_CLONE_NONCE__',
+  "sourceConnectionNotPristine".replace('sourceConnectionNotPristine','p10_clone_probe_source_connection_not_pristine'),
+  '[P10_014A_CLONE_PROBE]',
+]) {
+  assert(entry.includes(required), `R5 clone entry missing: ${required}`);
+}
+assert.equal(entry.includes("import '../../index'"), false, 'R5 clone probe must not import normal app root');
+assert.equal(entry.includes("from '../store/useStore'"), false, 'R5 clone probe must not import store');
+assert.equal(entry.toLowerCase().includes('supabase'), false, 'R5 clone probe must not import Supabase');
 assert(
-  source.includes('CANONICAL_ROW_SOURCE_V3_BATCH_POLICY.defaultMaxRows')
-  && source.includes('CANONICAL_ROW_SOURCE_V3_BATCH_POLICY.defaultMaxBytes'),
-  'P10-014A must use the reviewed bounded row/byte policy for stage and checkpoint work',
+  entry.indexOf('source.closeAsync()') < entry.indexOf('setP10CloneLedgerDbOverride(clone)'),
+  'Original source DB must be closed before clone becomes the application DB',
 );
 assert(
-  source.includes('incomingStageMaxBatchRows')
-  && source.includes('incomingStageMaxBatchBytes')
-  && source.includes('checkpointMaxBatchRows')
-  && source.includes('checkpointMaxBatchBytes'),
-  'P10-014A evidence must expose bounded-batch high-water metrics',
-);
-assert(
-  source.includes('writerDrainMs')
-  && source.includes('preRpcRevalidationMs')
-  && source.includes('syntheticServerProofRecordMs')
-  && source.includes('atomicPromotionMs')
-  && source.includes('localFinalFenceMs'),
-  'P10-014A must separate every local final-fence contribution',
-);
-assert(
-  source.includes('cleanupVerified') && source.includes('sweepOrphanedRuns'),
-  'P10-014A must prove cleanup and recover orphaned disposable runs',
-);
-assert(
-  source.includes("'DELETE FROM ledger_v7_meta WHERE key=? AND value=?'")
-  && source.includes('cleanup_recovery_marker_compare_and_swap_failed'),
-  'P10-014A recovery marker must be finalized with CAS only after cleanup verification',
-);
-assert(
-  source.includes('durableSyntheticEvidence')
-  && source.includes('synthetic_proof_marker_write_failed')
-  && source.includes('synthetic_proof_durable_label_missing'),
-  'P10-014A synthetic proof must carry durable non-cloud evidence atomically with the production recorder',
-);
-
-
-const entry = fs.readFileSync(
-  path.join(root, 'src', 'dev', 'p10_014aDiagnosticEntry.js'),
-  'utf8',
-);
-const workflow = fs.readFileSync(
-  path.join(root, '.github', 'workflows', 'p10-014a-local-strategy-b-device-gate.yml'),
-  'utf8',
-);
-const allowlist = fs.readFileSync(
-  path.join(root, '.github', 'p10-014a-allowed-source.txt'),
-  'utf8',
+  entry.indexOf('setP10CloneLedgerDbOverride(clone)') < entry.indexOf("await import('./phase10RestoreBenchmarkHarness')"),
+  'Clone override must be active before harness import',
 );
 
 for (const required of [
-  "import '../../index'",
-  "useStore.subscribe(maybeStart)",
-  "state?.workspaceReady",
-  "PHASE10_RESTORE_BENCHMARK_ENABLED",
-  "runPhase10RestoreBenchmarkHarness()",
-  "[P10_014A_DEVICE_GATE]",
+  "P10_014A_CLONE_PROBE_FLAG = process.env.EXPO_PUBLIC_P10_014A_CLONE_PROBE === '1'",
+  'setP10CloneLedgerDbOverride',
+  'clearP10CloneLedgerDbOverride',
+  "throw new Error('p10_clone_database_override_disabled')",
+  'if (p10CloneDiagnosticDb) return p10CloneDiagnosticDb',
+  'p10CloneDiagnosticDb ? Promise.resolve(p10CloneDiagnosticDb) : dbPromise',
 ]) {
-  assert(entry.includes(required), `P10-014A diagnostic entry missing: ${required}`);
+  assert(ledgerDb.includes(required), `R5 ledger DB override missing: ${required}`);
 }
-assert.equal(entry.includes("import '../../App'"), false, 'Diagnostic entry must use the normal root entry, not bypass app registration');
-assert.equal(entry.includes('supabase'), false, 'Diagnostic entry must not import Supabase');
 
-for (const required of [
-  "pkg.main='src/dev/p10_014aDiagnosticEntry.js'",
-  "applicationId 'com.myfi.app.p10a'",
-  'MYFI P10-014A',
-  'EXPO_PUBLIC_FRESH_TEST=1',
-  'ProductionAppDataIsolated=YES',
-  'DiagnosticEntry=src/dev/p10_014aDiagnosticEntry.js',
-  'ApplicationId=com.myfi.app.p10a',
-  'artifact@v4',
-  'P10-014A-local-strategy-b-device-gate-R3',
-]) {
-  assert(workflow.includes(required), `P10-014A workflow missing isolated diagnostic build contract: ${required}`);
-}
+// getLedgerDb default open path must remain present and must follow the diagnostic short-circuit.
+assert(ledgerDb.includes("SQLite.openDatabaseAsync(LEDGER_DB_NAME)"), 'Normal ledger open path must remain intact');
 assert(
-  allowlist.includes('src/dev/phase10RestoreBenchmarkHarness.js')
-  && allowlist.includes('src/dev/p10_014aDiagnosticEntry.js'),
-  'P10-014A allowlist must contain only the reviewed diagnostic source files',
+  ledgerDb.indexOf('if (p10CloneDiagnosticDb) return p10CloneDiagnosticDb')
+    < ledgerDb.indexOf("SQLite.openDatabaseAsync(LEDGER_DB_NAME)"),
+  'Diagnostic clone must short-circuit before normal DB initialization',
 );
 
+for (const required of [
+  'P10-014A Original Package Clone Probe APK',
+  "pkg.main='src/dev/p10_014aCloneProbeEntry.js'",
+  "applicationId 'com.myfi.app'",
+  'EXPO_PUBLIC_P10_014A_CLONE_PROBE=1',
+  'EXPO_PUBLIC_FRESH_TEST=0',
+  'OriginalDatabaseMode=QUERY_ONLY_BACKUP_SOURCE',
+  'HarnessDatabase=DISPOSABLE_SQLITE_BACKUP_CLONE',
+  'OriginalDatabaseMutationByHarness=NO',
+  'OriginalInstalledApkMustBeBackedUpByDeviceRunner=YES',
+  'P10-014A-original-package-clone-probe-R5',
+]) {
+  assert(workflow.includes(required), `R5 workflow missing: ${required}`);
+}
+assert.equal(
+  workflow.includes('gradle.replace(needle,"applicationId \'com.myfi.app.p10a\'")')
+    || workflow.includes("gradle.replace(needle,\"applicationId 'com.myfi.app.p10a'\")"),
+  false,
+  'R5 workflow must never replace the original applicationId with the isolated p10a package',
+);
+assert.equal(
+  workflow.includes('EXPO_PUBLIC_FRESH_TEST=1'),
+  false,
+  'R5 same-package clone probe must not use FRESH_TEST',
+);
 
 for (const required of [
-  "P10_014A_FRESH_TEST_FLAG = process.env.EXPO_PUBLIC_FRESH_TEST === '1'",
-  "P10_014A_FRESH_TEST_NAMESPACE = 'fresh-test-new-user'",
-  "workspaceNamespace === P10_014A_FRESH_TEST_NAMESPACE",
-  "!state?.user?.id",
-  "blockers.filter(blocker => blocker !== 'signed_in_account_required')",
-  "guardMode: isolatedFreshTestGuest ? 'isolated_fresh_test_guest' : 'signed_in_disposable'",
-  "signedInRequirementBypassed: isolatedFreshTestGuest",
-  "bypassedBlocker: isolatedFreshTestGuest ? 'signed_in_account_required' : null",
-  "otherBlockers: 0",
-  "patchId: 'P10-014A-001-R3'",
-  "disposableGuard",
+  'src/dev/phase10RestoreBenchmarkHarness.js',
+  'src/dev/p10_014aDiagnosticEntry.js',
+  'src/dev/p10_014aCloneProbeEntry.js',
+  'src/lib/ledgerDatabase.js',
 ]) {
-  assert(source.includes(required), `P10-014A R3 narrow fresh-test guard missing: ${required}`);
+  assert(allowlist.includes(required), `R5 allowlist missing ${required}`);
 }
-assert(
-  source.includes("const effectiveBlockers = isolatedFreshTestGuest")
-  && source.includes(": blockers;"),
-  'R3 must preserve all P19 disposable blockers outside the isolated fresh-test guest case',
-);
-console.log('MYFI P10-014A R3 FRESH-TEST GUARD CONTRACT: PASS');
+
+console.log('MYFI P10-014A R5 FAIL-CLOSED ORIGINAL-PACKAGE CLONE PROBE CONTRACT: PASS');

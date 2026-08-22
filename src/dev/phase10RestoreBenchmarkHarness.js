@@ -56,6 +56,8 @@ const P10_014A_LOCAL_FLAG = process.env.EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B ==
 const PHASE10_BENCHMARK_FLAG = process.env.EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK === '1';
 const P10_014A_FRESH_TEST_FLAG = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
 const P10_014A_FRESH_TEST_NAMESPACE = 'fresh-test-new-user';
+const P10_014A_CLONE_PROBE_FLAG = process.env.EXPO_PUBLIC_P10_014A_CLONE_PROBE === '1';
+const P10_014A_CLONE_MARKER_KEY = 'p10_014a_clone_database_marker';
 
 export const PHASE10_RESTORE_BENCHMARK_ENABLED = (
   P10_014A_LOCAL_FLAG && PHASE10_BENCHMARK_FLAG
@@ -117,6 +119,9 @@ const assertGate = (condition, code, details = null) => {
   if (details) error.details = details;
   throw error;
 };
+const uuidValue = value => (
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text(value))
+);
 const uuid = () => {
   const hex = () => Math.floor(Math.random() * 16).toString(16);
   const chunk = count => Array.from({ length: count }, hex).join('');
@@ -144,7 +149,34 @@ const withRestoreTransaction = (database, task) => (
   })
 );
 
+const assertCloneDatabaseBinding = async database => {
+  if (!P10_014A_CLONE_PROBE_FLAG) return null;
+  const nonce = text(globalThis?.__MYFI_P10_014A_CLONE_NONCE__);
+  assertGate(nonce && nonce.length >= 16 && nonce.length <= 120, 'clone_nonce_missing');
+  const row = await database.getFirstAsync(
+    'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1',
+    P10_014A_CLONE_MARKER_KEY,
+  );
+  assertGate(text(row?.value) === nonce, 'clone_database_marker_missing');
+  return Object.freeze({
+    ok: true,
+    mode: 'original_package_sqlite_backup_clone',
+    originalDatabaseReadOnly: true,
+    originalDatabaseMutationByHarness: false,
+  });
+};
+
 const assertDisposableCurrentAccount = async database => {
+  if (P10_014A_CLONE_PROBE_FLAG) {
+    return Object.freeze({
+      ok: true,
+      guardMode: 'original_package_clone_database',
+      signedInRequirementBypassed: true,
+      bypassedBlocker: 'current_account_disposable_guard_not_applicable_to_clone',
+      otherBlockers: 0,
+      realFinancialNamespaceMutation: false,
+    });
+  }
   const state = useStore.getState();
   const workspaceNamespace = text(state?.workspaceNamespace);
   assertGate(workspaceNamespace, 'workspace_namespace_missing');
@@ -194,6 +226,61 @@ const assertDisposableCurrentAccount = async database => {
     otherBlockers: 0,
   });
 };
+
+
+const readPromotionPreconditionEvidence = async ({
+  database, namespace, operationId, guard,
+}) => withRestoreTransaction(database, async txn => {
+  const intent = parseObject((await txn.getFirstAsync(
+    'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1',
+    `restore_intent:${namespace}`,
+  ))?.value);
+  const checkpoint = parseObject((await txn.getFirstAsync(
+    'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1',
+    `canonical_restore_checkpoint_v13:${namespace}:${guard.snapshot.checkpointId}`,
+  ))?.value);
+  const stageWorkspace = await txn.getFirstAsync(
+    'SELECT source_mode,schema_version FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1',
+    guard.snapshot.stageNamespace,
+  );
+
+  const immutableIntentMatch = !!intent
+    && intent.version === 3
+    && Number.isSafeInteger(intent.stateVersion) && intent.stateVersion >= 1
+    && intent.namespace === guard.snapshot.namespace
+    && intent.ledgerId === guard.snapshot.ledgerId
+    && intent.operationId === guard.snapshot.operationId
+    && intent.stageNamespace === guard.snapshot.stageNamespace
+    && intent.checkpointId === guard.snapshot.checkpointId
+    && intent.checkpointNamespace === guard.snapshot.checkpointNamespace
+    && Number(intent.fromEpoch) === Number(guard.snapshot.sourceRestoreEpoch)
+    && Number(intent.toEpoch) === Number(guard.snapshot.sourceRestoreEpoch) + 1
+    && Number(intent.sourceLiveGeneration) === Number(guard.snapshot.sourceLiveGeneration)
+    && Number(intent.semanticHashVersion) === Number(guard.snapshot.semanticHashVersion)
+    && intent.incomingSemanticHash === guard.snapshot.incomingSemanticHash
+    && intent.checkpointSemanticHash === guard.checkpoint.semanticHash
+    && Number(intent.validatorVersion) === Number(guard.snapshot.validatorVersion)
+    && countsEqual(intent.incomingCounts, guard.snapshot.incomingCounts)
+    && countsEqual(intent.checkpointCounts, guard.checkpoint.counts)
+    && ['restore', 'undo'].includes(intent.triggerKind)
+    && intent.restoreProofDigest === guard.restoreProofDigest;
+
+  return Object.freeze({
+    guardOk: guard?.ok === true,
+    immutableIntentMatch,
+    intentServerEpochProven: intent?.status === 'server_epoch_proven',
+    intentOperationBackupRestore: intent?.operation === 'backup_restore',
+    authUserIdUuid: uuidValue(intent?.authUserId),
+    serverEventIdUuid: uuidValue(intent?.serverEventId),
+    deviceIdPresent: !!text(intent?.deviceId),
+    checkpointPresent: !!checkpoint,
+    checkpointReady: checkpoint?.status === 'READY',
+    checkpointOperationMatch: checkpoint?.operationId === text(operationId).toLowerCase(),
+    stageWorkspacePresent: !!stageWorkspace,
+    stageSourceModeShadow: text(stageWorkspace?.source_mode) === 'shadow',
+    stageSchemaVersion7: Number(stageWorkspace?.schema_version) === 7,
+  });
+});
 
 const markerKey = namespace => `${MARKER_PREFIX}${namespace}`;
 const syntheticProofKey = (namespace, operationId) => (
@@ -876,6 +963,14 @@ const runTier = async ({ database, tier, baseToken }) => {
       );
       syntheticServerProofRecordMs = nowMs() - syntheticStarted;
 
+      const promotionPreconditions = await readPromotionPreconditionEvidence({
+        database, namespace, operationId, guard,
+      });
+      console.log('[P10_014A_PROMOTION_PRECONDITION]', JSON.stringify({
+        tierId: tier.id,
+        ...promotionPreconditions,
+      }));
+
       const promotionStarted = nowMs();
       promoted = await promoteCanonicalRestoreStageV13({
         namespace, operationId, database,
@@ -916,6 +1011,7 @@ const runTier = async ({ database, tier, baseToken }) => {
       writerDrainMs: roundMs(writerDrainMs),
       preRpcRevalidationMs: roundMs(preRpcRevalidationMs),
       syntheticServerProofRecordMs: roundMs(syntheticServerProofRecordMs),
+      promotionPreconditions,
       atomicPromotionMs: roundMs(atomicPromotionMs),
       localFinalFenceMs: roundMs(localFinalFenceMs),
       cloudHandshakeMs: null,
@@ -934,13 +1030,15 @@ const runTier = async ({ database, tier, baseToken }) => {
   }
 
   let cleanup = null;
+  let cleanupErrorCaught = null;
   try {
     cleanup = await cleanupBenchmarkMarker({ database, marker });
   } catch (cleanupError) {
+    cleanupErrorCaught = cleanupError;
     console.error('[P10_014A_CLEANUP_FAIL]', JSON.stringify({ tierId: tier.id, ...safeError(cleanupError) }));
-    throw cleanupError;
   }
   if (operationError) throw operationError;
+  if (cleanupErrorCaught) throw cleanupErrorCaught;
   const result = {
     ...coreEvidence,
     cleanupVerified: cleanup.ok === true,
@@ -963,12 +1061,13 @@ export async function runPhase10RestoreBenchmarkHarness({
 
   const database = await getLedgerDb();
   assertGate(database, 'database_unavailable');
+  const cloneDatabaseBinding = await assertCloneDatabaseBinding(database);
   await ensureFinancialLedgerV7(database);
   const disposableGuard = await assertDisposableCurrentAccount(database);
   const orphanRecovery = await sweepOrphanedRuns(database);
 
   const base = {
-    patchId: 'P10-014A-001-R3',
+    patchId: 'P10-014A-001-R5',
     gate: P10_014A_GATE,
     subgate: 'CORE_STRATEGY_B_DEVICE_PATH',
     acceptanceComplete: false,
@@ -984,6 +1083,9 @@ export async function runPhase10RestoreBenchmarkHarness({
     sqliteSchemaChanged: false,
     secureStoreChanged: false,
     memoryEvidence: 'EXTERNAL_ADB_REQUIRED',
+    cloneDatabaseOnly: P10_014A_CLONE_PROBE_FLAG,
+    originalDatabaseMutationByHarness: false,
+    cloneDatabaseBinding,
     disposableGuard,
     batchPolicy: {
       version: CANONICAL_ROW_SOURCE_V3_BATCH_POLICY.version,

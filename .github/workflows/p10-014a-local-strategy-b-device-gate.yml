@@ -1,4 +1,4 @@
-name: P10-014A Local Strategy B Device Gate APK
+name: P10-014A Original Package Clone Probe APK
 
 on:
   workflow_dispatch:
@@ -10,16 +10,16 @@ permissions:
   contents: read
 
 jobs:
-  build-p10-014a-local-strategy-b:
+  build-p10-014a-r5-clone-probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 70
     steps:
-      - name: Checkout P10-014A branch
+      - name: Checkout exact P10-014A branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Verify exact green base and diagnostic-only source scope
+      - name: Verify green source base and exact R5 source scope
         shell: bash
         run: |
           set -euo pipefail
@@ -30,7 +30,9 @@ jobs:
             App.js src android app.json eas.json package.json package-lock.json
           echo "SOURCE_BASE=$BASE" >> "$GITHUB_ENV"
           test "$(git diff "$BASE"...HEAD -- App.js src/store src/lib/supabase.js android app.json eas.json package.json package-lock.json | wc -l)" -eq 0
-          echo "[PASS] P10-014A production wiring/native/package sources unchanged"
+          CHANGED_LIBS="$(git diff --name-only "$BASE"...HEAD -- src/lib | sort)"
+          test "$CHANGED_LIBS" = "src/lib/ledgerDatabase.js"
+          echo "[PASS] only reviewed diagnostic override changed under src/lib"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -47,7 +49,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Load diagnostic environment
+      - name: Load bundle environment
         shell: bash
         run: |
           set -euo pipefail
@@ -64,138 +66,154 @@ jobs:
           echo "EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE=0" >> "$GITHUB_ENV"
           echo "EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK=1" >> "$GITHUB_ENV"
           echo "EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B=1" >> "$GITHUB_ENV"
-          echo "EXPO_PUBLIC_FRESH_TEST=1" >> "$GITHUB_ENV"
-          echo "[PASS] P10-014A isolated fresh-test flags enabled"
+          echo "EXPO_PUBLIC_P10_014A_CLONE_PROBE=1" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_FRESH_TEST=0" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: P10-014A harness/bootstrap/fresh-test guard contract
+      - name: R5 clone-probe contract
         run: node tests/phase10-restore-benchmark-memory.test.cjs .
 
-      - name: Static quality gate
-        run: npm run test:gate:static
+      - name: Full quality gate
+        run: npm run test:gate
 
-      - name: Runtime quality gate
-        run: npm run test:gate:runtime
-
-      - name: Select diagnostic entrypoint and isolated Android application id
+      - name: Select same-package clone probe entry in CI workspace only
         shell: bash
         run: |
           set -euo pipefail
+          cp package.json package.json.r5-backup
+          cp android/app/src/main/res/values/strings.xml strings.xml.r5-backup
           node <<'NODE'
           const fs=require('fs');
-
           const pkgPath='package.json';
           const pkg=JSON.parse(fs.readFileSync(pkgPath,'utf8'));
-          if(pkg.main !== 'index.js') throw new Error(`[FAIL] unexpected package main before diagnostic switch: ${pkg.main}`);
-          pkg.main='src/dev/p10_014aDiagnosticEntry.js';
-          fs.writeFileSync(pkgPath, JSON.stringify(pkg,null,2)+'\n');
+          if(pkg.main!=='index.js') throw new Error(`[FAIL] unexpected main: ${pkg.main}`);
+          pkg.main='src/dev/p10_014aCloneProbeEntry.js';
+          fs.writeFileSync(pkgPath,JSON.stringify(pkg,null,2)+'\n');
 
-          const gradlePath='android/app/build.gradle';
-          let gradle=fs.readFileSync(gradlePath,'utf8');
-          const needle="applicationId 'com.myfi.app'";
-          const matches=gradle.split(needle).length-1;
-          if(matches !== 1) throw new Error(`[FAIL] expected one MYFI applicationId, found ${matches}`);
-          gradle=gradle.replace(needle,"applicationId 'com.myfi.app.p10a'");
-          fs.writeFileSync(gradlePath,gradle);
+          const gradle=fs.readFileSync('android/app/build.gradle','utf8');
+          if((gradle.split("applicationId 'com.myfi.app'").length-1)!==1) {
+            throw new Error('[FAIL] original applicationId contract missing');
+          }
+          if(gradle.includes("applicationId 'com.myfi.app.p10a'")) {
+            throw new Error('[FAIL] isolated diagnostic applicationId is forbidden in R5');
+          }
 
           const stringsPath='android/app/src/main/res/values/strings.xml';
           let strings=fs.readFileSync(stringsPath,'utf8');
-          const appName=/<string name="app_name">[^<]*<\/string>/;
-          if(!appName.test(strings)) throw new Error('[FAIL] app_name resource missing');
-          strings=strings.replace(appName,'<string name="app_name">MYFI P10-014A</string>');
+          const re=/<string name="app_name">[^<]*<\/string>/;
+          if(!re.test(strings)) throw new Error('[FAIL] app_name missing');
+          strings=strings.replace(re,'<string name="app_name">MYFI P10 Clone Probe</string>');
           fs.writeFileSync(stringsPath,strings);
           NODE
+          test "$(node -p "require('./package.json').main")" = "src/dev/p10_014aCloneProbeEntry.js"
+          grep -Fq "applicationId 'com.myfi.app'" android/app/build.gradle
+          ! grep -Fq "applicationId 'com.myfi.app.p10a'" android/app/build.gradle
+          echo "[PASS] same-package clone probe selected without applicationId change"
 
-          test "$(node -p "require('./package.json').main")" = "src/dev/p10_014aDiagnosticEntry.js"
-          grep -Fq "applicationId 'com.myfi.app.p10a'" android/app/build.gradle
-          grep -Fq '<string name="app_name">MYFI P10-014A</string>' android/app/src/main/res/values/strings.xml
-          echo "[PASS] diagnostic entrypoint + isolated application id prepared in CI workspace only"
-
-      - name: Android diagnostic bundle verification
+      - name: Verify Android diagnostic bundle
         env:
           EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE: "0"
           EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK: "1"
           EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B: "1"
-          EXPO_PUBLIC_FRESH_TEST: "1"
+          EXPO_PUBLIC_P10_014A_CLONE_PROBE: "1"
+          EXPO_PUBLIC_FRESH_TEST: "0"
         run: npm run verify:android
 
-      - name: Verify signing certificate
+      - name: Verify signing certificate source
         shell: bash
         run: |
           set -euo pipefail
           EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
           ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
           test "$ACTUAL" = "$EXPECTED"
-          echo "[PASS] diagnostic APK signing certificate verified"
+          echo "[PASS] build signing certificate source verified"
 
-      - name: Build signed isolated P10-014A diagnostic APK
+      - name: Build same-package R5 clone probe APK
         working-directory: android
         env:
           CI: "true"
           EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE: "0"
           EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK: "1"
           EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B: "1"
-          EXPO_PUBLIC_FRESH_TEST: "1"
+          EXPO_PUBLIC_P10_014A_CLONE_PROBE: "1"
+          EXPO_PUBLIC_FRESH_TEST: "0"
         run: |
           chmod +x ./gradlew
-          ./gradlew app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
+          ./gradlew clean app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
 
-      - name: Verify P10-014A build evidence
+      - name: Restore CI-only entry changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mv package.json.r5-backup package.json
+          mv strings.xml.r5-backup android/app/src/main/res/values/strings.xml
+          test "$(node -p "require('./package.json').main")" = "index.js"
+          git diff --exit-code -- package.json android/app/src/main/res/values/strings.xml
+
+      - name: Verify APK identity and write evidence
         shell: bash
         run: |
           set -euo pipefail
           APK="android/app/build/outputs/apk/release/app-release.apk"
           test -f "$APK"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          test -x "$AAPT"
+          BADGING="$("$AAPT" dump badging "$APK" | head -1)"
+          echo "$BADGING"
+          echo "$BADGING" | grep -Fq "package: name='com.myfi.app'"
+          VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
+          VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
+          test -n "$VERSION_CODE"
           SHA="$(sha256sum "$APK" | awk '{print $1}')"
           SIZE="$(stat -c%s "$APK")"
           {
-            echo "Patch=P10-014A-001-R3"
-            echo "Gate=LOCAL_STRATEGY_B_ACCEPTANCE"
-            echo "Subgate=CORE_STRATEGY_B_DEVICE_PATH"
+            echo "Patch=P10-014A-001-R5"
+            echo "Gate=ORIGINAL_PACKAGE_SQLITE_BACKUP_CLONE"
             echo "AcceptanceComplete=NO"
             echo "NextRequiredSubgate=P10-014A-002_FAULT_AND_RESOURCE_MATRIX"
-            echo "CloudGate=CLOUD_HANDSHAKE_ACCEPTANCE"
             echo "CloudHandshakeAcceptance=NOT_TESTED"
             echo "ServerProofSource=synthetic_dev_only"
             echo "SyntheticProofIsCloudEvidence=NO"
             echo "GateSupabaseRpcCalled=NO"
             echo "ProductionRestoreWiring=NO"
             echo "P10_012_MigrationAppliedByGate=NO"
-            echo "MemoryEvidence=EXTERNAL_ADB_REQUIRED"
             echo "SourceBase=$SOURCE_BASE"
             echo "BuildCommit=$(git rev-parse HEAD)"
             echo "Branch=$(git branch --show-current)"
-            echo "DiagnosticEntry=src/dev/p10_014aDiagnosticEntry.js"
-            echo "ApplicationId=com.myfi.app.p10a"
-            echo "AppLabel=MYFI P10-014A"
-            echo "FreshTestMode=YES"
-            echo "ProductionAppDataIsolated=YES"
-            echo "DisposableGuardMode=isolated_fresh_test_guest"
-            echo "SignedInRequirementBypassedForFreshTestOnly=YES"
-            echo "APK=$APK"
+            echo "DiagnosticEntry=src/dev/p10_014aCloneProbeEntry.js"
+            echo "ApplicationId=com.myfi.app"
+            echo "VersionCode=$VERSION_CODE"
+            echo "VersionName=$VERSION_NAME"
+            echo "OriginalDatabaseMode=QUERY_ONLY_BACKUP_SOURCE"
+            echo "HarnessDatabase=DISPOSABLE_SQLITE_BACKUP_CLONE"
+            echo "OriginalDatabaseMutationByHarness=NO"
+            echo "CloneCreatedWith=expo-sqlite.backupDatabaseAsync"
+            echo "CloneDeletedAfterRun=REQUIRED"
+            echo "OriginalInstalledApkMustBeBackedUpByDeviceRunner=YES"
+            echo "OriginalInstalledApkVersionAndCertMustMatchProbe=YES"
+            echo "UninstallAllowed=NO"
+            echo "PmClearAllowed=NO"
+            echo "DowngradeInstallAllowed=NO"
+            echo "MemoryEvidence=EXTERNAL_ADB_REQUIRED"
             echo "SHA256=$SHA"
             echo "SizeBytes=$SIZE"
-            echo "ExpoSDK=54"
-            echo "ReactNative=0.81.5"
-            echo "SQLiteSchemaVersion=8"
-            echo "FinancialDataChangedOutsideBenchmarkNamespaces=NO"
-            echo "SQLiteSchemaChanged=NO"
-            echo "MigrationRequired=NO"
+            echo "SQLiteSchemaChangeToOriginal=NO"
+            echo "MigrationOnOriginal=NO"
             echo "SecureStoreChanged=NO"
             echo "SupabaseSchemaChanged=NO"
             echo "DeviceAcceptance=PENDING"
-          } | tee P10-014A-build-evidence.txt
-          sha256sum "$APK" | tee app-release.apk.sha256
+          } | tee P10-014A-R5-build-evidence.txt
+          sha256sum "$APK" > app-release.apk.sha256
 
-      - name: Upload P10-014A diagnostic APK
+      - name: Upload R5 clone-probe APK
         uses: actions/upload-artifact@v4
         with:
-          name: P10-014A-local-strategy-b-device-gate-R3
+          name: P10-014A-original-package-clone-probe-R5
           path: |
             android/app/build/outputs/apk/release/app-release.apk
             app-release.apk.sha256
-            P10-014A-build-evidence.txt
+            P10-014A-R5-build-evidence.txt
           if-no-files-found: error
           retention-days: 7

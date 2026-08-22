@@ -10,6 +10,34 @@ let ledgerWriteQueue = Promise.resolve();
 // Raised only while a runLedgerReadTransaction task is executing. See enqueueLedgerWrite.
 let readTransactionDepth = 0;
 
+// P10-014A-001-R5: diagnostic-only database redirection.
+// Production/default builds cannot activate this path because the build flag is absent.
+// The clone probe uses it only after a consistent SQLite backup of the original database
+// has been created and the original connection has been closed.
+const P10_014A_CLONE_PROBE_FLAG = process.env.EXPO_PUBLIC_P10_014A_CLONE_PROBE === '1';
+let p10CloneDiagnosticDb = null;
+
+export const setP10CloneLedgerDbOverride = database => {
+  if (!P10_014A_CLONE_PROBE_FLAG) throw new Error('p10_clone_database_override_disabled');
+  if (!database?.getFirstAsync || !database?.runAsync || !database?.withExclusiveTransactionAsync) {
+    throw new Error('p10_clone_database_override_invalid');
+  }
+  if (p10CloneDiagnosticDb && p10CloneDiagnosticDb !== database) {
+    throw new Error('p10_clone_database_override_conflict');
+  }
+  p10CloneDiagnosticDb = database;
+  return true;
+};
+
+export const clearP10CloneLedgerDbOverride = database => {
+  if (!P10_014A_CLONE_PROBE_FLAG) throw new Error('p10_clone_database_override_disabled');
+  if (p10CloneDiagnosticDb && database && p10CloneDiagnosticDb !== database) {
+    throw new Error('p10_clone_database_override_clear_mismatch');
+  }
+  p10CloneDiagnosticDb = null;
+  return true;
+};
+
 // expo-sqlite exposes one native connection to all MYFI repositories. Every
 // schema mutation and write transaction must share this queue; repository-local
 // queues can overlap and cause nested BEGIN/ROLLBACK failures.
@@ -87,10 +115,13 @@ export async function runLedgerReadTransaction(database, task) {
 
 // P19-014A: diagnostics may inspect an already-open handle, but must never
 // initialize the database or trigger schema/migration side effects themselves.
-export const peekLedgerDb = () => dbPromise;
+export const peekLedgerDb = () => (
+  p10CloneDiagnosticDb ? Promise.resolve(p10CloneDiagnosticDb) : dbPromise
+);
 
 export async function getLedgerDb() {
   if (Platform.OS === 'web') return null;
+  if (p10CloneDiagnosticDb) return p10CloneDiagnosticDb;
   if (!dbPromise) {
     dbPromise = (async () => {
       const db = await SQLite.openDatabaseAsync(LEDGER_DB_NAME);

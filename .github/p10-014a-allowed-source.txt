@@ -1,4 +1,6 @@
 # P10-014A source scope relative to exact green base c39bf6126dc262fc0b53e497a9a0729c9757d20a.
-# Diagnostic-only source. Production App.js/store/sync/Supabase/native source must remain unchanged.
+# R5 adds one fail-closed diagnostic DB override; normal production behavior is unchanged unless the R5 flag is enabled.
 src/dev/phase10RestoreBenchmarkHarness.js
 src/dev/p10_014aDiagnosticEntry.js
+src/dev/p10_014aCloneProbeEntry.js
+src/lib/ledgerDatabase.js
