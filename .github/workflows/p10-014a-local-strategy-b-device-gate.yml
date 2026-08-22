@@ -70,7 +70,7 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: P10-014A harness and bootstrap contract
+      - name: P10-014A harness/bootstrap/fresh-test guard contract
         run: node tests/phase10-restore-benchmark-memory.test.cjs .
 
       - name: Static quality gate
@@ -151,7 +151,7 @@ jobs:
           SHA="$(sha256sum "$APK" | awk '{print $1}')"
           SIZE="$(stat -c%s "$APK")"
           {
-            echo "Patch=P10-014A-001-R2"
+            echo "Patch=P10-014A-001-R3"
             echo "Gate=LOCAL_STRATEGY_B_ACCEPTANCE"
             echo "Subgate=CORE_STRATEGY_B_DEVICE_PATH"
             echo "AcceptanceComplete=NO"
@@ -172,6 +172,8 @@ jobs:
             echo "AppLabel=MYFI P10-014A"
             echo "FreshTestMode=YES"
             echo "ProductionAppDataIsolated=YES"
+            echo "DisposableGuardMode=isolated_fresh_test_guest"
+            echo "SignedInRequirementBypassedForFreshTestOnly=YES"
             echo "APK=$APK"
             echo "SHA256=$SHA"
             echo "SizeBytes=$SIZE"
@@ -190,7 +192,7 @@ jobs:
       - name: Upload P10-014A diagnostic APK
         uses: actions/upload-artifact@v4
         with:
-          name: P10-014A-local-strategy-b-device-gate-R2
+          name: P10-014A-local-strategy-b-device-gate-R3
           path: |
             android/app/build/outputs/apk/release/app-release.apk
             app-release.apk.sha256

@@ -128,7 +128,7 @@ for (const required of [
   'DiagnosticEntry=src/dev/p10_014aDiagnosticEntry.js',
   'ApplicationId=com.myfi.app.p10a',
   'artifact@v4',
-  'P10-014A-local-strategy-b-device-gate-R2',
+  'P10-014A-local-strategy-b-device-gate-R3',
 ]) {
   assert(workflow.includes(required), `P10-014A workflow missing isolated diagnostic build contract: ${required}`);
 }
@@ -138,4 +138,25 @@ assert(
   'P10-014A allowlist must contain only the reviewed diagnostic source files',
 );
 
-console.log('MYFI P10-014A R2 ISOLATED DEVICE BOOTSTRAP CONTRACT: PASS');
+
+for (const required of [
+  "P10_014A_FRESH_TEST_FLAG = process.env.EXPO_PUBLIC_FRESH_TEST === '1'",
+  "P10_014A_FRESH_TEST_NAMESPACE = 'fresh-test-new-user'",
+  "workspaceNamespace === P10_014A_FRESH_TEST_NAMESPACE",
+  "!state?.user?.id",
+  "blockers.filter(blocker => blocker !== 'signed_in_account_required')",
+  "guardMode: isolatedFreshTestGuest ? 'isolated_fresh_test_guest' : 'signed_in_disposable'",
+  "signedInRequirementBypassed: isolatedFreshTestGuest",
+  "bypassedBlocker: isolatedFreshTestGuest ? 'signed_in_account_required' : null",
+  "otherBlockers: 0",
+  "patchId: 'P10-014A-001-R3'",
+  "disposableGuard",
+]) {
+  assert(source.includes(required), `P10-014A R3 narrow fresh-test guard missing: ${required}`);
+}
+assert(
+  source.includes("const effectiveBlockers = isolatedFreshTestGuest")
+  && source.includes(": blockers;"),
+  'R3 must preserve all P19 disposable blockers outside the isolated fresh-test guest case',
+);
+console.log('MYFI P10-014A R3 FRESH-TEST GUARD CONTRACT: PASS');

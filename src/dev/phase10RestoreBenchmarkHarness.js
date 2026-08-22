@@ -54,6 +54,8 @@ import { disposableBlockers } from './p19RestoreEpochDeviceGate';
 
 const P10_014A_LOCAL_FLAG = process.env.EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B === '1';
 const PHASE10_BENCHMARK_FLAG = process.env.EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK === '1';
+const P10_014A_FRESH_TEST_FLAG = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
+const P10_014A_FRESH_TEST_NAMESPACE = 'fresh-test-new-user';
 
 export const PHASE10_RESTORE_BENCHMARK_ENABLED = (
   P10_014A_LOCAL_FLAG && PHASE10_BENCHMARK_FLAG
@@ -154,16 +156,43 @@ const assertDisposableCurrentAccount = async database => {
     database,
   });
   const blockers = disposableBlockers({ state, coldArchives, localWorkspace });
-  if (blockers.length) {
+
+  // P10-014A is local-only: it never calls Supabase and never operates on the
+  // current workspace financial namespace. R2 runs as a separate Android package
+  // with FRESH_TEST=1 under exactly fresh-test-new-user. P19's signed-in
+  // requirement belongs to its real cloud restore-epoch gate, so remove ONLY that
+  // one blocker under these exact isolated conditions. Every other blocker remains
+  // fail-closed.
+  const isolatedFreshTestGuest = (
+    P10_014A_LOCAL_FLAG
+    && PHASE10_BENCHMARK_FLAG
+    && P10_014A_FRESH_TEST_FLAG
+    && workspaceNamespace === P10_014A_FRESH_TEST_NAMESPACE
+    && !state?.user?.id
+  );
+  const effectiveBlockers = isolatedFreshTestGuest
+    ? blockers.filter(blocker => blocker !== 'signed_in_account_required')
+    : blockers;
+
+  if (effectiveBlockers.length) {
     const evidence = {
       ok: false,
       blocked: true,
       reason: 'disposable_financially_empty_account_required',
-      blockers,
+      blockers: effectiveBlockers,
+      isolatedFreshTestGuest,
     };
     console.warn('[P10_014A_BLOCKED]', JSON.stringify(evidence));
     assertGate(false, 'disposable_financially_empty_account_required', evidence);
   }
+
+  return Object.freeze({
+    ok: true,
+    guardMode: isolatedFreshTestGuest ? 'isolated_fresh_test_guest' : 'signed_in_disposable',
+    signedInRequirementBypassed: isolatedFreshTestGuest,
+    bypassedBlocker: isolatedFreshTestGuest ? 'signed_in_account_required' : null,
+    otherBlockers: 0,
+  });
 };
 
 const markerKey = namespace => `${MARKER_PREFIX}${namespace}`;
@@ -935,11 +964,11 @@ export async function runPhase10RestoreBenchmarkHarness({
   const database = await getLedgerDb();
   assertGate(database, 'database_unavailable');
   await ensureFinancialLedgerV7(database);
-  await assertDisposableCurrentAccount(database);
+  const disposableGuard = await assertDisposableCurrentAccount(database);
   const orphanRecovery = await sweepOrphanedRuns(database);
 
   const base = {
-    patchId: 'P10-014A-001-R1',
+    patchId: 'P10-014A-001-R3',
     gate: P10_014A_GATE,
     subgate: 'CORE_STRATEGY_B_DEVICE_PATH',
     acceptanceComplete: false,
@@ -955,6 +984,7 @@ export async function runPhase10RestoreBenchmarkHarness({
     sqliteSchemaChanged: false,
     secureStoreChanged: false,
     memoryEvidence: 'EXTERNAL_ADB_REQUIRED',
+    disposableGuard,
     batchPolicy: {
       version: CANONICAL_ROW_SOURCE_V3_BATCH_POLICY.version,
       maxRows: CANONICAL_ROW_SOURCE_V3_BATCH_POLICY.defaultMaxRows,
