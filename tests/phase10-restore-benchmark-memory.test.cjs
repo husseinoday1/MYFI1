@@ -199,9 +199,23 @@ assert(
   r52BackupIndex >= 0 && r52PostBackupDataVersionIndex > r52BackupIndex,
   'R5.2 must retain backup API before post-backup logical revalidation',
 );
+assert.equal(
+  entry.includes('cloneSchemaVersion !== sourceFingerprintBefore.schemaVersion'),
+  false,
+  'R5.2 must not compare the destination schema cookie to the source after SQLite Online Backup',
+);
+for (const required of [
+  'cloneUserVersion !== sourceFingerprintBefore.userVersion',
+  'clonePageCount !== sourceFingerprintBefore.pageCount',
+  'Number(cloneLedgerSchemaRow?.value) !== sourceFingerprintBefore.ledgerSchemaVersion',
+  'Number(cloneSqliteSchemaRow?.value) !== sourceFingerprintBefore.sqliteSchemaVersion',
+]) {
+  assert(entry.includes(required), `R5.2 clone logical verification missing: ${required}`);
+}
 for (const required of [
   'SourceImmutabilityVerification=QUERY_ONLY_TOTAL_CHANGES_DATA_VERSION_SCHEMA_PAGE_INVARIANTS',
   'WALCloseFileMetadata=OBSERVATIONAL_NOT_MUTATION_GATE',
+  'CloneSchemaVerification=LOGICAL_APP_SCHEMA_AND_PAGE_INVARIANTS_DEST_SCHEMA_COOKIE_EXCLUDED',
 ]) {
   assert(workflow.includes(required), `R5.2 workflow evidence missing: ${required}`);
 }

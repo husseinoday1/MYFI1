@@ -209,7 +209,6 @@ async function runCloneProbe() {
     await clone.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     const cloneQuick = String(scalar(await clone.getFirstAsync('PRAGMA quick_check')) || '').toLowerCase();
     const cloneUserVersion = Number(scalar(await clone.getFirstAsync('PRAGMA user_version')) || 0);
-    const cloneSchemaVersion = Number(scalar(await clone.getFirstAsync('PRAGMA schema_version')) || 0);
     const clonePageCount = Number(scalar(await clone.getFirstAsync('PRAGMA page_count')) || 0);
     const cloneLedgerSchemaRow = await clone.getFirstAsync(
       "SELECT value FROM ledger_v7_meta WHERE key='schema_version' LIMIT 1",
@@ -217,9 +216,11 @@ async function runCloneProbe() {
     const cloneSqliteSchemaRow = await clone.getFirstAsync(
       "SELECT value FROM ledger_v7_meta WHERE key='sqlite_schema_version' LIMIT 1",
     );
+    // SQLite Online Backup deliberately changes the destination schema cookie
+    // when backup completes. Destination PRAGMA schema_version is therefore not
+    // a source-equivalence invariant. Verify logical/application schema instead.
     if (cloneQuick !== 'ok'
         || cloneUserVersion !== sourceFingerprintBefore.userVersion
-        || cloneSchemaVersion !== sourceFingerprintBefore.schemaVersion
         || clonePageCount !== sourceFingerprintBefore.pageCount
         || Number(cloneLedgerSchemaRow?.value) !== sourceFingerprintBefore.ledgerSchemaVersion
         || Number(cloneSqliteSchemaRow?.value) !== sourceFingerprintBefore.sqliteSchemaVersion) {
