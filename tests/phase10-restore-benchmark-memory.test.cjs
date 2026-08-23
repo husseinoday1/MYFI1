@@ -274,4 +274,59 @@ for (const required of [
   assert(workflow.includes(required), `R5.2 workflow evidence missing: ${required}`);
 }
 
+// Core evidence is assembled outside the maintenance callback; preserve the
+// precondition evidence in runTier scope rather than shadowing it in the callback.
+const finalFenceIndex = source.indexOf('const localFenceStarted = nowMs();');
+const maintenanceCallIndex = source.indexOf('await runFinancialMaintenanceTask({', finalFenceIndex);
+const callbackConfigIndex = source.indexOf("presentation: 'blocking',", maintenanceCallIndex);
+const maintenanceCallbackIndex = source.indexOf('}, async () => {', callbackConfigIndex);
+const outerPreconditionsIndex = source.lastIndexOf('let promotionPreconditions = null;', maintenanceCallIndex);
+const innerPreconditionsAssignmentIndex = source.indexOf(
+  'promotionPreconditions = await readPromotionPreconditionEvidence({',
+  maintenanceCallbackIndex,
+);
+const outerEvidenceReferenceIndex = source.indexOf('promotionPreconditions,', innerPreconditionsAssignmentIndex);
+assert(
+  finalFenceIndex >= 0
+    && maintenanceCallIndex > finalFenceIndex
+    && maintenanceCallbackIndex > maintenanceCallIndex
+    && outerPreconditionsIndex >= 0
+    && outerPreconditionsIndex < maintenanceCallIndex,
+  'R5 harness must declare promotionPreconditions in runTier scope before the maintenance callback',
+);
+const callbackToEvidenceInterval = source.slice(
+  maintenanceCallbackIndex,
+  outerEvidenceReferenceIndex,
+);
+const lexicalPromotionPreconditionsBinding = /^[\t ]*(?:let|const|var)\s+promotionPreconditions\b/m;
+assert(
+  innerPreconditionsAssignmentIndex > maintenanceCallbackIndex
+    && /^[\t ]*promotionPreconditions\s*=\s*await readPromotionPreconditionEvidence\(/m
+      .test(callbackToEvidenceInterval),
+  'R5 harness must assign outer promotionPreconditions inside the maintenance callback',
+);
+assert.equal(
+  lexicalPromotionPreconditionsBinding.test(callbackToEvidenceInterval),
+  false,
+  'R5 harness must not lexically bind promotionPreconditions inside the maintenance callback',
+);
+for (const declarationKind of ['const', 'var']) {
+  const mutatedSource = source.replace(
+    'promotionPreconditions = await readPromotionPreconditionEvidence({',
+    `${declarationKind} promotionPreconditions = await readPromotionPreconditionEvidence({`,
+  );
+  const mutatedInterval = mutatedSource.slice(
+    maintenanceCallbackIndex,
+    outerEvidenceReferenceIndex,
+  );
+  assert(
+    lexicalPromotionPreconditionsBinding.test(mutatedInterval),
+    `R5 harness contract must reject callback-scoped ${declarationKind} promotionPreconditions`,
+  );
+}
+assert(
+  outerEvidenceReferenceIndex > innerPreconditionsAssignmentIndex,
+  'R5 harness core evidence must reference the prior outer promotionPreconditions value',
+);
+
 console.log('MYFI P10-014A R5.2 WAL-AWARE LOGICAL IMMUTABILITY CLONE PROBE CONTRACT: PASS');

@@ -1123,6 +1123,7 @@ const runTier = async ({ database, tier, baseToken }) => {
     let syntheticServerProofRecordMs = 0;
     let atomicPromotionMs = 0;
     let promoted = null;
+    let promotionPreconditions = null;
     const localFenceStarted = nowMs();
     await runFinancialMaintenanceTask({
       reason: 'p10_014a_local_strategy_b_final_fence',
@@ -1160,7 +1161,7 @@ const runTier = async ({ database, tier, baseToken }) => {
       );
       syntheticServerProofRecordMs = nowMs() - syntheticStarted;
 
-      let promotionPreconditions = await readPromotionPreconditionEvidence({
+      promotionPreconditions = await readPromotionPreconditionEvidence({
         database, namespace, operationId, guard,
       });
       console.log('[P10_014A_PROMOTION_PRECONDITION]', JSON.stringify({
