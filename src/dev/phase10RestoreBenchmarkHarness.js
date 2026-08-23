@@ -5,6 +5,8 @@
 // namespaces and are removed/verified after every tier or on the next run after a kill.
 
 import { Platform } from 'react-native';
+import { sha256 } from '@noble/hashes/sha2';
+import { bytesToHex } from '@noble/hashes/utils';
 import { useStore } from '../store/useStore';
 import { getLedgerNamespace } from '../lib/activeLedgerRepository';
 import { getLedgerDb } from '../lib/ledgerDatabase';
@@ -18,6 +20,7 @@ import {
 import { exportColdArchives, getColdArchiveNamespace } from '../lib/localArchiveRepository';
 import {
   CANONICAL_ROW_SOURCE_V3_BATCH_POLICY,
+  readCanonicalRowBatchV3,
 } from '../lib/financialCanonicalRowSourceV3';
 import {
   registerLiveGenerationInTransactionV13,
@@ -43,7 +46,17 @@ import {
   proveRestoreNamespaceSqlV13,
 } from '../lib/financialRestoreSqlValidatorV13';
 import { semanticHashNamespaceV3Bounded } from '../lib/financialSemanticStreamV3';
-import { SEMANTIC_HASH_V3_VERSION } from '../lib/financialSemanticProjection';
+import {
+  SEMANTIC_HASH_V3_VERSION,
+  stableSemanticJsonV3,
+  canonicalizeFinancialConfigItemV3,
+  canonicalizeFinancialAccountItemV3,
+  canonicalizeFinancialExchangeRateItemV3,
+  canonicalizeFinancialTransactionItemV3,
+  canonicalizeFinancialPostingItemV3,
+  canonicalizeFinancialLinkItemV3,
+  canonicalizeFinancialEntityItemV3,
+} from '../lib/financialSemanticProjection';
 import { normalizeCanonicalRestoreProofCountsV13 } from '../lib/financialRestoreProofV13';
 import {
   createStrategyBRestoreIntentV13InTransaction,
@@ -146,6 +159,81 @@ const exactProofCounts = (left, right) => {
   const a = normalizeCanonicalRestoreProofCountsV13(left);
   const b = normalizeCanonicalRestoreProofCountsV13(right);
   return !!a && !!b && Object.keys(a).every(key => a[key] === b[key]);
+};
+
+// P10-014A post-promotion diagnostics. These compare bounded canonical sections but
+// expose only section names/booleans. No row, amount, count value or digest is logged.
+const POST_PROMOTION_COUNT_SECTIONS = Object.freeze([
+  'transactions', 'postings', 'links', 'accounts', 'exchangeRates', 'entities',
+  'coldArchiveBundles', 'coldArchiveRecords',
+]);
+const POST_PROMOTION_SEMANTIC_SECTIONS = Object.freeze([
+  'financialConfig', 'accounts', 'exchangeRates', 'transactions', 'postings',
+  'links', 'entities', 'archiveHeaders', 'archiveRecords',
+]);
+const postPromotionDiagnosticEncoder = new TextEncoder();
+const POST_PROMOTION_CANONICALIZER = Object.freeze({
+  financialConfig: canonicalizeFinancialConfigItemV3,
+  accounts: canonicalizeFinancialAccountItemV3,
+  exchangeRates: canonicalizeFinancialExchangeRateItemV3,
+  transactions: canonicalizeFinancialTransactionItemV3,
+  postings: canonicalizeFinancialPostingItemV3,
+  links: canonicalizeFinancialLinkItemV3,
+  entities: canonicalizeFinancialEntityItemV3,
+  archiveHeaders: value => value,
+  archiveRecords: value => value,
+});
+const diagnosticSectionDigest = async ({ database, namespace, section }) => {
+  const canonicalize = POST_PROMOTION_CANONICALIZER[section];
+  assertGate(typeof canonicalize === 'function', 'post_promotion_diagnostic_section_invalid', { section });
+  const hash = sha256.create();
+  let cursor = null;
+  while (true) {
+    const batch = await readCanonicalRowBatchV3({
+      database,
+      namespace,
+      section,
+      cursor,
+      maxRows: CANONICAL_ROW_SOURCE_V3_BATCH_POLICY.defaultMaxRows,
+      maxBytes: CANONICAL_ROW_SOURCE_V3_BATCH_POLICY.defaultMaxBytes,
+    });
+    assertGate(batch?.ok === true, 'post_promotion_diagnostic_row_source_failed', { section });
+    for (const row of batch.rows) {
+      const serialized = stableSemanticJsonV3(canonicalize(row));
+      hash.update(postPromotionDiagnosticEncoder.encode(`${serialized.length}:`));
+      hash.update(postPromotionDiagnosticEncoder.encode(serialized));
+    }
+    if (!batch.hasMore) break;
+    assertGate(batch.nextCursor, 'post_promotion_diagnostic_cursor_missing', { section });
+    cursor = batch.nextCursor;
+  }
+  return bytesToHex(hash.digest());
+};
+const diagnosePostPromotionMismatch = async ({
+  database, liveNamespace, incomingNamespace, liveCounts, incomingCounts, semanticHashMatches,
+}) => {
+  const countFailedSections = POST_PROMOTION_COUNT_SECTIONS.filter(
+    key => Number(liveCounts?.[key] || 0) !== Number(incomingCounts?.[key] || 0),
+  );
+  const semanticFailedSections = [];
+  if (!semanticHashMatches) {
+    for (const section of POST_PROMOTION_SEMANTIC_SECTIONS) {
+      const liveDigest = await diagnosticSectionDigest({
+        database, namespace: liveNamespace, section,
+      });
+      const incomingDigest = await diagnosticSectionDigest({
+        database, namespace: incomingNamespace, section,
+      });
+      if (liveDigest !== incomingDigest) semanticFailedSections.push(section);
+    }
+    // A full semantic mismatch with equal section digests can only be in top-level
+    // framing/ledger binding. Keep this explicit rather than guessing a section.
+    if (!semanticFailedSections.length) semanticFailedSections.push('topLevelOrFraming');
+  }
+  return Object.freeze({
+    countFailedSections: Object.freeze(countFailedSections),
+    semanticFailedSections: Object.freeze(semanticFailedSections),
+  });
 };
 
 const withRestoreTransaction = (database, task) => (
@@ -768,7 +856,9 @@ const recordSyntheticServerProof = async ({
   });
 };
 
-const readPostPromotionState = async ({ database, marker, incomingHash, incomingCounts, sourceEpoch, sourceGeneration }) => {
+const readPostPromotionState = async ({
+  database, marker, tierId, incomingHash, incomingCounts, sourceEpoch, sourceGeneration,
+}) => {
   const identity = await readLedgerSyncIdentityV8({
     namespace: marker.namespace,
     database,
@@ -813,6 +903,25 @@ const readPostPromotionState = async ({ database, marker, incomingHash, incoming
     namespace: marker.namespace,
     ledgerId: marker.ledgerId,
   });
+  const semanticHashMatches = liveHash === incomingHash;
+  const countsMatch = countsEqual(liveCounts, incomingCounts);
+  if (!semanticHashMatches || !countsMatch) {
+    const mismatch = await diagnosePostPromotionMismatch({
+      database,
+      liveNamespace: marker.namespace,
+      incomingNamespace: marker.incomingSourceNamespace,
+      liveCounts,
+      incomingCounts,
+      semanticHashMatches,
+    });
+    console.error('[P10_014A_POST_PROMOTION_DIFF]', JSON.stringify({
+      tierId: text(tierId),
+      semanticHashMatches,
+      countsMatch,
+      countFailedSections: mismatch.countFailedSections,
+      semanticFailedSections: mismatch.semanticFailedSections,
+    }));
+  }
   const stageCounts = await readNamespaceManifestCountsV13({ database, namespace: marker.stageNamespace });
   const stageCleared = zeroCounts(stageCounts) && !transactionState.stageMeta && !transactionState.stageWorkspace;
   const checkpointReferenced = !!(
@@ -842,8 +951,8 @@ const readPostPromotionState = async ({ database, marker, incomingHash, incoming
     restoreEpochAfter: Number(identity.restoreEpoch),
     liveGenerationBefore: sourceGeneration,
     liveGenerationAfter: Number(transactionState.generation.generation),
-    semanticHashMatches: liveHash === incomingHash,
-    countsMatch: countsEqual(liveCounts, incomingCounts),
+    semanticHashMatches,
+    countsMatch,
     stageCleared,
     undoCheckpointReferenced: checkpointReferenced,
     syntheticProofDurablyLabeled,
@@ -1144,6 +1253,7 @@ const runTier = async ({ database, tier, baseToken }) => {
     const postPromotion = await readPostPromotionState({
       database,
       marker,
+      tierId: tier.id,
       incomingHash,
       incomingCounts,
       sourceEpoch: snapshot.sourceRestoreEpoch,
