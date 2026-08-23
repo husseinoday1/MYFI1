@@ -312,7 +312,23 @@ export const clearColdArchives = async (namespace = 'guest') => {
 export const clearColdArchiveNamespaceInTransaction = async ({ database, namespace } = {}) => {
   const target = String(namespace || '').trim();
   if (!database || !target) throw new Error('cold_archive_transaction_namespace_invalid');
-  return database.runAsync('DELETE FROM cold_archive_years WHERE namespace = ?', target);
+
+  // Do not rely on ON DELETE CASCADE here. Some existing MYFI databases may have
+  // been created from an older cold-archive table shape, and CREATE TABLE IF NOT
+  // EXISTS cannot retrofit a missing foreign-key action. Promotion must therefore
+  // remove child rows explicitly before removing archive headers.
+  const records = await database.runAsync(
+    'DELETE FROM cold_archive_transactions WHERE namespace = ?',
+    target,
+  );
+  const headers = await database.runAsync(
+    'DELETE FROM cold_archive_years WHERE namespace = ?',
+    target,
+  );
+  return {
+    ...headers,
+    changes: Number(records?.changes || 0) + Number(headers?.changes || 0),
+  };
 };
 
 export const replaceColdArchiveNamespaceFromStageInTransaction = async ({

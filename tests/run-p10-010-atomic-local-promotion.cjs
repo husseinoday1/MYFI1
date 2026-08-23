@@ -269,6 +269,17 @@ const snapshot = async () => {
 (async () => {
   await database.execAsync(`${repository.FINANCIAL_LEDGER_V7_SCHEMA_SQL}\n${repository.FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL}`);
   await archive.ensureColdArchiveSchema();
+
+  // Regression for P10-014A real-device failure: legacy databases cannot be
+  // assumed to enforce the cold-archive ON DELETE CASCADE contract. Disable FK
+  // enforcement so successful promotion must explicitly remove child records.
+  await database.execAsync('PRAGMA foreign_keys = OFF');
+  assert.equal(
+    Number((await database.getFirstAsync('PRAGMA foreign_keys'))?.foreign_keys || 0),
+    0,
+    'P10-010 legacy archive regression requires foreign-key enforcement off',
+  );
+
   await run(`INSERT INTO ledger_currencies(code,minor_exponent,enabled) VALUES ('IQD',3,1)`);
   await run(`INSERT INTO ledger_sync_identity_v8
     (namespace,ledger_id,restore_epoch,protocol_version,minimum_supported_version,created_at,updated_at)
@@ -350,6 +361,16 @@ const snapshot = async () => {
   assert.deepEqual(visited, boundaries, 'success must cross every tested promotion boundary');
   assert.deepEqual((await all(`SELECT id FROM ledger_financial_transactions_v7 WHERE namespace=? ORDER BY id`, namespace)).map(row => row.id), ['tx-new']);
   assert.deepEqual((await all(`SELECT year FROM cold_archive_years WHERE namespace=? ORDER BY year`, namespace)).map(row => Number(row.year)), [2032]);
+  assert.deepEqual(
+    (await all(`SELECT id FROM cold_archive_transactions WHERE namespace=? ORDER BY id`, namespace)).map(row => row.id),
+    ['archive-tx-new'],
+    'promotion must remove stale cold-archive records even when FK cascade is unavailable',
+  );
+  assert.deepEqual(
+    (await all(`SELECT id FROM cold_archive_transactions WHERE namespace=? ORDER BY id`, stageOne)).map(row => row.id),
+    [],
+    'consumed restore stage must not leave orphan cold-archive records when FK cascade is unavailable',
+  );
   const workspace = JSON.parse((await database.getFirstAsync(`SELECT payload_json FROM ledger_workspace_state_v7 WHERE namespace=?`, namespace)).payload_json);
   assert.deepEqual(workspace.localPreferences, { cfg: { currency: 'USD', language: 'ar', theme: 'dark' }, notif: { quiet: true } },
     'promotion must retain device-local preferences and overlay only the financial config allowlist');
