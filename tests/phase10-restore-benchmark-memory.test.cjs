@@ -155,8 +155,10 @@ assert(
   'Diagnostic clone must short-circuit before normal DB initialization',
 );
 
-for (const required of [
-  "P10_014A_CLONE_PROBE_DIAGNOSTICS = process.env.EXPO_PUBLIC_P10_014A_CLONE_PROBE === '1'",
+// P10-014A evidence must stay in the dev harness: the production promotion
+// module keeps its fail-closed condition without device-probe diagnostics.
+for (const forbidden of [
+  'P10_014A_CLONE_PROBE_DIAGNOSTICS',
   'promotionPreconditionDiagnosticChecks',
   'promotionPreconditionFailedFields',
   '[P10_014A_PRODUCTION_PRECONDITION_DIFF]',
@@ -164,18 +166,8 @@ for (const required of [
   'immutableIntentCompositeMatch',
   'stageSchemaVersionMatch',
 ]) {
-  assert(promotion.includes(required), `R5.2 production-transaction diagnostic missing: ${required}`);
+  assert.equal(promotion.includes(forbidden), false, `Production promotion must not contain P10-014A diagnostic: ${forbidden}`);
 }
-assert(
-  promotion.indexOf('if (P10_014A_CLONE_PROBE_DIAGNOSTICS)')
-    < promotion.indexOf("throw new Error('canonical_restore_promotion_v13_precondition_failed')"),
-  'R5.2 diagnostic marker must execute only on the existing production precondition failure path',
-);
-assert.equal(
-  promotion.includes("console.error('[P10_014A_PRODUCTION_PRECONDITION_DIFF]', JSON.stringify({\n            intent:"),
-  false,
-  'R5.2 production diagnostic must not serialize the restore intent payload',
-);
 
 for (const required of [
   'P10-014A Original Package Clone Probe APK',
