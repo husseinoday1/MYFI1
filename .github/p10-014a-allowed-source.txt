@@ -5,3 +5,4 @@ src/dev/p10_014aDiagnosticEntry.js
 src/dev/p10_014aCloneProbeEntry.js
 src/lib/ledgerDatabase.js
 src/lib/financialRestorePromotionV13.js
+src/lib/localArchiveRepository.js
