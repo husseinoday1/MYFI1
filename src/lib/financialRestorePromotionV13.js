@@ -1,10 +1,8 @@
 // Phase 10 / P10-013 Strategy B — atomic local promotion with Undo pointer.
 // Isolated: no UI, Supabase client or live maintenance-fence wiring is imported.
 
-import {
-  FINANCIAL_LEDGER_SCHEMA_VERSION,
-  runFinancialRestorePromotionTransactionV8,
-} from './financialLedgerV7Repository';
+import { runFinancialRestorePromotionTransactionV8 } from './financialLedgerV7Repository';
+import { FINANCIAL_LEDGER_SCHEMA_VERSION } from './financialLedgerV7Model';
 import { cloudWorkspaceCfg, mergeCloudWorkspaceCfg } from './cloudWorkspaceMetadata.js';
 import { guardRestoreSourceBeforeEpochRpcInTransactionV13 } from './financialRestoreSourceGuardV13';
 import { normalizeCanonicalRestoreProofCountsV13 } from './financialRestoreProofV13';

@@ -7,11 +7,33 @@ const source = fs.readFileSync(path.join(root, 'src', 'dev', 'phase10RestoreBenc
 const entry = fs.readFileSync(path.join(root, 'src', 'dev', 'p10_014aCloneProbeEntry.js'), 'utf8');
 const ledgerDb = fs.readFileSync(path.join(root, 'src', 'lib', 'ledgerDatabase.js'), 'utf8');
 const promotion = fs.readFileSync(path.join(root, 'src', 'lib', 'financialRestorePromotionV13.js'), 'utf8');
+const ledgerModel = fs.readFileSync(path.join(root, 'src', 'lib', 'financialLedgerV7Model.js'), 'utf8');
+const p10AtomicTest = fs.readFileSync(path.join(root, 'tests', 'run-p10-013-atomic-undo-promotion-v13.cjs'), 'utf8');
 const workflow = fs.readFileSync(
   path.join(root, '.github', 'workflows', 'p10-014a-local-strategy-b-device-gate.yml'),
   'utf8',
 );
 const allowlist = fs.readFileSync(path.join(root, '.github', 'p10-014a-allowed-source.txt'), 'utf8');
+
+// Production schema-version ownership must match the real runtime module graph.
+assert(
+  /import\s*\{\s*FINANCIAL_LEDGER_SCHEMA_VERSION\s*\}\s*from '\.\/financialLedgerV7Model';/.test(promotion),
+  'Promotion must import FINANCIAL_LEDGER_SCHEMA_VERSION from financialLedgerV7Model',
+);
+assert.equal(
+  /import\s*\{[\s\S]*?FINANCIAL_LEDGER_SCHEMA_VERSION[\s\S]*?\}\s*from '\.\/financialLedgerV7Repository';/.test(promotion),
+  false,
+  'Promotion must not import FINANCIAL_LEDGER_SCHEMA_VERSION from financialLedgerV7Repository',
+);
+assert(
+  ledgerModel.includes('export const FINANCIAL_LEDGER_SCHEMA_VERSION = 7;'),
+  'financialLedgerV7Model must own schema version 7',
+);
+assert.equal(
+  p10AtomicTest.includes('module.exports = { FINANCIAL_LEDGER_SCHEMA_VERSION, FINANCIAL_LEDGER_V7_SCHEMA_SQL'),
+  false,
+  'P10-013 harness must not invent a repository export for FINANCIAL_LEDGER_SCHEMA_VERSION',
+);
 
 // Production Strategy B/V13 only; never retired V7 benchmark promotion.
 for (const forbidden of [

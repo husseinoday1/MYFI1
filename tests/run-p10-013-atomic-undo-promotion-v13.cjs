@@ -78,15 +78,42 @@ let repoSource = fs.readFileSync(repoFilename, 'utf8')
   .replace(/export const /g, 'const ')
   .replace(/export async function /g, 'async function ')
   .replace(/export function /g, 'function ');
-repoSource += `\nmodule.exports = { FINANCIAL_LEDGER_SCHEMA_VERSION, FINANCIAL_LEDGER_V7_SCHEMA_SQL, FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL, runFinancialRestorePromotionTransactionV8 };\n`;
+repoSource += `\nmodule.exports = { FINANCIAL_LEDGER_V7_SCHEMA_SQL, FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL, runFinancialRestorePromotionTransactionV8 };\n`;
 const repository = compile(repoFilename, repoSource);
 globalThis.__P10_REPOSITORY__ = repository;
 
 globalThis.__P10_GUARD__ = null;
 const promotionFilename = path.join(root, 'src/lib/financialRestorePromotionV13.js');
-let promotionSource = fs.readFileSync(promotionFilename, 'utf8')
-  .replace(/import \{[\s\S]*?\} from '\.\/financialLedgerV7Repository';/,
-    `const { FINANCIAL_LEDGER_SCHEMA_VERSION, runFinancialRestorePromotionTransactionV8 } = globalThis.__P10_REPOSITORY__;`)
+const promotionProductionSource = fs.readFileSync(promotionFilename, 'utf8');
+const ledgerModelProductionSource = fs.readFileSync(
+  path.join(root, 'src/lib/financialLedgerV7Model.js'), 'utf8',
+);
+assert(
+  /import\s*\{\s*FINANCIAL_LEDGER_SCHEMA_VERSION\s*\}\s*from '\.\/financialLedgerV7Model';/.test(
+    promotionProductionSource,
+  ),
+  'P10-013 production promotion must import FINANCIAL_LEDGER_SCHEMA_VERSION from financialLedgerV7Model',
+);
+assert.equal(
+  /import\s*\{[\s\S]*?FINANCIAL_LEDGER_SCHEMA_VERSION[\s\S]*?\}\s*from '\.\/financialLedgerV7Repository';/.test(
+    promotionProductionSource,
+  ),
+  false,
+  'P10-013 production promotion must not import FINANCIAL_LEDGER_SCHEMA_VERSION from repository',
+);
+assert(
+  ledgerModelProductionSource.includes('export const FINANCIAL_LEDGER_SCHEMA_VERSION = 7;'),
+  'P10-013 ledger model must own/export schema version 7',
+);
+let promotionSource = promotionProductionSource
+  .replace(
+    "import { runFinancialRestorePromotionTransactionV8 } from './financialLedgerV7Repository';",
+    `const { runFinancialRestorePromotionTransactionV8 } = globalThis.__P10_REPOSITORY__;`,
+  )
+  .replace(
+    "import { FINANCIAL_LEDGER_SCHEMA_VERSION } from './financialLedgerV7Model';",
+    `const FINANCIAL_LEDGER_SCHEMA_VERSION = 7;`,
+  )
   .replace(/import \{ cloudWorkspaceCfg, mergeCloudWorkspaceCfg \} from '\.\/cloudWorkspaceMetadata\.js';/,
     `const cloudWorkspaceCfg = cfg => cfg?.currency === undefined ? {} : { currency: cfg.currency };\nconst mergeCloudWorkspaceCfg = (localCfg = {}, cloudCfg = {}) => ({ ...(localCfg || {}), ...cloudWorkspaceCfg(cloudCfg) });`)
   .replace(/import \{ guardRestoreSourceBeforeEpochRpcInTransactionV13 \} from '\.\/financialRestoreSourceGuardV13';/,
