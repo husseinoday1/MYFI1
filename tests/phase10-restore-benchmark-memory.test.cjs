@@ -98,6 +98,32 @@ for (const required of [
   'cloneDatabaseOnly: P10_014A_CLONE_PROBE_FLAG',
   'originalDatabaseMutationByHarness: false',
   "memoryEvidence: 'EXTERNAL_ADB_REQUIRED'",
+  'PROMOTION_FAULT_BOUNDARIES',
+  'after_private_copy_before_state',
+  'after_copy_before_checkpoint_state',
+  'runPhase10RestoreFaultMatrixHarness',
+  "scenarioId: 'bounded_batch_cancellation'",
+  "scenarioId: 'simulated_sqlite_busy'",
+  "scenarioId: 'simulated_low_storage'",
+  "scenarioId: 'maintenance_interlocks'",
+  "lowStorageAcceptance: 'REAL_CLONE_SCOPED_SQLITE_FULL_PAGE_QUOTA'",
+  "physicalDeviceStorageExhaustion: 'NOT_RUN_GLOBAL_SIDE_EFFECT_FORBIDDEN'",
+  "sqliteBusyAcceptance: 'REAL_CLONE_SCOPED_SQLITE_CONTENTION'",
+  "processKillAcceptance: 'PENDING_EXTERNAL_ADB_RUNNER'",
+  '[P10_014A_FAULT_ROLLBACK]',
+  '[P10_014A_FAULT_MATRIX_RESULT]',
+  'PROCESS_KILL_WINDOWS',
+  'runPhase10RestoreKillWindowHarness',
+  '[P10_014A_KILL_WINDOW_READY]',
+  "boundary: 'before_private_stage_batch_transaction'",
+  "boundary === 'before_live_clear'",
+  'pidScopedForceStopRequired: true',
+  'runRealSqliteBusyScenario',
+  'runRealSqliteFullScenario',
+  '[P10_014A_SQLITE_BUSY_RESULT]',
+  '[P10_014A_SQLITE_FULL_RESULT]',
+  'BEGIN IMMEDIATE',
+  'PRAGMA max_page_count',
 ]) {
   assert(source.includes(required), `R5 harness missing: ${required}`);
 }
@@ -128,6 +154,22 @@ for (const required of [
   "setStatus({ label: 'FAIL', code })",
   "backgroundColor: '#ffffff'",
   '{status.code}',
+  "FAULT_MATRIX_FLAG = process.env.EXPO_PUBLIC_P10_014A_FAULT_MATRIX === '1'",
+  'harness.runPhase10RestoreFaultMatrixHarness()',
+  "FAULT_MATRIX_FLAG ? 'P10-014A-002-R6.3' : 'P10-014A-001-R5.3'",
+  'KILL_WINDOW_PATTERN',
+  'Linking.getInitialURL()',
+  'harness.runPhase10RestoreKillWindowHarness({ killWindow })',
+  "__MYFI_P10_014A_KILL_WINDOW__",
+  "__MYFI_P10_014A_CLONE_DB_NAME__",
+  "'P10-014A-002-R6.2'",
+  "killWindow === 'cleanup_only'",
+  "mode: 'orphan_cleanup_only'",
+  'SOURCE_ARTIFACT_FINGERPRINT_KEY',
+  'SOURCE_FINGERPRINT_BASELINE',
+  'SOURCE_FINGERPRINT_RECOVERY',
+  'sourceFingerprintComparisonCount',
+  'p10_clone_probe_source_fingerprint_changed_after_process_kill',
 ]) {
   assert(entry.includes(required), `R5 clone entry missing: ${required}`);
 }
@@ -135,7 +177,8 @@ assert.equal(entry.includes("import '../../index'"), false, 'R5 clone probe must
 assert.equal(entry.includes("from '../store/useStore'"), false, 'R5 clone probe must not import store');
 assert.equal(entry.toLowerCase().includes('supabase'), false, 'R5 clone probe must not import Supabase');
 assert(
-  entry.indexOf('await sweepCloneArtifacts()') < entry.indexOf('const sourceUri = databaseUri(LEDGER_DB_NAME)'),
+  entry.lastIndexOf('const orphanSweep = await sweepCloneArtifacts();')
+    < entry.indexOf('const sourceInfoBefore = await FileSystem.getInfoAsync(sourceUri)'),
   'Orphan clone artifacts must be removed before the source database is opened',
 );
 

@@ -1,0 +1,141 @@
+name: P10-014A Normal MYFI APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - impl/p10-014a-local-strategy-b-device-gate-2026-08-22
+
+permissions:
+  contents: read
+
+jobs:
+  build-normal-myfi-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Checkout exact branch commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify normal application entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./package.json').main")" = "index.js"
+          grep -Fq "applicationId 'com.myfi.app'" android/app/build.gradle
+          echo "[PASS] normal MYFI entry and application id verified"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Load public bundle environment and disable diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const cfg = JSON.parse(fs.readFileSync('eas.json', 'utf8'));
+          const env = cfg?.build?.preview?.env || {};
+          for (const key of ['EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_KEY']) {
+            const value = String(env[key] || '').trim();
+            if (!value) throw new Error(`[FAIL] Missing ${key} in eas.json preview env`);
+            fs.appendFileSync(process.env.GITHUB_ENV, `${key}=${value}\n`);
+          }
+          NODE
+          {
+            echo "EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE=0"
+            echo "EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK=0"
+            echo "EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B=0"
+            echo "EXPO_PUBLIC_P10_014A_CLONE_PROBE=0"
+            echo "EXPO_PUBLIC_P10_014A_FAULT_MATRIX=0"
+            echo "EXPO_PUBLIC_FRESH_TEST=0"
+          } >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Full quality gate
+        run: npm run test:gate
+
+      - name: Verify normal Android bundle
+        run: npm run verify:android
+
+      - name: Verify signing certificate source
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
+          ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
+          test "$ACTUAL" = "$EXPECTED"
+          echo "[PASS] update-compatible signing certificate verified"
+
+      - name: Build normal arm64 release APK
+        working-directory: android
+        env:
+          CI: "true"
+          NODE_ENV: "production"
+          EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE: "0"
+          EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK: "0"
+          EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B: "0"
+          EXPO_PUBLIC_P10_014A_CLONE_PROBE: "0"
+          EXPO_PUBLIC_P10_014A_FAULT_MATRIX: "0"
+          EXPO_PUBLIC_FRESH_TEST: "0"
+        run: |
+          chmod +x ./gradlew
+          ./gradlew clean app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Verify APK identity and write evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          BADGING="$("$AAPT" dump badging "$APK" | head -1)"
+          echo "$BADGING"
+          echo "$BADGING" | grep -Fq "package: name='com.myfi.app'"
+          VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
+          VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
+          test -n "$VERSION_CODE"
+          SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          SIZE="$(stat -c%s "$APK")"
+          {
+            echo "BuildType=NORMAL_MYFI_RELEASE"
+            echo "DiagnosticEntry=NO"
+            echo "ApplicationEntry=index.js"
+            echo "ApplicationId=com.myfi.app"
+            echo "BuildCommit=$(git rev-parse HEAD)"
+            echo "Branch=$(git branch --show-current)"
+            echo "VersionCode=$VERSION_CODE"
+            echo "VersionName=$VERSION_NAME"
+            echo "SigningCertificateSHA256=FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
+            echo "InstallMode=ADB_INSTALL_R_PRESERVE_DATA"
+            echo "SHA256=$SHA"
+            echo "SizeBytes=$SIZE"
+          } | tee MYFI-normal-apk-evidence.txt
+          sha256sum "$APK" > app-release.apk.sha256
+
+      - name: Upload normal MYFI APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MYFI-P10-014A-normal-release
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            app-release.apk.sha256
+            MYFI-normal-apk-evidence.txt
+          if-no-files-found: error
+          retention-days: 7

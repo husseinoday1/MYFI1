@@ -6,7 +6,7 @@
 // on a disposable clone database selected through the R5 diagnostic override.
 
 import React, { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Linking, Text, View } from 'react-native';
 import { registerRootComponent } from 'expo';
 import * as SQLite from 'expo-sqlite';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -22,7 +22,16 @@ import {
 
 const LOG = '[P10_014A_CLONE_PROBE]';
 const CLONE_MARKER_KEY = 'p10_014a_clone_database_marker';
+const SOURCE_ARTIFACT_FINGERPRINT_KEY = 'p10_014a_source_artifact_fingerprint';
 const CLONE_FLAG = process.env.EXPO_PUBLIC_P10_014A_CLONE_PROBE === '1';
+const FAULT_MATRIX_FLAG = process.env.EXPO_PUBLIC_P10_014A_FAULT_MATRIX === '1';
+const KILL_WINDOW_PATTERN = /[?&]window=(unlocked_batch|final_locked|cleanup_only)(?:&|$)/;
+
+const requestedKillWindow = async () => {
+  const initialUrl = String(await Linking.getInitialURL() || '');
+  const match = initialUrl.match(KILL_WINDOW_PATTERN);
+  return match?.[1] || null;
+};
 
 const scalar = row => {
   if (!row || typeof row !== 'object') return null;
@@ -50,12 +59,92 @@ const sweepCloneArtifacts = () => sweepOwnedCloneArtifacts({
   sourceDatabaseName: LEDGER_DB_NAME,
 });
 
+const fileArtifactFingerprint = async uri => {
+  const info = await FileSystem.getInfoAsync(uri, { md5: true });
+  return info?.exists && !info?.isDirectory
+    ? Object.freeze({ exists: true, size: Number(info.size || 0), md5: String(info.md5 || '') })
+    : Object.freeze({ exists: false, size: 0, md5: '' });
+};
+
+const sourceArtifactFingerprint = async () => {
+  const sourceUri = databaseUri(LEDGER_DB_NAME);
+  return Object.freeze({
+    database: await fileArtifactFingerprint(sourceUri),
+    wal: await fileArtifactFingerprint(`${sourceUri}-wal`),
+  });
+};
+
+const recoverKillWindowArtifacts = async () => {
+  const directoryUri = toFileUri(SQLite.defaultDatabaseDirectory);
+  const names = await FileSystem.readDirectoryAsync(directoryUri);
+  const cloneNames = names.map(name => String(name || '')).filter(isOwnedCloneDatabaseName).sort();
+  const sourceFingerprintAfterRestart = await sourceArtifactFingerprint();
+  const comparisons = [];
+
+  for (const cloneName of cloneNames) {
+    let clone = null;
+    try {
+      clone = await SQLite.openDatabaseAsync(
+        cloneName,
+        { useNewConnection: true },
+        SQLite.defaultDatabaseDirectory,
+      );
+      const row = await clone.getFirstAsync(
+        'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1',
+        SOURCE_ARTIFACT_FINGERPRINT_KEY,
+      );
+      if (!row?.value) continue;
+      const sourceFingerprintBeforeKill = JSON.parse(String(row.value));
+      comparisons.push(Object.freeze({
+        cloneName,
+        sourceFingerprintBeforeKill,
+        sourceFingerprintAfterRestart,
+        stable: JSON.stringify(sourceFingerprintBeforeKill)
+          === JSON.stringify(sourceFingerprintAfterRestart),
+      }));
+    } finally {
+      try { await clone?.closeAsync?.(); } catch {}
+    }
+  }
+
+  return Object.freeze({
+    sourceFingerprintAfterRestart,
+    comparisons,
+    comparisonCount: comparisons.length,
+    sourceFingerprintStable: comparisons.length > 0
+      && comparisons.every(item => item.stable === true),
+  });
+};
+
 const nonce = () => (
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
 );
 
 async function runCloneProbe() {
   if (!CLONE_FLAG) throw new Error('p10_clone_probe_build_flag_required');
+  const killWindow = await requestedKillWindow();
+  if (killWindow === 'cleanup_only') {
+    const recovery = await recoverKillWindowArtifacts();
+    const orphanSweep = await sweepCloneArtifacts();
+    console.info(LOG, 'ORPHAN_CLONE_SWEEP', JSON.stringify(orphanSweep));
+    if (!recovery.sourceFingerprintStable) {
+      throw new Error('p10_clone_probe_source_fingerprint_changed_after_process_kill');
+    }
+    console.info(LOG, 'SOURCE_FINGERPRINT_RECOVERY', JSON.stringify(recovery));
+    return {
+      ok: true,
+      patchId: 'P10-014A-002-R6.2',
+      mode: 'orphan_cleanup_only',
+      originalDatabaseReadOnly: true,
+      originalDatabaseMutationByHarness: false,
+      orphanCloneArtifactCount: orphanSweep.artifactCount,
+      orphanCloneCleanupVerified: orphanSweep.cleanupVerified,
+      sourceFingerprintComparisonCount: recovery.comparisonCount,
+      sourceFingerprintStable: recovery.sourceFingerprintStable,
+      cloneDeletedAfterRun: true,
+      harnessResult: { ok: true, cleanupOnly: true },
+    };
+  }
   const orphanSweep = await sweepCloneArtifacts();
   console.info(LOG, 'ORPHAN_CLONE_SWEEP', JSON.stringify(orphanSweep));
   const sourceUri = databaseUri(LEDGER_DB_NAME);
@@ -249,7 +338,22 @@ async function runCloneProbe() {
       cloneNonce,
       new Date().toISOString(),
     );
+    if (killWindow) {
+      const sourceFingerprintBeforeKill = await sourceArtifactFingerprint();
+      await clone.runAsync(
+        'INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)',
+        SOURCE_ARTIFACT_FINGERPRINT_KEY,
+        JSON.stringify(sourceFingerprintBeforeKill),
+        new Date().toISOString(),
+      );
+      console.info(LOG, 'SOURCE_FINGERPRINT_BASELINE', JSON.stringify({
+        killWindow,
+        sourceFingerprintBeforeKill,
+      }));
+    }
     globalThis.__MYFI_P10_014A_CLONE_NONCE__ = cloneNonce;
+    globalThis.__MYFI_P10_014A_CLONE_DB_NAME__ = cloneName;
+    globalThis.__MYFI_P10_014A_KILL_WINDOW__ = killWindow;
     setP10CloneLedgerDbOverride(clone);
     overrideEnabled = true;
 
@@ -258,12 +362,18 @@ async function runCloneProbe() {
     if (!harness.PHASE10_RESTORE_BENCHMARK_ENABLED) {
       throw new Error('p10_clone_probe_harness_flags_required');
     }
-    harnessResult = await harness.runPhase10RestoreBenchmarkHarness();
+    harnessResult = killWindow
+      ? await harness.runPhase10RestoreKillWindowHarness({ killWindow })
+      : FAULT_MATRIX_FLAG
+        ? await harness.runPhase10RestoreFaultMatrixHarness()
+        : await harness.runPhase10RestoreBenchmarkHarness();
     if (!harnessResult?.ok) throw new Error('p10_clone_probe_harness_failed');
 
     return {
       ok: true,
-      patchId: 'P10-014A-001-R5.3',
+      patchId: killWindow
+        ? 'P10-014A-002-R6.2'
+        : FAULT_MATRIX_FLAG ? 'P10-014A-002-R6.3' : 'P10-014A-001-R5.3',
       mode: 'original_package_sqlite_backup_clone',
       originalDatabaseReadOnly: true,
       originalDatabaseMutationByHarness: false,
@@ -279,6 +389,8 @@ async function runCloneProbe() {
       try { clearP10CloneLedgerDbOverride(clone); } catch {}
     }
     try { delete globalThis.__MYFI_P10_014A_CLONE_NONCE__; } catch {}
+    try { delete globalThis.__MYFI_P10_014A_CLONE_DB_NAME__; } catch {}
+    try { delete globalThis.__MYFI_P10_014A_KILL_WINDOW__; } catch {}
     try { await source?.closeAsync?.(); } catch {}
     try { await clone?.closeAsync?.(); } catch {}
     try {
@@ -330,7 +442,7 @@ function CloneProbeApp() {
       backgroundColor: '#ffffff',
     }}>
       <Text style={{ color: '#111111', fontSize: 20, fontWeight: '700', marginBottom: 12 }}>
-        P10-014A R5.3 Clone Probe
+        {FAULT_MATRIX_FLAG ? 'P10-014A R6.3 Fault Matrix' : 'P10-014A R5.3 Clone Probe'}
       </Text>
       <Text style={{ color: '#111111', fontSize: 18, marginBottom: 10 }}>
         {status.label}

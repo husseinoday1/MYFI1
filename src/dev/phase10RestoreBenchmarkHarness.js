@@ -5,6 +5,7 @@
 // namespaces and are removed/verified after every tier or on the next run after a kill.
 
 import { Platform } from 'react-native';
+import * as SQLite from 'expo-sqlite';
 import { sha256 } from '@noble/hashes/sha2';
 import { bytesToHex } from '@noble/hashes/utils';
 import { useStore } from '../store/useStore';
@@ -63,7 +64,10 @@ import {
   promoteCanonicalRestoreStageV13,
   recordStrategyBServerProofV13InTransaction,
 } from '../lib/financialRestorePromotionV13';
-import { runFinancialMaintenanceTask } from '../lib/financialMaintenanceBarrier';
+import {
+  isFinancialMaintenanceBlocked,
+  runFinancialMaintenanceTask,
+} from '../lib/financialMaintenanceBarrier';
 import { disposableBlockers } from './p19RestoreEpochDeviceGate';
 
 const P10_014A_LOCAL_FLAG = process.env.EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B === '1';
@@ -88,6 +92,19 @@ const REQUIRED_TIERS = Object.freeze([
   { id: '100000', transactions: 100000 },
 ]);
 const REQUIRED_TIER_MAP = new Map(REQUIRED_TIERS.map(item => [item.id, item]));
+const PROMOTION_FAULT_BOUNDARIES = Object.freeze([
+  'before_live_clear',
+  'after_live_clear',
+  'after_hot_copy',
+  'after_archive_replace',
+  'after_workspace_state',
+  'after_undo_pointer',
+  'after_restore_metadata',
+  'after_epoch_cas',
+  'after_stage_cleanup',
+]);
+const PROCESS_KILL_WINDOWS = Object.freeze(['unlocked_batch', 'final_locked']);
+const PROCESS_KILL_WINDOW_TIMEOUT_MS = 60000;
 const PRIVATE_COPY_SECTIONS = Object.freeze([
   'accounts', 'exchangeRates', 'transactions', 'postings', 'links', 'entities',
   'archiveHeaders', 'archiveRecords',
@@ -115,6 +132,11 @@ const nowMs = () => (
 );
 const roundMs = value => Math.round(Number(value || 0) * 1000) / 1000;
 const text = value => String(value ?? '').trim();
+const firstValue = row => {
+  if (!row || typeof row !== 'object') return null;
+  const values = Object.values(row);
+  return values.length ? values[0] : null;
+};
 const object = value => !!value && typeof value === 'object' && !Array.isArray(value);
 const parseObject = value => {
   try {
@@ -132,6 +154,16 @@ const assertGate = (condition, code, details = null) => {
   const error = new Error(`p10_014a_${code}`);
   if (details) error.details = details;
   throw error;
+};
+const holdForExternalProcessKill = async ({ killWindow, boundary }) => {
+  console.warn('[P10_014A_KILL_WINDOW_READY]', JSON.stringify({
+    killWindow,
+    boundary,
+    pidScopedForceStopRequired: true,
+    originalDatabaseMutationByHarness: false,
+  }));
+  await new Promise(resolve => setTimeout(resolve, PROCESS_KILL_WINDOW_TIMEOUT_MS));
+  throw new Error(`p10_014a_kill_window_timeout_${killWindow}`);
 };
 const uuidValue = value => (
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text(value))
@@ -709,11 +741,62 @@ const initializeRestoreStageWorkspace = async ({ database, sourceNamespace, stag
   });
 };
 
-const copyPrivateNamespaceBounded = async ({ database, sourceNamespace, targetNamespace }) => {
-  const metrics = { batches: 0, maxBatchRows: 0, maxBatchBytes: 0 };
+const copyPrivateNamespaceBounded = async ({
+  database,
+  sourceNamespace,
+  targetNamespace,
+  injectedFaultCode = null,
+  processKillWindow = null,
+}) => {
+  const metrics = {
+    batches: 0,
+    maxBatchRows: 0,
+    maxBatchBytes: 0,
+    injectedFaultCode: injectedFaultCode || null,
+    injectedFaultRolledBack: injectedFaultCode ? false : null,
+  };
+  if (processKillWindow === 'unlocked_batch') {
+    await holdForExternalProcessKill({
+      killWindow: processKillWindow,
+      boundary: 'before_private_stage_batch_transaction',
+    });
+  }
+  let faultPending = !!injectedFaultCode;
   for (const section of PRIVATE_COPY_SECTIONS) {
     let cursor = null;
     while (true) {
+      if (faultPending) {
+        const rowsBefore = await namespaceRowCount(database, targetNamespace);
+        let caught = null;
+        try {
+          await withRestoreTransaction(database, txn => (
+            copyBoundedFinancialNamespaceBatchInTransactionV13({
+              database: txn,
+              sourceNamespace,
+              targetNamespace,
+              section,
+              cursor,
+              maxRows: CANONICAL_ROW_SOURCE_V3_BATCH_POLICY.defaultMaxRows,
+              maxBytes: CANONICAL_ROW_SOURCE_V3_BATCH_POLICY.defaultMaxBytes,
+              faultInjector: boundary => {
+                if (boundary === 'after_private_copy_before_state') {
+                  throw new Error(injectedFaultCode);
+                }
+              },
+            })
+          ));
+        } catch (error) {
+          caught = text(error?.message || error);
+        }
+        assertGate(caught === injectedFaultCode, 'stage_copy_fault_not_observed', {
+          expected: injectedFaultCode,
+          actual: caught,
+        });
+        const rowsAfter = await namespaceRowCount(database, targetNamespace);
+        assertGate(rowsAfter === rowsBefore, 'stage_copy_fault_not_rolled_back');
+        metrics.injectedFaultRolledBack = true;
+        faultPending = false;
+      }
       const result = await withRestoreTransaction(database, txn => (
         copyBoundedFinancialNamespaceBatchInTransactionV13({
           database: txn,
@@ -740,12 +823,62 @@ const copyPrivateNamespaceBounded = async ({ database, sourceNamespace, targetNa
   return metrics;
 };
 
-const buildCheckpointBounded = async ({ database, namespace, operationId, checkpointId }) => {
+const buildCheckpointBounded = async ({
+  database,
+  namespace,
+  operationId,
+  checkpointId,
+  injectedFaultCode = null,
+}) => {
   let state = await withRestoreTransaction(database, txn => (
     initializeRestoreCheckpointInTransactionV13({ database: txn, namespace, operationId })
   ));
-  const metrics = { batches: 0, maxBatchRows: 0, maxBatchBytes: 0 };
+  const metrics = {
+    batches: 0,
+    maxBatchRows: 0,
+    maxBatchBytes: 0,
+    injectedFaultCode: injectedFaultCode || null,
+    injectedFaultRolledBack: injectedFaultCode ? false : null,
+  };
+  let faultPending = !!injectedFaultCode;
   while (state.status !== 'PROVING_CHECKPOINT') {
+    if (faultPending) {
+      const rowsBefore = await namespaceRowCount(database, state.checkpointNamespace);
+      const stateBefore = JSON.stringify(state);
+      let caught = null;
+      try {
+        await withRestoreTransaction(database, txn => (
+          copyNextRestoreCheckpointBatchInTransactionV13({
+            database: txn,
+            namespace,
+            checkpointId,
+            maxRows: CANONICAL_ROW_SOURCE_V3_BATCH_POLICY.defaultMaxRows,
+            maxBytes: CANONICAL_ROW_SOURCE_V3_BATCH_POLICY.defaultMaxBytes,
+            faultInjector: boundary => {
+              if (boundary === 'after_copy_before_checkpoint_state') {
+                throw new Error(injectedFaultCode);
+              }
+            },
+          })
+        ));
+      } catch (error) {
+        caught = text(error?.message || error);
+      }
+      assertGate(caught === injectedFaultCode, 'checkpoint_copy_fault_not_observed', {
+        expected: injectedFaultCode,
+        actual: caught,
+      });
+      const rowsAfter = await namespaceRowCount(database, state.checkpointNamespace);
+      const checkpointRow = await database.getFirstAsync(
+        'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1',
+        `canonical_restore_checkpoint_v13:${namespace}:${checkpointId}`,
+      );
+      assertGate(rowsAfter === rowsBefore, 'checkpoint_copy_fault_not_rolled_back');
+      assertGate(String(checkpointRow?.value || '') === stateBefore,
+        'checkpoint_copy_state_advanced_after_fault');
+      metrics.injectedFaultRolledBack = true;
+      faultPending = false;
+    }
     state = await withRestoreTransaction(database, txn => (
       copyNextRestoreCheckpointBatchInTransactionV13({
         database: txn,
@@ -965,7 +1098,17 @@ const readPostPromotionState = async ({
   return evidence;
 };
 
-const runTier = async ({ database, tier, baseToken }) => {
+const runTier = async ({
+  database,
+  tier,
+  baseToken,
+  scenarioId = 'core',
+  stageCopyFaultCode = null,
+  checkpointCopyFaultCode = null,
+  promotionFaultBoundary = null,
+  promotionFaultCode = null,
+  processKillWindow = null,
+}) => {
   const operationId = uuid();
   const checkpointId = uuid();
   const namespace = `${LIVE_NAMESPACE_PREFIX}${baseToken}-${tier.id}`;
@@ -977,7 +1120,11 @@ const runTier = async ({ database, tier, baseToken }) => {
   let marker = {
     version: 1,
     gate: P10_014A_GATE,
-    subgate: 'P10-014A-001_CORE',
+    subgate: processKillWindow
+      ? 'P10-014A-002_PROCESS_KILL'
+      : promotionFaultBoundary || stageCopyFaultCode || checkpointCopyFaultCode
+      ? 'P10-014A-002_FAULT_MATRIX'
+      : 'P10-014A-001_CORE',
     serverProofSource: SYNTHETIC_SERVER_PROOF_SOURCE,
     cloudHandshakeAcceptance: 'NOT_TESTED',
     namespace,
@@ -1069,6 +1216,8 @@ const runTier = async ({ database, tier, baseToken }) => {
       database,
       sourceNamespace: incomingSourceNamespace,
       targetNamespace: stageNamespace,
+      injectedFaultCode: stageCopyFaultCode,
+      processKillWindow,
     });
     const incomingStageCopyMs = nowMs() - stageCopyStarted;
 
@@ -1100,6 +1249,7 @@ const runTier = async ({ database, tier, baseToken }) => {
     const checkpointCopyStarted = nowMs();
     const checkpointMetrics = await buildCheckpointBounded({
       database, namespace, operationId, checkpointId,
+      injectedFaultCode: checkpointCopyFaultCode,
     });
     const checkpointCopyMs = nowMs() - checkpointCopyStarted;
 
@@ -1228,9 +1378,99 @@ const runTier = async ({ database, tier, baseToken }) => {
         });
 
       const promotionStarted = nowMs();
+      let rollbackBaseline = null;
+      if (promotionFaultBoundary) {
+        const baselineIdentity = await readLedgerSyncIdentityV8({
+          namespace,
+          database,
+          schemaReady: true,
+        });
+        const baselineGeneration = await withRestoreTransaction(database, txn => (
+          readLiveGenerationInTransactionV13({
+            database: txn,
+            namespace,
+            ledgerId: baselineIdentity.ledgerId,
+            restoreEpoch: baselineIdentity.restoreEpoch,
+          })
+        ));
+        rollbackBaseline = {
+          semanticHash: await semanticHashNamespaceV3Bounded({
+            database,
+            namespace,
+            ledgerId: identity.ledgerId,
+          }),
+          counts: await readNamespaceManifestCountsV13({ database, namespace }),
+          restoreEpoch: Number(baselineIdentity.restoreEpoch),
+          liveGeneration: Number(baselineGeneration.generation),
+        };
+      }
+
+      const injectedPromotionCode = promotionFaultCode
+        || (promotionFaultBoundary ? `p10_014a_injected_${promotionFaultBoundary}` : null);
       promoted = await promoteCanonicalRestoreStageV13({
-        namespace, operationId, database,
+        namespace,
+        operationId,
+        database,
+        faultInjector: promotionFaultBoundary || processKillWindow === 'final_locked'
+          ? async boundary => {
+              if (processKillWindow === 'final_locked' && boundary === 'before_live_clear') {
+                await holdForExternalProcessKill({ killWindow: processKillWindow, boundary });
+              }
+              if (boundary === promotionFaultBoundary) throw new Error(injectedPromotionCode);
+            }
+          : null,
       });
+
+      if (promotionFaultBoundary) {
+        assertGate(promoted?.ok === false && text(promoted?.reason) === injectedPromotionCode,
+          'promotion_fault_not_observed', {
+            scenarioId,
+            promotionFaultBoundary,
+            expected: injectedPromotionCode,
+            actual: text(promoted?.reason),
+          });
+        const rollbackIdentity = await readLedgerSyncIdentityV8({
+          namespace,
+          database,
+          schemaReady: true,
+        });
+        const rollbackGeneration = await withRestoreTransaction(database, txn => (
+          readLiveGenerationInTransactionV13({
+            database: txn,
+            namespace,
+            ledgerId: rollbackIdentity.ledgerId,
+            restoreEpoch: rollbackIdentity.restoreEpoch,
+          })
+        ));
+        const rollbackHash = await semanticHashNamespaceV3Bounded({
+          database,
+          namespace,
+          ledgerId: identity.ledgerId,
+        });
+        const rollbackCounts = await readNamespaceManifestCountsV13({ database, namespace });
+        const retryGuard = await withRestoreTransaction(database, txn => (
+          guardRestoreSourceBeforeEpochRpcInTransactionV13({ database: txn, namespace, operationId })
+        ));
+        const rollbackVerified = (
+          rollbackHash === rollbackBaseline.semanticHash
+          && countsEqual(rollbackCounts, rollbackBaseline.counts)
+          && Number(rollbackIdentity.restoreEpoch) === rollbackBaseline.restoreEpoch
+          && Number(rollbackGeneration.generation) === rollbackBaseline.liveGeneration
+          && retryGuard?.ok === true
+        );
+        assertGate(rollbackVerified, 'promotion_fault_rollback_invalid', {
+          scenarioId,
+          promotionFaultBoundary,
+        });
+        console.log('[P10_014A_FAULT_ROLLBACK]', JSON.stringify({
+          scenarioId,
+          boundary: promotionFaultBoundary,
+          faultCode: injectedPromotionCode,
+          rollbackVerified,
+          retryGuardReady: retryGuard?.ok === true,
+        }));
+        promoted = await promoteCanonicalRestoreStageV13({ namespace, operationId, database });
+      }
       atomicPromotionMs = nowMs() - promotionStarted;
       void rebindMs;
 
@@ -1279,6 +1519,17 @@ const runTier = async ({ database, tier, baseToken }) => {
       checkpointBatches: checkpointMetrics.batches,
       checkpointMaxBatchRows: checkpointMetrics.maxBatchRows,
       checkpointMaxBatchBytes: checkpointMetrics.maxBatchBytes,
+      scenarioId,
+      stageCopyFaultCode: stageCopyMetrics.injectedFaultCode,
+      stageCopyFaultRolledBack: stageCopyMetrics.injectedFaultRolledBack,
+      checkpointCopyFaultCode: checkpointMetrics.injectedFaultCode,
+      checkpointCopyFaultRolledBack: checkpointMetrics.injectedFaultRolledBack,
+      promotionFaultBoundary: promotionFaultBoundary || null,
+      promotionFaultCode: promotionFaultBoundary
+        ? (promotionFaultCode || `p10_014a_injected_${promotionFaultBoundary}`)
+        : null,
+      promotionFaultRolledBack: promotionFaultBoundary ? true : null,
+      promotionRetrySucceeded: promotionFaultBoundary ? promoted?.ok === true : null,
       writerDrainMs: roundMs(writerDrainMs),
       preRpcRevalidationMs: roundMs(preRpcRevalidationMs),
       syntheticServerProofRecordMs: roundMs(syntheticServerProofRecordMs),
@@ -1382,4 +1633,286 @@ export async function runPhase10RestoreBenchmarkHarness({
   };
   console.log('[P10_014A_LOCAL_STRATEGY_B_RESULT]', JSON.stringify(result, null, 2));
   return result;
+}
+
+const runMaintenanceInterlockScenario = async () => {
+  let evidence = null;
+  await runFinancialMaintenanceTask({
+    reason: 'p10_014a_fault_matrix_interlock',
+    presentation: 'blocking',
+  }, async () => {
+    const state = useStore.getState();
+    const blockedInsideFence = isFinancialMaintenanceBlocked();
+    const scheduledSyncAccepted = state.scheduleCloudSync?.('p10_014a_fault_matrix') === true;
+    const v2Activation = await state.activateFinancialSyncV2?.();
+    evidence = {
+      scenarioId: 'maintenance_interlocks',
+      blockedInsideFence,
+      scheduledSyncRejected: scheduledSyncAccepted === false,
+      v2ApplyRejected: v2Activation?.ok === false
+        && v2Activation?.reason === 'financial_maintenance_active',
+      v2Reason: text(v2Activation?.reason),
+      networkCallPerformed: false,
+    };
+    console.log('[P10_014A_INTERLOCK_OBSERVATION]', JSON.stringify(evidence));
+    assertGate(evidence.blockedInsideFence, 'maintenance_interlock_not_active');
+    assertGate(evidence.scheduledSyncRejected, 'scheduled_sync_not_rejected_during_maintenance');
+    assertGate(evidence.v2ApplyRejected, 'v2_apply_not_rejected_during_maintenance');
+  });
+  assertGate(isFinancialMaintenanceBlocked() === false, 'maintenance_interlock_not_released');
+  console.log('[P10_014A_INTERLOCK_RESULT]', JSON.stringify(evidence));
+  return evidence;
+};
+
+const runRealSqliteBusyScenario = async database => {
+  const cloneDatabaseName = text(globalThis?.__MYFI_P10_014A_CLONE_DB_NAME__);
+  assertGate(/^p10-014a-r5-clone-\d{13}-[a-z0-9]{8}\.db$/.test(cloneDatabaseName),
+    'sqlite_busy_clone_name_invalid');
+  const probeKey = `p10_014a_sqlite_busy_probe:${uuid()}`;
+  let blocker = null;
+  let caught = null;
+  try {
+    blocker = await SQLite.openDatabaseAsync(
+      cloneDatabaseName,
+      { useNewConnection: true },
+      SQLite.defaultDatabaseDirectory,
+    );
+    await database.execAsync('PRAGMA busy_timeout = 100;');
+    await blocker.execAsync('PRAGMA busy_timeout = 100; BEGIN IMMEDIATE;');
+    try {
+      await database.runAsync(
+        'INSERT INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)',
+        probeKey, 'busy-probe', new Date().toISOString(),
+      );
+    } catch (error) {
+      caught = text(error?.message || error);
+    }
+  } finally {
+    try { await blocker?.execAsync?.('ROLLBACK;'); } catch {}
+    try { await blocker?.closeAsync?.(); } catch {}
+    try { await database.execAsync('PRAGMA busy_timeout = 5000;'); } catch {}
+  }
+
+  assertGate(/locked|busy/i.test(caught), 'sqlite_busy_not_observed', { caught });
+  const rowAfterFault = await database.getFirstAsync(
+    'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1', probeKey,
+  );
+  assertGate(!rowAfterFault, 'sqlite_busy_partial_write_visible');
+  await database.runAsync(
+    'INSERT INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)',
+    probeKey, 'retry-ok', new Date().toISOString(),
+  );
+  const retryRow = await database.getFirstAsync(
+    'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1', probeKey,
+  );
+  assertGate(text(retryRow?.value) === 'retry-ok', 'sqlite_busy_retry_failed');
+  await database.runAsync('DELETE FROM ledger_v7_meta WHERE key=?', probeKey);
+  const evidence = Object.freeze({
+    scenarioId: 'real_clone_sqlite_busy',
+    actualSqliteContention: true,
+    cloneScoped: true,
+    faultObserved: true,
+    partialWriteVisible: false,
+    retrySucceeded: true,
+  });
+  console.log('[P10_014A_SQLITE_BUSY_RESULT]', JSON.stringify(evidence));
+  return evidence;
+};
+
+const runRealSqliteFullScenario = async database => {
+  const table = 'p10_014a_sqlite_full_probe';
+  let originalMaxPageCount = 0;
+  let caught = null;
+  try {
+    await database.getFirstAsync('PRAGMA wal_checkpoint(TRUNCATE)');
+    const deleteJournalMode = text(firstValue(
+      await database.getFirstAsync('PRAGMA journal_mode = DELETE'),
+    )).toLowerCase();
+    assertGate(deleteJournalMode === 'delete', 'sqlite_full_delete_journal_not_applied');
+    await database.execAsync(`DROP TABLE IF EXISTS ${table}; VACUUM;`);
+    await database.execAsync(`CREATE TABLE ${table}(id INTEGER PRIMARY KEY,payload BLOB NOT NULL); VACUUM;`);
+    const pageCount = Number(firstValue(await database.getFirstAsync('PRAGMA page_count')) || 0);
+    const pageSize = Number(firstValue(await database.getFirstAsync('PRAGMA page_size')) || 0);
+    const freelistCount = Number(firstValue(await database.getFirstAsync('PRAGMA freelist_count')) || 0);
+    originalMaxPageCount = Number(firstValue(await database.getFirstAsync('PRAGMA max_page_count')) || 0);
+    assertGate(pageCount > 0 && pageSize > 0 && freelistCount === 0 && originalMaxPageCount > pageCount,
+      'sqlite_full_precondition_invalid', { pageCount, pageSize, freelistCount });
+    const appliedLimit = Number(firstValue(await database.getFirstAsync(`PRAGMA max_page_count = ${pageCount}`)) || 0);
+    assertGate(appliedLimit === pageCount, 'sqlite_full_page_limit_not_applied');
+    let transactionOpen = false;
+    try {
+      await database.execAsync('BEGIN EXCLUSIVE;');
+      transactionOpen = true;
+      await database.runAsync(
+        `INSERT INTO ${table}(payload) VALUES (randomblob(?))`,
+        pageSize * 4096,
+      );
+    } catch (error) {
+      caught = text(error?.message || error);
+    } finally {
+      if (transactionOpen) {
+        try { await database.execAsync('ROLLBACK;'); } catch {}
+      }
+    }
+  } finally {
+    if (originalMaxPageCount > 0) {
+      try { await database.getFirstAsync(`PRAGMA max_page_count = ${originalMaxPageCount}`); } catch {}
+    }
+  }
+
+  assertGate(/full|disk/i.test(caught), 'sqlite_full_not_observed', { caught });
+  const countAfterFault = Number(firstValue(await database.getFirstAsync(`SELECT COUNT(*) FROM ${table}`)) || 0);
+  assertGate(countAfterFault === 0, 'sqlite_full_transaction_not_rolled_back');
+  await database.runAsync(
+    `INSERT INTO ${table}(payload) VALUES (randomblob(1024))`,
+  );
+  const retryCount = Number(firstValue(await database.getFirstAsync(`SELECT COUNT(*) FROM ${table}`)) || 0);
+  assertGate(retryCount === 1, 'sqlite_full_retry_failed');
+  await database.execAsync(`DROP TABLE ${table};`);
+  const restoredJournalMode = text(firstValue(
+    await database.getFirstAsync('PRAGMA journal_mode = WAL'),
+  )).toLowerCase();
+  assertGate(restoredJournalMode === 'wal', 'sqlite_full_wal_restore_failed');
+  const evidence = Object.freeze({
+    scenarioId: 'real_clone_sqlite_full_page_quota',
+    actualSqliteFullError: true,
+    physicalDeviceStorageExhausted: false,
+    cloneScoped: true,
+    transactionRolledBack: true,
+    retrySucceeded: true,
+  });
+  console.log('[P10_014A_SQLITE_FULL_RESULT]', JSON.stringify(evidence));
+  return evidence;
+};
+
+export async function runPhase10RestoreFaultMatrixHarness() {
+  assertGate(Platform.OS === 'android' || Platform.OS === 'ios', 'native_platform_required');
+  assertGate(PHASE10_RESTORE_BENCHMARK_ENABLED, 'acceptance_build_flags_required');
+  assertGate(P10_014A_CLONE_PROBE_FLAG, 'fault_matrix_clone_probe_required');
+
+  const database = await getLedgerDb();
+  assertGate(database, 'database_unavailable');
+  const cloneDatabaseBinding = await assertCloneDatabaseBinding(database);
+  await ensureFinancialLedgerV7(database);
+  const disposableGuard = await assertDisposableCurrentAccount(database);
+  const orphanRecovery = await sweepOrphanedRuns(database);
+  const sqliteBusy = await runRealSqliteBusyScenario(database);
+  const sqliteFull = await runRealSqliteFullScenario(database);
+  const interlocks = await runMaintenanceInterlockScenario();
+  const token = runToken();
+  const tier = REQUIRED_TIER_MAP.get('1000');
+  const scenarios = [];
+
+  scenarios.push(await runTier({
+    database,
+    tier,
+    baseToken: `${token}-batch-cancel`,
+    scenarioId: 'bounded_batch_cancellation',
+    stageCopyFaultCode: 'p10_014a_injected_stage_copy_cancelled',
+    checkpointCopyFaultCode: 'p10_014a_injected_checkpoint_copy_cancelled',
+  }));
+
+  for (const boundary of PROMOTION_FAULT_BOUNDARIES) {
+    scenarios.push(await runTier({
+      database,
+      tier,
+      baseToken: `${token}-${boundary.replace(/_/g, '-')}`,
+      scenarioId: `promotion_${boundary}`,
+      promotionFaultBoundary: boundary,
+    }));
+  }
+
+  scenarios.push(await runTier({
+    database,
+    tier,
+    baseToken: `${token}-sqlite-busy`,
+    scenarioId: 'simulated_sqlite_busy',
+    promotionFaultBoundary: 'after_hot_copy',
+    promotionFaultCode: 'database is locked',
+  }));
+  scenarios.push(await runTier({
+    database,
+    tier,
+    baseToken: `${token}-sqlite-full`,
+    scenarioId: 'simulated_low_storage',
+    promotionFaultBoundary: 'after_hot_copy',
+    promotionFaultCode: 'database or disk is full',
+  }));
+
+  const scenarioPass = item => (
+    item.cleanupVerified === true
+    && item.recoveryMarkerFinalizedLast === true
+    && item.semanticHashMatches === true
+    && item.countsMatch === true
+    && item.stageCleared === true
+    && item.undoCheckpointReferenced === true
+    && (item.stageCopyFaultCode ? item.stageCopyFaultRolledBack === true : true)
+    && (item.checkpointCopyFaultCode ? item.checkpointCopyFaultRolledBack === true : true)
+    && (item.promotionFaultBoundary
+      ? item.promotionFaultRolledBack === true && item.promotionRetrySucceeded === true
+      : true)
+  );
+  const result = {
+    ok: scenarios.every(scenarioPass)
+      && sqliteBusy.actualSqliteContention
+      && sqliteBusy.retrySucceeded
+      && sqliteFull.actualSqliteFullError
+      && sqliteFull.transactionRolledBack
+      && sqliteFull.retrySucceeded
+      && interlocks.blockedInsideFence
+      && interlocks.scheduledSyncRejected
+      && interlocks.v2ApplyRejected,
+    patchId: 'P10-014A-002-R6.3',
+    gate: P10_014A_GATE,
+    subgate: 'P10-014A-002_FAULT_AND_RESOURCE_MATRIX',
+    acceptanceComplete: false,
+    resourceBaselineEvidence: 'EXTERNAL_ADB_R6_COMPLETE',
+    lowStorageAcceptance: 'REAL_CLONE_SCOPED_SQLITE_FULL_PAGE_QUOTA',
+    physicalDeviceStorageExhaustion: 'NOT_RUN_GLOBAL_SIDE_EFFECT_FORBIDDEN',
+    sqliteBusyAcceptance: 'REAL_CLONE_SCOPED_SQLITE_CONTENTION',
+    processKillAcceptance: 'PENDING_EXTERNAL_ADB_RUNNER',
+    cloudHandshakeAcceptance: 'NOT_TESTED',
+    serverProofSource: SYNTHETIC_SERVER_PROOF_SOURCE,
+    syntheticProofCountsAsCloudEvidence: false,
+    networkCallPerformedByGate: false,
+    productionRestoreWiring: false,
+    originalDatabaseMutationByHarness: false,
+    cloneDatabaseOnly: true,
+    cloneDatabaseBinding,
+    disposableGuard,
+    orphanRecovery,
+    promotionFaultBoundaries: PROMOTION_FAULT_BOUNDARIES,
+    scenarios,
+    sqliteBusy,
+    sqliteFull,
+    interlocks,
+    completedAt: new Date().toISOString(),
+  };
+  console.log('[P10_014A_FAULT_MATRIX_RESULT]', JSON.stringify(result, null, 2));
+  return result;
+}
+
+export async function runPhase10RestoreKillWindowHarness({ killWindow } = {}) {
+  assertGate(Platform.OS === 'android' || Platform.OS === 'ios', 'native_platform_required');
+  assertGate(PHASE10_RESTORE_BENCHMARK_ENABLED, 'acceptance_build_flags_required');
+  assertGate(P10_014A_CLONE_PROBE_FLAG, 'kill_window_clone_probe_required');
+  assertGate(PROCESS_KILL_WINDOWS.includes(killWindow), 'kill_window_invalid');
+  assertGate(globalThis?.__MYFI_P10_014A_KILL_WINDOW__ === killWindow,
+    'kill_window_global_binding_mismatch');
+
+  const database = await getLedgerDb();
+  assertGate(database, 'database_unavailable');
+  await assertCloneDatabaseBinding(database);
+  await ensureFinancialLedgerV7(database);
+  await assertDisposableCurrentAccount(database);
+  await sweepOrphanedRuns(database);
+
+  await runTier({
+    database,
+    tier: REQUIRED_TIER_MAP.get('1000'),
+    baseToken: `${runToken()}-kill-${killWindow.replace(/_/g, '-')}`,
+    scenarioId: `process_kill_${killWindow}`,
+    processKillWindow: killWindow,
+  });
+  throw new Error(`p10_014a_kill_window_completed_without_external_kill_${killWindow}`);
 }
