@@ -93,6 +93,30 @@ const event = Object.freeze({
   const rejected = await advanceOrResolveFinancialRestoreEpochV3({ supabase: rejectedClient, operation });
   assert.equal(rejected.reason, 'restore_epoch_access_denied');
   assert.equal(rejectedClient.calls.length, 1, 'definitive PostgreSQL rejection must not generate extra requests');
+
+  const abortSignals = [];
+  const timeoutClient = {
+    calls: [],
+    rpc(name, args) {
+      this.calls.push({ rpc: name, args });
+      const builder = new Promise(() => {});
+      builder.abortSignal = (signal) => {
+        abortSignals.push(signal);
+        return new Promise(resolve => signal.addEventListener('abort', () => resolve({
+          data: null, error: { code: 'P10_RPC_TIMEOUT' },
+        }), { once: true }));
+      };
+      return builder;
+    },
+  };
+  const timedOut = await advanceOrResolveFinancialRestoreEpochV3({
+    supabase: timeoutClient, operation, rpcTimeoutMs: 10,
+  });
+  assert.equal(timedOut.ok, false); assert.equal(timedOut.ambiguous, true);
+  assert.equal(timedOut.reason, 'restore_epoch_server_outcome_unknown');
+  assert.equal(timeoutClient.calls.length, 2, 'timeout resolution remains bounded to two exact calls');
+  assert.equal(abortSignals.length, 2, 'each timed-out PostgREST builder receives an abort signal');
+  assert(abortSignals.every(signal => signal.aborted), 'all timeout signals must be aborted');
   console.log('[PASS] Supabase adapter resolves under the same server lock and is bounded to two exact RPC calls');
 
   const migrations = fs.readdirSync(path.join(root, 'supabase/migrations'))

@@ -3,7 +3,6 @@
 // reads or prints financial payloads and refuses to call Supabase for a non-empty
 // account. The cloud advance and local epoch CAS are one reviewed acceptance pair.
 
-import * as Crypto from 'expo-crypto';
 import { exportColdArchives, getColdArchiveNamespace } from '../lib/localArchiveRepository';
 import {
   beginLedgerRestoreEpochV8,
@@ -15,11 +14,12 @@ import {
 import { getLedgerDb } from '../lib/ledgerDatabase';
 import { getLedgerNamespace } from '../lib/activeLedgerRepository';
 import { deriveCanonicalRestoreProofDigestV11 } from '../lib/financialRestoreProofV11';
-import { readNamespaceManifestCountsV13 } from '../lib/financialRestoreCheckpointV13';
+import { readNamespaceManifestCountsV13 } from '../lib/financialRestoreSourceGuardV13';
 import { semanticHashNamespaceV3Bounded } from '../lib/financialSemanticStreamV3';
 import { advanceOrResolveFinancialRestoreEpochV3 } from '../lib/financialRestoreEpochV3Client';
 import { resolveCloudLedgerV2 } from '../lib/financialMutationSyncV2';
 import { getOrCreateDeviceId } from '../lib/secureVault';
+import { createSecureUuidV4 } from '../lib/secureUuid';
 import { supabase } from '../lib/supabase';
 import { disposableBlockers } from './p19RestoreEpochDeviceGate';
 
@@ -30,18 +30,26 @@ export const P10_014B_CLOUD_HANDSHAKE_ENABLED = (
 const text = value => String(value ?? '').trim();
 const normalizeRpcObject = value => (Array.isArray(value) ? value[0] : value);
 const errorText = error => String(error?.message || error?.code || error || 'p10_014b_unknown_error');
-const newOperationId = () => {
-  if (typeof Crypto.randomUUID === 'function') return Crypto.randomUUID().toLowerCase();
-  if (typeof Crypto.getRandomBytes !== 'function') throw new Error('p10_014b_uuid_generation_unavailable');
-  const bytes = Crypto.getRandomBytes(16);
-  if (!bytes || bytes.length < 16) throw new Error('p10_014b_uuid_entropy_unavailable');
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = Array.from(bytes.slice(0, 16), byte => byte.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+const withTimeout = async (promise, timeoutMs, code) => {
+  let timer = null;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(code)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 };
 
-export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
+export const runP10_014BCloudHandshakeGate = async ({ getState, onPhase } = {}) => {
+  let secureStoreChangedByGate = false;
+  const markPhase = (phase) => {
+    if (typeof onPhase === 'function') onPhase(phase);
+  };
+  markPhase('preflight');
   const state = typeof getState === 'function' ? getState() : null;
   const base = {
     patchId: 'P10-014B-001',
@@ -51,7 +59,7 @@ export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
     p10_012MigrationRequired: true,
     p10_012Rpc: 'advance_financial_restore_epoch_v3',
     financialDataChangedByGate: false,
-    secureStoreChangedByGate: false,
+    secureStoreChangedByGate,
     startedAt: new Date().toISOString(),
   };
 
@@ -61,7 +69,11 @@ export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
   if (!state?.user?.id || !state.workspaceReady) {
     return { ...base, blocked: true, reason: 'signed_in_workspace_required' };
   }
+  if (!state.financialLedgerV7Cutover) {
+    return { ...base, blocked: true, reason: 'financial_ledger_v7_cutover_required' };
+  }
 
+  markPhase('local_disposable_guard');
   const database = await getLedgerDb();
   if (!database) return { ...base, blocked: true, reason: 'sqlite_unavailable' };
   const workspaceNamespace = text(state.workspaceNamespace || '');
@@ -82,6 +94,7 @@ export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
     };
   }
 
+  markPhase('local_protocol_identity');
   const identity = await ensureLedgerSyncIdentityV8({ namespace: ledgerNamespace, database });
   const protocol = await readFinancialSyncProtocolV8({ namespace: ledgerNamespace, database });
   if (!identity?.ledgerId || Number(identity.restoreEpoch || 0) < 1
@@ -91,14 +104,20 @@ export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
     return { ...base, blocked: true, reason: 'active_protocol_v2_required', identity, protocol };
   }
 
-  const session = await supabase.auth.getUser();
+  markPhase('authenticated_user');
+  const session = await withTimeout(
+    supabase.auth.getUser(), 10000, 'p10_014b_authenticated_user_timeout',
+  );
   const sessionUserId = text(session?.data?.user?.id).toLowerCase();
   const ownerId = text(state.user.id).toLowerCase();
   if (!sessionUserId || sessionUserId !== ownerId) {
     return { ...base, blocked: true, reason: 'original_authenticated_session_required' };
   }
 
-  const cloud = await resolveCloudLedgerV2({ supabase, identity });
+  markPhase('cloud_ledger_identity');
+  const cloud = await withTimeout(
+    resolveCloudLedgerV2({ supabase, identity }), 10000, 'p10_014b_cloud_ledger_timeout',
+  );
   if (text(cloud?.ledgerId) !== text(identity.ledgerId)
       || Number(cloud?.restoreEpoch || 0) !== Number(identity.restoreEpoch || 0)
       || Number(cloud?.protocolVersion || 0) !== 2 || !cloud?.bootstrappedAt) {
@@ -107,8 +126,11 @@ export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
 
   const fromEpoch = Number(identity.restoreEpoch);
   const toEpoch = fromEpoch + 1;
-  const operationId = newOperationId();
-  const deviceId = await getOrCreateDeviceId();
+  markPhase('proof_inputs');
+  const operationId = createSecureUuidV4();
+  const deviceId = await getOrCreateDeviceId({
+    onCreate: () => { secureStoreChangedByGate = true; },
+  });
   const semanticHash = await semanticHashNamespaceV3Bounded({
     database, namespace: ledgerNamespace, ledgerId: identity.ledgerId,
   });
@@ -118,6 +140,7 @@ export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
     semanticHash, validatorVersion: 1, counts,
   });
 
+  markPhase('local_restore_intent');
   const intent = await beginLedgerRestoreEpochV8({
     namespace: ledgerNamespace, operation: 'backup_restore', database,
   });
@@ -128,6 +151,7 @@ export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
 
   let serverResult = null;
   try {
+    markPhase('proof_bound_rpc');
     serverResult = await advanceOrResolveFinancialRestoreEpochV3({
       supabase,
       operation: {
@@ -145,6 +169,7 @@ export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
       throw new Error(serverResult?.reason || 'p10_014b_server_proof_invalid');
     }
 
+    markPhase('local_epoch_commit');
     const committed = await commitLedgerRestoreEpochV8({
       namespace: ledgerNamespace, expectedFromEpoch: fromEpoch, toEpoch, database,
     });
@@ -168,6 +193,7 @@ export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
       eventId: text(serverResult.eventId),
       outcome: text(serverResult.outcome),
       restoreProofDigest,
+      secureStoreChangedByGate,
       serverProofSource: 'supabase_rpc_v3',
       localEpochCommitted: true,
       completedAt: new Date().toISOString(),
@@ -178,13 +204,16 @@ export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
       ok: false,
       blocked: false,
       reason: errorText(error),
-      serverAdvanced: false,
+      serverAdvanced: serverResult?.ok === true,
+      serverOutcomeUnknown: serverResult?.ambiguous === true,
+      splitStateRequiresRecovery: serverResult?.ok === true || serverResult?.ambiguous === true,
       workspaceNamespace,
       ledgerNamespace,
       ledgerId: identity.ledgerId,
       fromEpoch,
       toEpoch,
       operationId,
+      secureStoreChangedByGate,
       serverResult,
     };
   }

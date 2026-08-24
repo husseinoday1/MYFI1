@@ -2,7 +2,6 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SQLiteStorage from 'expo-sqlite/kv-store';
 import * as SecureStore from 'expo-secure-store';
-import * as Crypto from 'expo-crypto';
 import {
   base64ToBytes,
   bytesToBase64,
@@ -10,6 +9,7 @@ import {
   encryptString,
   randomKey,
 } from './cryptoBox';
+import { createSecureUuidV4 } from './secureUuid';
 
 const VAULT_KEY_ID = 'MYFI_VAULT_MASTER_KEY_V1';
 const WEB_KEY_ID = 'MYFI_WEB_VAULT_MASTER_KEY_V1';
@@ -155,13 +155,13 @@ export const clearVaultSnapshot = async (namespace = GUEST_NAMESPACE) => {
   await Promise.all([storage.removeItem(key), ...backupKeys.map(item => storage.removeItem(item))]);
 };
 
-export const getOrCreateDeviceId = async () => {
+export const getOrCreateDeviceId = async ({ onCreate } = {}) => {
   const secure = await secureStoreAvailable();
   const existing = secure
     ? await SecureStore.getItemAsync(DEVICE_ID)
     : await AsyncStorage.getItem(DEVICE_ID);
   if (existing) return existing;
-  const id = Crypto.randomUUID();
+  const id = createSecureUuidV4();
   if (secure) {
     await SecureStore.setItemAsync(DEVICE_ID, id, {
       keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
@@ -169,6 +169,7 @@ export const getOrCreateDeviceId = async () => {
   } else {
     await AsyncStorage.setItem(DEVICE_ID, id);
   }
+  if (typeof onCreate === 'function') onCreate(id);
   return id;
 };
 

@@ -14,6 +14,7 @@ const safeFailureCode = (error, fallback) => {
   return fallback;
 };
 const definitivePostgresError = error => ['42501', '22023', '40001', '23505'].includes(text(error?.code));
+const DEFAULT_RPC_TIMEOUT_MS = 10000;
 
 const normalizeProof = (value) => {
   const row = one(value);
@@ -68,9 +69,11 @@ const normalizeRequest = (operation = {}) => {
   return request;
 };
 
-const invokeProofBoundRpc = async ({ supabase, request }) => {
+const invokeProofBoundRpc = async ({ supabase, request, timeoutMs }) => {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  let timer = null;
   try {
-    return await supabase.rpc('advance_financial_restore_epoch_v3', {
+    let invocation = supabase.rpc('advance_financial_restore_epoch_v3', {
       p_ledger_id: request.ledgerId,
       p_expected_epoch: request.fromEpoch,
       p_new_epoch: request.toEpoch,
@@ -79,8 +82,23 @@ const invokeProofBoundRpc = async ({ supabase, request }) => {
       p_operation_id: request.operationId,
       p_restore_proof_digest: request.restoreProofDigest,
     });
+    if (controller && typeof invocation?.abortSignal === 'function') {
+      invocation = invocation.abortSignal(controller.signal);
+    }
+    const timeout = new Promise(resolve => {
+      timer = setTimeout(() => {
+        if (controller) controller.abort();
+        resolve({
+          data: null,
+          error: { code: 'P10_RPC_TIMEOUT', message: 'restore_epoch_rpc_timeout' },
+        });
+      }, timeoutMs);
+    });
+    return await Promise.race([Promise.resolve(invocation), timeout]);
   } catch (error) {
     return { data: null, error };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 };
 
@@ -100,6 +118,7 @@ const provenResponse = (response, request) => {
 export const advanceOrResolveFinancialRestoreEpochV3 = async ({
   supabase,
   operation,
+  rpcTimeoutMs = DEFAULT_RPC_TIMEOUT_MS,
 } = {}) => {
   if (!supabase?.rpc) {
     return { supported: false, ok: false, reason: 'supabase_unavailable' };
@@ -111,7 +130,8 @@ export const advanceOrResolveFinancialRestoreEpochV3 = async ({
     return { supported: true, ok: false, ambiguous: false, reason: text(error?.message) || 'restore_epoch_v3_request_invalid' };
   }
 
-  const response = await invokeProofBoundRpc({ supabase, request });
+  const timeoutMs = Math.max(10, Math.min(30000, Number(rpcTimeoutMs) || DEFAULT_RPC_TIMEOUT_MS));
+  const response = await invokeProofBoundRpc({ supabase, request, timeoutMs });
   const firstProof = provenResponse(response, request);
   if (firstProof) return { supported: true, ok: true, ...firstProof };
   if (definitivePostgresError(response.error)) {
@@ -122,7 +142,7 @@ export const advanceOrResolveFinancialRestoreEpochV3 = async ({
       reason: safeFailureCode(response.error, 'restore_epoch_rpc_rejected'),
     };
   }
-  const resolved = await invokeProofBoundRpc({ supabase, request });
+  const resolved = await invokeProofBoundRpc({ supabase, request, timeoutMs });
   const resolvedProof = provenResponse(resolved, request);
   if (resolvedProof) {
     return {
