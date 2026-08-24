@@ -2,6 +2,9 @@ name: P10-014B Cloud Handshake Device Gate
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - impl/p10-014a-local-strategy-b-device-gate-2026-08-22
 
 permissions:
   contents: read
