@@ -37,6 +37,7 @@ import {
   recordStrategyBServerProofV13InTransaction,
 } from './financialRestorePromotionV13';
 import { createSecureUuidV4 } from './secureUuid';
+import { quarantineRestoreWorkspaceConflictInTransactionV13 } from './financialRestorePreflightConflictV13';
 
 const text = value => String(value ?? '').trim();
 const object = value => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -54,7 +55,7 @@ const readMeta = async (database, key) => parse((await database.getFirstAsync(
   'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1', key,
 ))?.value);
 
-const preflight = async ({ database, namespace, authUserId, adapters }) => {
+const preflight = async ({ database, namespace, authUserId, adapters, allowEmptyShellWorkspaceConflict = false }) => {
   const owner = text(authUserId).toLowerCase();
   if (!owner || namespace !== `user:${owner}`) return failure('canonical_restore_original_session_required');
   const currentOwner = text(await adapters.getAuthenticatedUserId?.()).toLowerCase();
@@ -73,7 +74,8 @@ const preflight = async ({ database, namespace, authUserId, adapters }) => {
         AND acknowledged_at IS NULL AND superseded_by_bootstrap_id IS NULL`,
     namespace, identity.ledgerId, identity.restoreEpoch,
   );
-  if (Number(pending?.n || 0) > 0) return failure('canonical_restore_pending_mutations');
+  const pendingCount = Number(pending?.n || 0);
+  if (pendingCount > 0 && !allowEmptyShellWorkspaceConflict) return failure('canonical_restore_pending_mutations');
   if (typeof adapters.resolveCloudLedger !== 'function') return failure('canonical_restore_cloud_adapter_required');
   const cloud = await adapters.resolveCloudLedger(identity);
   if (text(cloud?.ledgerId) !== text(identity.ledgerId)
@@ -81,7 +83,7 @@ const preflight = async ({ database, namespace, authUserId, adapters }) => {
       || Number(cloud?.protocolVersion || 0) !== 2 || !cloud?.bootstrappedAt) {
     return failure('canonical_restore_cloud_identity_not_ready');
   }
-  return { supported: true, ok: true, owner, identity, protocol, cloud };
+  return { supported: true, ok: true, owner, identity, protocol, cloud, pendingCount };
 };
 
 const buildCheckpoint = async ({ database, namespace, operationId, checkpointId }) => {
@@ -194,8 +196,20 @@ const prepareUndoStage = async ({ database, namespace, operationId, checkpointId
   return { stageNamespace, counts: proof.counts, semanticHash: proof.semanticHash };
 };
 
-const createIntent = async ({ database, namespace, operationId, authUserId, deviceId, triggerKind }) => (
+const createIntent = async ({
+  database, namespace, operationId, authUserId, deviceId, triggerKind,
+  workspaceConflictGate = null,
+}) => (
   withRestoreTransaction(database, async txn => {
+    if (workspaceConflictGate?.required === true) {
+      await quarantineRestoreWorkspaceConflictInTransactionV13({
+        database: txn,
+        namespace,
+        ledgerId: workspaceConflictGate.ledgerId,
+        restoreEpoch: workspaceConflictGate.restoreEpoch,
+        operationId,
+      });
+    }
     const guard = await guardRestoreSourceBeforeEpochRpcInTransactionV13({
       database: txn, namespace, operationId,
     });
@@ -298,6 +312,7 @@ export const startCanonicalRestoreProductionV13 = async ({
   adapters = {},
   database = null,
   triggerKind = 'restore',
+  allowEmptyShellWorkspaceConflict = false,
 } = {}) => {
   const target = text(namespace);
   const db = database || await getLedgerDb();
@@ -309,7 +324,10 @@ export const startCanonicalRestoreProductionV13 = async ({
     if (pendingPromotion?.status === 'local_promoted_pending_reload') {
       return continuePrepared({ database: db, namespace: target, authUserId, adapters });
     }
-    const gate = await preflight({ database: db, namespace: target, authUserId, adapters });
+    const gate = await preflight({
+      database: db, namespace: target, authUserId, adapters,
+      allowEmptyShellWorkspaceConflict: allowEmptyShellWorkspaceConflict === true && triggerKind !== 'undo',
+    });
     if (!gate.ok) return gate;
     if (!text(deviceId) || text(deviceId).length > 200) return failure('canonical_restore_device_id_invalid');
     const operationId = createSecureUuidV4();
@@ -327,6 +345,11 @@ export const startCanonicalRestoreProductionV13 = async ({
       authUserId: gate.owner,
       deviceId,
       triggerKind,
+      workspaceConflictGate: gate.pendingCount > 0 ? {
+        required: true,
+        ledgerId: gate.identity.ledgerId,
+        restoreEpoch: gate.identity.restoreEpoch,
+      } : null,
     });
     return continuePrepared({ database: db, namespace: target, authUserId: gate.owner, adapters });
   } catch (error) {

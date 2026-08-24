@@ -673,16 +673,24 @@ export const createDataSlice = (set, get) => ({
       }
       const productionRestore = options?.triggerKind === 'undo'
         || (canonicalBackupCandidate(candidate) && !!get().user && get().financialLedgerV7Cutover);
+      let allowEmptyShellWorkspaceConflict = false;
       if (productionRestore) {
         const synced = await get().syncCloud();
         if (!synced) {
-          set({ lastSyncError: 'canonical_restore_preflight_sync_failed' });
-          return false;
+          const syncReason = String(get().lastSyncError || '');
+          allowEmptyShellWorkspaceConflict = options?.triggerKind !== 'undo'
+            && syncReason === 'financial_v2_revision_conflict';
+          if (!allowEmptyShellWorkspaceConflict) {
+            set({ lastSyncError: 'canonical_restore_preflight_sync_failed' });
+            return false;
+          }
         }
       }
       const result = await get().runFinancialMaintenance(
         'backup_restore',
-        () => get().importBackup(jsonStr, { ...(options || {}), maintenanceOwned: true }),
+        () => get().importBackup(jsonStr, {
+          ...(options || {}), maintenanceOwned: true, allowEmptyShellWorkspaceConflict,
+        }),
         { resumeSync: !productionRestore, presentation: 'blocking' },
       );
       if (!productionRestore) return result;
@@ -741,6 +749,7 @@ export const createDataSlice = (set, get) => ({
           deviceId,
           adapters: restoreAdapters(),
           triggerKind: options?.triggerKind === 'undo' ? 'undo' : 'restore',
+          allowEmptyShellWorkspaceConflict: options?.allowEmptyShellWorkspaceConflict === true,
         });
         if (!restored?.ok || !restored?.promoted) {
           set({
