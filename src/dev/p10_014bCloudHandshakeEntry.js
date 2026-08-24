@@ -22,7 +22,10 @@ const startGate = () => {
   setTimeout(() => {
     runP10_014BCloudHandshakeGate({ getState: useStore.getState })
       .then(result => console.info('[P10_014B_DEVICE_GATE] RESULT', JSON.stringify(result)))
-      .catch(error => console.error('[P10_014B_DEVICE_GATE] FAIL', JSON.stringify({ code: safeMessage(error) })));
+      .catch(error => console.error('[P10_014B_DEVICE_GATE] FAIL', JSON.stringify({
+        code: safeMessage(error),
+        stack: String(error?.stack || '').slice(0, 1200),
+      })));
   }, 0);
 };
 
