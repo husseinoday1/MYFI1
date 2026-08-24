@@ -62,6 +62,7 @@ jobs:
             echo "EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B=0"
             echo "EXPO_PUBLIC_P10_014A_CLONE_PROBE=0"
             echo "EXPO_PUBLIC_P10_014A_FAULT_MATRIX=0"
+            echo "EXPO_PUBLIC_P10_014B_CLOUD_HANDSHAKE=0"
             echo "EXPO_PUBLIC_FRESH_TEST=0"
           } >> "$GITHUB_ENV"
 
@@ -93,6 +94,7 @@ jobs:
           EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B: "0"
           EXPO_PUBLIC_P10_014A_CLONE_PROBE: "0"
           EXPO_PUBLIC_P10_014A_FAULT_MATRIX: "0"
+          EXPO_PUBLIC_P10_014B_CLOUD_HANDSHAKE: "0"
           EXPO_PUBLIC_FRESH_TEST: "0"
         run: |
           chmod +x ./gradlew
@@ -116,6 +118,8 @@ jobs:
           {
             echo "BuildType=NORMAL_MYFI_RELEASE"
             echo "DiagnosticEntry=NO"
+            echo "ProductionRestoreWiring=YES"
+            echo "Phase10ClosureCandidate=YES"
             echo "ApplicationEntry=index.js"
             echo "ApplicationId=com.myfi.app"
             echo "BuildCommit=$(git rev-parse HEAD)"

@@ -23,6 +23,7 @@ import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components
 import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
 import { PRODUCT_NAME } from '../lib/productIdentity';
 import { inspectBackupData } from '../lib/backupData';
+import { decodeCanonicalBackupV11 } from '../lib/financialBackupV11Decoder';
 import { MONTH_NAME_STYLES, monthStyleLabel } from '../lib/months';
 import { budgetMonthId, getBudgetMapForMonth, getBudgetRows, getBudgetSummary, suggestBudgetsDetailedFromHistory } from '../lib/budgets';
 import { formatMoneyNumber } from '../lib/money';
@@ -315,6 +316,22 @@ const previewBackupText = (text = '', lang = 'ar') => {
 
   try {
     const data = JSON.parse(raw);
+    if (data?.kind === 'myfi_canonical_financial_backup') {
+      const decoded = decodeCanonicalBackupV11(data);
+      const counts = decoded?.manifest?.counts || {};
+      return {
+        valid: decoded?.ok === true,
+        empty: false,
+        error: decoded?.ok ? '' : (decoded?.reason || 'invalid_backup'),
+        name: 'MYFI V11',
+        currency: decoded?.data?.financialConfig?.currency || '',
+        months: [],
+        entries: Number(counts.transactions || 0) + Number(counts.coldArchiveRecords || 0),
+        wallets: Number(counts.accounts || 0),
+        trackers: Number(counts.entities || 0),
+        commitments: 0,
+      };
+    }
     const result = inspectBackupData(data);
 
     const messageFor = code => {

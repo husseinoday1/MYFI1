@@ -20,6 +20,8 @@ import {
   profileModuleDefaults,
 } from '../src/lib/modules.js';
 import { buildMyfiPackage, inspectMyfiPackage } from '../src/lib/myfiFiles.js';
+import { canonicalBackupV11ManifestCounts } from '../src/lib/financialBackupV11.js';
+import { semanticHashCanonicalV2 } from '../src/lib/financialSemanticProjection.js';
 import { secureAuthStorage } from '../src/lib/secureVault.js';
 import { resolveSystemTheme } from '../src/lib/systemTheme.js';
 import { getVisibleHistoryTransactions } from '../src/lib/history.js';
@@ -1184,6 +1186,30 @@ const runLinkedStoreAssertions = async () => {
   const inspectedBackup = await inspectMyfiPackage(fullPackage.base64);
   assert.equal(inspectedBackup.payload.kind, 'full_backup');
   assert.equal(inspectedBackup.payload.format, 'MYFI');
+  const canonicalData = {
+    semanticHashVersion: 2,
+    ledgerId: 'ledger-package-v11',
+    financialConfig: { currency: 'IQD' },
+    accounts: [], exchangeRates: [], transactions: [], postings: [], links: [], entities: [], archives: [],
+  };
+  const canonicalBackup = {
+    kind: 'myfi_canonical_financial_backup',
+    manifest: {
+      format: 'MYFI_CANONICAL_LEDGER_BACKUP',
+      dataVersion: 11,
+      semanticHashVersion: 2,
+      semanticHashAlgorithm: 'SHA-256',
+      semanticHash: semanticHashCanonicalV2(canonicalData),
+      createdAt: '2026-08-24T00:00:00.000Z',
+      ledgerId: canonicalData.ledgerId,
+      counts: canonicalBackupV11ManifestCounts(canonicalData),
+    },
+    data: canonicalData,
+  };
+  const canonicalPackage = await buildMyfiPackage({ kind: 'full_backup', data: canonicalBackup });
+  const inspectedCanonical = await inspectMyfiPackage(canonicalPackage.base64);
+  assert.equal(inspectedCanonical.payload.data.kind, 'myfi_canonical_financial_backup');
+  assert.equal(inspectedCanonical.payload.data.manifest.dataVersion, 11);
   const encryptedPackage = await buildMyfiPackage({
     kind: 'full_backup',
     data: JSON.parse(await useStore.getState().exportBackup()),

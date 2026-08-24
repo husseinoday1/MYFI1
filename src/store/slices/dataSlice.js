@@ -5,7 +5,7 @@ import { STORAGE, DEF_CATS, DEF_CFG, DEF_NOTIF, LEGACY_STORAGE_KEYS, normalizeCf
 import { calcStats, catSpend } from '../../utils/calc';
 import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
 import { defaultScopeForProfile, getActiveScope, normalizeScope } from '../../lib/modules';
-import { clearVaultSnapshot, GUEST_NAMESPACE, readVaultSnapshot, writeVaultSnapshot } from '../../lib/secureVault';
+import { clearVaultSnapshot, getOrCreateDeviceId, GUEST_NAMESPACE, readVaultSnapshot, writeVaultSnapshot } from '../../lib/secureVault';
 import { buildFinancialBackup, inspectBackupData, mergeFinancialBackupConfig, sanitizeBackupCategories } from '../../lib/backupData';
 import {
   archivedWalletMovement,
@@ -24,11 +24,47 @@ import { compareTransactionsNewestFirst } from '../../lib/transactionIndex';
 import { activeLedgerSupported, clearLedgerNamespace, getLedgerNamespace, replaceLedgerSnapshot } from '../../lib/activeLedgerRepository';
 import { archiveFinancialTransactionsV7, clearFinancialWorkspaceV7 } from '../../lib/financialLedgerV7Repository';
 import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
+import { createCanonicalBackupV11 } from '../../lib/financialBackupV11';
+import { decodeCanonicalBackupV11 } from '../../lib/financialBackupV11Decoder';
+import {
+  markCanonicalRestoreActivatedV13,
+  resumeCanonicalRestoreProductionV13,
+  startCanonicalRestoreProductionV13,
+} from '../../lib/financialRestoreProductionV13';
+import { advanceOrResolveFinancialRestoreEpochV3 } from '../../lib/financialRestoreEpochV3Client';
+import { resolveCloudLedgerV2 } from '../../lib/financialMutationSyncV2';
+import { supabase } from '../../lib/supabase';
 
 const RESET_MARKER_PREFIX = 'MYFI_INTENTIONAL_RESET_V1';
 const syncBaseNamespace = namespace => `sync-base:${String(namespace || GUEST_NAMESPACE)}`;
 const backupRestoreRollbackNamespace = namespace => `backup-restore-rollback:${String(namespace || GUEST_NAMESPACE)}`;
 const resetMarkerKey = namespace => `${RESET_MARKER_PREFIX}:${String(namespace || GUEST_NAMESPACE)}`;
+const canonicalBackupCandidate = value => value?.kind === 'myfi_canonical_financial_backup';
+const withRestoreNetworkTimeout = async (promise, code, timeoutMs = 10000) => {
+  let timer = null;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(code)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+const restoreAdapters = () => ({
+  getAuthenticatedUserId: async () => {
+    const result = await withRestoreNetworkTimeout(
+      supabase.auth.getUser(), 'canonical_restore_authenticated_user_timeout',
+    );
+    return result?.data?.user?.id || null;
+  },
+  resolveCloudLedger: identity => withRestoreNetworkTimeout(
+    resolveCloudLedgerV2({ supabase, identity }), 'canonical_restore_cloud_identity_timeout',
+  ),
+  advanceRestoreEpoch: operation => advanceOrResolveFinancialRestoreEpochV3({ supabase, operation }),
+});
 
 const stripPerformanceCfg = (cfg = {}) => {
   const {
@@ -329,6 +365,10 @@ export const createDataSlice = (set, get) => ({
 
 
   restoreLastBackupRollback: async () => {
+    const current = get();
+    if (current.user && current.financialLedgerV7Cutover) {
+      return get().importBackup(null, { triggerKind: 'undo' });
+    }
     const namespace = get().workspaceNamespace || GUEST_NAMESPACE;
     const { snapshot } = await readVaultSnapshot(backupRestoreRollbackNamespace(namespace));
     if (!snapshot?.backup) return false;
@@ -338,7 +378,21 @@ export const createDataSlice = (set, get) => ({
   },
 
   exportBackup: async () => {
-    const { trans, debts, goals, wallets, commitments, cats, cfg, workspaceNamespace } = get();
+    const {
+      trans, debts, goals, wallets, commitments, cats, cfg, workspaceNamespace,
+      user, financialLedgerV7Cutover,
+    } = get();
+    if (user && financialLedgerV7Cutover) {
+      const canonical = await createCanonicalBackupV11({
+        namespace: getLedgerNamespace(workspaceNamespace || GUEST_NAMESPACE, cfg),
+      });
+      if (!canonical?.ok || !canonical?.backup) {
+        throw new Error(canonical?.reason || 'canonical_backup_export_failed');
+      }
+      const decoded = decodeCanonicalBackupV11(canonical.backup);
+      if (!decoded?.ok) throw new Error(decoded?.reason || 'canonical_backup_export_preflight_failed');
+      return JSON.stringify(canonical.backup);
+    }
     const coldArchives = await exportColdArchives(
       getColdArchiveNamespace(workspaceNamespace || GUEST_NAMESPACE, cfg),
     );
@@ -613,19 +667,102 @@ export const createDataSlice = (set, get) => ({
   importBackup: async (jsonStr, options = {}) => {
     // P19-015A2: backup restore owns the maintenance barrier.
     if (!options?.maintenanceOwned) {
-      return get().runFinancialMaintenance(
+      let candidate = null;
+      if (options?.triggerKind !== 'undo') {
+        try { candidate = JSON.parse(jsonStr); } catch { return false; }
+      }
+      const productionRestore = options?.triggerKind === 'undo'
+        || (canonicalBackupCandidate(candidate) && !!get().user && get().financialLedgerV7Cutover);
+      if (productionRestore) {
+        const synced = await get().syncCloud();
+        if (!synced) {
+          set({ lastSyncError: 'canonical_restore_preflight_sync_failed' });
+          return false;
+        }
+      }
+      const result = await get().runFinancialMaintenance(
         'backup_restore',
         () => get().importBackup(jsonStr, { ...(options || {}), maintenanceOwned: true }),
+        { resumeSync: !productionRestore, presentation: 'blocking' },
       );
+      if (!productionRestore) return result;
+      if (!result?.ok || !result?.promoted) return false;
+      const activation = await get().activateFinancialSyncV2();
+      if (!activation?.ok) {
+        set({
+          lastSyncError: activation?.reason || 'canonical_restore_activation_pending',
+          restoreSafety: {
+            status: 'restore_activation_required',
+            operation: 'backup_restore',
+            operationId: result.operationId,
+            checkedAt: new Date().toISOString(),
+          },
+        });
+        return false;
+      }
+      const marked = await markCanonicalRestoreActivatedV13({
+        namespace: result.namespace,
+        operationId: result.operationId,
+        activation,
+      });
+      if (!marked?.ok) {
+        set({ lastSyncError: marked?.reason || 'canonical_restore_completion_evidence_failed' });
+        return false;
+      }
+      set({
+        lastSyncError: null,
+        restoreSafety: {
+          status: 'restore_complete',
+          operation: 'backup_restore',
+          operationId: result.operationId,
+          triggerKind: result.triggerKind,
+          checkedAt: new Date().toISOString(),
+        },
+      });
+      return true;
     }
     let rollback = null;
     try {
-      const data = JSON.parse(jsonStr);
+      const data = options?.triggerKind === 'undo' ? null : JSON.parse(jsonStr);
+      const current = get();
+      if (options?.triggerKind === 'undo' || canonicalBackupCandidate(data)) {
+        if (!current.user || !current.financialLedgerV7Cutover) {
+          set({ lastSyncError: 'canonical_restore_signed_in_v2_required' });
+          return false;
+        }
+        const namespace = getLedgerNamespace(
+          current.workspaceNamespace || GUEST_NAMESPACE, current.cfg,
+        );
+        const deviceId = await getOrCreateDeviceId();
+        const restored = await startCanonicalRestoreProductionV13({
+          candidate: data,
+          namespace,
+          authUserId: current.user.id,
+          deviceId,
+          adapters: restoreAdapters(),
+          triggerKind: options?.triggerKind === 'undo' ? 'undo' : 'restore',
+        });
+        if (!restored?.ok || !restored?.promoted) {
+          set({
+            lastSyncError: restored?.reason || 'canonical_restore_failed',
+            restoreSafety: {
+              status: restored?.pending ? 'restore_recovery_required' : 'restore_blocked',
+              operation: 'backup_restore',
+              checkedAt: new Date().toISOString(),
+            },
+          });
+          return restored;
+        }
+        await get().loadLocal(
+          current.workspaceNamespace || GUEST_NAMESPACE,
+          { allowLegacy: false, maintenanceOwned: true },
+        );
+        return restored;
+      }
       const validation = inspectBackupData(data);
       if (!validation.valid) throw new Error(validation.errors[0] || 'invalid_backup');
       const restoredCollections = Number(data.v || 0) >= 10 ? data.financialData : data;
 
-      const current = get();
       if (current.user && current.financialLedgerV7Cutover) {
         set({
           lastSyncError: 'backup_restore_requires_protocol_v2',
@@ -768,5 +905,47 @@ export const createDataSlice = (set, get) => ({
       }
       return false;
     }
+  },
+
+  resumeCanonicalRestoreProduction: async () => {
+    const current = get();
+    if (!current.user || current.cfg.demoMode || !current.workspaceReady || !current.financialLedgerV7Cutover) {
+      return { supported: true, ok: false, pending: false, reason: 'canonical_restore_resume_not_eligible' };
+    }
+    const namespace = getLedgerNamespace(
+      current.workspaceNamespace || GUEST_NAMESPACE, current.cfg,
+    );
+    const result = await get().runFinancialMaintenance(
+      'backup_restore_resume',
+      async () => {
+        const resumed = await resumeCanonicalRestoreProductionV13({
+          namespace,
+          authUserId: get().user?.id,
+          adapters: restoreAdapters(),
+        });
+        if (resumed?.ok && resumed?.promoted && resumed?.activationRequired) {
+          await get().loadLocal(
+            current.workspaceNamespace || GUEST_NAMESPACE,
+            { allowLegacy: false, maintenanceOwned: true },
+          );
+        }
+        return resumed;
+      },
+      { resumeSync: false, presentation: 'blocking' },
+    );
+    if (!result?.ok || !result?.promoted || !result?.activationRequired) return result;
+    const activation = await get().activateFinancialSyncV2();
+    if (!activation?.ok) return { ...result, ok: false, reason: activation?.reason || 'canonical_restore_activation_pending' };
+    const marked = await markCanonicalRestoreActivatedV13({
+      namespace: result.namespace,
+      operationId: result.operationId,
+      activation,
+    });
+    if (!marked?.ok) return { ...result, ok: false, reason: marked?.reason };
+    set({ lastSyncError: null, restoreSafety: {
+      status: 'restore_complete', operation: 'backup_restore', operationId: result.operationId,
+      triggerKind: result.triggerKind, checkedAt: new Date().toISOString(),
+    } });
+    return { ...result, activationComplete: true };
   },
 });

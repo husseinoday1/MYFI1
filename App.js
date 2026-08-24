@@ -125,6 +125,7 @@ function AppRoot() {
     transferGuestToCurrent,
     dismissGuestTransfer,
     restoreLastMergeRollback,
+    resumeCanonicalRestoreProduction,
     syncConflict,
     resolveSyncConflict,
     exitDemoMode,
@@ -443,9 +444,17 @@ function AppRoot() {
   }, [ready, cfg.lang, setUser]); // P19-015A2 auth URL startup barrier
 
   useEffect(() => {
-    if (!ready || !user || !workspaceReady) return;
-    loadCloud();
-  }, [ready, user, workspaceReady, loadCloud]);
+    if (!ready || !user || !workspaceReady) return undefined;
+    let active = true;
+    Promise.resolve(resumeCanonicalRestoreProduction?.())
+      .then((result) => {
+        const blockedByRestore = result?.pending === true
+          || (result?.promoted === true && result?.ok === false);
+        if (active && !blockedByRestore) loadCloud();
+      })
+      .catch(() => null)
+    return () => { active = false; };
+  }, [ready, user, workspaceReady, resumeCanonicalRestoreProduction, loadCloud]);
 
   useEffect(() => {
     if (!ready || !user || !workspaceReady) return undefined;

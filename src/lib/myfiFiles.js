@@ -7,6 +7,7 @@ import { deflateSync, inflateSync, strFromU8, strToU8, unzipSync, zipSync } from
 import { decryptStringWithPassword, encryptStringWithPassword } from './cryptoBox';
 import { getTransactionDisplayAmount } from './modules';
 import { inspectBackupData, MYFI_BACKUP_DATA_VERSION } from './backupData';
+import { decodeCanonicalBackupV11 } from './financialBackupV11Decoder';
 import { PRODUCT_FILE_PREFIX, PRODUCT_NAME } from './productIdentity';
 
 export const MYFI_SCHEMA_VERSION = 1;
@@ -123,6 +124,16 @@ const countData = (data = {}) => ({
   goals: Array.isArray(data.goals) ? data.goals.length : 0,
   commitments: Array.isArray(data.commitments) ? data.commitments.length : 0,
 });
+
+const inspectPackagedBackupData = (data = {}) => {
+  if (data?.kind !== 'myfi_canonical_financial_backup') return inspectBackupData(data);
+  const decoded = decodeCanonicalBackupV11(data);
+  return {
+    valid: decoded.ok === true,
+    errors: decoded.ok === true ? [] : [decoded.reason || 'canonical_backup_invalid'],
+    canonical: true,
+  };
+};
 
 const safeStamp = (date = new Date()) => date.toISOString().replace(/[:.]/g, '-');
 
@@ -300,11 +311,14 @@ export const inspectMyfiPackage = async (base64, { password = '' } = {}) => {
   if (!payload?.data || typeof payload.data !== 'object' || Array.isArray(payload.data)) {
     throw new Error('MYFI package has no valid backup data');
   }
-  const dataVersion = Number(payload.data.v || 0);
-  if (dataVersion > MYFI_BACKUP_DATA_VERSION) {
+  const canonical = payload.data.kind === 'myfi_canonical_financial_backup';
+  const dataVersion = canonical
+    ? Number(payload.data.manifest?.dataVersion || 0)
+    : Number(payload.data.v || 0);
+  if (!canonical && dataVersion > MYFI_BACKUP_DATA_VERSION) {
     throw new Error('This backup data was created by a newer MYFI version');
   }
-  const validation = inspectBackupData(payload.data);
+  const validation = inspectPackagedBackupData(payload.data);
   if (!validation.valid) {
     throw new Error('Invalid backup data: ' + (validation.errors[0] || 'unknown'));
   }

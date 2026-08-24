@@ -31,6 +31,7 @@ import ChoiceSheet from '../components/ChoiceSheet';
 import { isBiometricSupported, authenticate } from '../lib/biometric';
 import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
 import { inspectBackupData } from '../lib/backupData';
+import { decodeCanonicalBackupV11 } from '../lib/financialBackupV11Decoder';
 import { syncDiagnosticCode } from '../lib/syncErrorClassification';
 import AccountDeleteModal from '../components/AccountDeleteModal';
 import DecisionModal from '../components/DecisionModal';
@@ -948,6 +949,10 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
   const importPreview = useMemo(() => {
     if (!importPackage?.payload?.data) return null;
     try {
+      if (importPackage.payload.data?.kind === 'myfi_canonical_financial_backup') {
+        const decoded = decodeCanonicalBackupV11(importPackage.payload.data);
+        return { valid: decoded?.ok === true, errors: decoded?.ok ? [] : [decoded?.reason || 'invalid'] };
+      }
       return inspectBackupData(importPackage.payload.data);
     } catch {
       return { valid: false, errors: ['invalid'] };
