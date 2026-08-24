@@ -30,6 +30,16 @@ export const P10_014B_CLOUD_HANDSHAKE_ENABLED = (
 const text = value => String(value ?? '').trim();
 const normalizeRpcObject = value => (Array.isArray(value) ? value[0] : value);
 const errorText = error => String(error?.message || error?.code || error || 'p10_014b_unknown_error');
+const newOperationId = () => {
+  if (typeof Crypto.randomUUID === 'function') return Crypto.randomUUID().toLowerCase();
+  if (typeof Crypto.getRandomBytes !== 'function') throw new Error('p10_014b_uuid_generation_unavailable');
+  const bytes = Crypto.getRandomBytes(16);
+  if (!bytes || bytes.length < 16) throw new Error('p10_014b_uuid_entropy_unavailable');
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes.slice(0, 16), byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
 
 export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
   const state = typeof getState === 'function' ? getState() : null;
@@ -97,7 +107,7 @@ export const runP10_014BCloudHandshakeGate = async ({ getState } = {}) => {
 
   const fromEpoch = Number(identity.restoreEpoch);
   const toEpoch = fromEpoch + 1;
-  const operationId = Crypto.randomUUID().toLowerCase();
+  const operationId = newOperationId();
   const deviceId = await getOrCreateDeviceId();
   const semanticHash = await semanticHashNamespaceV3Bounded({
     database, namespace: ledgerNamespace, ledgerId: identity.ledgerId,
