@@ -20,9 +20,12 @@ const runLedgerExclusiveTransaction = (db, task) => globalThis.__EXCLUSIVE__(db,
 const runLedgerReadTransaction = (db, task) => globalThis.__READ_TX__(db, task);`,
   )
   .replace(
+    /import \{ FINANCIAL_LEDGER_SCHEMA_VERSION \} from '\.\/financialLedgerV7Model';/,
+    'const FINANCIAL_LEDGER_SCHEMA_VERSION = 7;',
+  )
+  .replace(
     /import \{[\s\S]*?\} from '\.\/financialLedgerV7Repository';/,
-    `const FINANCIAL_LEDGER_SCHEMA_VERSION = 7;
-const ensureFinancialLedgerV7 = async db => globalThis.__ENSURE__(db);
+    `const ensureFinancialLedgerV7 = async db => globalThis.__ENSURE__(db);
 const proveFinancialLedgerInvariantsV7 = options => globalThis.__INVARIANTS__(options);
 const readFinancialProjectionV7 = options => globalThis.__PROJECTION__(options);`,
   )

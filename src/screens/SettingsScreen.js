@@ -180,6 +180,7 @@ const pageCopy = (lang = 'ar') => {
     restoreNow: ar ? 'استعادة النسخة الآن' : 'Restore backup now',
     backupReady: ar ? 'النسخة صالحة للاستعادة' : 'Backup is ready to restore',
     backupInvalid: ar ? 'النسخة غير صالحة' : 'Backup is invalid',
+    restoreFailed: ar ? 'تعذر إكمال الاستعادة بأمان. لم يتم اعتماد أي تغيير.' : 'The restore could not be completed safely. No change was committed.',
     securityTitle: ar ? 'أمان التطبيق' : 'App security',
     appLock: ar ? 'قفل التطبيق بالبصمة' : 'Biometric app lock',
     appLockSub: ar ? 'يتطلب بصمة أو تعريفاً حيوياً مدعوماً من الجهاز.' : 'Uses biometrics supported by the device.',
@@ -969,14 +970,17 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
     setRestoreBusy(true);
     try {
       const ok = await importBackup(JSON.stringify(importPackage.payload.data));
-      if (!ok) Alert.alert('', T.backupInvalid);
+      if (!ok) {
+        const diagnostic = syncDiagnosticCode(useStore.getState().lastSyncError);
+        Alert.alert('', diagnostic ? `${T.restoreFailed}\n\n${diagnostic}` : T.restoreFailed);
+      }
       if (ok) {
         setRestoreResultOpen(true);
         setImportPackage(null);
         setRestoreConfirmOpen(false);
       }
     } catch (error) {
-      Alert.alert('', error?.message || T.backupInvalid);
+      Alert.alert('', error?.message || T.restoreFailed);
     } finally {
       setRestoreBusy(false);
     }

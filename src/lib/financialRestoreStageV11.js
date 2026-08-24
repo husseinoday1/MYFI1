@@ -8,8 +8,8 @@
 
 import { ensureColdArchiveSchema } from './localArchiveRepository';
 import { enqueueLedgerWrite, getLedgerDb, runLedgerExclusiveTransaction, runLedgerReadTransaction } from './ledgerDatabase';
+import { FINANCIAL_LEDGER_SCHEMA_VERSION } from './financialLedgerV7Model';
 import {
-  FINANCIAL_LEDGER_SCHEMA_VERSION,
   ensureFinancialLedgerV7,
   proveFinancialLedgerInvariantsV7,
   readFinancialProjectionV7,

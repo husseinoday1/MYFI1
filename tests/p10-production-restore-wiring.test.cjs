@@ -10,6 +10,8 @@ const app = read('App.js');
 const settings = read('src/screens/SettingsScreen.js');
 const legacySettings = read('src/screens/SettingsLegacyScreen.js');
 const packageFiles = read('src/lib/myfiFiles.js');
+const restoreStage = read('src/lib/financialRestoreStageV11.js');
+const ledgerModel = read('src/lib/financialLedgerV7Model.js');
 
 for (const token of [
   'decodeCanonicalBackupV11',
@@ -76,5 +78,24 @@ assert.match(packageFiles, /import \{ decodeCanonicalBackupV11 \} from '\.\/fina
 assert.match(packageFiles, /data\?\.kind !== 'myfi_canonical_financial_backup'/);
 assert.match(packageFiles, /const decoded = decodeCanonicalBackupV11\(data\);/);
 assert.match(packageFiles, /const validation = inspectPackagedBackupData\(payload\.data\);/);
+assert.match(
+  restoreStage,
+  /import \{ FINANCIAL_LEDGER_SCHEMA_VERSION \} from '\.\/financialLedgerV7Model';/,
+  'restore stage must bind its schema version from the module that exports it',
+);
+const restoreRepositoryImport = restoreStage.match(
+  /import \{([^}]*)\} from '\.\/financialLedgerV7Repository';/,
+);
+assert(restoreRepositoryImport, 'restore stage repository import must remain explicit');
+assert.doesNotMatch(
+  restoreRepositoryImport[1],
+  /FINANCIAL_LEDGER_SCHEMA_VERSION/,
+  'restore stage must not import an undefined schema version from the repository',
+);
+assert.match(
+  ledgerModel,
+  /export const FINANCIAL_LEDGER_SCHEMA_VERSION = 7;/,
+  'restore stage schema version must remain a real exported runtime value',
+);
 
 console.log('MYFI P10 PRODUCTION RESTORE WIRING CONTRACT: PASS');
