@@ -8,12 +8,14 @@ import {
 
 let started = false;
 let unsubscribe = null;
+const gateDeadline = Date.now() + 15000;
 const safeMessage = error => String(error?.message || error || 'p10_014b_unknown_error').slice(0, 240);
 
 const startGate = () => {
   if (started || !P10_014B_CLOUD_HANDSHAKE_ENABLED) return;
   const state = useStore.getState();
-  if (!state?.workspaceReady) return;
+  const authenticatedWorkspaceReady = Boolean(state?.workspaceReady && state?.user?.id);
+  if (!authenticatedWorkspaceReady && Date.now() < gateDeadline) return;
   started = true;
   if (typeof unsubscribe === 'function') unsubscribe();
   unsubscribe = null;
