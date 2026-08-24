@@ -1,0 +1,128 @@
+name: P10-014B Cloud Handshake Device Gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-p10-014b-cloud-handshake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Checkout exact P10 branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select dedicated P10-014B entry in CI workspace only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp package.json package.json.p10-014b-backup
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'package.json';
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          if (pkg.main !== 'index.js') throw new Error(`[FAIL] unexpected main: ${pkg.main}`);
+          pkg.main = 'src/dev/p10_014bCloudHandshakeEntry.js';
+          fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Load public bundle environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const cfg = JSON.parse(fs.readFileSync('eas.json', 'utf8'));
+          const env = cfg?.build?.preview?.env || {};
+          for (const key of ['EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_KEY']) {
+            const value = String(env[key] || '').trim();
+            if (!value) throw new Error(`[FAIL] Missing ${key}`);
+            fs.appendFileSync(process.env.GITHUB_ENV, `${key}=${value}\n`);
+          }
+          NODE
+          {
+            echo 'EXPO_PUBLIC_P10_014B_CLOUD_HANDSHAKE=1'
+            echo 'EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE=0'
+            echo 'EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK=0'
+            echo 'EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B=0'
+            echo 'EXPO_PUBLIC_P10_014A_CLONE_PROBE=0'
+            echo 'EXPO_PUBLIC_FRESH_TEST=0'
+          } >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: P10-014B contract
+        run: node tests/p10-014b-cloud-handshake.test.cjs .
+
+      - name: Full quality gate
+        run: npm run test:gate
+
+      - name: Verify Android bundle
+        run: npm run verify:android
+
+      - name: Build P10-014B APK
+        working-directory: android
+        env:
+          CI: 'true'
+          NODE_ENV: production
+          EXPO_PUBLIC_P10_014B_CLOUD_HANDSHAKE: '1'
+          EXPO_PUBLIC_P19_RESTORE_EPOCH_DEVICE_GATE: '0'
+          EXPO_PUBLIC_PHASE10_RESTORE_BENCHMARK: '0'
+          EXPO_PUBLIC_P10_014A_LOCAL_STRATEGY_B: '0'
+          EXPO_PUBLIC_P10_014A_CLONE_PROBE: '0'
+          EXPO_PUBLIC_FRESH_TEST: '0'
+        run: |
+          chmod +x ./gradlew
+          ./gradlew clean app:assembleRelease -x lint -x test --stacktrace --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Write and upload P10-014B evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='android/app/build/outputs/apk/release/app-release.apk'
+          test -f "$APK"
+          SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          {
+            echo 'Patch=P10-014B-001'
+            echo 'Gate=CLOUD_HANDSHAKE_ACCEPTANCE'
+            echo 'AcceptanceComplete=PENDING_DISPOSABLE_DEVICE'
+            echo 'ServerProofSource=supabase_rpc_v3'
+            echo 'ProductionRestoreWiring=NO'
+            echo "BuildCommit=$(git rev-parse HEAD)"
+            echo "SHA256=$SHA"
+            echo 'InstallMode=ADB_INSTALL_R_PRESERVE_DATA'
+            echo 'UninstallAllowed=NO'
+            echo 'PmClearAllowed=NO'
+          } | tee P10-014B-build-evidence.txt
+          sha256sum "$APK" > app-release.apk.sha256
+
+      - name: Upload P10-014B APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MYFI-P10-014B-cloud-handshake
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            app-release.apk.sha256
+            P10-014B-build-evidence.txt
+          if-no-files-found: error
+          retention-days: 7
