@@ -5,6 +5,8 @@ const path = require('node:path');
 const root = path.resolve(process.argv[2] || '.');
 const source = fs.readFileSync(path.join(root, 'src', 'dev', 'phase10RestoreBenchmarkHarness.js'), 'utf8');
 const entry = fs.readFileSync(path.join(root, 'src', 'dev', 'p10_014aCloneProbeEntry.js'), 'utf8');
+const cloneArtifactsPath = path.join(root, 'src', 'dev', 'p10_014aCloneArtifacts.js');
+const cloneArtifactsSource = fs.readFileSync(cloneArtifactsPath, 'utf8');
 const ledgerDb = fs.readFileSync(path.join(root, 'src', 'lib', 'ledgerDatabase.js'), 'utf8');
 const promotion = fs.readFileSync(path.join(root, 'src', 'lib', 'financialRestorePromotionV13.js'), 'utf8');
 const ledgerModel = fs.readFileSync(path.join(root, 'src', 'lib', 'financialLedgerV7Model.js'), 'utf8');
@@ -103,6 +105,11 @@ for (const required of [
 for (const required of [
   "import * as SQLite from 'expo-sqlite'",
   "import * as FileSystem from 'expo-file-system/legacy'",
+  "from './p10_014aCloneArtifacts'",
+  'isOwnedCloneDatabaseName(cloneName)',
+  'sweepOwnedCloneArtifacts({',
+  "console.info(LOG, 'ORPHAN_CLONE_SWEEP'",
+  'orphanCloneCleanupVerified: orphanSweep.cleanupVerified',
   'FileSystem.getInfoAsync(sourceUri)',
   "PRAGMA query_only = ON",
   "PRAGMA query_only",
@@ -127,6 +134,76 @@ for (const required of [
 assert.equal(entry.includes("import '../../index'"), false, 'R5 clone probe must not import normal app root');
 assert.equal(entry.includes("from '../store/useStore'"), false, 'R5 clone probe must not import store');
 assert.equal(entry.toLowerCase().includes('supabase'), false, 'R5 clone probe must not import Supabase');
+assert(
+  entry.indexOf('await sweepCloneArtifacts()') < entry.indexOf('const sourceUri = databaseUri(LEDGER_DB_NAME)'),
+  'Orphan clone artifacts must be removed before the source database is opened',
+);
+
+const compiledCloneArtifacts = cloneArtifactsSource
+  .replace(/export const /g, 'const ')
+  .replace(/export async function /g, 'async function ')
+  + '\nmodule.exports = { P10_014A_CLONE_DATABASE_NAME_PATTERN, P10_014A_CLONE_DATABASE_ARTIFACT_PATTERN, isOwnedCloneDatabaseName, sweepOwnedCloneArtifacts };';
+const cloneArtifactsModule = { exports: {} };
+new Function('module', 'exports', compiledCloneArtifacts)(cloneArtifactsModule, cloneArtifactsModule.exports);
+const cloneArtifacts = cloneArtifactsModule.exports;
+
+assert.equal(cloneArtifacts.isOwnedCloneDatabaseName('p10-014a-r5-clone-1724450000000-ab12cd34.db'), true);
+assert.equal(cloneArtifacts.isOwnedCloneDatabaseName('myfi-ledger-v2.db'), false);
+assert.equal(cloneArtifacts.isOwnedCloneDatabaseName('../p10-014a-r5-clone-1724450000000-ab12cd34.db'), false);
+
+const runCloneArtifactRuntime = async () => {
+  const ownedBase = 'p10-014a-r5-clone-1724450000000-ab12cd34.db';
+  const files = new Set([
+    'myfi-ledger-v2.db',
+    'unrelated.db',
+    ownedBase,
+    `${ownedBase}-wal`,
+    `${ownedBase}-shm`,
+    `${ownedBase}-journal`,
+    'p10-014a-r5-clone-invalid.db',
+  ]);
+  const deleted = [];
+  const fileSystem = {
+    readDirectoryAsync: async () => [...files],
+    deleteAsync: async uri => {
+      const name = String(uri).split('/').pop();
+      deleted.push(name);
+      files.delete(name);
+    },
+  };
+  const sweepResult = await cloneArtifacts.sweepOwnedCloneArtifacts({
+    fileSystem,
+    directoryUri: 'file:///data/user/0/com.myfi.app/databases',
+    sourceDatabaseName: 'myfi-ledger-v2.db',
+  });
+  assert.deepEqual(deleted.sort(), [ownedBase, `${ownedBase}-journal`, `${ownedBase}-shm`, `${ownedBase}-wal`].sort());
+  assert.equal(files.has('myfi-ledger-v2.db'), true, 'Source DB must survive clone cleanup');
+  assert.equal(files.has('unrelated.db'), true, 'Unrelated DB must survive clone cleanup');
+  assert.deepEqual(sweepResult, { artifactCount: 4, cleanupVerified: true });
+
+  await assert.rejects(
+    cloneArtifacts.sweepOwnedCloneArtifacts({
+      fileSystem: {
+        readDirectoryAsync: async () => [ownedBase],
+        deleteAsync: async () => {},
+      },
+      directoryUri: 'file:///data/user/0/com.myfi.app/databases',
+      sourceDatabaseName: 'myfi-ledger-v2.db',
+    }),
+    /p10_clone_probe_orphan_sweep_failed/,
+  );
+  await assert.rejects(
+    cloneArtifacts.sweepOwnedCloneArtifacts({
+      fileSystem: {
+        readDirectoryAsync: async () => [ownedBase],
+        deleteAsync: async () => {},
+      },
+      directoryUri: 'file:///data/user/0/com.myfi.app/databases',
+      sourceDatabaseName: ownedBase,
+    }),
+    /p10_clone_probe_orphan_sweep_scope_invalid/,
+  );
+};
 assert(
   entry.indexOf('source.closeAsync()') < entry.indexOf('setP10CloneLedgerDbOverride(clone)'),
   'Original source DB must be closed before clone becomes the application DB',
@@ -179,7 +256,7 @@ for (const required of [
   'HarnessDatabase=DISPOSABLE_SQLITE_BACKUP_CLONE',
   'OriginalDatabaseMutationByHarness=NO',
   'OriginalInstalledApkMustBeBackedUpByDeviceRunner=YES',
-  'P10-014A-original-package-clone-probe-R5-2',
+  'P10-014A-original-package-clone-probe-R5-3',
 ]) {
   assert(workflow.includes(required), `R5 workflow missing: ${required}`);
 }
@@ -329,4 +406,9 @@ assert(
   'R5 harness core evidence must reference the prior outer promotionPreconditions value',
 );
 
-console.log('MYFI P10-014A R5.2 WAL-AWARE LOGICAL IMMUTABILITY CLONE PROBE CONTRACT: PASS');
+runCloneArtifactRuntime()
+  .then(() => console.log('MYFI P10-014A R5.3 WAL-AWARE LOGICAL IMMUTABILITY CLONE PROBE CONTRACT: PASS'))
+  .catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  });

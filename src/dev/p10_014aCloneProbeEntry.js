@@ -15,6 +15,10 @@ import {
   setP10CloneLedgerDbOverride,
   clearP10CloneLedgerDbOverride,
 } from '../lib/ledgerDatabase';
+import {
+  isOwnedCloneDatabaseName,
+  sweepOwnedCloneArtifacts,
+} from './p10_014aCloneArtifacts';
 
 const LOG = '[P10_014A_CLONE_PROBE]';
 const CLONE_MARKER_KEY = 'p10_014a_clone_database_marker';
@@ -40,12 +44,20 @@ const databaseUri = name => (
 
 const databaseHandleUri = database => toFileUri(database?.databasePath);
 
+const sweepCloneArtifacts = () => sweepOwnedCloneArtifacts({
+  fileSystem: FileSystem,
+  directoryUri: toFileUri(SQLite.defaultDatabaseDirectory),
+  sourceDatabaseName: LEDGER_DB_NAME,
+});
+
 const nonce = () => (
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
 );
 
 async function runCloneProbe() {
   if (!CLONE_FLAG) throw new Error('p10_clone_probe_build_flag_required');
+  const orphanSweep = await sweepCloneArtifacts();
+  console.info(LOG, 'ORPHAN_CLONE_SWEEP', JSON.stringify(orphanSweep));
   const sourceUri = databaseUri(LEDGER_DB_NAME);
   const sourceInfoBefore = await FileSystem.getInfoAsync(sourceUri);
   if (!sourceInfoBefore?.exists || sourceInfoBefore?.isDirectory || Number(sourceInfoBefore?.size || 0) <= 0) {
@@ -53,6 +65,9 @@ async function runCloneProbe() {
   }
 
   const cloneName = `p10-014a-r5-clone-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.db`;
+  if (!isOwnedCloneDatabaseName(cloneName)) {
+    throw new Error('p10_clone_probe_clone_name_invalid');
+  }
   const cloneUri = databaseUri(cloneName);
   const existingClone = await FileSystem.getInfoAsync(cloneUri);
   if (existingClone?.exists) throw new Error('p10_clone_probe_clone_name_collision');
@@ -248,10 +263,12 @@ async function runCloneProbe() {
 
     return {
       ok: true,
-      patchId: 'P10-014A-001-R5.2',
+      patchId: 'P10-014A-001-R5.3',
       mode: 'original_package_sqlite_backup_clone',
       originalDatabaseReadOnly: true,
       originalDatabaseMutationByHarness: false,
+      orphanCloneArtifactCount: orphanSweep.artifactCount,
+      orphanCloneCleanupVerified: orphanSweep.cleanupVerified,
       sourceFingerprintStable: JSON.stringify(sourceFingerprintBefore) === JSON.stringify(sourceFingerprintAfter),
       sourceFileMetadataObservation,
       cloneDeletedAfterRun: true,
@@ -266,6 +283,7 @@ async function runCloneProbe() {
     try { await clone?.closeAsync?.(); } catch {}
     try {
       await SQLite.deleteDatabaseAsync(cloneName, SQLite.defaultDatabaseDirectory);
+      await sweepCloneArtifacts();
       const cloneInfo = await FileSystem.getInfoAsync(cloneUri);
       cloneDeleted = !cloneInfo?.exists;
     } catch {}
@@ -288,6 +306,8 @@ function CloneProbeApp() {
           mode: result.mode,
           originalDatabaseReadOnly: result.originalDatabaseReadOnly,
           originalDatabaseMutationByHarness: result.originalDatabaseMutationByHarness,
+          orphanCloneArtifactCount: result.orphanCloneArtifactCount,
+          orphanCloneCleanupVerified: result.orphanCloneCleanupVerified,
           sourceFingerprintStable: result.sourceFingerprintStable,
           sourceFileMetadataObservation: result.sourceFileMetadataObservation,
         }));
@@ -310,7 +330,7 @@ function CloneProbeApp() {
       backgroundColor: '#ffffff',
     }}>
       <Text style={{ color: '#111111', fontSize: 20, fontWeight: '700', marginBottom: 12 }}>
-        P10-014A R5.2 Clone Probe
+        P10-014A R5.3 Clone Probe
       </Text>
       <Text style={{ color: '#111111', fontSize: 18, marginBottom: 10 }}>
         {status.label}

@@ -170,7 +170,7 @@ jobs:
           SHA="$(sha256sum "$APK" | awk '{print $1}')"
           SIZE="$(stat -c%s "$APK")"
           {
-            echo "Patch=P10-014A-001-R5.2"
+            echo "Patch=P10-014A-001-R5.3"
             echo "Gate=ORIGINAL_PACKAGE_SQLITE_BACKUP_CLONE"
             echo "AcceptanceComplete=NO"
             echo "NextRequiredSubgate=P10-014A-002_FAULT_AND_RESOURCE_MATRIX"
@@ -196,6 +196,7 @@ jobs:
             echo "WALCloseFileMetadata=OBSERVATIONAL_NOT_MUTATION_GATE"
             echo "CloneSchemaVerification=LOGICAL_APP_SCHEMA_AND_PAGE_INVARIANTS_DEST_SCHEMA_COOKIE_EXCLUDED"
             echo "CloneDeletedAfterRun=REQUIRED"
+            echo "OrphanCloneSweepBeforeRun=REQUIRED"
             echo "OriginalInstalledApkMustBeBackedUpByDeviceRunner=YES"
             echo "OriginalInstalledApkVersionAndCertMustMatchProbe=YES"
             echo "UninstallAllowed=NO"
@@ -215,7 +216,7 @@ jobs:
       - name: Upload R5 clone-probe APK
         uses: actions/upload-artifact@v4
         with:
-          name: P10-014A-original-package-clone-probe-R5-2
+          name: P10-014A-original-package-clone-probe-R5-3
           path: |
             android/app/build/outputs/apk/release/app-release.apk
             app-release.apk.sha256

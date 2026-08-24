@@ -3,6 +3,7 @@
 src/dev/phase10RestoreBenchmarkHarness.js
 src/dev/p10_014aDiagnosticEntry.js
 src/dev/p10_014aCloneProbeEntry.js
+src/dev/p10_014aCloneArtifacts.js
 src/lib/ledgerDatabase.js
 src/lib/financialRestorePromotionV13.js
 src/lib/localArchiveRepository.js
