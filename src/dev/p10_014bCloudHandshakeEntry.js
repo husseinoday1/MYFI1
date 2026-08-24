@@ -13,7 +13,10 @@ const safeMessage = error => String(error?.message || error || 'p10_014b_unknown
 const maybeStart = () => {
   if (started || !P10_014B_CLOUD_HANDSHAKE_ENABLED) return;
   const state = useStore.getState();
-  if (!state?.workspaceReady) return;
+  // Auth hydration and workspace hydration complete on separate startup paths.
+  // Waiting for workspaceReady alone can run the gate in the small interval where
+  // the workspace exists but the original Supabase user is not in the store yet.
+  if (!state?.workspaceReady || !state?.user?.id) return;
   started = true;
   if (typeof unsubscribe === 'function') unsubscribe();
   unsubscribe = null;
