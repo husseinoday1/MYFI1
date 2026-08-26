@@ -1,2 +1,28 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# General - normalize text files to LF
+* text=auto eol=lf
+
+# Images and fonts - binary, never normalized or diffed
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+
+# Build artifacts, Android packages, and keys - binary
+*.apk binary
+*.aab binary
+*.keystore binary
+*.jks binary
+
+# Windows scripts - always CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Misc
+package-lock.json -diff
+*.sh text eol=lf
