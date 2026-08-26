@@ -1,10 +1,12 @@
 # MYFI Master Plan Restructure Proposal — 2026-08-26
 
-**Status:** PROPOSAL, awaiting user sign-off. Does not replace
-`MYFI_MASTER_PLAN_FROZEN.md` until approved — per
-`docs/00_MYFI_CANONICAL_AUTHORITY.md`, phase sequencing changes only via an
-approved proposal. Once approved, this becomes the new post-Phase-10 section
-of the frozen plan (Phases 0-10 are untouched — already executed, closed).
+**Status: APPROVED by the user, 2026-08-26.** This is now the operative
+post-Phase-10 phase structure, registered in
+`docs/00_MYFI_CANONICAL_AUTHORITY.md` under A1. It supersedes the 2026-08-24
+addendum's undated "parallel workstream" framing for phase-sequencing
+purposes (that addendum's actual content — the PRODUCT-*/SECURITY-* work
+packages — is absorbed into the phases below, not discarded). Phases 0-10
+are untouched — already executed, closed.
 
 **Why this exists:** the 2026-08-24 addendum opened Product Design/Security
 as an undated "parallel workstream" rather than giving it real phase
@@ -92,12 +94,19 @@ import policy, product claim scope) becomes **17-A**, unchanged. New tracks:
   transaction data (`getBudgetRows`, `getBudgetSummary` and history already
   in `src/lib/budgets.js`/`wallets.js`) — no new financial write path, no
   new stored fields. Lowest risk of the three approved-now items.
-- **17-D — Smart Capture improvement (approved, scope TBD).** The user
-  referenced a prior agreement that Smart Capture (`docs/SMART_CAPTURE.md`)
-  "needs a big improvement" — this proposal cannot specify what improvement
-  without that detail; flagged here as an open 17-D slot so it has a home
-  in the restructured plan, with the actual scope to be supplied before
-  work starts.
+- **17-D — Smart Capture improvement (approved, scope confirmed
+  2026-08-26).** Two concrete defects, per the user directly:
+  1. **Receipt/image OCR is inaccurate and makes mistakes.** Analysis needs
+     to become currency-aware and wallet-aware — i.e. infer/apply the
+     correct currency and target wallet context from the receipt, not just
+     extract a raw amount blind to which wallet/currency it belongs to.
+  2. **Voice capture's speech analysis itself works correctly, but the
+     surrounding flow fails** (exact failure mode not yet specified by the
+     user — needs reproduction before a fix is designed) **and needs an
+     explicit confirmation step added**, or the underlying mechanism
+     reworked so it stops failing silently.
+  Merges with 17-F below (SMS becomes a fourth capture source using the
+  same underlying mechanism this track is fixing).
 - **17-E — AI financial assistant, natural-language Q&A over the user's
   data (approved for a paid tier; privacy approach still open).** User
   explicitly asked for "a middle-ground solution" on privacy — this
@@ -114,6 +123,37 @@ import policy, product claim scope) becomes **17-A**, unchanged. New tracks:
   This needs its own short design spike before scoping, not a default pick
   buried in a phase-list line item — recommend Planning & Audit runs that
   spike before 17-E gets a real execution package.
+
+- **17-F — SMS-based transaction auto-detection, interim bank-sync bridge
+  (approved, 2026-08-26).** The app reads incoming SMS, detects bank
+  transfer/spend/income notifications, and stages them as draft transactions
+  **requiring explicit user review before commit** — never auto-committed
+  silently. This is consistent with, not an exception to, the existing
+  financial invariant "no silent repair"/no unreviewed financial writes.
+  A given sender number can be pinned to a specific wallet (e.g. "messages
+  from this bank's sender ID map to Wallet X"), which is exactly the
+  interim, no-real-bank-API version of 16-B's future readiness — this phase
+  is the practical bridge until real per-country bank integration exists.
+  Natural home for 17-D's still-undefined "Smart Capture improvement": SMS
+  becomes a fourth capture source alongside receipt/voice/text, using the
+  same `smartSource` marker and local-parsing approach already established
+  in `docs/SMART_CAPTURE.md` — recommend 17-D and 17-F merge into one
+  execution package once 17-D's other details are supplied.
+  **Flagged risk, must be resolved before scoping, not after:**
+  - **Android:** reading SMS (`READ_SMS`/`RECEIVE_SMS`) is a Google Play
+    *restricted permission* — Play policy has, for years, only granted it to
+    apps that are the user's default SMS/Assistant handler, with narrow
+    exceptions requiring a core-functionality justification. This is a real
+    Play Store distribution risk, not a coding detail — **must be verified
+    against Google Play's current policy (reverify at implementation time,
+    per the plan's own A7 rule) before any implementation work starts**, not
+    discovered at submission.
+  - **iOS:** no API exists for a third-party app to read incoming SMS at
+    all — Apple does not expose this. If MYFI ever ships iOS, this feature
+    is Android-only by platform constraint, not a build choice.
+  - Bank SMS formats vary by bank/country and change over time — parsing
+    will be inherently approximate, reinforcing why "needs review" is
+    mandatory, not optional polish.
 
 ### Phase 18 — split into 18-A (executing now) and 18-B (original scope, deferred until 18-A closes)
 Confirmed from the earlier 2026-08-26 sequencing decision
@@ -134,10 +174,12 @@ Confirmed from the earlier 2026-08-26 sequencing decision
 ```
 Phase 11 → 12 → 13 ─┬─→ 18-A Step 4 (Settings/Legacy)
                      │
-Phase 14-A → 15 → 16-A → 17-A/B/C/D → 18-B → 19 → 20 → 21
+Phase 14-A → 15 → 16-A → 17-A/B/C/D/F → 18-B → 19 → 20 → 21
                      │
         14-B, 16-B, 17-E: future-plans slots, not scheduled,
-        each needs its own scoping trigger before execution
+        each needs its own scoping trigger before execution.
+        17-F has its own hard pre-condition: Google Play SMS-permission
+        policy reverified current BEFORE scoping starts (see 17-F risk note).
 ```
 18-A Steps 3/5-9 (everything except Step 4) do not depend on Phases 11-17
 and continue in parallel, as already happening.
@@ -152,12 +194,26 @@ and continue in parallel, as already happening.
 - 16-B is design-only in this proposal; zero schema/migration impact until
   a specific country's real integration gets its own future proposal.
 - New rule needed: third-party contact PII (17-B) addition to
-  `MYFI_DATA_OWNERSHIP.md` before 17-B implementation starts.
+  `MYFI_DATA_OWNERSHIP.md` before 17-B implementation starts, and again
+  before 17-F (SMS-derived transactions reference the sender, and the
+  wallet-mapping rule references a phone/sender number) — same underlying
+  gap, one rule should cover both.
+- 17-F reads device SMS content — this is itself a security/privacy-
+  threat-model item (`MYFI_SECURITY_THREAT_MODEL.md`, A3), separate from the
+  Play Store distribution-policy risk noted above. Both must clear before
+  17-F gets a real execution package, not just one of them.
 
-## Risk if not adopted
-The five 2026-08-26 product decisions and the Design workstream continue
-living as disconnected side-conversations with no phase home, the way the
-2026-08-24 addendum already did once — each new session has to be told
-about them individually instead of reading one coherent plan, and the real
-sequencing dependency (17-B needs a data-ownership rule first; 18-A Step 4
-needs Phases 11-13 first) stays implicit instead of gating anything.
+## Approval record
+User approved this proposal in full, 2026-08-26, including 17-F added in
+the same approval message, and supplied 17-D's concrete scope (above) the
+same day. One item remains explicitly open, by the user's own choice, and is
+not blocking the rest of this structure:
+1. **17-E's privacy-approach choice (the 3 options above): deliberately
+   deferred.** User's own words: decide when the phase is actually reached,
+   discuss in detail then — not a gap to chase now, a decision correctly
+   scheduled for its own execution trigger rather than forced early.
+
+## Risk if not adopted (historical — proposal is now approved)
+The five 2026-08-26 product decisions and the Design workstream would have
+continued living as disconnected side-conversations with no phase home, the
+way the 2026-08-24 addendum already did once.

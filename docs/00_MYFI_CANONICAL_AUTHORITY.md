@@ -37,6 +37,19 @@ It does not override frozen financial invariants merely because code happens to 
 folder into engineering authority vs. historical raw Product Owner input —
 read it before citing anything in that folder as binding.
 
+**Post-Phase-10 phase structure — APPROVED restructure, 2026-08-26:**
+`01_CORE_AUTHORITY/MYFI_MASTER_PLAN_RESTRUCTURE_PROPOSAL_2026-08-26.md` is
+now the operative phase map for everything after Phase 10 (Phases 0-10
+unchanged, already closed). It supersedes the 2026-08-24 addendum's
+undated "parallel workstream" framing for sequencing purposes and gives
+explicit phase slots to the Design workstream (18-A/18-B) and five
+2026-08-26 product decisions (14-B household sharing, 16-B bank-sync
+architecture readiness, 17-B contact-linked debt settlement, 17-C budget
+prediction, 17-D Smart Capture fixes, 17-E AI financial assistant, 17-F
+SMS-based transaction auto-detection). Read that file for the full
+dependency graph before assuming any of Phases 14-18 is unchanged from the
+original frozen text.
+
 This is the canonical Frozen Master Plan in this package.
 
 It replaces older master-plan variants in previous handoffs, including:
