@@ -307,7 +307,7 @@ const editableIdentityName = ({ user, cfg } = {}) => {
   return localName || cleanDisplayName(metadata.full_name || metadata.name || metadata.displayName) || '';
 };
 
-export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal = 0, openRequest = null }) {
+export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest = null }) {
   const {
     cfg,
     setCfg,
@@ -1217,7 +1217,6 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], resetSignal =
             fileBusy={fileBusy}
             importPackage={importPackage}
             importPreview={importPreview}
-            onArchive={onOpenArchive}
             onExport={handleExport}
             onPickImport={selectImport}
             onRestore={restoreImport}
@@ -1827,7 +1826,7 @@ function AboutPage({ th, isAr, T }) {
   );
 }
 
-function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview, onArchive, onExport, onPickImport, onRestore, onClearImport, onReset, cfg, testDataBusy, onActivateTestTier, onExitTestData, dataHealth, onRefreshDataHealth, financialLedgerV7Cutover, financialMutationSync }) {
+function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview, onExport, onPickImport, onRestore, onClearImport, onReset, cfg, testDataBusy, onActivateTestTier, onExitTestData, dataHealth, onRefreshDataHealth, financialLedgerV7Cutover, financialMutationSync }) {
   const activeTier = cfg?.demoMode ? String(cfg?.performanceTestTier || '') : '';
   return (
     <>
@@ -1903,7 +1902,6 @@ function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview,
 
       <SectionLabel th={th} isAr={isAr} text={T.backup} />
       <MenuGroup th={th}>
-        <MenuRow th={th} isAr={isAr} icon="archive-outline" title={T.archive} subtitle={T.archiveSub} onPress={onArchive} last={!!cfg?.demoMode} />
         <MenuRow th={th} isAr={isAr} icon="download-outline" title={T.exportBackup} subtitle={cfg?.demoMode ? (isAr ? 'متاح بعد العودة إلى بياناتك الحقيقية' : 'Available after returning to your real data') : T.exportBackupSub} onPress={cfg?.demoMode ? null : onExport} />
         <MenuRow th={th} isAr={isAr} icon="cloud-upload-outline" title={T.importBackup} subtitle={cfg?.demoMode ? (isAr ? 'متاح بعد العودة إلى بياناتك الحقيقية' : 'Available after returning to your real data') : (isAr ? 'راجع النسخة ثم استعدها بأمان' : 'Review the backup, then restore it safely')} onPress={cfg?.demoMode ? null : onPickImport} last />
       </MenuGroup>

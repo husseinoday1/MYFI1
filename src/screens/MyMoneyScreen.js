@@ -11,18 +11,20 @@ import {
   getWalletBaseAvailableTotal,
 } from '../lib/wallets';
 import { getBudgetRows, getBudgetSummary } from '../lib/budgets';
+import { CAT_COLORS } from '../lib/constants';
 import { ScreenScroll, PageIntro, SectionTitle, Touchable, rowDirection } from '../components/AppPrimitives';
 import { GatewayCard } from '../components/GatewayCard';
 
 // Gateway 3/4 accent tones aren't covered by any semantic financial token
-// (those are reserved for income/expense/transfer/warning/danger). These are
-// the already-APPROVED muted category-palette targets from
-// docs/design/04_MYFI_DESIGN_TOKEN_CATALOG.md (#7 "muted purple", #3 "muted
-// terracotta") — reused here as-is rather than inventing new colors. No
-// confirmed dark-theme variant exists yet for these two (the catalog's
-// contrast pass is explicitly deferred); flagged as a known gap.
-const BUDGET_TONE = '#8D7CB8';
-const REPORTS_TONE = '#C99860';
+// (those are reserved for income/expense/transfer/warning/danger). Per
+// user direction (2026-08-26): prefer the app's existing/current colors
+// over importing new ones from the not-yet-applied token-catalog muted
+// palette. Reused here from CAT_COLORS — the same 12-hue category palette
+// already live throughout the app (Follow-ups, budgets, etc.) — rather
+// than the catalog's new "target" recommendations (#8D7CB8/#C99860), which
+// aren't used anywhere else in the app today.
+const BUDGET_TONE = CAT_COLORS[6]; // '#a78bfa' — existing purple, already used for a category
+const REPORTS_TONE = CAT_COLORS[2]; // '#f6ad55' — existing orange, already used for a category
 
 // My Money hub — a thin router. Per docs/design/07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md
 // "My Money": four numbered gateway cards, nothing else at this level. Each

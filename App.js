@@ -953,7 +953,7 @@ function AppRoot() {
       />
     ),
     reports: <ReportsScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} />,
-    settings: <SettingsScreen onOpenArchive={() => setArchiveOpen(true)} tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} />,
+    settings: <SettingsScreen tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} />,
     mymoney: (
       <MyMoneyScreen
         onOpenWallets={() => setTab('wallets')}
@@ -970,6 +970,7 @@ function AppRoot() {
         onAddTransaction={() => openAddExp(true)}
         onTransfer={openTransfer}
         onOpenBudget={() => setTab('budget')}
+        onOpenArchive={() => setArchiveOpen(true)}
       />
     ),
     wallets: <WalletsAccountsScreen />,

@@ -49,10 +49,11 @@ function TrustBadge({ th, lang, icon, tone, title, description }) {
 //   not implemented.
 // - "My Tools" and "Benefits" route to a plain "coming soon" placeholder —
 //   their sub-items are documented in the approved reference but building
-//   them (categories/currencies/templates/archive-relocation for My Tools;
-//   an actual Premium/rewards system for Benefits) is out of this Step 3
-//   navigation-shell scope.
-export default function MoreScreen({ onOpenSettingsPage, onAddTransaction, onTransfer, onOpenBudget }) {
+//   them (categories/currencies/templates for My Tools; an actual
+//   Premium/rewards system for Benefits) is out of scope here. Archive is
+//   the one My Tools sub-item that already exists and is wired directly
+//   (roadmap Step 5, see below).
+export default function MoreScreen({ onOpenSettingsPage, onAddTransaction, onTransfer, onOpenBudget, onOpenArchive }) {
   const { th, lang, isAr } = useTheme();
   const [placeholder, setPlaceholder] = useState(null);
 
@@ -90,8 +91,18 @@ export default function MoreScreen({ onOpenSettingsPage, onAddTransaction, onTra
         <SectionListRow
           th={th} lang={lang} icon="briefcase-outline" tone={th.primary}
           title={isAr ? 'أدواتي' : 'My Tools'}
-          description={isAr ? 'التصنيفات، العملات والحسابات، القوالب والأرشيف' : 'Categories, currencies & accounts, templates and archive'}
+          description={isAr ? 'التصنيفات، العملات والحسابات، القوالب' : 'Categories, currencies & accounts, templates'}
+          bordered
           onPress={() => setPlaceholder(isAr ? 'أدواتي' : 'My Tools')}
+        />
+        {/* Archive relocated here from Settings > Data & storage per roadmap
+            Step 5 (2026-08-26) — same ArchiveScreen, same onOpenArchive
+            wiring, content/logic unchanged. */}
+        <SectionListRow
+          th={th} lang={lang} icon="archive-outline" tone={th.primary}
+          title={isAr ? 'الأرشيف' : 'Archive'}
+          description={isAr ? 'الحسابات والفئات المؤرشفة' : 'Archived accounts and categories'}
+          onPress={onOpenArchive}
         />
       </SurfaceCard>
 

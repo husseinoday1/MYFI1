@@ -6,7 +6,7 @@ import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
 import { FinancialDirectionMark, Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import WalletBalanceCard from '../components/WalletBalanceCard';
-import { getSymbol } from '../lib/constants';
+import { CAT_COLORS, getSymbol } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
 import { buildFinancialReport, calcStats, catSpend, debtSummary } from '../utils/calc';
 import { buildLeakInsights } from '../lib/localIntelligence';
@@ -20,7 +20,13 @@ import { getTransactionIndex } from '../lib/transactionIndex';
 import { getLedgerNamespace, queryLedgerCategorySpend, queryLedgerSummary } from '../lib/activeLedgerRepository';
 import { currencyGroupsAreBaseOnly, mergeCurrencyAmounts, summarizeCommitmentCurrencies, summarizeDebtCurrencies, summarizeGoalCurrencies } from '../lib/entityCurrencySummary';
 
-const CHART_COLORS = ['#138A57', '#447FC1', '#C18428', '#C25761', '#6E68B5', '#4E8975'];
+// Step 7 (2026-08-26): reconnected to the app's existing, already-governed
+// category palette (CAT_COLORS, src/lib/constants.js) instead of maintaining
+// a separate local 6-color set — per user direction to prefer existing app
+// colors over introducing new ones. Same modulo-cycling usage below; more
+// colors (12 vs 6) only improves category distinguishability in charts with
+// many categories.
+const CHART_COLORS = CAT_COLORS;
 
 const dateOf = (item) => {
   const date = new Date(`${item?.dateISO || ''}T12:00:00`);
