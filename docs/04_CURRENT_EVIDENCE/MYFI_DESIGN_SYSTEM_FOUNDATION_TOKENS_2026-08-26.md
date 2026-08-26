@@ -114,6 +114,17 @@ touched.
 - Motion system, responsive rules — canonical doc marks both as not evaluated/
   proposed-only this pass; out of scope here too.
 
+## Push status
+
+Committed locally to `impl/design-tokens-foundation-2026-08-26` (`f701a48`),
+**not pushed to origin**, per explicit user instruction (2026-08-26): hold
+until the full design rollout is ready to go up together, or until the
+current weekly token allowance resets — whichever comes first. No APK was
+built or installed; the only build step run was a local `expo export`
+static-verification pass (output removed afterward, not shipped anywhere).
+Device testing for this work happens live through the Expo Go / dev-client
+app, not a packaged APK.
+
 ## Verification
 
 - All five new/changed files parsed cleanly with `@babel/parser`
