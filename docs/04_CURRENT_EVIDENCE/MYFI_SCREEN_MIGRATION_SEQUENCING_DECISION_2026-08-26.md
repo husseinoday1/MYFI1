@@ -47,6 +47,15 @@ token-limit reset, whichever the user decides), Step 3 gets its scoped
 package from `impl/design-tokens-foundation-2026-08-26`'s tip, not from
 `main`.
 
+**Trigger fired (user decision, 2026-08-26):** `impl/design-tokens-foundation-2026-08-26`
+pushed to origin (tip `6cd1886`). Step 3 assigned to Implementation 4 from
+that branch tip, scope per the roadmap's own Step 3 text: restructure
+`App.js`'s `BASE_TABS` to 4 tabs, build thin-router **My Money** and **More**
+screens per `05_MYFI_COMPONENT_ARCHITECTURE.md` and
+`06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md`, reorganization not
+rebuild. Steps 4+ (Settings/Legacy consolidation onward) remain unauthorized
+until Step 3 closes with its own evidence + `/code-review` pass.
+
 ## What is safe to run in parallel right now
 
 Evidence archival (queued in
