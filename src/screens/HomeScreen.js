@@ -1239,7 +1239,7 @@ const s = StyleSheet.create({
 
 
   brandTitle:   { fontSize: 23, lineHeight: 28, ...weight('900'), letterSpacing: 0 },
-  hero:         { borderRadius: 18, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 10 },
+  hero:         { borderRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 10, ...SHADOW.card },
   heroTop:      { alignItems: 'flex-start', gap: 8 },
   heroLabel:    { fontSize: TYPE.meta, lineHeight: 17, ...weight('900') },
   heroAmount:   { fontSize: 27, lineHeight: 32, ...weight('900'), marginTop: 2 },
@@ -1249,7 +1249,7 @@ const s = StyleSheet.create({
   healthText:   { fontSize: 12, marginTop: 5, lineHeight: 18, ...weight('700'), opacity: 0.94 },
   heroFact:     { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 54, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   factDivider:  { width: 1, height: 30 },
-  quickEntry:   { borderRadius: 18, borderWidth: 1, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 10, marginBottom: 10 },
+  quickEntry:   { borderRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 10, marginBottom: 10, ...SHADOW.subtle },
   quickEntryTitle:{ fontSize: 12, lineHeight: 17, ...weight('800'), marginBottom: 7 },
   quickEntryRow: { alignItems: 'stretch', justifyContent: 'space-between', gap: 7 },
   quickEntryAction:{ flex: 1, flexBasis: 0, minWidth: 0, minHeight: 64, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 3 },
