@@ -63,3 +63,22 @@ Evidence archival (queued in
 none of the same files as the tokens/navigation work and has no dependency on
 it — assigned to Implementation 4 now, in parallel with this sequencing
 decision, on its own branch.
+
+## Step 3 closed, new scope gap found (2026-08-26)
+
+Step 3 (nav shell + My Money + More) is **accepted** — commit `899fec7` on
+`impl/nav-shell-step3-2026-08-26`, evidence at
+`04_CURRENT_EVIDENCE/MYFI_STEP3_NAV_SHELL_MYMONEY_MORE_2026-08-26.md`, still
+on hold for push pending the user's explicit go.
+
+**New open item: Home screen is not covered by any of the roadmap's 10
+numbered steps**, and `docs/design/07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md`
+§Home specifies **4 period pills (Today/Week/Month/Year)** replacing the
+live `HomeScreen.js`'s **health-pulse pill** (OK/!/— indicator) — a real
+structural/product difference, not a styling one, and not something either
+document resolves. **Decision (2026-08-26): token/spacing/radius adoption on
+Home is authorized now; the health-pill-vs-period-pills structural question
+is explicitly NOT authorized and stays open** until it gets its own scoped
+decision. Same principle applies to any other screen not in the numbered
+roadmap: token-only changes proceed, any found structural gap against the
+approved spec stops and escalates rather than being resolved unilaterally.
