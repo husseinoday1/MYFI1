@@ -46,9 +46,17 @@ while internal patches, rollback evidence and phase gates remain distinct.
 `01_CORE_AUTHORITY/MYFI_R04_1_ACCEPTANCE_RECOVERY_ADDENDUM.md`
 and
 `04_CURRENT_EVIDENCE/MYFI_CURRENT_ACCEPTANCE_DELTA_2026-08-16.md`
+and
+`01_CORE_AUTHORITY/MYFI_PRODUCT_SECURITY_DATA_PROTECTION_ADDENDUM_2026-08-24.md`
 
 An active addendum overlays the master plan for its stated release/gate only.
 It does not rewrite unrelated future phases.
+
+The 2026-08-24 Product/Security addendum registers two post-Phase-10 planning
+workstreams. Its `PRODUCT-*` and `SECURITY-*` labels are work-package labels,
+not replacements for Frozen Master Plan phase numbers. It cannot authorize a
+feature, schema, Supabase, SecureStore, SQLCipher, backup-format, or production
+Android change by itself.
 
 Current rule:
 R04 automated evidence is baseline evidence; product acceptance is not closed until
@@ -106,6 +114,20 @@ it is not permission to redefine the local-ledger ownership contract.
 - `MYFI_MARKETING_PLAN_AR.md`
 
 These guide their own domains but cannot weaken financial, migration, security or acceptance gates.
+
+**`docs/design/` tier placement (added 2026-08-26, closes a gap the design-system
+consolidation left open):** the 14-file design canon under `docs/design/`
+(navigation map: `docs/design/00_README_DESIGN_SOURCE_OF_TRUTH.md`) sits at
+**A6** — it governs product/UX/visual-identity decisions and is authoritative
+for *that* domain, but it cannot override A1 (Frozen Master Plan phase order),
+A2 (active addenda), or A3 (permanent financial/security/data contracts). Its
+own internal "CANONICAL — highest authority" wording in
+`01_MYFI_MASTER_PRODUCT_DESIGN_BLUEPRINT.md` means highest authority *within
+the design domain*, not above A0-A5. Where a design-canon file conflicts with
+`MYFI_FINANCIAL_CONTRACT.md`, `MYFI_SECURITY_THREAT_MODEL.md`, or the Frozen
+Master Plan's phase sequencing, A3/A1 win and the conflict must be escalated
+to Planning & Audit rather than resolved by whichever session is doing the
+implementation work.
 
 `CODE_QUALITY_STANDARDS_AR.md` contains older command examples.
 When commands differ, use the scripts actually present in the current `package.json`
@@ -377,3 +399,52 @@ future phase, not just Phase 9:
 **Explicitly declined (2026-08-20):** a separate staging Supabase project
 isolated from the "Production"-labeled one. Do not re-propose this unless a
 concrete incident makes the case again.
+
+<!-- PRODUCT_SECURITY_ADDENDUM_AUTHORITY_REGISTRATION_2026_08_24 -->
+## Product Design and Security/Data-Protection Authority Registration — 2026-08-24
+
+The user explicitly approved integrating the product-design and
+security/data-protection direction into the project plan and document
+hierarchy, without conflicting with the existing financial and Phase-10 work.
+
+Registered planning overlay:
+
+- `docs/01_CORE_AUTHORITY/MYFI_PRODUCT_SECURITY_DATA_PROTECTION_ADDENDUM_2026-08-24.md`
+
+The Frozen Master Plan remains frozen and retains its engineering phase order.
+The new overlay makes Competitive Design Translation and Security & Data
+Protection first-class parallel workstreams after Phase 10. Phase 10 is now
+closed by:
+
+- `docs/04_CURRENT_EVIDENCE/MYFI_PHASE10_LIVE_PRODUCTION_RESTORE_CLOSURE_2026-08-24.md`
+
+The closure evidence was recorded at
+`d2ed3ae03c137d818040dfe77c665c516b8440b7`, after accepting the CI-built APK
+from `ed436efab2cdee118fb21113c12026012cba14c1` on a real Android production
+restore path.
+
+The next authorized work is planning reconciliation and approval of
+`PRODUCT-P0-A` and `SECURITY-S0`. No Product or security implementation is
+authorized until its own scoped gate and dependencies are approved.
+
+<!-- PRODUCT_DESIGN_RESTRUCTURE_BLUEPRINT_REGISTRATION_2026_08_25 -->
+## Product Design Restructure Blueprint Registration — 2026-08-25
+
+The user supplied a new Product Owner design blueprint (visual identity,
+Design System, full-product UI/navigation audit). It is registered as an
+active planning overlay, alongside — not replacing — the 2026-08-24
+Product/Security addendum:
+
+- `docs/01_CORE_AUTHORITY/MYFI_PRODUCT_DESIGN_RESTRUCTURE_BLUEPRINT_2026-08-25.md`
+
+Planning & Audit reconciliation against the live repo (confirmed navigation
+conflict, current screen/component inventory, working-tree state) is recorded in:
+
+- `docs/04_CURRENT_EVIDENCE/MYFI_PRODUCT_DESIGN_BLUEPRINT_RECONCILIATION_2026-08-25.md`
+
+This blueprint authorizes a **design/product/architecture documentation
+audit only** — it creates new files under `docs/design/` and explicitly does
+not authorize any UI migration, code change, or financial/schema/backup/sync
+change. The Frozen Master Plan remains frozen; this overlay does not
+renumber or replace its phases. Handoff for execution goes to the
+Implementation session per the standing session-structure rule.

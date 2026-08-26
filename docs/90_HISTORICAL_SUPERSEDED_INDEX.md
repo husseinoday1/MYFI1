@@ -20,3 +20,14 @@ These files were reviewed but intentionally omitted from the clean canonical pac
 | Pasted text(2).txt | TRANSIENT LOG | Test transcript only. |
 
 No exact byte-for-byte duplicate files were found; the cleanup is semantic/version deduplication.
+
+## Note (added 2026-08-26): a second, separate archive index exists
+
+`docs/design/archive/00_ARCHIVE_INDEX.md` tracks supersession *within* the
+design-canon subtree (e.g. `docs/01_CORE_AUTHORITY/MYFI_PRODUCT_DESIGN_RESTRUCTURE_BLUEPRINT_2026-08-25.md`
+being superseded for day-to-day reference by
+`docs/design/01_MYFI_MASTER_PRODUCT_DESIGN_BLUEPRINT.md`). This root index was
+last updated 2026-08-16 and does not cover that. **Check both** before treating
+any document as either current or dead — this file for pre-2026-08-16 project-wide
+cleanup, the design archive index for anything inside `docs/design/` or
+`docs/01_CORE_AUTHORITY/*BLUEPRINT*`.

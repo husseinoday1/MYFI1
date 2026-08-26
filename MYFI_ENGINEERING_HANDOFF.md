@@ -1,6 +1,6 @@
 # MYFI — Engineering Handoff
 
-Prepared: 2026-08-19 (last updated 2026-08-19, MYFI Planning & Audit session)
+Prepared: 2026-08-19 (last updated 2026-08-24, Product/Security plan integration)
 Repository: `https://github.com/husseinoday1/MYFI1`
 
 ## 0. What this document is — and is not
@@ -46,7 +46,9 @@ Do not pick a document because its filename says "final"/"frozen"/"REV2" — use
 3. **A2 — Active recovery/addendum overlays** for the current release only
    (currently the R04.1 recovery addendum, now closed, and the P19 Sync V2
    activation addendum, active and extended by the P19-013 atomic remote-apply
-   contract).
+   contract), plus the user-approved post-Phase-10 Product Design and
+   Security/Data-Protection planning overlay at
+   `docs/01_CORE_AUTHORITY/MYFI_PRODUCT_SECURITY_DATA_PROTECTION_ADDENDUM_2026-08-24.md`.
 4. **A3 — Permanent domain contracts** (financial, data ownership, sync,
    backup, date/time, migration, performance, release scope, security). These
    beat design notes and status prose.
@@ -72,7 +74,56 @@ never as current architecture or roadmap.
 
 ---
 
-## 3. Current verified state (updated 2026-08-21 — RE-VERIFY, this drifts fast)
+## 3. Current verified state (latest overlay 2026-08-24 — RE-VERIFY, this drifts fast)
+
+### Latest verified overlay — 2026-08-24
+
+This block supersedes older operational status prose later in this section.
+The older text remains only as incident and design history.
+
+```text
+Verified branch: impl/p10-014a-local-strategy-b-device-gate-2026-08-22
+Verified HEAD: d2ed3ae03c137d818040dfe77c665c516b8440b7
+Remote freshness: git fetch --all --prune completed 2026-08-24;
+                  this branch is the newest remote branch by commit time
+SQLite schema: V8
+Financial ledger model: V7
+Current gate: Phase 10 CLOSED; post-Phase-10 Product/Security planning reconciliation is next
+```
+
+Current Phase-10 facts:
+
+- Production canonical restore wiring is committed at `5209d17`.
+- The schema-version bind failure was fixed at `c8cc663`.
+- The empty-shell restore conflict was fixed at `ed436ef` with a narrow
+  restore-only quarantine for the exact safe V3/V1 pair; it does not authorize
+  broad conflict repair.
+- Accepted GitHub Actions normal build run: `32718230827`.
+- Accepted artifact: `MYFI-P10-014A-normal-release`, app `com.myfi.app`,
+  version `1.0.0` (`versionCode=2`), commit `ed436ef`.
+- APK SHA-256:
+  `fcd44ff69440dd63469097912636d72112299ac65289ef05de6687f2944435f0`.
+- Install mode was `adb install -r`; app data and sign-in state were preserved.
+- Automated gate before the live run: `120 passed, 0 failed, 11 skipped`.
+- The user completed production restore successfully on a real Android device.
+- Runtime/Supabase evidence: `P19_FINAL_V2_ACTIVE`, restore epoch `2 -> 3`,
+  bootstrap finalized, expected rows `22`, actual rows `22`, protocol `2/2`.
+- Closure evidence:
+  `docs/04_CURRENT_EVIDENCE/MYFI_PHASE10_LIVE_PRODUCTION_RESTORE_CLOSURE_2026-08-24.md`.
+
+Phase 10 is **closed**. Do not rebuild, reinstall, or rerun the restore merely
+to repeat this evidence. Any later backup/restore change is a new scoped
+package with its own tests and acceptance proof.
+
+Next exact planning task:
+
+1. reconcile the new Product Design and Security/Data Protection Blueprint;
+2. approve `PRODUCT-P0-A` and `SECURITY-S0` as analysis/current-state outputs;
+3. select one small first implementation package only after that approval;
+4. keep all Product/Security work subordinate to the existing financial,
+   sync, restore, migration, deletion, and security contracts.
+
+### Historical 2026-08-21 snapshot
 
 ⚠️ **Re-run `git fetch origin && git log origin/impl/p20-g01-acceptance-apk-2026-08-19 --oneline -10` before trusting anything below.** This project has
 multiple simultaneous contributors pushing to the same branch (a Claude
@@ -215,8 +266,9 @@ implementation decisions.
     implicitly by the other two.
 - Account switch is an explicit namespace transition, never an implicit
   Guest-ledger remount.
-- Full scenario matrix (A–H) is in Phase 9 of the Frozen Master Plan and is
-  the current open gate — see §3 and §9.
+- Full scenario matrix (A-H) is in Phase 9 of the Frozen Master Plan and is
+  now historical closure context plus a standing lifecycle-safety contract;
+  see §3 and §9.
 
 ---
 
@@ -255,7 +307,7 @@ implementation decisions.
   **must continue toward V2** — it must not fall back to V1 on the same
   attempt. A finalized V2 cloud ledger is never reinterpreted through
   `user_data`; that's a separate `financial_v2_bootstrap_import_required` path.
-- **P20-G01 (2026-08-19, current open gate):** before Phase 9 can close, the
+- **P20-G01 (2026-08-19, later closed):** before Phase 9 closed, the
   destructive restore-epoch handshake (`advance_financial_restore_epoch_v2`
   CAS → local epoch CAS commit → new-epoch shadow pull → verify zero
   old-epoch replay → verify server restore-event evidence → verify the
@@ -347,8 +399,8 @@ Always check the Frozen Master Plan's own phase number, not the patch prefix.
 | 6 | SQLite-first Write Path |
 | 7 | SQLite-first Read Path |
 | 8 | Operational Canonical Cutover |
-| **9** | **Account Lifecycle Gate ← current open gate, one item left (P20-G01)** |
-| 10 | Atomic Backup / Restore Engine (blocked by 9) |
+| 9 | Account Lifecycle Gate — closed by later device/runtime evidence |
+| 10 | Atomic Backup / Restore Engine — closed by 2026-08-24 live production restore evidence |
 | 11 | Archive Consolidation |
 | 12 | Final Semantic Backup Round Trip |
 | 13 | Compatibility / Dual-write Retirement |
@@ -371,29 +423,24 @@ before assuming a phase can start early.
 
 ## 10. Current phase — what "done" looks like next
 
-Phase 9 (Account Lifecycle Gate) is OPEN but down to **one remaining gate**:
-**P20-G01**, the real-device restore-epoch/destructive-recovery acceptance
-test. Per `docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_PHASE9_RESTORE_EPOCH_GATE_2026-08-19.md`,
-10 items remain, none done yet:
+Phase 10 is closed. The immediate next work is not another restore build and
+not a broad Product/Security implementation patch.
 
-1. Build the P20-G01 signed acceptance APK.
-2. Install over the current app without clearing data.
-3. Confirm the gate refuses to run on the existing non-empty (real) account.
-4. Sign out and create/use a genuinely disposable, financially-empty test account.
-5. Let Protocol V2 reach an active/quiescent state on that account.
-6. Run the restore-epoch gate once.
-7. Require the exact pass marker `[P20_G01_PHASE9_RESTORE_EPOCH_GATE_PASS]`.
-8. Audit the Supabase restore event/epoch server-side.
-9. Sign out of the disposable account, re-login to the original real account.
-10. Verify the original account's transactions/balances are untouched and V2 sync is still healthy.
+The next planning/current-state outputs are:
 
-Only after all 10 pass may Phase 9 be recorded CLOSED and Phase 10 opened.
+1. `PRODUCT-P0-A` — Competitive Design Translation Blueprint:
+   screen-by-screen target behavior, UX rules, design-system direction,
+   Settings IA, Home/Quick Add/Onboarding direction, component reuse inventory,
+   and explicit unchanged financial behavior.
+2. `SECURITY-S0` — Security & Data Current-State Blueprint:
+   real code/runtime evidence for SQLite at rest, SecureStore use, Android
+   backup state, logs, Supabase/RLS/sync boundaries, backup/restore security,
+   and smart-data privacy boundaries.
 
-Separately, earlier Phase 9 scenario-matrix items (A/B/E/G/H from
-`MYFI_P18_013_PHASE9_MINIMUM_ACCEPTANCE_MATRIX`) should be reconciled against
-this newer evidence rather than assumed still-pending as originally written —
-the ordinary logout/re-login/account-switch/real-transaction path has since
-been device-proven via the P20 evidence in §7/§8.
+After those two are reviewed and approved, choose exactly one small package
+from the refined roadmap. That package gets its own scope, tests, CI evidence
+where relevant, and device/runtime acceptance when behavior depends on Android
+or persistent financial data.
 
 ---
 
@@ -516,19 +563,34 @@ plan.
 Master Plan (§9 above), including Phase 17 (Budget Intelligence + Recurring +
 Product Correctness) and Phase 18 (Structural Refactor + UX/Accessibility).
 
-**Mentioned by the user, not yet in any canonical doc — NOT YET AUTHORIZED
-for implementation, needs a proper canonical-authority registration before
-any code starts:**
-- Contacts / Financial Parties linking.
-- Transaction templates.
-- Categories 2.0.
-- Quick Add flow.
+The user approved the planning direction registered in:
 
-Do not start these from this handoff alone — they were raised in
-conversation, not registered in `00_MYFI_CANONICAL_AUTHORITY.md` or the
-Frozen Master Plan. If asked to build one, first check whether it has since
-been added to canonical docs; if not, treat it as a proposal to scope, not a
-ready task.
+`docs/01_CORE_AUTHORITY/MYFI_PRODUCT_SECURITY_DATA_PROTECTION_ADDENDUM_2026-08-24.md`
+
+It establishes three equal dimensions: Financial Integrity, Product
+Experience, and Security & Privacy. It does not authorize implementation by
+itself and does not renumber the Frozen Master Plan.
+
+Post-Phase-10 planning is organized into two parallel tracks:
+
+- **Product:** `PRODUCT-P0-A` Competitive Design Translation → `P0-B` Design
+  System → `P0-C` Onboarding/First Use → `P0-D` Settings/Education → `P1-A`
+  Home/Needs Attention → `P1-B` Quick Add/Smart Defaults → `P1-C`
+  Insights/Search/Goals → `P2` Smart Automation → `P3` Advanced Intelligence.
+- **Security/Data:** `SECURITY-S0` Threat Model/Current State → `S1` SQLCipher
+  feasibility/decision → `S2` key lifecycle/recovery → `S3` backup/restore
+  security → `S4` cloud/sync acceptance → `S5` smart-data privacy → `S6`
+  production security gate.
+
+After live Phase-10 closure, `PRODUCT-P0-A` and `SECURITY-S0` become the next
+planning/current-state outputs to reconcile and approve. The first
+implementation package must be selected from those approved outputs and scoped
+separately. Quick Add, templates, category changes, OCR, SMS, Voice, Statement
+Import, Safe-to-Spend, and “Ask Your Money” are backlog candidates to evaluate,
+not a single pre-approved implementation batch.
+
+Contacts/Financial Parties linking remains a separate proposal unless a later
+canonical package explicitly scopes it.
 
 **Deferred/conditional by explicit plan** (not future ideas, already decided):
 OCR, Voice, and multi-device sync are conditional — not described as
