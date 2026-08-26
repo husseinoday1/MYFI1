@@ -37,6 +37,15 @@ export const RADIUS = {
   pill: 999,
 };
 
+// Tinted rounded container behind an action icon (Quick Add circles, list-row
+// leading icons). Formalizes the ad hoc per-screen pattern noted in
+// docs/design/04_MYFI_DESIGN_TOKEN_CATALOG.md ("icon.container.*").
+export const ICON_CONTAINER = {
+  sm: { size: 30, radius: RADIUS.md },
+  md: { size: 38, radius: RADIUS.md },
+  lg: { size: 52, radius: RADIUS.lg },
+};
+
 export const SHADOW = {
   card: Platform.select({
     ios: {

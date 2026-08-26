@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, ScrollView, StyleSheet, Text, TouchableOpacity as NativeTouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { RADIUS, SHADOW, SPACE, TYPE } from '../lib/tokens';
+import { CONTROL, ICON_CONTAINER, RADIUS, SHADOW, SPACE, TYPE } from '../lib/tokens';
 
 export const rtl = (lang) => lang === 'ar';
 export const textAlign = (lang) => (rtl(lang) ? 'right' : 'left');
@@ -119,6 +119,8 @@ export function AppButton({
   label,
   icon,
   tone = 'primary',
+  variant = 'default',
+  iconSize = 'md',
   lang = 'ar',
   style,
   textStyle,
@@ -130,8 +132,31 @@ export function AppButton({
     : tone === 'soft'
       ? { bg: th.primSoft, fg: th.primary, border: 'transparent' }
       : tone === 'danger'
-        ? { bg: th.expBg, fg: th.exp, border: 'transparent' }
+        ? { bg: th.dangerBg || th.expBg, fg: th.danger || th.exp, border: 'transparent' }
         : { bg: th.primary, fg: th.onPrimary, border: 'transparent' };
+
+  if (variant === 'icon') {
+    const dim = ICON_CONTAINER[iconSize] || ICON_CONTAINER.md;
+    return (
+      <Touchable
+        style={[
+          s.iconButton,
+          {
+            width: dim.size,
+            height: dim.size,
+            borderRadius: dim.radius,
+            backgroundColor: palette.bg,
+            borderColor: palette.border,
+          },
+          style,
+        ]}
+        {...props}
+      >
+        {icon ? <Ionicons name={icon} size={Math.round(dim.size * 0.42)} color={palette.fg} /> : children}
+      </Touchable>
+    );
+  }
+
   return (
     <Touchable
       style={[
@@ -157,6 +182,95 @@ export function AppButton({
         </Text>
       )}
     </Touchable>
+  );
+}
+
+// Tinted rounded container behind a standalone icon (list-row leading icons,
+// category glyphs). Purely presentational — the color/tone decision stays with
+// the caller, this just standardizes size/radius/tint per ICON_CONTAINER.
+export function IconContainer({ th, icon, tone, size = 'md', plain = false, style }) {
+  const dim = ICON_CONTAINER[size] || ICON_CONTAINER.md;
+  const accent = tone || th.primary;
+  return (
+    <View
+      style={[
+        {
+          width: dim.size,
+          height: dim.size,
+          borderRadius: dim.radius,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        plain
+          ? null
+          : { backgroundColor: `${accent}1A`, borderWidth: 1, borderColor: `${accent}30` },
+        style,
+      ]}
+    >
+      <Ionicons name={icon} size={Math.round(dim.size * 0.42)} color={accent} />
+    </View>
+  );
+}
+
+// Small labeled/colored indicator (type pills, status badges). One primitive
+// covering both use cases named in 03_MYFI_DESIGN_SYSTEM_CANONICAL.md §8,
+// differentiated by fill vs. outline.
+export function Badge({ th, label, tone, variant = 'fill', icon, style, textStyle }) {
+  const accent = tone || th.primary;
+  const isFill = variant === 'fill';
+  return (
+    <View
+      style={[
+        s.badge,
+        isFill
+          ? { backgroundColor: `${accent}1F`, borderColor: 'transparent' }
+          : { backgroundColor: 'transparent', borderColor: accent, borderWidth: 1 },
+        style,
+      ]}
+    >
+      {icon ? <Ionicons name={icon} size={11} color={accent} style={{ marginEnd: 4 }} /> : null}
+      <Text
+        style={[s.badgeText, { color: accent }, textStyle]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+// Horizontal single-active-state segmented control (History filter tabs,
+// Follow-ups sub-screens, Reports sections — see canonical doc §7).
+export function SegmentedTabs({ th, lang = 'ar', items = [], activeKey, onChange, style }) {
+  return (
+    <View style={[s.segmentWrap, { backgroundColor: th.cardHigh, flexDirection: rowDirection(lang) }, style]}>
+      {items.map((item) => {
+        const active = item.key === activeKey;
+        return (
+          <Touchable
+            key={item.key}
+            haptic="selection"
+            onPress={() => onChange?.(item.key)}
+            style={[
+              s.segmentItem,
+              active && { backgroundColor: th.card, ...SHADOW.subtle },
+            ]}
+          >
+            <Text
+              style={[
+                s.segmentLabel,
+                { color: active ? th.text : th.sub, fontWeight: active ? '900' : '700' },
+              ]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+            >
+              {item.label}
+            </Text>
+          </Touchable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -333,6 +447,42 @@ const s = StyleSheet.create({
     fontSize: TYPE.body,
     lineHeight: 18,
     fontWeight: '900',
+  },
+  iconButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: SPACE.sm,
+    paddingVertical: 4,
+    borderRadius: RADIUS.pill,
+  },
+  badgeText: {
+    fontSize: TYPE.tiny,
+    lineHeight: 15,
+    fontWeight: '900',
+  },
+  segmentWrap: {
+    borderRadius: RADIUS.lg,
+    padding: 3,
+    gap: 3,
+  },
+  segmentItem: {
+    flex: 1,
+    minHeight: CONTROL.compact,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: SPACE.sm,
+  },
+  segmentLabel: {
+    fontSize: TYPE.meta,
+    lineHeight: 16,
   },
   metricCard: {
     width: '48.8%',
