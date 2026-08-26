@@ -16,18 +16,25 @@ vague someday.
 
 ## Cluster index (newest file per topic is the one to trust, per A4)
 
-- **Phase 8/9 recovery (2026-08-17), CLOSED:** `MYFI_P18_011` through
-  `MYFI_P18_021`, `MYFI_R04_1_DEVICE_ACCEPTANCE_CLOSURE_2026-08-17.md`.
-- **P19 Sync V2 (2026-08-17/18), CLOSED:** `MYFI_P19_001_011_...`,
-  `MYFI_P19_012_EMPTY_SHELL_CLOUD_RECOVERY`, `MYFI_P19_013_ATOMIC_V2_REMOTE_APPLY`.
-- **P20/G01 acceptance APK (2026-08-19/20), CLOSED:** `MYFI_P20_G01_*` (13
-  files — device acceptance, D1-D3 diagnostics, mandatory fixes, shadow
-  parity, Supabase key issue), `MYFI_PHASE9_STATUS_CONSOLIDATED_2026-08-19.md`,
-  `MYFI_PHASE9_ITEM10_V2_SYNC_RECHECK_2026-08-21.md`,
-  `MYFI_P20_V2_CLIENT_CLOSURE_PLAN_2026-08-19.md`,
-  `MYFI_SCENARIO_G_DELETE_ACCOUNT_BROKEN_2026-08-20.md`,
-  `MYFI_SUPABASE_*_2026-08-20.md` (3 files),
-  `MYFI_*_FK_CASCADE_APPLIED_2026-08-20.md` (2 files).
+- **Phase 8/9 recovery (2026-08-17), CLOSED, ARCHIVED 2026-08-26:** moved to
+  `archive/phase-8-9-recovery-2026-08-17/` — see that folder's `00_ROLLUP.md`.
+  `MYFI_R04_1_DEVICE_ACCEPTANCE_CLOSURE_2026-08-17.md` stays in this directory
+  (cited by path from `00_MYFI_CANONICAL_AUTHORITY.md`).
+- **P19 Sync V2 (2026-08-17/18), CLOSED, PARTIALLY ARCHIVED 2026-08-26:**
+  `MYFI_P19_012_EMPTY_SHELL_CLOUD_RECOVERY` moved to
+  `archive/p19-sync-v2-2026-08-17-18/` — see that folder's `00_ROLLUP.md`.
+  `MYFI_P19_001_011_SYNC_V2_EXECUTION_EVIDENCE` and
+  `MYFI_P19_013_ATOMIC_V2_REMOTE_APPLY` stay in this directory (cited by path
+  from `00_MYFI_CANONICAL_AUTHORITY.md`).
+- **P20/G01 acceptance APK (2026-08-19/20), CLOSED, PARTIALLY ARCHIVED
+  2026-08-26:** `MYFI_P20_G01_*` (device acceptance, D1-D3 diagnostics,
+  mandatory fixes, shadow parity, Supabase key issue), the Phase 9 item-10
+  sync recheck, the P20 V2 client-closure plan, the Scenario G delete-account
+  record, the Supabase DB/disk-IO/publishable-key assessments, and the
+  `finance_data`/`profiles` FK-cascade records all moved to
+  `archive/p20-g01-acceptance-apk-2026-08-19-20/` — see that folder's
+  `00_ROLLUP.md` for the full file list. `MYFI_PHASE9_STATUS_CONSOLIDATED_2026-08-19.md`
+  stays in this directory (cited by path from `00_MYFI_CANONICAL_AUTHORITY.md`).
 - **Phase 10 restore engine (2026-08-20 to 2026-08-25), CLOSED for the
   happy-path restore — see the standing correction below:**
   `MYFI_PHASE10_BACKUP_RESTORE_RESEARCH_2026-08-20.md`,
@@ -71,10 +78,11 @@ that checklist's §C as current without cross-checking `MYFI_IMPLEMENTATION_2_HA
    originals, and update every citing path in `00_MYFI_CANONICAL_AUTHORITY.md`
    and `START_HERE.md` in the same commit — the move and the reference fix
    are one atomic change, never split across commits.
-3. **First candidate once queued:** the Phase 8/9/P19/P20-G01 clusters above
-   (all CLOSED, none re-opened since) — everything through 2026-08-20 except
-   files still cited live by the canonical authority doc's A2/A4 sections
-   (check citations before moving each one).
+3. **First candidate, executed 2026-08-26:** the Phase 8/9/P19/P20-G01
+   clusters above (all CLOSED, none re-opened since) were archived per this
+   policy — see the "Cluster index" entries above for the resulting archive
+   paths and rollup files. Files still cited live by the canonical authority
+   doc's A2/A4 sections were checked and left in place before any move.
 4. **Never archive** a cluster still being actively cross-checked (Phase 10's
    cluster stays put until the A2/restore-safety story is fully settled and
    Testing & Release has run its acceptance pass).
