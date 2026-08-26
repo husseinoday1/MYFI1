@@ -82,3 +82,42 @@ is explicitly NOT authorized and stays open** until it gets its own scoped
 decision. Same principle applies to any other screen not in the numbered
 roadmap: token-only changes proceed, any found structural gap against the
 approved spec stops and escalates rather than being resolved unilaterally.
+
+## Steps 5/6/7/8 + Home batch closed (2026-08-26)
+
+Commit `302c020` (+ `4674cfa`) on `impl/nav-shell-step3-2026-08-26`, evidence
+at `04_CURRENT_EVIDENCE/MYFI_STEPS_5_6_7_8_HOME_BATCH_2026-08-26.md`.
+**Accepted:** Step 5 (Archive relocation), Step 7 (Reports color reconnect,
+color-swap slice only), the color-guidance correction applied retroactively
+to Step 3's GatewayCard tones (now uses live `CAT_COLORS`, not new catalog
+hex), and Home's conservative token pass (exact-match substitutions only,
+correctly declined to force-fit ambiguous radius values).
+
+**Two new gates found and confirmed by Planning & Audit — both correctly
+NOT touched by Implementation 4, per the standing "stop and escalate a
+structural fork" rule:**
+
+1. **Step 6 rename is done** (Trackers → Follow-ups, landed in Step 3). The
+   roadmap's underlying claim that `TrackersLabScreen.js` "already covers
+   most of this in substance" is **false** — Installments, Subscriptions,
+   and Payment History do not exist as data concepts at all (no sub-typing
+   on commitments, no payment-history view). Building them is new financial
+   product/data-model work, not a UI step — **registered as a new plan item,
+   17-G (Follow-ups tracker-type completion: Installments, Subscriptions,
+   Payment History)**, full Verification-Floor rigor required, not part of
+   any Implementation-4-scale light-rigor batch. See the master plan
+   restructure proposal for where this sits in Phase 17.
+2. **Step 8 cannot close as scoped.** `OnboardingScreen.js` is 3 steps, not
+   the locked 6, and its `QuickSetupSlide` has a Personal/Business/Dual
+   `profileType` selector the locked spec explicitly forbids — but
+   `profileType`/`activeScope` drives data filtering app-wide
+   (`filterByActiveScope` in `MyMoneyScreen.js`, `PlanBudgetScreen.js`,
+   `WalletBalanceCard.js`, etc.). Removing it without a replacement breaks
+   live scoping. **New dependency registered: Step 8's full conformance is
+   gated on Phase 14-A landing its "personal/business workspace separation"
+   item first** (a real replacement mechanism for what `profileType`
+   currently does) — same pattern as Step 4's gate on Phases 11-13. Do not
+   attempt Step 8's structural fix before Phase 14-A lands.
+
+Implementation 4 correctly stopped at both forks and reported rather than
+deciding unilaterally — this is the expected behavior, not a shortfall.
