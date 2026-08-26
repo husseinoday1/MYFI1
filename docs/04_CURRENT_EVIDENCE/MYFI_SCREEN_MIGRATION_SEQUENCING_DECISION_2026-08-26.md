@@ -20,10 +20,12 @@ Per Implementation 4's report (commit `f701a48` on
   (`myfi_design_tokens_scope_ruling_2026-08-26` in Planning & Audit memory) —
   not a gap, a correctly-deferred item.
 
-**Open follow-up, not yet assigned to a session:** who runs the
-implementation-time contrast pass (WCAG contrast ratios for the 12 category
-hues against both light/dark surface tokens) and when. This blocks final
-`CAT_COLORS` values but does not block anything else in the roadmap.
+**Resolved (user decision, 2026-08-26):** the implementation-time contrast
+pass for the 12 `CAT_COLORS` category hues is deliberately deferred until the
+actual screen-implementation phase (Step 3 onward) — not assigned to
+Implementation 4 or DeepSeek now, even though the WCAG-ratio computation
+itself is mechanical enough to delegate. Re-open this only when screen work
+starts and a session is actively touching category-tagged UI.
 
 ## Decision: Step 3 (Navigation shell) — authorized, but sequenced *after* the tokens branch lands
 
