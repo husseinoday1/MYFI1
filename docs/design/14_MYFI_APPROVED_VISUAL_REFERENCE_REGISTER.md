@@ -35,9 +35,14 @@ must be updated with actual file paths.
     per-wallet icon, name, and balance; pagination dots.
   - "ملخص هذا الشهر" — three-column Net/Expense/Income summary with a single
     two-tone progress bar beneath.
-  - "الإضافة السريعة" — four circular icon actions: Income (down-arrow,
-    green), Expense (up-arrow, red), Transfer (bidirectional arrow, blue),
-    Smart (star, purple). Confirms the Blueprint's exact Home Quick Add set.
+  - "الإضافة السريعة" — four circular icon actions: Income, Expense,
+    Transfer (bidirectional arrow, blue), Smart (star, purple). Confirms the
+    Blueprint's exact Home Quick Add set. **Correction (2026-08-26):** the
+    source image's arrow directions are reversed from the canonical
+    direction and must not be carried into implementation — **Income is
+    UP, Expense is DOWN.** (The source mockup showed Income with a
+    down-arrow and Expense with an up-arrow; this is a documentation
+    correction only, not a re-audit of the image itself.)
   - Recent Transactions list with colored category-icon circles, +/- colored
     amounts, and a "View all" link.
 - **Screen-specific pattern (not global):** the balance-card hero treatment
@@ -62,8 +67,8 @@ must be updated with actual file paths.
 - **Global Design System principles derived:** brand-green hero-card
   treatment; period-pill pattern; colored-circle category icons paired with
   signed amounts (not color alone).
-- **Canonical documents influenced:** `MYFI_VISUAL_IDENTITY_CANONICAL.md`,
-  `MYFI_SCREEN_VISUAL_CONSISTENCY_MATRIX.md` (Home row), `MYFI_BLUEPRINT_REVISION_MAP.md`.
+- **Canonical documents influenced:** `02_MYFI_VISUAL_IDENTITY_CANONICAL.md`,
+  `07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md` (Home row), `archive/MYFI_BLUEPRINT_REVISION_MAP.md`.
 
 ## REF-02 — Onboarding: Welcome (1 of 6)
 
@@ -74,9 +79,17 @@ must be updated with actual file paths.
   (Expenses/Planning/Goals), a one-line trust tagline ("تجربة عربية واضحة،
   سريعة، وآمنة" — a clear, fast, and safe Arabic experience), a single
   primary CTA ("ابدأ") and a soft skip ("ليس الآن").
-- **Known textual corrections:** none identified.
-- **Canonical documents influenced:** `MYFI_VISUAL_IDENTITY_CANONICAL.md`
-  (onboarding tone), `MYFI_BLUEPRINT_REVISION_MAP.md`.
+- **Known textual corrections:** **product-positioning note (2026-08-26):**
+  this register's prior description translated the tagline as a "clear,
+  fast, and safe Arabic experience," which risks reading as market
+  exclusivity. Arabic/RTL-native is an approved first-class implementation
+  requirement, but MYFI's product positioning must remain internationally
+  extensible — describe product quality as clear/fast/safe/human/
+  financially trustworthy, not as an Arabic-only product. The on-screen copy
+  itself is a localization detail outside this register's authority to
+  rewrite.
+- **Canonical documents influenced:** `02_MYFI_VISUAL_IDENTITY_CANONICAL.md`
+  (onboarding tone), `01_MYFI_MASTER_PRODUCT_DESIGN_BLUEPRINT.md`.
 
 ## REF-03 — Onboarding: Priorities (2 of 6)
 
@@ -184,7 +197,11 @@ sequence, to prevent a future implementation from adding them anyway:
     Analytics) — each card shows a live summary stat and a named link that
     opens a dedicated full-screen destination.
   - The four destinations shown are: a Wallets screen (total + per-wallet +
-    a separate bank-accounts section), a History screen (filter tabs +
+    a separate bank-accounts section — **correction, 2026-08-26: external
+    bank/card-aggregation linkage is FUTURE/CONDITIONAL, not a current
+    product capability; do not infer live banking integration from this
+    mockup, and the current target must work fully without it**), a History
+    screen (filter tabs +
     search + date-grouped list), a Budget screen (donut chart + category
     breakdown with percentages), and a Reports screen (tabbed overview +
     top-5-categories list + "view full report").
@@ -198,10 +215,10 @@ sequence, to prevent a future implementation from adding them anyway:
 - **Known textual corrections:** none identified — this reference is
   internally consistent with the Blueprint text.
 - **Global Design System principles derived:** the View/Add/Complex-flow
-  navigation-pattern legend (→ `MYFI_DESIGN_SYSTEM_CANONICAL.md` §Navigation).
-- **Canonical documents influenced:** `MYFI_DESIGN_SYSTEM_CANONICAL.md`,
-  `MYFI_SCREEN_VISUAL_CONSISTENCY_MATRIX.md` (My Money + 4 sub-screens),
-  `MYFI_BLUEPRINT_REVISION_MAP.md`.
+  navigation-pattern legend (→ `03_MYFI_DESIGN_SYSTEM_CANONICAL.md` §Navigation).
+- **Canonical documents influenced:** `03_MYFI_DESIGN_SYSTEM_CANONICAL.md`,
+  `07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md` (My Money + 4 sub-screens),
+  `archive/MYFI_BLUEPRINT_REVISION_MAP.md`.
 
 ## REF-05 — Follow-ups (المتابعات) hub + breakdown
 
@@ -224,15 +241,22 @@ sequence, to prevent a future implementation from adding them anyway:
     Subscriptions, Goals & Savings, **Payment History (سجل الدفعات)** — this
     directly confirms Payment History as a first-class Follow-ups section,
     not a buried sub-view.
-  - A floating "+" (purple) plus an explicit on-canvas note that the
-    Quick-Add row here uses "نفس النمط في الرئيسية" (the same pattern as
-    Home) — this is direct visual confirmation of the global, single
-    Add-Method setting applying to both Home and Follow-ups (Blueprint
-    §3.12), which code verification also confirms is already implemented
-    (`App.js:1047-1049`, `TrackersLabScreen.js:726-739`).
+  - A floating "+" plus an explicit on-canvas note that the Quick-Add row
+    here uses "نفس النمط في الرئيسية" (the same pattern as Home) — this is
+    direct visual confirmation of the global, single Add-Method setting
+    applying to both Home and Follow-ups (Blueprint §3.12), which code
+    verification also confirms is already implemented (`App.js:1047-1049`,
+    `TrackersLabScreen.js:726-739`). **Correction (2026-08-26):** the source
+    image rendered this floating `+` in purple. **Purple is not established
+    as the canonical Side `+` button color** merely because a generated
+    reference showed it — the global Side `+` button belongs to the MYFI
+    olive/green brand system unless device testing later proves a better
+    accessible treatment. Purple remains available only where a governed
+    semantic/category role justifies it (e.g. the Goals category color),
+    not for the global Add control.
 - **Known textual corrections:** none identified.
-- **Canonical documents influenced:** `MYFI_SCREEN_VISUAL_CONSISTENCY_MATRIX.md`
-  (Follow-ups + 6 sub-sections), `MYFI_COMPONENT_INVENTORY_AND_MIGRATION.md`
+- **Canonical documents influenced:** `07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md`
+  (Follow-ups + 6 sub-sections), `05_MYFI_COMPONENT_ARCHITECTURE.md`
   (FollowUpCard, PaymentHistoryRow).
 
 ## REF-06 — More (المزيد), Light + Dark + breakdown
@@ -262,8 +286,8 @@ sequence, to prevent a future implementation from adding them anyway:
   inside More's own breakdown graphic**, not a claim that Settings' actual
   root screen shows these exact six items — see REF-07 for the authoritative
   Settings root.
-- **Canonical documents influenced:** `MYFI_SCREEN_VISUAL_CONSISTENCY_MATRIX.md`
-  (More + 5 sub-sections, Archive relocation), `MYFI_COMPONENT_INVENTORY_AND_MIGRATION.md`.
+- **Canonical documents influenced:** `07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md`
+  (More + 5 sub-sections, Archive relocation), `05_MYFI_COMPONENT_ARCHITECTURE.md`.
 
 ## REF-07 — Settings (الإعدادات), Light + Dark + breakdown
 
@@ -276,8 +300,13 @@ sequence, to prevent a future implementation from adding them anyway:
     and no separate profile icon — profile access is via the Account & Sync
     card itself.
   - Root list is **exactly five rows**, matching the Blueprint's approved
-    structure one-to-one: 1) Account & Sync (top card, avatar + "Personal
-    account" + verified badge + live sync status), 2) Appearance & Language,
+    structure one-to-one: 1) Account & Sync (top card, avatar + account
+    identity/verified badge + live sync status — **correction, 2026-08-26:
+    the source image's "Personal account" label must not be encoded as an
+    MYFI account-type model; the approved onboarding removed Personal/
+    Business/Dual entirely, so this card may show identity, sync status,
+    verification, and account actions, but never an account-type
+    selector**), 2) Appearance & Language,
     3) Financial Preferences ("العملة، الموازنة، الفئات، الحسابات" — wait:
     labeled "الإعدادات المالية" but subtitle mentions currency/budget/
     categories/accounts), 4) Notifications & Reminders, 5) Privacy &
@@ -317,9 +346,9 @@ sequence, to prevent a future implementation from adding them anyway:
      Current code (`SettingsScreen.js:1402-1403`) groups Country/Currency
      with Language/Theme — a confirmed code-vs-target gap for the
      implementation phase, not an open design question.
-- **Canonical documents influenced:** `MYFI_SCREEN_VISUAL_CONSISTENCY_MATRIX.md`
-  (Settings root + 5 sections), `MYFI_DESIGN_TOKEN_CATALOG.md` (explicitly
-  documents the rejected accent-color token), `MYFI_BLUEPRINT_REVISION_MAP.md`.
+- **Canonical documents influenced:** `07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md`
+  (Settings root + 5 sections), `04_MYFI_DESIGN_TOKEN_CATALOG.md` (explicitly
+  documents the rejected accent-color token), `archive/MYFI_BLUEPRINT_REVISION_MAP.md`.
 
 ---
 

@@ -4,13 +4,13 @@
 **Status:** CANONICAL
 **Inputs:** `docs/01_CORE_AUTHORITY/MYFI_PRODUCT_DESIGN_RESTRUCTURE_BLUEPRINT_2026-08-25.md`
 (target authority), `docs/04_CURRENT_EVIDENCE/MYFI_PRODUCT_DESIGN_BLUEPRINT_RECONCILIATION_2026-08-25.md`
-(current-vs-target evidence), `docs/design/MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`
+(current-vs-target evidence), `docs/design/14_MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`
 (approved mockups, REF-01 through REF-07), and direct repository evidence
 (`src/lib/theme.js`, `src/lib/tokens.js`, `src/lib/constants.js`) verified at
 HEAD `d2ed3ae03c137d818040dfe77c665c516b8440b7`.
 
-This document defines what MYFI should *feel like*. `MYFI_DESIGN_SYSTEM_CANONICAL.md`
-defines the components that deliver it, and `MYFI_DESIGN_TOKEN_CATALOG.md`
+This document defines what MYFI should *feel like*. `03_MYFI_DESIGN_SYSTEM_CANONICAL.md`
+defines the components that deliver it, and `04_MYFI_DESIGN_TOKEN_CATALOG.md`
 defines the exact values.
 
 ## 1. Design philosophy
@@ -58,7 +58,7 @@ correction (§3.2 of the 2026-08-25 instruction), the rule is:
 > visible color today, as long as changing one does not silently change the
 > other.
 
-This is a governance/architecture requirement (see `MYFI_DESIGN_TOKEN_CATALOG.md`
+This is a governance/architecture requirement (see `04_MYFI_DESIGN_TOKEN_CATALOG.md`
 for the concrete token split), not a demand for a new visible color.
 
 **Semantic financial colors are independent of decorative brand colors.**
@@ -95,7 +95,7 @@ default category colors (`constants.js:153-160`) already exist as one central
 definition (good — already centrally governed structurally) but include hues
 more saturated than a "muted" reading of this rule, and two internal
 near-duplicate hue pairs. The concrete audited value-by-value recommendation
-is now in `MYFI_DESIGN_TOKEN_CATALOG.md` §Category tokens (approved
+is now in `04_MYFI_DESIGN_TOKEN_CATALOG.md` §Category tokens (approved
 direction; exact final hex values still get a contrast/accessibility pass at
 implementation time, but the *governance rule and the adjustment direction*
 are settled, not open).
@@ -115,10 +115,10 @@ color expressions of one structure, never two designs.**
 A type scale already exists (`TYPE` in `src/lib/tokens.js:6-13`: hero/title/
 section/body/meta/tiny/caption) with a dedicated Arabic font
 (`MYFI-Cairo`, applied globally via `src/lib/fonts.js`). This is the
-canonical scale — see `MYFI_DESIGN_TOKEN_CATALOG.md` for exact values. The
+canonical scale — see `04_MYFI_DESIGN_TOKEN_CATALOG.md` for exact values. The
 defect is adoption, not design: 532 raw `fontSize` literals exist directly in
 screen files against only 15 uses of `TYPE`. Closing that gap is a migration
-task (`MYFI_COMPONENT_INVENTORY_AND_MIGRATION.md`), not a new typography
+task (`05_MYFI_COMPONENT_ARCHITECTURE.md`), not a new typography
 decision.
 
 ## 8. Spacing, radius, elevation
@@ -165,7 +165,7 @@ No motion system currently exists in the audited code beyond
 `PressableScale.js` (a generic pressable scale-animation primitive). No
 motion principles were demonstrated in the static image references (motion
 cannot be shown in a still mockup). Motion rules are deferred to
-`MYFI_DESIGN_SYSTEM_CANONICAL.md` as a proposal, not a confirmed target.
+`03_MYFI_DESIGN_SYSTEM_CANONICAL.md` as a proposal, not a confirmed target.
 
 ## 13. Responsiveness
 

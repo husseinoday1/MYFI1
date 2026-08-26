@@ -2,15 +2,15 @@
 
 **Registered:** 2026-08-25 · **Updated:** 2026-08-26 (Product Owner rulings
 applied) · **Status:** CANONICAL
-**Basis:** `MYFI_VISUAL_IDENTITY_CANONICAL.md`, `MYFI_DESIGN_TOKEN_CATALOG.md`,
-`MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`, and direct code evidence at HEAD
+**Basis:** `02_MYFI_VISUAL_IDENTITY_CANONICAL.md`, `04_MYFI_DESIGN_TOKEN_CATALOG.md`,
+`14_MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`, and direct code evidence at HEAD
 `d2ed3ae03c137d818040dfe77c665c516b8440b7`.
 
 **2026-08-26 ruling status:** Add Method location, Archive location, Settings
 root (incl. Financial Preferences placement of Country/Base Currency), and
 the rejection of accent-color/payment-methods/VAT rows are all reflected
 below — see §2. Category-color and brand/income token governance are defined
-in `MYFI_DESIGN_TOKEN_CATALOG.md` and referenced, not duplicated, here.
+in `04_MYFI_DESIGN_TOKEN_CATALOG.md` and referenced, not duplicated, here.
 
 This document defines the component and interaction layer that delivers the
 visual identity. It extends the existing architecture — `theme.js` +
@@ -37,44 +37,15 @@ screen independently does `TH[cfg.theme] || TH.dark` (19 files). Introduce one
 shared hook (e.g. `useTheme()`) as the first primitive-layer change — this is
 a maintainability fix, not a visual change.
 
-## 2. Navigation rules (confirmed by REF-04's on-canvas legend)
+## 2. Navigation
 
-The approved My Money reference (REF-04) states this almost verbatim as a
-design rule, not just a My Money-local note — treat it as global:
-
-- **View something → full Page.**
-- **Simple add action → Bottom Sheet.**
-- **Complex, multi-step action → full-screen flow** (e.g. statement import).
-- Multiple entry points may open the **same** secondary screen — never
-  duplicate business logic per entry point (this is already correctly done
-  for Add: one `AddTransModal` fed by multiple `openAddExp`/`openAddInc`/etc.
-  handlers in `App.js:785-820`).
-
-**Primary navigation:** 4 tabs — Home / My Money / Follow-ups / More.
-History and Reports are secondary destinations inside My Money; Settings is
-reached from More (More → Settings); **Archive is reached at More → My
-Tools → Archive specifically** (2026-08-26 ruling — not a bare "secondary
-destination," and not a Home or My Money gateway). None of History, Reports,
-Settings, or Archive are primary tabs.
-
-**Add Method (global):** More → My Tools → Customize MYFI → Add Method.
-Supported modes are exactly **Quick Add** or **side `+` button**, mutually
-exclusive, applying globally to both Home and Follow-ups. Already
-implemented in code as `cfg.entryMode` (`'quick'`/`'classic'`,
-`App.js:837`, `HomeScreen.js:1161`, `TrackersLabScreen.js:726`) — this is a
-relocation of an existing setting into the target IA, not new logic.
-
-**Settings root (5 sections, approved, no duplicate Account & Sync row):**
-Account & Sync (top card, the entry point itself) → Appearance & Language →
-**Financial Preferences (Country, Base Currency, Default Wallet — approved
-2026-08-26; not Appearance & Language)** → Notifications & Reminders →
-Privacy & Security. No accent-color picker, no payment-methods row, no
-VAT/rounding row — all three REJECTED FOR CURRENT TARGET (2026-08-26).
-
-**Header pattern (confirmed by REF-01, REF-04, REF-05, REF-06, REF-07):**
-profile icon + centered/leading title + bell icon, **except** Settings, which
-replaces the profile icon with a search icon (no duplicate profile access
-needed there since Account & Sync is the first list row).
+**Moved to its own document, 2026-08-26, to avoid duplicating authority:**
+see `06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md` for primary
+navigation, the View/Add/Complex-flow rule set, the destination map, Add
+Method location, Settings root, header pattern, and onboarding flow. This
+document (03) covers only the component/interaction layer that *implements*
+those rules — cards, buttons, inputs, feedback, charts (color-sourcing),
+RTL/accessibility/theme consumption.
 
 ## 3. Cards
 
@@ -173,7 +144,7 @@ document fixes the *color-sourcing* rule only.
 
 ## 13. RTL / accessibility / Light-Dark
 
-Governed by `MYFI_VISUAL_IDENTITY_CANONICAL.md` §10-11-6 — this document
+Governed by `02_MYFI_VISUAL_IDENTITY_CANONICAL.md` §10-11-6 — this document
 does not restate those rules, only requires every composite/primitive listed
 above to consume them (via the shared theme hook and `src/lib/layout.js`)
 rather than reimplementing RTL/theme logic locally.

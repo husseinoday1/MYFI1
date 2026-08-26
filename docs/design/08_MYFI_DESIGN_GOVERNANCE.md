@@ -13,7 +13,7 @@ audit closes — the process, not the content (content lives in the other six
    see §2).
 3. `docs/01_CORE_AUTHORITY/MYFI_PRODUCT_DESIGN_RESTRUCTURE_BLUEPRINT_2026-08-25.md`.
 4. `docs/04_CURRENT_EVIDENCE/MYFI_PRODUCT_DESIGN_BLUEPRINT_RECONCILIATION_2026-08-25.md`.
-5. `docs/design/MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`.
+5. `docs/design/14_MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`.
 6. Older MYFI design/product documents (`MYFI_UI_REDESIGN_SPEC_AR.md`, etc.).
 7. Existing legacy UI behavior.
 8. Competitor/reference patterns.
@@ -29,7 +29,7 @@ An approved mockup can contain an accidental or obsolete element. When a
 supplied image conflicts with an explicit textual Product Owner rule, the
 text wins, and the conflict is recorded in the Visual Reference Register —
 never silently promoted into a canonical token, component, or rule. Three
-confirmed instances exist today (see `MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`,
+confirmed instances exist today (see `14_MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`,
 REF-01 and REF-07): a superseded bottom-nav labeling, a rejected
 user-selectable accent-color picker, and an unconfirmed payment-methods/VAT
 row.
@@ -39,9 +39,9 @@ row.
 Every new screen or component must answer, before a line of UI code is
 written:
 
-- Which tokens does it use (`MYFI_DESIGN_TOKEN_CATALOG.md`)?
-- Which existing primitive(s) does it reuse (`MYFI_DESIGN_SYSTEM_CANONICAL.md`,
-  `MYFI_COMPONENT_INVENTORY_AND_MIGRATION.md`)?
+- Which tokens does it use (`04_MYFI_DESIGN_TOKEN_CATALOG.md`)?
+- Which existing primitive(s) does it reuse (`03_MYFI_DESIGN_SYSTEM_CANONICAL.md`,
+  `05_MYFI_COMPONENT_ARCHITECTURE.md`)?
 - Which existing composite/domain component does it reuse?
 - Does it introduce a genuinely new interaction pattern? If yes, why — what
   semantic role, interaction contract, state model, or accessibility need is
@@ -59,12 +59,12 @@ the operative governance check).
 
 ## 4. Component approval rules
 
-- A new primitive requires an entry added to `MYFI_COMPONENT_INVENTORY_AND_MIGRATION.md`
+- A new primitive requires an entry added to `05_MYFI_COMPONENT_ARCHITECTURE.md`
   before or alongside its implementation — no primitive should exist in code
   without a corresponding inventory row.
-- A new token requires an entry in `MYFI_DESIGN_TOKEN_CATALOG.md` with Light
+- A new token requires an entry in `04_MYFI_DESIGN_TOKEN_CATALOG.md` with Light
   and Dark values before use in more than one screen.
-- A new screen requires a row in `MYFI_SCREEN_VISUAL_CONSISTENCY_MATRIX.md`.
+- A new screen requires a row in `07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md`.
 
 ## 5. Visual-review checklist (apply to every design-affecting PR)
 
@@ -90,7 +90,7 @@ A genuinely new interaction pattern (not covered by §3's "reuse" answer) is
 proposed as: description → screens affected → why existing primitives don't
 cover it → proposed token/component additions → RTL/accessibility/Light-Dark
 plan. It becomes canonical only after being added to
-`MYFI_DESIGN_SYSTEM_CANONICAL.md`.
+`03_MYFI_DESIGN_SYSTEM_CANONICAL.md`.
 
 ## 7. RTL checklist
 

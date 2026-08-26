@@ -3,8 +3,8 @@
 **Registered:** 2026-08-25 · **Status:** CANONICAL
 **Basis:** current tokens verified directly in `src/lib/theme.js` and
 `src/lib/tokens.js` at HEAD `d2ed3ae03c137d818040dfe77c665c516b8440b7`, target
-values per `MYFI_VISUAL_IDENTITY_CANONICAL.md` and the approved visual
-references (`MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`).
+values per `02_MYFI_VISUAL_IDENTITY_CANONICAL.md` and the approved visual
+references (`14_MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`).
 
 Legend: **Current** = confirmed value in code today. **Target** = this
 document's recommendation. **Migration note** = what changes and why.
@@ -27,7 +27,7 @@ value today. See the `financial.income` row below.
 
 **No `brand.accent` / user-selectable accent token exists or is approved.**
 REF-07's 5-swatch accent picker is explicitly rejected — see
-`MYFI_VISUAL_IDENTITY_CANONICAL.md` §3 and the Visual Reference Register.
+`02_MYFI_VISUAL_IDENTITY_CANONICAL.md` §3 and the Visual Reference Register.
 
 ## Semantic financial tokens
 
@@ -43,7 +43,7 @@ REF-07's 5-swatch accent picker is explicitly rejected — see
 ## Category tokens
 
 **Status: APPROVED DIRECTION (2026-08-26).** Governed per
-`MYFI_VISUAL_IDENTITY_CANONICAL.md` §5 — broader-than-brand palette is
+`02_MYFI_VISUAL_IDENTITY_CANONICAL.md` §5 — broader-than-brand palette is
 sanctioned, must be muted/controlled, must never substitute for brand or
 financial-semantic tokens, must hold contrast in both themes, must never be
 the sole category identifier, and must stay centrally defined (already true
@@ -110,7 +110,7 @@ them should be created from mockup artifacts.
 
 **Adoption gap (not a value problem):** 532 raw `fontSize` literals exist in
 `src/screens/*.js` against 15 uses of `TYPE`. No new sizes are proposed;
-`MYFI_COMPONENT_INVENTORY_AND_MIGRATION.md` tracks the adoption migration.
+`05_MYFI_COMPONENT_ARCHITECTURE.md` tracks the adoption migration.
 
 ## Spacing tokens (`SPACE`, `tokens.js:20-29`)
 
@@ -137,4 +137,4 @@ work.
 | Token | Purpose | Current | Migration note |
 |---|---|---|---|
 | `icon.family` | The one icon set | `Ionicons` (`@expo/vector-icons`), 31 files, zero exceptions | Already canonical, no change |
-| `icon.container.*` | Tinted rounded container behind action icons | Ad hoc per screen (REF-01/REF-05 Quick Add circles) | Formalize as a primitive per `MYFI_DESIGN_SYSTEM_CANONICAL.md` |
+| `icon.container.*` | Tinted rounded container behind action icons | Ad hoc per screen (REF-01/REF-05 Quick Add circles) | Formalize as a primitive per `03_MYFI_DESIGN_SYSTEM_CANONICAL.md` |

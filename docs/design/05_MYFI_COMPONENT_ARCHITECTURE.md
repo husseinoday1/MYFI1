@@ -62,7 +62,7 @@ None found at the shared-component level. Duplication instead exists at the
 ## Consolidation candidates
 
 - The 19-file manual `TH[cfg.theme] || TH.dark` pattern → one shared
-  `useTheme()` hook (see `MYFI_DESIGN_SYSTEM_CANONICAL.md` §1).
+  `useTheme()` hook (see `03_MYFI_DESIGN_SYSTEM_CANONICAL.md` §1).
 - `ReportsScreen.js`'s standalone `CHART_COLORS` → sourced from
   `category.palette` + semantic tokens (see Design System §12).
 - Three independent list-row implementations (More/Settings/Follow-ups
