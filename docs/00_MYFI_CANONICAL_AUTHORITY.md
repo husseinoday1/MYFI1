@@ -33,6 +33,10 @@ It does not override frozen financial invariants merely because code happens to 
 ## A1 — Phase order / architecture / execution policy
 `01_CORE_AUTHORITY/MYFI_MASTER_PLAN_FROZEN.md`
 
+`01_CORE_AUTHORITY/README.md` (added 2026-08-26) classifies every file in that
+folder into engineering authority vs. historical raw Product Owner input —
+read it before citing anything in that folder as binding.
+
 This is the canonical Frozen Master Plan in this package.
 
 It replaces older master-plan variants in previous handoffs, including:
@@ -83,6 +87,10 @@ Logout is not Delete Local Data.
 - `01_CORE_AUTHORITY/MYFI_RELEASE_GATE_STATUS_AR.md`
 - `01_CORE_AUTHORITY/MYFI_USER_NOTES_RECONCILIATION_CANONICAL_2026-08-16.md`
 - `04_CURRENT_EVIDENCE/MYFI_CURRENT_ACCEPTANCE_DELTA_2026-08-16.md`
+
+`04_CURRENT_EVIDENCE/00_EVIDENCE_INDEX_AND_ROLLUP_POLICY.md` (added
+2026-08-26) groups the 74+ files in that folder by phase/cluster and states
+the archival policy — read it first instead of listing the raw directory.
 
 Evidence precedence:
 1. newer real-device evidence;
