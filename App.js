@@ -27,6 +27,10 @@ import TrackersLabScreen from './src/screens/TrackersLabScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
 import ArchiveScreen from './src/screens/ArchiveScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import MyMoneyScreen from './src/screens/MyMoneyScreen';
+import MoreScreen from './src/screens/MoreScreen';
+import WalletsAccountsScreen from './src/screens/WalletsAccountsScreen';
+import PlanBudgetScreen from './src/screens/PlanBudgetScreen';
 import AddTransModal from './src/components/AddTransModal';
 import NewItemModal from './src/components/NewItemModal';
 import DraggableFab from './src/components/DraggableFab';
@@ -51,13 +55,26 @@ const INTERNAL_DEMO_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_INTERNAL_DEMO =
 const R01_DEVICE_GATE_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_R01_DEVICE_GATE === '1';
 let r01DeviceGateStarted = false;
 
+// 4-tab primary navigation per docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md
+// §1 (LOCKED): Home / My Money / Follow-ups / More. History, Reports, and
+// Settings moved off the primary bar into My Money/More gateways (see the
+// `screens` map below and HUB_TABS/back-affordance handling) — their own
+// screen components are unchanged.
 const BASE_TABS = [
   { key: 'home', icon: 'home-outline', labelKey: 'home' },
-  { key: 'history', icon: 'receipt-outline', labelAr: 'السجل', labelEn: 'History' },
-  { key: 'trackers', icon: 'layers-outline', labelAr: 'المتابعات', labelEn: 'Trackers' },
-  { key: 'reports', icon: 'bar-chart-outline', labelKey: 'reports' },
-  { key: 'settings', icon: 'settings-outline', labelKey: 'settings' },
+  { key: 'mymoney', icon: 'wallet-outline', labelAr: 'أموالي', labelEn: 'My Money' },
+  { key: 'trackers', icon: 'layers-outline', labelAr: 'المتابعات', labelEn: 'Follow-ups' },
+  { key: 'more', icon: 'ellipsis-horizontal-outline', labelAr: 'المزيد', labelEn: 'More' },
 ];
+
+// Primary/hub tabs (bottom nav). Any other `tab` value is a secondary
+// destination reached via a My Money/More gateway and gets a "back to hub"
+// affordance instead of a bottom-nav highlight.
+const HUB_TABS = ['home', 'mymoney', 'trackers', 'more'];
+
+// Secondary destinations reached via a My Money/More gateway (not a primary
+// tab, so never subject to the visibleTabs filter/reset guard below).
+const SECONDARY_SCREEN_KEYS = ['history', 'reports', 'settings', 'wallets', 'budget'];
 
 const shellCopy = (lang) => (
   lang === 'ar'
@@ -131,6 +148,7 @@ function AppRoot() {
     exitDemoMode,
   } = useStore();
   const [tab, setTab] = useState('home');
+  const [lastHubTab, setLastHubTab] = useState('home');
   const [settingsResetSignal, setSettingsResetSignal] = useState(0);
   const [settingsOpenRequest, setSettingsOpenRequest] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -291,6 +309,11 @@ function AppRoot() {
     [cfg.enabledModules],
   );
   const preferredTab = visibleTabs.some(item => item.key === cfg.startTab) ? cfg.startTab : 'home';
+  const isSecondaryScreen = !HUB_TABS.includes(tab);
+
+  useEffect(() => {
+    if (HUB_TABS.includes(tab)) setLastHubTab(tab);
+  }, [tab]);
 
   // P19-015A2: startup barrier. Local SQLite mounting/migration completes before
   // any Supabase session transition is allowed to switch the active workspace.
@@ -660,6 +683,7 @@ function AppRoot() {
   }, [ready, trans, debts, goals, wallets, commitments, cats, cfg, notif, sym]);
 
   useEffect(() => {
+    if (SECONDARY_SCREEN_KEYS.includes(tab)) return;
     if (!visibleTabs.some(t => t.key === tab)) setTab('home');
   }, [visibleTabs, tab]);
 
@@ -930,6 +954,26 @@ function AppRoot() {
     ),
     reports: <ReportsScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} />,
     settings: <SettingsScreen onOpenArchive={() => setArchiveOpen(true)} tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} />,
+    mymoney: (
+      <MyMoneyScreen
+        onOpenWallets={() => setTab('wallets')}
+        onOpenHistory={() => setTab('history')}
+        onOpenBudget={() => setTab('budget')}
+        onOpenReports={() => setTab('reports')}
+        onTransfer={openTransfer}
+        onAddTransaction={() => openAddExp(true)}
+      />
+    ),
+    more: (
+      <MoreScreen
+        onOpenSettingsPage={openSettingsPage}
+        onAddTransaction={() => openAddExp(true)}
+        onTransfer={openTransfer}
+        onOpenBudget={() => setTab('budget')}
+      />
+    ),
+    wallets: <WalletsAccountsScreen />,
+    budget: <PlanBudgetScreen />,
   };
 
   return (
@@ -977,6 +1021,18 @@ function AppRoot() {
               {cfg.lang === 'ar' ? 'بيانات تجريبية - لا تتم مزامنتها' : 'Demo data - never synced'}
             </Text>
           </View>
+        ) : null}
+        {isSecondaryScreen ? (
+          <Pressable
+            onPress={() => setTab(lastHubTab)}
+            style={[s.backToHubBar, { flexDirection: isRtl ? 'row-reverse' : 'row', borderBottomColor: th.border }]}
+            hitSlop={8}
+          >
+            <Ionicons name={isRtl ? 'chevron-forward' : 'chevron-back'} size={20} color={th.text} />
+            <Text style={{ color: th.text, fontSize: 13, fontWeight: '800' }}>
+              {cfg.lang === 'ar' ? 'رجوع' : 'Back'}
+            </Text>
+          </Pressable>
         ) : null}
         {screens[tab]}
       </View>
@@ -1110,6 +1166,7 @@ const s = StyleSheet.create({
   crashBody: { color: '#8DA2B6', fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 8 },
   crashDetails: { color: '#F0A84A', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 14 },
   demoBanner: { minHeight: 32, borderBottomWidth: 0.5, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, paddingHorizontal: 12 },
+  backToHubBar: { minHeight: 44, borderBottomWidth: 0.5, alignItems: 'center', gap: 6, paddingHorizontal: 16 },
   splash: {
     flex: 1,
     backgroundColor: '#0D1110',
