@@ -361,18 +361,29 @@ export default function TrackersLabScreen({
       bg: commitmentBg,
     } : null,
   ].filter(Boolean);
+  // Installment/subscription are not tracker KINDS — they are a classification
+  // inside the 'monthly' kind — so they filter on the commitment's subType
+  // rather than on item.kind. Each chip only appears once there is something to
+  // put in it, the same way 'ended' and 'archived' do, so the bar stays short
+  // for anyone who does not use the classification.
+  const commitmentsOfSubType = (subType) =>
+    currentTrackers.filter(item => item.kind === 'monthly' && item.commitment?.subType === subType);
+  const installmentCount = commitmentsOfSubType('installment').length;
+  const subscriptionCount = commitmentsOfSubType('subscription').length;
   const filters = [
     { key: 'all', label: T.all, count: currentTrackers.length },
     modules.debtsOwed ? { key: 'owed', label: T.owed, count: currentTrackers.filter(item => item.kind === 'owed').length } : null,
     modules.debtsReceivable ? { key: 'receivable', label: T.receivable, count: currentTrackers.filter(item => item.kind === 'receivable').length } : null,
     modules.goals ? { key: 'saving', label: T.saving, count: currentTrackers.filter(item => item.kind === 'saving').length } : null,
     modules.commitments ? { key: 'monthly', label: T.monthly, count: currentTrackers.filter(item => item.kind === 'monthly').length } : null,
+    modules.commitments && installmentCount ? { key: 'installment', label: isAr ? 'أقساط' : 'Installments', count: installmentCount } : null,
+    modules.commitments && subscriptionCount ? { key: 'subscription', label: isAr ? 'اشتراكات' : 'Subscriptions', count: subscriptionCount } : null,
     endedTrackers.length ? { key: 'ended', label: T.ended, count: endedTrackers.length } : null,
     archivedTrackers.length ? { key: 'archived', label: T.archived, count: archivedTrackers.length } : null,
   ].filter(Boolean);
   useEffect(() => {
     if (!filters.some(item => item.key === filter)) setFilter('all');
-  }, [filter, endedTrackers.length, archivedTrackers.length, modules.debtsOwed, modules.debtsReceivable, modules.goals, modules.commitments]);
+  }, [filter, endedTrackers.length, archivedTrackers.length, installmentCount, subscriptionCount, modules.debtsOwed, modules.debtsReceivable, modules.goals, modules.commitments]);
   useEffect(() => {
     if (!focusRequest?.nonce) return;
     const nextKind = focusRequest.kind === 'goal'
@@ -393,6 +404,8 @@ export default function TrackersLabScreen({
       ? archivedTrackers
     : filter === 'all'
       ? currentTrackers
+    : filter === 'installment' || filter === 'subscription'
+      ? commitmentsOfSubType(filter)
       : currentTrackers.filter(item => item.kind === filter);
   const visible = visibleBase;
   const selection = useMultiSelect(visible.map(item => item.id));
