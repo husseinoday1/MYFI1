@@ -7,7 +7,7 @@ import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
 import { getSymbol } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
-import { buildFinancialSnapshot, getUpcomingRecurring, pct, today } from '../utils/calc';
+import { buildFinancialSnapshot, getUpcomingRecurring, homePeriodPills, pct, today } from '../utils/calc';
 import AddTransModal from '../components/AddTransModal';
 import { filterByActiveScope, filterFeatureEntities, filterTransactionsByEnabledFeatures, getActiveScope, getModules, getTransactionDisplayAmount } from '../lib/modules';
 import { getDefaultWalletId, getWalletAvailableBalances, getWalletBaseAvailableTotal, getWalletLabel, normalizeWallets } from '../lib/wallets';
@@ -39,6 +39,10 @@ const copy = (lang) => {
     allTransactions: ar ? 'كل المعاملات' : 'All transactions',
     currentMoney: ar ? 'المتبقي بعد الصرف' : 'Left after spending',
     thisMonth: ar ? 'هذا الشهر' : 'This month',
+    periodDay: ar ? 'اليوم' : 'Today',
+    periodWeek: ar ? 'هذا الاسبوع' : 'This week',
+    periodMonth: ar ? 'هذا الشهر' : 'This month',
+    periodYear: ar ? 'هذا العام' : 'This year',
     monthEnd: ar ? 'نهاية الشهر' : 'Month end',
     dailyRoom: ar ? 'المتاح يومياً' : 'Daily room',
     afterDebts: ar ? 'بعد استحقاقات دين عليّ' : 'After debts due',
@@ -198,6 +202,12 @@ export default function HomeScreen({
   );
   const [sqlHome, setSqlHome] = useState(null);
   const currentMonthKey = today().slice(0, 7);
+  // REF-01 period pills. calcStats(trans) is the existing function used for
+  // 'this month' in buildFinancialSnapshot above — no new financial math,
+  // only the date-range slicing behind it is new. scopedTrans matches what
+  // snapshot.month/currentMonthRows already use.
+  const [activePeriod, setActivePeriod] = useState('month');
+  const periodPills = useMemo(() => homePeriodPills(scopedTrans), [scopedTrans]);
   useEffect(() => {
     let cancelled = false;
     if (!financialLedgerV7Cutover) {
@@ -265,6 +275,11 @@ export default function HomeScreen({
     : snapshot.health === 'warning' || snapshot.health === 'watch'
       ? th.warn
       : th.inc;
+  // The health pill moved out of the hero card into Needs Attention (Planning
+  // & Audit ruling, 2026-08-27) — "only when it has meaning" per the Home
+  // spec, i.e. not for 'safe'/'neutral'. 'neutral' is the empty-account
+  // state, not a problem to flag.
+  const healthNeedsAttention = snapshot.health === 'danger' || snapshot.health === 'warning' || snapshot.health === 'watch';
   const canTransfer = walletRows.length > 1;
   const heroBalance = getWalletBaseAvailableTotal(walletRows, cfg.currency);
   const activeGoals = scopedGoals.filter(goal => goal.active !== false && Number(goal.target || 0) > 0);
@@ -690,9 +705,12 @@ export default function HomeScreen({
     .sort((a, b) => (Number(b.cur || 0) / Math.max(1, Number(b.target || 0))) - (Number(a.cur || 0) / Math.max(1, Number(a.target || 0))))
     .slice(0, 2);
   const orderedHomeSections = homeSectionsCfg
-    .filter(item => (item.visible !== false || (item.key === 'attention' && attentionItems.length > 0)) && item.key !== 'hero')
+    .filter(item => (item.visible !== false || (item.key === 'attention' && (attentionItems.length > 0 || healthNeedsAttention))) && item.key !== 'hero')
     .filter(item => item.key !== 'wallets' || modules.wallets)
-    .filter(item => item.key !== 'attention' || modules.recurring || modules.commitments)
+    // This gate predates the health banner and originally only guarded
+    // due-commitment/recurring rows; keep it from also hiding a meaningful
+    // health status for a user who has both those modules turned off.
+    .filter(item => item.key !== 'attention' || modules.recurring || modules.commitments || healthNeedsAttention)
     .filter(item => item.key !== 'goals' || modules.goals);
 
   const dueTextFor = (item) => {
@@ -883,11 +901,22 @@ export default function HomeScreen({
         ) : null}
       </View>
 
-      {attentionItems.length === 0 ? (
-        <View style={[s.clearPanel, importantS.clearPanel, { borderColor: th.border, backgroundColor: th.cardHigh }]}>
-          <Ionicons name="checkmark-circle-outline" size={19} color={th.inc} />
-          <Text style={{ color: th.inc, fontSize: 13, ...weight('900') }}>{C.allClear}</Text>
+      {healthNeedsAttention ? (
+        <View style={[importantS.card, { backgroundColor: `${healthColor}12`, borderColor: `${healthColor}44`, flexDirection: rowDir, alignItems: 'center', gap: 8 }]}>
+          <Ionicons name="pulse-outline" size={16} color={healthColor} />
+          <Text style={{ color: healthColor, fontSize: 12, ...weight('800'), flex: 1, textAlign: align }}>
+            {C[snapshot.health] || C.neutral}
+          </Text>
         </View>
+      ) : null}
+
+      {attentionItems.length === 0 ? (
+        healthNeedsAttention ? null : (
+          <View style={[s.clearPanel, importantS.clearPanel, { borderColor: th.border, backgroundColor: th.cardHigh }]}>
+            <Ionicons name="checkmark-circle-outline" size={19} color={th.inc} />
+            <Text style={{ color: th.inc, fontSize: 13, ...weight('900') }}>{C.allClear}</Text>
+          </View>
+        )
       ) : (
         <View style={importantS.items}>
           {attentionItems.slice(0, 4).map(renderAttentionRow)}
@@ -1034,7 +1063,7 @@ export default function HomeScreen({
   );
 
   const renderHomeSection = (item) => {
-    if (item.key === 'attention') return attentionItems.length ? <React.Fragment key={item.key}>{renderAttentionSection()}</React.Fragment> : null;
+    if (item.key === 'attention') return (attentionItems.length || healthNeedsAttention) ? <React.Fragment key={item.key}>{renderAttentionSection()}</React.Fragment> : null;
     if (item.key === 'goals') return activeGoals.length ? <React.Fragment key={item.key}>{renderGoalsSection()}</React.Fragment> : null;
     if (item.key === 'recentTransactions') return <React.Fragment key={item.key}>{renderRecentSection()}</React.Fragment>;
     return null;
@@ -1099,17 +1128,40 @@ export default function HomeScreen({
               >
                 <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={15} color={th.onPrimaryContainer} />
               </TouchableOpacity>
-              <View style={[s.healthPill, { backgroundColor: `${healthColor}22` }]}>
-                <Ionicons name="pulse-outline" size={14} color={healthColor} />
-                <Text style={{ color: healthColor, fontSize: 12, ...weight('800') }}>
-                  {snapshot.health === 'danger' ? '!' : snapshot.health === 'safe' ? 'OK' : snapshot.health === 'neutral' ? '—' : '...'}
-                </Text>
-              </View>
             </View>
           </View>
-          <Text style={[s.healthText, { color: healthColor, textAlign: align }]}>
-            {C[snapshot.health] || C.neutral}
-          </Text>
+          {/* REF-01 period pills. All four always show their own net delta;
+              tapping one only changes which is highlighted (activePeriod) —
+              it does not change heroBalance, which stays the point-in-time
+              available balance regardless of period (a "balance for today"
+              alone would not be a different figure from the total). */}
+          <View style={[s.periodPillRow, { flexDirection: rowDir }]}>
+            {periodPills.map(pillItem => {
+              const active = activePeriod === pillItem.key;
+              const pillLabel = pillItem.key === 'day' ? C.periodDay
+                : pillItem.key === 'week' ? C.periodWeek
+                : pillItem.key === 'month' ? C.periodMonth
+                : C.periodYear;
+              const deltaColor = pillItem.net > 0 ? th.inc : pillItem.net < 0 ? th.exp : th.onPrimaryContainer;
+              return (
+                <TouchableOpacity
+                  key={pillItem.key}
+                  onPress={() => setActivePeriod(pillItem.key)}
+                  style={[
+                    s.periodPill,
+                    { backgroundColor: active ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.10)', borderColor: active ? 'rgba(255,255,255,0.4)' : 'transparent' },
+                  ]}
+                >
+                  <Text style={{ color: th.onPrimaryContainer, fontSize: 10, ...weight('800'), textAlign: 'center' }} numberOfLines={1}>
+                    {pillLabel}
+                  </Text>
+                  <Text style={{ color: deltaColor, fontSize: 11, ...weight('900'), textAlign: 'center' }} numberOfLines={1}>
+                    {moneyText(`${pillItem.net > 0 ? '+' : pillItem.net < 0 ? '-' : ''}${fmt(Math.abs(pillItem.net))}`)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           {modules.wallets && walletRows.length > 0 ? (
             <TouchableOpacity
               onPress={() => setShowWalletDetails(prev => !prev)}
@@ -1245,8 +1297,8 @@ const s = StyleSheet.create({
   heroAmount:   { fontSize: 27, lineHeight: 32, ...weight('900'), marginTop: 2 },
   heroTools:    { alignItems: 'center', gap: 6 },
   heroIconBtn:  { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  healthPill:   { minWidth: 54, height: 28, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 3 },
-  healthText:   { fontSize: 12, marginTop: 5, lineHeight: 18, ...weight('700'), opacity: 0.94 },
+  periodPillRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
+  periodPill:   { flex: 1, borderRadius: RADIUS.pill, borderWidth: 1, paddingVertical: 6, gap: 1 },
   heroFact:     { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 54, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   factDivider:  { width: 1, height: 30 },
   quickEntry:   { borderRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 10, marginBottom: 10, ...SHADOW.subtle },

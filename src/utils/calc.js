@@ -1,7 +1,7 @@
 import { getTransactionDisplayAmount, isExpenseFlow, isIncomeFlow } from '../lib/modules';
 import { getWalletBalances, walletAmountToBase } from '../lib/wallets';
 import { asDate, daysInMonth, isISODate, normalizeDate, today } from '../lib/dateCore';
-import { getMonthTransactions, getTransactionIndex, getTransactionsThroughDate } from '../lib/transactionIndex';
+import { getMonthTransactions, getTransactionIndex, getTransactionsThroughDate, getYearTransactions } from '../lib/transactionIndex';
 export { daysInMonth, isISODate, normalizeDate, today } from '../lib/dateCore';
 import {
   adaptiveVariableProjection,
@@ -56,6 +56,47 @@ export const calcCashFlow = (trans = []) => {
 };
 
 export const byMonth = (trans = [], m, y) => getMonthTransactions(trans, y, m);
+
+// Home's four period pills (Today/Week/Month/Year — REF-01). No new financial
+// math: each period's figures are calcStats(trans) run on a date-sliced
+// array, the exact function 'this month' already uses in
+// buildFinancialSnapshot — only the slicing is new.
+// Week start matches the app's one existing calendar convention
+// (DateField.js's month grid), Saturday: (getDay() + 1) % 7 === 0.
+const dayISO = (date) => {
+  const safe = asDate(date);
+  return `${safe.getFullYear()}-${String(safe.getMonth() + 1).padStart(2, '0')}-${String(safe.getDate()).padStart(2, '0')}`;
+};
+
+const startOfWeekISO = (date) => {
+  const safe = asDate(date);
+  const offset = (safe.getDay() + 1) % 7;
+  const start = new Date(safe.getFullYear(), safe.getMonth(), safe.getDate() - offset, 12, 0, 0);
+  return dayISO(start);
+};
+
+const byDateRange = (trans = [], startISO, endISO) => trans.filter(tx => {
+  const iso = String(tx?.dateISO || '').slice(0, 10);
+  return iso && iso >= startISO && iso <= endISO;
+});
+
+export const homePeriodPills = (trans = [], date = new Date()) => {
+  const safeDate = asDate(date);
+  const todayISO = dayISO(safeDate);
+  const weekStartISO = startOfWeekISO(safeDate);
+  const monthTrans = byMonth(trans, safeDate.getMonth(), safeDate.getFullYear());
+  const yearTrans = getYearTransactions(trans, safeDate.getFullYear());
+  const dayStats = calcStats(byDateRange(trans, todayISO, todayISO));
+  const weekStats = calcStats(byDateRange(trans, weekStartISO, todayISO));
+  const monthStats = calcStats(monthTrans);
+  const yearStats = calcStats(yearTrans);
+  return [
+    { key: 'day', inc: dayStats.inc, exp: dayStats.exp, net: money(dayStats.inc - dayStats.exp) },
+    { key: 'week', inc: weekStats.inc, exp: weekStats.exp, net: money(weekStats.inc - weekStats.exp) },
+    { key: 'month', inc: monthStats.inc, exp: monthStats.exp, net: money(monthStats.inc - monthStats.exp) },
+    { key: 'year', inc: yearStats.inc, exp: yearStats.exp, net: money(yearStats.inc - yearStats.exp) },
+  ];
+};
 
 const dateOfTransaction = (item = {}) => {
   const date = new Date(`${item?.dateISO || ''}T12:00:00`);
