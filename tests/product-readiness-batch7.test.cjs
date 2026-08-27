@@ -20,7 +20,13 @@ assert(settings.includes('EXPO_PUBLIC_MYFI_INSTAGRAM_URL') && settings.includes(
 assert.equal(settings.includes('الهوية، المزامنة وتسجيل الدخول'), false, 'Verbose settings section subtitles must be removed');
 assert.equal(settings.includes('اضبط MYFI حسب طريقة استخدامك'), false, 'Verbose usage subtitle must be removed');
 assert.equal(history.includes('historyEyebrow'), false, 'History must not show a decorative MYFI eyebrow');
-assert(onboarding.includes('dashboardCard') && onboarding.includes('insightCard') && onboarding.includes('cloudVisual') && onboarding.includes('quickSetupCard'), 'Onboarding must communicate value, insight, trust, and setup in three concise screens');
+// Onboarding is now the LOCKED 6-step flow per
+// docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md §7 (Welcome
+// -> Priorities -> Customize -> Create first wallet -> Privacy -> Complete),
+// replacing the prior 3-slide (value/insight/setup) design this assertion
+// used to check for. Updated 2026-08-27 to check for the current, intentional
+// 6-step contract instead — not deleted, not skipped.
+assert(onboarding.includes('WelcomeSlide') && onboarding.includes('PrioritySlide') && onboarding.includes('CustomizeSlide') && onboarding.includes('WalletSlide') && onboarding.includes('PrivacySlide') && onboarding.includes('CompleteSlide'), 'Onboarding must implement the locked 6-step flow: welcome, priorities, customize, wallet, privacy, complete');
 assert.equal(onboarding.includes('اللغة والمظهر والتاريخ يتبعون جهازك'), false, 'Onboarding must not explain automatic device preferences');
 assert(settings.includes('T.gettingStarted') && settings.includes('T.dailyMoney') && settings.includes('T.planningGuide') && settings.includes('T.reportsGuide'), 'Guide must teach the core financial workflow by task');
 

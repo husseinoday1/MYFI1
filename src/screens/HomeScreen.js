@@ -1005,7 +1005,14 @@ export default function HomeScreen({
   // no new balance calculation happens here.
   const WALLET_CARD_WIDTH = 148;
   const renderWalletStrip = () => {
-    if (!modules.wallets || !isHomeSectionVisible('wallets') || walletRows.length === 0) return null;
+    // Deliberately NOT gated on modules.wallets (a business-profile-only flag
+    // for the multi-wallet FEATURE SET — selecting among wallets, transfers,
+    // etc). REF-01 shows this strip as a universal Home element, and every
+    // profile — personal included — has at least one real wallet holding
+    // real money (confirmed: Settings > Financial setup shows "1 Wallets" on
+    // a fresh personal account). Gating on the business flag hid this section
+    // from every personal-profile user, which is most of them.
+    if (!isHomeSectionVisible('wallets') || walletRows.length === 0) return null;
     const pageCount = Math.max(1, Math.ceil(walletRows.length / 3));
     return (
       <View style={s.walletStripBlock}>
