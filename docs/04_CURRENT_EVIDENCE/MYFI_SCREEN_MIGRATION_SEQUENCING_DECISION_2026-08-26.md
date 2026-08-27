@@ -121,3 +121,33 @@ structural fork" rule:**
 
 Implementation 4 correctly stopped at both forks and reported rather than
 deciding unilaterally — this is the expected behavior, not a shortfall.
+
+## Gates lifted, revised scope authorized (user decision, 2026-08-26)
+
+Both gates above are **reframed and unblocked**, not deferred, per the
+user's direct decision that both fixes are small enough to do now with the
+right design:
+
+- **Step 6 revised:** Payment History = read-only aggregation over existing
+  `debt.payments[]`/commitment payment data, zero new writes. Installments/
+  Subscriptions = a `subType` field + a couple of small fields added onto
+  the *existing* commitment entity in `commitments.js` (not a new entity
+  type) — additive JSON-payload change, not the "new financial product
+  logic" this doc previously assumed. 17-G registration is superseded by
+  this — remove/close it as a separate plan item once this lands.
+- **Step 8 revised:** remove the Personal/Business/Dual selector from
+  onboarding; new accounts default `profileType='personal'` silently.
+  `profileType`/`activeScope`/`filterByActiveScope` stay in the codebase
+  unchanged — only the onboarding-time question goes away, not the
+  capability. Implementation 4 tasked to first verify whether a scope
+  switcher already exists elsewhere (e.g. Settings) before building one.
+  **This no longer needs Phase 14-A to land first** — the previous
+  assumption (deleting the mechanism entirely) drove that dependency; a
+  silent-default-plus-existing-mechanism design does not.
+
+**Standing rule for both, reaffirmed:** any part of either fix that writes
+or reshapes live financial data (`commitments.js` subType/fields, the
+onboarding default write) stays in the Verification Floor — full
+self-review, no DeepSeek delegation, repeat-action tests for any new
+counter/state logic — even though the surrounding batch is otherwise
+light-rigor. Implementation 4 instructed accordingly.
