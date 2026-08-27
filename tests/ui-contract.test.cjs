@@ -428,7 +428,7 @@ assert(reports.includes('kind="income" color={th.inc}') && reports.includes('kin
 assert(onboarding.includes('direction="income"') && onboarding.includes('direction="expense"'), 'Onboarding preview must use plus/minus direction marks');
 assert(legacySettings.includes("direction: item.key === 'income' ? 'income' : item.key === 'expense' ? 'expense' : null"), 'Advanced Home metric settings must use plus/minus direction marks');
 assert(legacySettings.includes("direction: 'expense', color: th.exp") && legacySettings.includes("direction: 'income', color: th.inc"), 'Category flow choices must use red minus/green plus semantics');
-assert(theme.includes('inc: BRAND_GREEN') && theme.includes("exp: '#C74F5C'") && theme.includes("exp: '#E06B76'"), 'Light and dark themes must preserve green income and red expense colors');
+assert(theme.includes('inc: INCOME_GREEN') && theme.includes("exp: '#C74F5C'") && theme.includes("exp: '#E06B76'"), 'Light and dark themes must preserve green income and red expense colors');
 assert(accountDelete.includes('secureTextEntry={!passwordVisible}') && accountDelete.includes("passwordVisible ? 'eye-off-outline' : 'eye-outline'"), 'Account deletion password must have a show/hide control');
 assert(archive.includes('secureTextEntry={!archivePasswordVisible}') && archive.includes("archivePasswordVisible ? 'eye-off-outline' : 'eye-outline'"), 'Archive password must have a show/hide control');
 assert(legacySettings.includes('secureTextEntry={!backupPasswordVisible}') && legacySettings.includes("backupPasswordVisible ? 'eye-off-outline' : 'eye-outline'"), 'Legacy backup password must have a show/hide control');
