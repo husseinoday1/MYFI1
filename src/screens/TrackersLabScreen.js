@@ -134,6 +134,7 @@ export default function TrackersLabScreen({
   onAddLinkedPlan,
   onNewTracker,
   onOpenPaymentHistory,
+  initialFilter = 'all',
 }) {
   const {
     trans, debts, goals, commitments, wallets, cfg,
@@ -168,7 +169,7 @@ export default function TrackersLabScreen({
     if (item.linkedType === 'goal') return modules.goals;
     return true;
   });
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState(initialFilter);
   const [openId, setOpenId] = useState(null);
   const [expandedPaymentHistoryId, setExpandedPaymentHistoryId] = useState(null);
   const [editTrackerDraft, setEditTrackerDraft] = useState(null);

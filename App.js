@@ -24,6 +24,7 @@ import OnboardingScreen from './src/screens/OnboardingScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
 import TrackersLabScreen from './src/screens/TrackersLabScreen';
+import FollowUpsHubScreen from './src/screens/FollowUpsHubScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
 import ArchiveScreen from './src/screens/ArchiveScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
@@ -75,7 +76,10 @@ const HUB_TABS = ['home', 'mymoney', 'trackers', 'more'];
 
 // Secondary destinations reached via a My Money/More gateway (not a primary
 // tab, so never subject to the visibleTabs filter/reset guard below).
-const SECONDARY_SCREEN_KEYS = ['history', 'reports', 'settings', 'wallets', 'budget', 'paymentHistory'];
+const SECONDARY_SCREEN_KEYS = [
+  'history', 'reports', 'settings', 'wallets', 'budget', 'paymentHistory',
+  'followupsAll', 'followupsDebts', 'followupsCommitments', 'followupsInstallments', 'followupsSubscriptions', 'followupsGoals',
+];
 
 const shellCopy = (lang) => (
   lang === 'ar'
@@ -890,7 +894,7 @@ function AppRoot() {
         id: action.trackerId || null,
         nonce: Date.now(),
       });
-      setTab('trackers');
+      setTab('followupsAll');
       return;
     }
 
@@ -904,17 +908,17 @@ function AppRoot() {
 
     if (action.type === 'open_add') {
       if (action.mode === 'goal' && action.goalId) {
-        setTab('trackers');
+        setTab('followupsAll');
         openQuickSave(action.goalId);
         return;
       }
       if (action.mode === 'debt' && action.debtId) {
-        setTab('trackers');
+        setTab('followupsAll');
         openQuickPay(action.debtId);
         return;
       }
       if (action.mode === 'commitment' && action.commitmentId) {
-        setTab('trackers');
+        setTab('followupsAll');
         openQuickCommitment(action.commitmentId);
         return;
       }
@@ -943,9 +947,81 @@ function AppRoot() {
     // A user with no transactions taps the one obvious call to action and nothing
     // happens. Same handlers HomeScreen already uses.
     history: <HistoryScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} />,
+    // 'trackers' is the primary Follow-ups nav tab (BASE_TABS/HUB_TABS) and,
+    // like 'mymoney', now renders a thin hub — REF-05. The full/unfiltered
+    // TrackersLabScreen (needed for trackerFocus deep-links from
+    // notifications and quick-pay/save/commitment shortcuts) moved to the
+    // 'followupsAll' secondary key below; every setTab('trackers') call site
+    // that relied on that behavior was repointed to 'followupsAll'.
     trackers: (
+      <FollowUpsHubScreen
+        onOpenDebts={() => setTab('followupsDebts')}
+        onOpenCommitments={() => setTab('followupsCommitments')}
+        onOpenInstallments={() => setTab('followupsInstallments')}
+        onOpenSubscriptions={() => setTab('followupsSubscriptions')}
+        onOpenGoals={() => setTab('followupsGoals')}
+        onOpenPaymentHistory={() => setTab('paymentHistory')}
+        onNewTracker={openNewTracker}
+      />
+    ),
+    followupsAll: (
       <TrackersLabScreen
         focusRequest={trackerFocus}
+        onQuickPay={openQuickPay}
+        onQuickSave={openQuickSave}
+        onQuickCommitment={openQuickCommitment}
+        onAddLinkedPlan={openLinkedPlan}
+        onNewTracker={openNewTracker}
+        onOpenPaymentHistory={() => setTab('paymentHistory')}
+      />
+    ),
+    followupsDebts: (
+      <TrackersLabScreen
+        initialFilter="owed"
+        onQuickPay={openQuickPay}
+        onQuickSave={openQuickSave}
+        onQuickCommitment={openQuickCommitment}
+        onAddLinkedPlan={openLinkedPlan}
+        onNewTracker={openNewTracker}
+        onOpenPaymentHistory={() => setTab('paymentHistory')}
+      />
+    ),
+    followupsCommitments: (
+      <TrackersLabScreen
+        initialFilter="monthly"
+        onQuickPay={openQuickPay}
+        onQuickSave={openQuickSave}
+        onQuickCommitment={openQuickCommitment}
+        onAddLinkedPlan={openLinkedPlan}
+        onNewTracker={openNewTracker}
+        onOpenPaymentHistory={() => setTab('paymentHistory')}
+      />
+    ),
+    followupsInstallments: (
+      <TrackersLabScreen
+        initialFilter="installment"
+        onQuickPay={openQuickPay}
+        onQuickSave={openQuickSave}
+        onQuickCommitment={openQuickCommitment}
+        onAddLinkedPlan={openLinkedPlan}
+        onNewTracker={openNewTracker}
+        onOpenPaymentHistory={() => setTab('paymentHistory')}
+      />
+    ),
+    followupsSubscriptions: (
+      <TrackersLabScreen
+        initialFilter="subscription"
+        onQuickPay={openQuickPay}
+        onQuickSave={openQuickSave}
+        onQuickCommitment={openQuickCommitment}
+        onAddLinkedPlan={openLinkedPlan}
+        onNewTracker={openNewTracker}
+        onOpenPaymentHistory={() => setTab('paymentHistory')}
+      />
+    ),
+    followupsGoals: (
+      <TrackersLabScreen
+        initialFilter="saving"
         onQuickPay={openQuickPay}
         onQuickSave={openQuickSave}
         onQuickCommitment={openQuickCommitment}
