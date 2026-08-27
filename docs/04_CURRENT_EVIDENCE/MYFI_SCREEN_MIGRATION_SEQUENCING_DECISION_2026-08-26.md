@@ -151,3 +151,24 @@ onboarding default write) stays in the Verification Floor — full
 self-review, no DeepSeek delegation, repeat-action tests for any new
 counter/state logic — even though the surrounding batch is otherwise
 light-rigor. Implementation 4 instructed accordingly.
+
+## Home structural gap resolved (user decision, 2026-08-27)
+
+The health-pill-vs-period-pills fork (flagged 2026-08-26) is decided:
+**adopt period-pills (Today/Week/Month/Year, each with a delta) as the
+Home hero card's control** — this is not a toss-up between two equal
+options: `docs/design/14_MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md` REF-01
+already carries **Approved** status for exactly this element (the only
+rejected part of REF-01 was its bottom-nav labels, superseded by
+REF-04-07). The existing health-pill was never part of any approved
+reference or spec — it's a legacy behavior, not a rejected alternative.
+
+**Health-pill is not discarded — it moves to Home's "Needs Attention"
+section** (already a required Home section per
+`07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md`, "only when meaningful"), so its
+at-a-glance judgment value isn't lost, it just stops competing spatially
+with the approved pills.
+
+Authorized now: Implementation 5, light-rigor UI tier (display/period-
+calculation only, reuses HomeScreen.js's existing balance/period logic per
+the spec's "Reusable business logic" note — no new financial computation).
