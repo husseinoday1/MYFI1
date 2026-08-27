@@ -62,12 +62,73 @@ new financial calculation.
   existing quick-entry section, wired to `onOpenPaymentHistory`) — no
   existing `TrackersLabScreen.js` logic touched.
 
-**Not done (separate, larger, deferred item — flagged, not attempted):**
-Installments/Subscriptions as distinct commitment sub-types (the
-`subType` field on `commitments.js` the peer scoped as full Verification
-Floor work). Payment History's read-only aggregation was judged genuinely
-low-risk and completed; the commitment-schema change is a larger,
-separate piece of work not completed in this pass — see follow-up.
+## Step 6 (completion) — commitment `subType` classification
+
+Full Verification Floor work: written directly, reviewed line-by-line, no
+`ask_deepseek` delegation, per the explicit instruction for this piece.
+
+**Financial-impact check performed first** (`myfi-financial-impact-check`
+skill): commitments are committed as `entityType: 'commitment'` payloads
+through `commitEntityChangesV7` into `ledger_entities_v7.payload_json` (a
+JSON blob column, confirmed by reading `financialLedgerV7Repository.js`'s
+schema directly — not assumed). Adding an optional key to that JSON payload
+is not a SQL column/schema change: `FINANCIAL_SQLITE_SCHEMA_VERSION` is
+unaffected, no migration is required, and existing rows with no `subType`
+key simply read as `undefined` and normalize to `'general'` — verified via
+`normalizeCommitments`'s `...item` spread already passing unknown keys
+through, then explicit `normalizeSubType()` validation added on top so a
+garbage/missing value can never reach the UI unnormalized.
+
+**Verdict block:**
+```
+Financial Data: NONE — classification tag only, no amount/balance/date/
+  posting field changes, no calculation touched.
+SQLite Schema:  NONE — new JSON payload key, not a new column; confirmed
+  by reading the CREATE TABLE statement directly.
+Migration Required: NO
+Existing User Data: PRESERVED — commitments with no subType stored
+  normalize to 'general' (same as today's implicit behavior), read and
+  write paths both idempotent under the same normalization function.
+Proof: npm run test:database (schema/backfill/financial-core, all pass),
+  full test:gate:static back to the 70/1/11 baseline, manual trace of
+  every addCommitment/editCommitment call site.
+```
+
+**Scope actually implemented (deliberately narrower than the full request):**
+- `src/lib/commitments.js`: `COMMITMENT_SUB_TYPES` constant + `normalizeSubType`,
+  wired into `normalizeCommitments` (the single normalization chokepoint
+  every commitment read/write already passes through).
+- `src/store/slices/managementSlice.js`: `addCommitment` passes `item.subType`
+  through (normalized downstream); `editCommitment` needed **no change** —
+  it already spreads `...current` (which includes the normalized `subType`)
+  before re-normalizing, so edits preserve it automatically.
+- `src/components/NewItemModal.js`: a `commitmentSubType` picker
+  (General/Installment/Subscription) added to the direct commitment-creation
+  form, reusing the exact same `renderSelectField` mechanism already used
+  for the adjacent category/repeat-mode fields — no new interaction pattern
+  introduced. Only wired into the direct-creation `addCommitment` call; the
+  two linked-plan `addCommitment` calls (debt/goal payment plans) correctly
+  keep the `'general'` default, since a debt-repayment plan isn't itself an
+  installment/subscription commitment.
+- `src/screens/TrackersLabScreen.js`: a small badge (`item.commitment.subType`)
+  renders next to a commitment's status chip when subType is not `'general'`.
+  Traced `item.commitment: item` back to the `monthlyRows` construction to
+  confirm the normalized object (with `subType`) is what's actually attached
+  — not assumed.
+
+**Explicitly not built in this pass (flagged, not silently dropped):**
+- No "remaining installments" counter. Building an auto-decrementing counter
+  tied to the payment-marking flow is real state-machine logic requiring a
+  repeat-action test per the standing rule, and needs its own design
+  decision (manual field vs. auto-decrement, what happens at zero, etc.) —
+  judged out of scope for this pass; a purely manual, non-decrementing
+  number field could be added cheaply later if wanted.
+- No dedicated "Installments"/"Subscriptions" filter tabs in Follow-ups'
+  tracker-type segmented control — that's an information-architecture change
+  to an already-working filter mechanism (`filters`/`currentTrackers` in
+  `TrackersLabScreen.js`), a bigger, separate decision than a display badge.
+  The badge makes installments/subscriptions visually distinguishable today
+  without touching that mechanism.
 
 ## Verification performed
 

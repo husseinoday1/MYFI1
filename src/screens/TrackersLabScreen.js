@@ -888,6 +888,15 @@ export default function TrackersLabScreen({
                           {statusLabel(item.status, item)}
                         </Text>
                       </View>
+                      {item.kind === 'monthly' && item.commitment?.subType && item.commitment.subType !== 'general' ? (
+                        <View style={[s.trackerStateChip, { backgroundColor: th.cardHigh }]}>
+                          <Text style={{ color: th.sub, fontSize: 10, lineHeight: 14, ...weight('800') }}>
+                            {item.commitment.subType === 'installment'
+                              ? (isAr ? 'قسط' : 'Installment')
+                              : (isAr ? 'اشتراك' : 'Subscription')}
+                          </Text>
+                        </View>
+                      ) : null}
                       <Text style={{ color: th.faint, fontSize: 10, lineHeight: 14, ...weight('800'), textAlign: align }} numberOfLines={1}>
                         {item.kind === 'monthly' ? `${T.next}: ${item.date || '-'}` : item.completedAt ? item.completedAt : item.date || '-'}
                       </Text>

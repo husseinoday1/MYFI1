@@ -128,6 +128,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const [commitmentCat, setCommitmentCat] = useState('other');
   const [commitmentCatTouched, setCommitmentCatTouched] = useState(false);
   const [commitmentRepeatMonthly, setCommitmentRepeatMonthly] = useState(true);
+  const [commitmentSubType, setCommitmentSubType] = useState('general');
   const [expandedPicker, setExpandedPicker] = useState(null);
 
   useEffect(() => {
@@ -288,6 +289,14 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     { value: true, label: T.monthlyRepeat, icon: 'repeat-outline', color: th.warn },
     { value: false, label: T.oneTimeRepeat, icon: 'ellipse-outline', color: th.warn },
   ];
+  // Classification only (docs/04_CURRENT_EVIDENCE/MYFI_STEP8_ONBOARDING_PAYMENT_HISTORY_2026-08-27.md
+  // follow-up) — does not change repeat/lifecycle/payment logic, just tags
+  // the commitment so Follow-ups can show it distinctly.
+  const commitmentSubTypeOptions = [
+    { value: 'general', label: isAr ? 'عام' : 'General', icon: 'calendar-outline', color: th.warn },
+    { value: 'installment', label: isAr ? 'قسط' : 'Installment', icon: 'card-outline', color: th.warn },
+    { value: 'subscription', label: isAr ? 'اشتراك' : 'Subscription', icon: 'sync-outline', color: th.warn },
+  ];
   const currencyOptions = CURRENCIES.map(item => ({
     value: item.code,
     label: `${item.code} · ${isAr ? item.name : item.nameEn}`,
@@ -421,6 +430,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         linkedType: 'none',
         currencyCode: selectedEntityCurrency,
         repeatMonthly: commitmentRepeatMonthly,
+        subType: commitmentSubType,
       });
       handleClose();
       return;
@@ -686,6 +696,19 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                     icon: 'repeat-outline',
                     tone: th.warn,
                     onChange: setCommitmentRepeatMonthly,
+                  })}
+                </View>
+              ) : null}
+              {isCommitment ? (
+                <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
+                  {renderSelectField({
+                    id: 'commitment-subtype',
+                    label: isAr ? 'نوع الالتزام' : 'Commitment type',
+                    value: commitmentSubType,
+                    options: commitmentSubTypeOptions,
+                    icon: 'pricetags-outline',
+                    tone: th.warn,
+                    onChange: setCommitmentSubType,
                   })}
                 </View>
               ) : null}

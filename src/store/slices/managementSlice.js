@@ -81,6 +81,7 @@ export const createManagementSlice = (set, get) => ({
       walletId: item.walletId || defaultWalletId,
       linkedType: item.linkedType || 'none',
       linkedId: item.linkedId || null,
+      subType: item.subType,
       scope: normalizeScope(item.scope, getEntryScope(get().cfg)),
       repeatMonthly: item.repeatMonthly !== false,
       active: item.active !== false,

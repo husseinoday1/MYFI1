@@ -15,6 +15,15 @@ const dayFromISO = (value) => {
 const normalizeLinkedType = (value) =>
   ['debt', 'receivable', 'goal'].includes(value) ? value : 'none';
 
+// Classification only — does not change due-date/lifecycle calculation,
+// payment recording, or any financial total. Added 2026-08-27 so Follow-ups
+// can distinguish installment/subscription commitments from a generic
+// monthly one; existing commitments with no subType stored default to
+// 'general' here, not at read time in every caller.
+export const COMMITMENT_SUB_TYPES = ['general', 'installment', 'subscription'];
+const normalizeSubType = (value) =>
+  COMMITMENT_SUB_TYPES.includes(value) ? value : 'general';
+
 const isMonthKey = value => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(value || ''));
 
 const dateToISO = (date = new Date()) => {
@@ -99,6 +108,7 @@ export const normalizeCommitments = (items = [], fallbackWalletId = null, fallba
         walletId: item.walletId || fallbackWalletId,
         linkedType,
         linkedId: linkedType === 'none' ? null : item.linkedId || null,
+        subType: normalizeSubType(item.subType),
         deferredUntilISO: isISODate(item.deferredUntilISO) ? item.deferredUntilISO : null,
         deferredCycleMonth: isMonthKey(item.deferredCycleMonth) ? item.deferredCycleMonth : null,
         lastPaidMonth: isMonthKey(item.lastPaidMonth) ? item.lastPaidMonth : null,
