@@ -10,10 +10,12 @@ it must be ignored.
 
 **Source:** images pasted directly into the MYFI Planning & Audit conversation,
 described by the user as "the latest Product Owner-approved MYFI visual
-references." No image files exist yet in the repository — this register
-describes their content from that conversation. If/when the source image
-files are exported into the repo (e.g. `docs/design/assets/`), this register
-must be updated with actual file paths.
+references."
+
+**2026-08-27 update:** the actual image files (11, matching every REF-\* entry
+below one-to-one) were provided by the user and are now in the repository
+under `docs/design/assets/REF-<code>-<slug>.jpeg`. Every entry below can now
+be checked against real pixels instead of only this register's prose.
 
 ---
 
@@ -354,16 +356,16 @@ sequence, to prevent a future implementation from adding them anyway:
 
 ## Summary table
 
-| Ref | Screen | Theme | Status | Key conflict/artifact |
-|---|---|---|---|---|
-| REF-01 | Home | Both | Approved (nav labels excluded) | Bottom-nav labels superseded by REF-04–07 + Blueprint text |
-| REF-02 | Onboarding 1/6 Welcome | Light | Approved | none |
-| REF-03 | Onboarding 2/6 Priorities | Light | Approved | none |
-| REF-03B | Onboarding 3/6 Customize | Light | Approved | none |
-| REF-03C | Onboarding 5/6 Privacy | Light | Approved | step-count question resolved 2026-08-26 (approved as intentionally short) |
-| REF-03D | Onboarding: create first wallet | Light | Approved, canonical step 4 of 6 | Source mislabeled "1 of 6" — resolved 2026-08-26 |
-| REF-03E | Onboarding 6/6 Complete | Light | Approved | none |
-| REF-04 | My Money hub + 4 gateways | Light | Approved | none |
-| REF-05 | Follow-ups hub + 6 sections | Light | Approved | none |
-| REF-06 | More + 5 sections | Both | Approved | none |
-| REF-07 | Settings + 5 sections | Both | Approved (structure); 3 content items rejected | accent color, payment methods, VAT/rounding — all REJECTED FOR CURRENT TARGET 2026-08-26; Country/Currency → Financial Preferences, approved |
+| Ref | Screen | Theme | Status | File | Key conflict/artifact |
+|---|---|---|---|---|---|
+| REF-01 | Home | Both | Approved (nav labels excluded) | `assets/REF-01-home.jpeg` | Bottom-nav labels superseded by REF-04–07 + Blueprint text |
+| REF-02 | Onboarding 1/6 Welcome | Light | Approved | `assets/REF-02-onboarding-welcome.jpeg` | none |
+| REF-03 | Onboarding 2/6 Priorities | Light | Approved | `assets/REF-03-onboarding-priorities.jpeg` | none |
+| REF-03B | Onboarding 3/6 Customize | Light | Approved | `assets/REF-03B-onboarding-customize.jpeg` | none |
+| REF-03C | Onboarding 5/6 Privacy | Light | Approved | `assets/REF-03C-onboarding-privacy.jpeg` | step-count question resolved 2026-08-26 (approved as intentionally short) |
+| REF-03D | Onboarding: create first wallet | Light | Approved, canonical step 4 of 6 | `assets/REF-03D-onboarding-wallet-setup.jpeg` | Source mislabeled "1 of 6" — resolved 2026-08-26 |
+| REF-03E | Onboarding 6/6 Complete | Light | Approved | `assets/REF-03E-onboarding-complete.jpeg` | none |
+| REF-04 | My Money hub | Light | Approved | `assets/REF-04-mymoney-hub.jpeg` | **2026-08-27:** the real file is a numbered 1–4 vertical drill-through list (Wallets/Accounts, Transactions/Log, Plan/Budget, Reports/Analytics), NOT a "4 gateways" grid as this table previously described — that description was written before the file existed. Current repo (`MyMoneyScreen.js`, Step 3) uses a GatewayCard grid instead; structural gap, not yet reconciled. |
+| REF-05 | Follow-ups hub + 6 sections | Light | Approved | `assets/REF-05-followups-hub.jpeg` | none |
+| REF-06 | More + 5 sections | Both | Approved | `assets/REF-06-more-hub.jpeg` | none |
+| REF-07 | Settings + 5 sections | Both | Approved (structure); 3 content items rejected | `assets/REF-07-settings.jpeg` | accent color, payment methods, VAT/rounding — all REJECTED FOR CURRENT TARGET 2026-08-26; Country/Currency → Financial Preferences, approved |
