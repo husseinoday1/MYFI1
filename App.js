@@ -30,6 +30,7 @@ import SettingsScreen from './src/screens/SettingsScreen';
 import MyMoneyScreen from './src/screens/MyMoneyScreen';
 import MoreScreen from './src/screens/MoreScreen';
 import WalletsAccountsScreen from './src/screens/WalletsAccountsScreen';
+import PaymentHistoryScreen from './src/screens/PaymentHistoryScreen';
 import PlanBudgetScreen from './src/screens/PlanBudgetScreen';
 import AddTransModal from './src/components/AddTransModal';
 import NewItemModal from './src/components/NewItemModal';
@@ -74,7 +75,7 @@ const HUB_TABS = ['home', 'mymoney', 'trackers', 'more'];
 
 // Secondary destinations reached via a My Money/More gateway (not a primary
 // tab, so never subject to the visibleTabs filter/reset guard below).
-const SECONDARY_SCREEN_KEYS = ['history', 'reports', 'settings', 'wallets', 'budget'];
+const SECONDARY_SCREEN_KEYS = ['history', 'reports', 'settings', 'wallets', 'budget', 'paymentHistory'];
 
 const shellCopy = (lang) => (
   lang === 'ar'
@@ -950,8 +951,10 @@ function AppRoot() {
         onQuickCommitment={openQuickCommitment}
         onAddLinkedPlan={openLinkedPlan}
         onNewTracker={openNewTracker}
+        onOpenPaymentHistory={() => setTab('paymentHistory')}
       />
     ),
+    paymentHistory: <PaymentHistoryScreen />,
     reports: <ReportsScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} />,
     settings: <SettingsScreen tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} />,
     mymoney: (

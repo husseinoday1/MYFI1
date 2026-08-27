@@ -41,7 +41,13 @@ assert(modules.includes('cfg.activeScope'), 'mixed personal/business mode still 
 
 const onboarding = read('src/screens/OnboardingScreen.js');
 assert(onboarding.includes('countryCode') && onboarding.includes('currencyCode') && onboarding.includes('baseCurrencyConfirmedAt'), 'first-run country/base-currency confirmation gate missing');
-assert(onboarding.includes("profileType={profileType}"), 'first-run usage type selection missing');
+// Reversed 2026-08-26 per docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md
+// §7 (LOCKED — explicitly prohibits a Personal/Business/Dual selector during
+// onboarding). New accounts now default to 'personal' silently; the existing
+// SettingsLegacyScreen.js:665 profile-type control remains the (unchanged)
+// way to change it later.
+assert(!/typeOptions|setProfileType/.test(onboarding), 'onboarding still renders a first-run usage-type selector');
+assert(onboarding.includes("const profileType = 'personal';"), 'onboarding no longer defaults profileType to personal silently');
 
 const domain = read('src/store/domain.js');
 assert(domain.includes('categoryBudgetsByMonth') && domain.includes('hasBudgets'), 'budget values do not lock base-currency meaning');
@@ -63,6 +69,7 @@ assert(!settingsLegacy.includes('setTransCatToOther(id)'), 'category removal sti
 assert(settingsLegacy.includes('deleteCategoriesMany([id])'), 'single category lifecycle does not use historical-safe archive path');
 assert(settingsLegacy.includes('reconcileRate'), 'foreign wallet reconciliation cannot capture explicit historical FX');
 assert(settingsLegacy.includes('await setCfg({ country: country.code })'), 'legacy country change still owns or silently changes base currency');
+assert(settingsLegacy.includes('const setProfileType'), 'the post-onboarding profile-type change path (Settings) was removed with no replacement');
 const settings = read('src/screens/SettingsScreen.js');
 assert(settings.includes('await setCfg({ country: country.code })') && !settings.includes('const currencyPatch = country.currency'), 'primary Settings country change still owns or silently changes base currency');
 const accountCenter = read('src/components/HomeCenterModal.js');

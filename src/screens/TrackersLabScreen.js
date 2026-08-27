@@ -132,6 +132,7 @@ export default function TrackersLabScreen({
   onQuickCommitment,
   onAddLinkedPlan,
   onNewTracker,
+  onOpenPaymentHistory,
 }) {
   const {
     trans, debts, goals, commitments, wallets, cfg,
@@ -722,6 +723,20 @@ export default function TrackersLabScreen({
             />
           ))}
         </View>
+      ) : null}
+      {onOpenPaymentHistory ? (
+        <TouchableOpacity
+          onPress={onOpenPaymentHistory}
+          style={[s.paymentHistoryRow, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}
+        >
+          <View style={[s.trackerQuickEntryIcon, { backgroundColor: `${th.primary}18`, borderColor: `${th.primary}44` }]}>
+            <Ionicons name="receipt-outline" size={18} color={th.primary} />
+          </View>
+          <Text style={{ flex: 1, color: th.text, fontSize: 13, fontWeight: '900', textAlign: align }}>
+            {isAr ? 'سجل الدفعات' : 'Payment History'}
+          </Text>
+          <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={16} color={th.faint} />
+        </TouchableOpacity>
       ) : null}
       {cfg.entryMode === 'quick' ? (
         <View style={[s.trackerQuickEntry, { backgroundColor: th.card, borderColor: th.border }]}>
@@ -1369,6 +1384,7 @@ function SummaryTile({ th, lang, item, value }) {
 }
 
 const s = StyleSheet.create({
+  paymentHistoryRow: { minHeight: 54, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 12, marginBottom: 10 },
   trackerQuickEntry: { borderRadius: 18, borderWidth: 1, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 10, marginBottom: 10 },
   trackerQuickEntryTitle: { fontSize: 12, lineHeight: 17, ...weight('800'), marginBottom: 7 },
   trackerQuickEntryRow: { alignItems: 'stretch', justifyContent: 'space-between', gap: 7 },

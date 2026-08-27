@@ -64,7 +64,15 @@ export default function OnboardingScreen({ cfg, onDone }) {
   }, []);
   const initialCountry = localeCountry || null;
   const initialSuggestedCurrency = COUNTRIES.find(item => item.code === initialCountry)?.currency || '';
-  const [profileType, setProfileType] = useState('personal');
+  // Account-type selection (Personal/Business/Dual) removed from onboarding
+  // per docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md §7
+  // (LOCKED — explicitly prohibits this step). Every new account starts
+  // 'personal' silently; it can still be changed later via the existing,
+  // unmodified Settings > ... > profile-type control
+  // (SettingsLegacyScreen.js:665) — verified live before this change that
+  // that control already exists and is fully functional, so no replacement
+  // UI is needed here.
+  const profileType = 'personal';
   const [countryCode, setCountryCode] = useState(initialCountry);
   const [currencyCode, setCurrencyCode] = useState(initialSuggestedCurrency);
   const [currencyTouched, setCurrencyTouched] = useState(false);
@@ -125,8 +133,6 @@ export default function OnboardingScreen({ cfg, onDone }) {
             th={th}
             isAr={isAr}
             T={T}
-            profileType={profileType}
-            setProfileType={setProfileType}
             country={COUNTRIES.find(item => item.code === countryCode) || null}
             currency={CURRENCIES.find(item => item.code === currencyCode) || null}
             onCountry={() => setChoice('country')}
@@ -257,29 +263,12 @@ function InsightSlide({ th, isAr, T, preview }) {
   );
 }
 
-function QuickSetupSlide({ th, isAr, T, profileType, setProfileType, country, currency, onCountry, onCurrency }) {
-  const typeOptions = [
-    { value: 'personal', label: T.personal, icon: 'person-outline' },
-    { value: 'business', label: T.business, icon: 'briefcase-outline' },
-    { value: 'personal_business', label: T.mixed, icon: 'layers-outline' },
-  ];
+function QuickSetupSlide({ th, isAr, T, country, currency, onCountry, onCurrency }) {
   return (
     <View style={s.slide}>
       <View style={[s.heroCopy, { marginBottom: 14 }]}>
         <Text style={[s.heroTitle, { color: th.text }]}>{T.setupTitle}</Text>
         <Text style={[s.heroBody, { color: th.sub }]}>{T.setupBody}</Text>
-      </View>
-      <Text style={[s.quickSetupLabel, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>{T.usage}</Text>
-      <View style={[s.typeGrid, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-        {typeOptions.map(item => {
-          const active = profileType === item.value;
-          return (
-            <TouchableOpacity key={item.value} onPress={() => setProfileType(item.value)} style={[s.typeOption, { backgroundColor: active ? th.primSoft : th.card, borderColor: active ? th.primary : th.border }]}>
-              <Ionicons name={item.icon} size={19} color={active ? th.primary : th.sub} />
-              <Text style={[s.typeOptionText, { color: active ? th.primary : th.text }]}>{item.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
       </View>
       <View style={[s.setupCard, { backgroundColor: th.card, borderColor: th.border }]}>
         <SetupRow th={th} isAr={isAr} icon="location-outline" label={T.country} value={country ? `${country.flag} ${isAr ? country.name : country.nameEn}` : T.chooseCountry} onPress={onCountry} />
