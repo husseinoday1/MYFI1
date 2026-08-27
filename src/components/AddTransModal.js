@@ -852,6 +852,11 @@ export default function AddTransModal({
             ? 'الدين أو الهدف المرتبط بهذا الالتزام مكتمل بالفعل. الغِ الربط أو أوقف الالتزام من شاشة تعديله.'
             : 'The linked debt or goal is already complete. Unlink it or pause this commitment.');
         }
+        if (result?.reason === 'installment_plan_complete') {
+          Alert.alert('', cfg.lang === 'ar'
+            ? 'كل أقساط هذه الخطة مدفوعة. إذا تريد الاستمرار بالدفع، غيّر نوع الالتزام أو زد عدد الأقساط من شاشة تعديله.'
+            : 'Every installment in this plan is already paid. To keep paying, change the commitment type or raise the number of installments from its edit screen.');
+        }
         return;
       }
       if (result.partial) {

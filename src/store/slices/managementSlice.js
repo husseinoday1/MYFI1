@@ -3,7 +3,7 @@ import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
 import { commitmentCycleMonth, deferredCommitmentDueISO, monthKey, normalizeCommitments } from '../../lib/commitments';
 import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
 import { buildCurrencyFields, buildEntityCurrencyFields, normalizeCurrencyCode } from '../../lib/financialCoreV2';
-import { financialDataCount, syncCommitmentPaidMonth, uid } from '../domain';
+import { financialDataCount, remainingInstallments, syncCommitmentPaidMonth, uid } from '../domain';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
 import { commandWalletBalance, commandWalletPosition } from '../../lib/financialCommandBalances';
 import { buildBalanceReconciliationPreview, buildTrackerTransactionTitle, TRANSACTION_SEMANTIC_KIND } from '../../lib/transactionSemantics';
@@ -333,6 +333,14 @@ export const createManagementSlice = (set, get) => ({
     const paymentWalletId = walletId || defaultWalletId || commitment.walletId;
     const paidMonth = cycleMonth || commitmentCycleMonth(commitment, new Date(`${entryDate}T12:00:00`));
     if (commitment.lastPaidMonth === paidMonth) return { ok: false, reason: 'already_paid' };
+    // An installment plan is a fixed number of cycles by definition, so once
+    // the last one is posted a further payment has no meaning. Refused with
+    // its own reason so the UI can say why, rather than failing silently.
+    // Only installments: subscriptions and general commitments have no end,
+    // and remainingInstallments returns null for them anyway.
+    if (commitment.subType === 'installment' && remainingInstallments(commitment, get().trans) === 0) {
+      return { ok: false, reason: 'installment_plan_complete' };
+    }
     const linkedType = commitment.linkedType || 'none';
     const linkedId = commitment.linkedId || null;
     const linkedTarget = linkedType === 'goal'

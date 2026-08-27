@@ -160,19 +160,88 @@ commit, and observing the identical pair of errors — then restoring the stash.
 Nothing in this change touches `loadLocal` or persistence. **Flagged to
 Planning & Audit as a separate item; not fixed here.**
 
-## Deliberately not built (needs a product ruling)
+## Completion guard (second pass — product ruling received)
 
-**Nothing stops a finished installment plan from being paid again.** Once
-remaining reaches zero the badge reads "Installments complete", but the
-commitment stays active and `payCommitment` will happily record a seventh
-payment on a 3-installment plan — it advances cycle-by-cycle off
-`lastPaidMonth` and has no notion of a plan ending.
+Planning & Audit ruled that a finished plan must refuse further payments, for
+`subType: 'installment'` only, with a clear message rather than a silent
+failure. Implemented in `managementSlice.payCommitment`, immediately after the
+existing `already_paid` check and **before any side effect** — no ledger write,
+no wallet movement, no linked-entity mutation. It fails closed:
 
-Auto-deactivating the commitment at zero would be a real financial-state
-mutation beyond what was authorised, so it was not done silently. Raised with
-Planning & Audit as an open question.
+```js
+if (commitment.subType === 'installment' && remainingInstallments(commitment, get().trans) === 0) {
+  return { ok: false, reason: 'installment_plan_complete' };
+}
+```
+
+`commitment` there is the normalized object, so `subType`/`totalInstallments`
+are guaranteed normalized. `remainingInstallments` returns `null` (never `0`)
+for subscriptions, general commitments, and installments with no plan size, so
+none of them can be caught by this guard.
+
+The message is wired in `AddTransModal` — the single call site for
+`payCommitment` (Home's commitment actions route through the same modal, which
+`ui-contract.test.cjs:255` enforces).
+
+### Repeat-action test (`tests/financial-core.test.mjs`)
+
+A 3-installment plan paid five times in sequence:
+
+| # | result | reason | remaining |
+|---|---|---|---|
+| 1 | ok | — | 2 |
+| 2 | ok | — | 1 |
+| 3 | ok | — | 0 |
+| 4 | **refused** | `installment_plan_complete` | 0 |
+| 5 | **refused** | `installment_plan_complete` | 0 |
+
+Also asserted: remaining never goes negative; the refused calls post **nothing**
+to the ledger (exactly 3 payment rows, not 5); a subscription with the same
+data is never blocked; an installment with **no** plan size is never blocked (an
+unknown-length plan must not behave like a zero-length one); and deleting a
+payment both hands the installment back **and** reopens the plan so it accepts
+a payment again — which a stored counter could not do.
+
+### Live verification of the guard
+
+Confirmed on Expo web that a completed plan is refused: created a 1-installment
+plan, paid it (badge became **"Paid this month · Installments complete"**), then
+fired the payment handler again — **no new ledger row was posted**.
+
+The alert text itself could **not** be observed on web: `Alert.alert()` is a
+no-op in react-native-web (`node_modules/react-native-web/dist/exports/Alert/index.js`
+is literally `static alert() {}`) — read directly, not assumed. This affects the
+pre-existing `linked_unavailable` message equally. The message is therefore
+verified by code path on web and needs an Android/device pass to be seen.
+
+## Code review findings, and what was done about them
+
+`/code-review` (medium) returned two confirmed findings, both in this change.
+Both were fixed rather than accepted:
+
+1. **An installment count above `MAX_TOTAL_INSTALLMENTS` was silently
+   discarded.** The input only stripped non-digits, so typing `1200` was
+   accepted in the field, then normalized to `null` on save — the user's entered
+   plan size vanished with no error, which is the silent-repair behaviour
+   contract rule 5 forbids. Fixed by holding the input to the valid range as it
+   is typed, so what the user sees is exactly what gets stored.
+2. **"One-time" repeat + "Installment" subtype produced a self-contradictory
+   card** — "done" and "N of M left" on the same row after the first payment.
+   Fixed at the `normalizeCommitments` chokepoint (`repeatMonthly === false` ⇒
+   `totalInstallments: null`) rather than only in the form, so edit, restore and
+   sync all give the same answer. The count field is also hidden for one-time
+   commitments. Both directions pinned by assertions.
+
+## Gates after the second pass
+
+- `npm run test:logic` / `test:database`: all assertions passed.
+- `npm run test:gate:static`: **70 passed / 1 failed / 11 skipped** — the exact
+  documented baseline. The single failure is `ui-contract`'s
+  "Light and dark themes must preserve green income and red expense colors",
+  re-confirmed pre-existing this session by stashing all `src/` and `tests/`
+  changes and observing the identical assertion fail without them.
 
 ## Status
 
-Committed, not pushed — held for explicit user push approval per the standing
-git safety rule.
+Not pushed — held for explicit user push approval per the standing git safety
+rule.

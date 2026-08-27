@@ -37,8 +37,12 @@ const normalizeSubType = (value) =>
 // clamped 1200 would render as "600 of 600 left", a plan size the user never
 // entered and cannot tell is wrong (contract rule 5, no silent repair).
 export const MAX_TOTAL_INSTALLMENTS = 600;
-const normalizeTotalInstallments = (value, subType) => {
-  if (subType !== 'installment') return null;
+// `repeatMonthly === false` is a single one-time payment, which cannot also be
+// a plan of N installments; allowing both produced a card reading "done" and
+// "N left" at once. Cleared here rather than in the form so edit, restore and
+// sync all get the same answer.
+const normalizeTotalInstallments = (value, subType, repeatMonthly) => {
+  if (subType !== 'installment' || repeatMonthly === false) return null;
   const n = Math.round(Number(value));
   if (!Number.isFinite(n) || n < 1 || n > MAX_TOTAL_INSTALLMENTS) return null;
   return n;
@@ -130,7 +134,7 @@ export const normalizeCommitments = (items = [], fallbackWalletId = null, fallba
         linkedType,
         linkedId: linkedType === 'none' ? null : item.linkedId || null,
         subType,
-        totalInstallments: normalizeTotalInstallments(item.totalInstallments, subType),
+        totalInstallments: normalizeTotalInstallments(item.totalInstallments, subType, item.repeatMonthly),
         deferredUntilISO: isISODate(item.deferredUntilISO) ? item.deferredUntilISO : null,
         deferredCycleMonth: isMonthKey(item.deferredCycleMonth) ? item.deferredCycleMonth : null,
         lastPaidMonth: isMonthKey(item.lastPaidMonth) ? item.lastPaidMonth : null,

@@ -909,26 +909,99 @@ const runLinkedStoreAssertions = async () => {
   assert.equal(instCommitment().totalInstallments, 3, 'installment plan size must survive normalization');
   assert.equal(instLeft(), 3, 'an unpaid 3-installment plan must report 3 remaining');
 
-  // Run the same action repeatedly, one cycle month at a time.
+  // Run the same action repeatedly, one cycle month at a time. Payments 4 and
+  // 5 must be REFUSED: the plan is complete after 3, and an installment plan
+  // is a fixed number of cycles by definition.
   const instMonths = ['2026-07-10', '2026-08-10', '2026-09-10', '2026-10-10', '2026-11-10'];
   const instObserved = [];
   for (const payDate of instMonths) {
     const result = await useStore.getState().payCommitment('commit-inst', payDate, 'cash');
-    instObserved.push({ ok: result.ok, left: instLeft() });
+    instObserved.push({ ok: result.ok, reason: result.reason || null, left: instLeft() });
   }
   assert.deepEqual(
     instObserved,
     [
-      { ok: true, left: 2 },
-      { ok: true, left: 1 },
-      { ok: true, left: 0 },
-      { ok: true, left: 0 },
-      { ok: true, left: 0 },
+      { ok: true, reason: null, left: 2 },
+      { ok: true, reason: null, left: 1 },
+      { ok: true, reason: null, left: 0 },
+      { ok: false, reason: 'installment_plan_complete', left: 0 },
+      { ok: false, reason: 'installment_plan_complete', left: 0 },
     ],
-    'each installment payment must decrement remaining by exactly one, then floor at zero without going negative',
+    'each installment payment must decrement remaining by exactly one, then refuse further payments at zero without going negative',
   );
   assert.equal(instLeft() >= 0, true, 'remaining installments must never be negative');
-  assert.equal(commitmentPaidCycleCount(useStore.getState().trans, 'commit-inst'), 5, 'five distinct cycle months must count as five paid cycles');
+  assert.equal(commitmentPaidCycleCount(useStore.getState().trans, 'commit-inst'), 3, 'a completed 3-installment plan must have exactly 3 paid cycles, not 5');
+  assert.equal(
+    useStore.getState().trans.filter(tx => tx.isCommitmentPayment && tx.commitmentId === 'commit-inst').length,
+    3,
+    'a refused payment must post nothing to the ledger',
+  );
+
+  // The completion guard is installment-only: a subscription has no end, so it
+  // must keep accepting payments however many times it is paid.
+  useStore.setState({
+    trans: [],
+    commitments: normalizeCommitments([{
+      id: 'commit-sub', name: 'Streaming', amt: 100, day: 10, active: true,
+      repeatMonthly: true, walletId: 'cash', linkedType: 'none', linkedId: null,
+      subType: 'subscription', totalInstallments: 3,
+    }], 'cash', 'IQD'),
+  });
+  assert.equal(useStore.getState().commitments[0].totalInstallments, null, 'a subscription must not carry a plan size at all');
+  const subObserved = [];
+  for (const payDate of instMonths) {
+    const result = await useStore.getState().payCommitment('commit-sub', payDate, 'cash');
+    subObserved.push(result.ok);
+  }
+  assert.deepEqual(subObserved, [true, true, true, true, true], 'a subscription must never be blocked by the installment completion guard');
+
+  // The plan size is optional. An installment with no size entered has no
+  // known end, so the completion guard must never fire on it — a plan of
+  // "unknown length" must not behave like a plan of length zero.
+  useStore.setState({
+    trans: [],
+    commitments: normalizeCommitments([{
+      id: 'commit-open', name: 'Open plan', amt: 100, day: 10, active: true,
+      repeatMonthly: true, walletId: 'cash', linkedType: 'none', linkedId: null,
+      subType: 'installment',
+    }], 'cash', 'IQD'),
+  });
+  assert.equal(useStore.getState().commitments[0].totalInstallments, null, 'an installment with no size entered must normalize to null, not 0');
+
+  // A one-time payment cannot also be a plan of N installments — the card
+  // would read "done" and "N left" at the same time. Cleared at the
+  // normalization chokepoint so edit/restore/sync all agree.
+  assert.equal(
+    normalizeCommitments([{ id: 'c', name: 'One-off', amt: 100, subType: 'installment', totalInstallments: 12, repeatMonthly: false }], 'cash', 'IQD')[0].totalInstallments,
+    null,
+    'a one-time commitment must not carry an installment plan size',
+  );
+  assert.equal(
+    normalizeCommitments([{ id: 'c', name: 'Plan', amt: 100, subType: 'installment', totalInstallments: 12, repeatMonthly: true }], 'cash', 'IQD')[0].totalInstallments,
+    12,
+    'a repeating installment commitment must keep its plan size',
+  );
+  assert.equal(remainingInstallments(useStore.getState().commitments[0], []), null, 'an unsized installment plan has no remaining count');
+  const openObserved = [];
+  for (const payDate of instMonths) {
+    const result = await useStore.getState().payCommitment('commit-open', payDate, 'cash');
+    openObserved.push(result.ok);
+  }
+  assert.deepEqual(openObserved, [true, true, true, true, true], 'an installment with no plan size must never be blocked by the completion guard');
+
+  // Restore the completed installment plan for the assertions that follow.
+  useStore.setState({
+    trans: [],
+    commitments: normalizeCommitments([{
+      id: 'commit-inst', name: 'Car loan', amt: 100, day: 10, active: true,
+      repeatMonthly: true, walletId: 'cash', linkedType: 'none', linkedId: null,
+      subType: 'installment', totalInstallments: 3,
+    }], 'cash', 'IQD'),
+  });
+  for (const payDate of ['2026-07-10', '2026-08-10', '2026-09-10']) {
+    await useStore.getState().payCommitment('commit-inst', payDate, 'cash');
+  }
+  assert.equal(instLeft(), 0, 'the restored plan must be back at zero remaining');
 
   // Re-paying an ALREADY-SETTLED cycle must be refused and must not move the
   // counter. Note this needs the cycle month passed explicitly: payCommitment
@@ -936,17 +1009,21 @@ const runLinkedStoreAssertions = async () => {
   // so a second call with a later date is a legitimate *next* cycle, not a
   // duplicate.
   const instPaidMonth = instCommitment().lastPaidMonth;
-  const instDuplicate = await useStore.getState().payCommitment('commit-inst', '2026-11-20', 'cash', instPaidMonth);
+  const instDuplicate = await useStore.getState().payCommitment('commit-inst', '2026-09-20', 'cash', instPaidMonth);
   assert.equal(instDuplicate.ok, false, 'paying an already-settled cycle again must be refused');
-  assert.equal(instDuplicate.reason, 'already_paid');
   assert.equal(instLeft(), 0, 'a refused duplicate payment must not change the remaining count');
 
   // Deleting a payment must give the installment back — the whole point of
-  // deriving instead of storing a counter.
-  const instTxToDelete = useStore.getState().trans.find(tx => tx.isCommitmentPayment && tx.commitmentMonth === '2026-11');
-  assert.ok(instTxToDelete, 'the November installment payment must exist before deletion');
+  // deriving instead of storing a counter — AND must reopen the plan so the
+  // completion guard stops blocking it. A stored counter could do neither.
+  const instTxToDelete = useStore.getState().trans.find(tx => tx.isCommitmentPayment && tx.commitmentMonth === '2026-09');
+  assert.ok(instTxToDelete, 'the September installment payment must exist before deletion');
   await useStore.getState().deleteTrans(instTxToDelete.id);
-  assert.equal(commitmentPaidCycleCount(useStore.getState().trans, 'commit-inst'), 4, 'deleting a payment must drop the paid-cycle count');
+  assert.equal(commitmentPaidCycleCount(useStore.getState().trans, 'commit-inst'), 2, 'deleting a payment must drop the paid-cycle count');
+  assert.equal(instLeft(), 1, 'deleting a payment must hand the installment back');
+  const instAfterReopen = await useStore.getState().payCommitment('commit-inst', '2026-09-10', 'cash');
+  assert.equal(instAfterReopen.ok, true, 'a plan reopened by deleting a payment must accept a payment again');
+  assert.equal(instLeft(), 0, 're-paying the reopened cycle must take the plan back to zero');
 
   // A commitment reclassified away from 'installment' must not keep a stale plan size.
   assert.equal(

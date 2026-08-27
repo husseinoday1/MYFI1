@@ -16,6 +16,7 @@ import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
 import { filterByActiveScope, getModules, getTrackerKinds } from '../lib/modules';
 import { suggestCategoryForText } from '../lib/localIntelligence';
 import { CATEGORY_FLOWS, getCategoriesForFlow } from '../lib/categories';
+import { MAX_TOTAL_INSTALLMENTS } from '../lib/commitments';
 
 const cleanNumber = parseNumberInput;
 const modalCopy = (lang = 'ar') => {
@@ -720,10 +721,21 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                   })}
                 </View>
               ) : null}
-              {isCommitment && commitmentSubType === 'installment' ? renderTextField({
+              {/* Only for a repeating commitment: a one-time payment cannot be
+                  a plan of N installments, and allowing both would render a
+                  card that says "done" and "N left" at the same time. */}
+              {isCommitment && commitmentSubType === 'installment' && commitmentRepeatMonthly ? renderTextField({
                 label: isAr ? 'عدد الأقساط' : 'Number of installments',
                 value: commitmentTotalInstallments,
-                onChangeText: (value) => setCommitmentTotalInstallments(String(value).replace(/[^0-9]/g, '')),
+                // Held to the valid range as it is typed, so the number the
+                // user sees is exactly the number that gets stored. Letting a
+                // larger value through would normalize to null on save and
+                // silently discard what they entered.
+                onChangeText: (value) => {
+                  const digits = String(value).replace(/[^0-9]/g, '').replace(/^0+/, '');
+                  if (!digits) return setCommitmentTotalInstallments('');
+                  return setCommitmentTotalInstallments(String(Math.min(Number(digits), MAX_TOTAL_INSTALLMENTS)));
+                },
                 keyboardType: 'numeric',
                 placeholder: isAr ? 'اختياري — مثلاً 12' : 'Optional — e.g. 12',
               }) : null}
