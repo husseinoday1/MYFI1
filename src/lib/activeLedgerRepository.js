@@ -12,6 +12,7 @@ import {
   transactionWalletAmount,
 } from './financialCoreV2';
 import { inferFlowType } from './modules';
+import { getDefaultWalletId } from './wallets';
 import {
   ARCHIVE_SCOPE,
   archiveScopeClause,
@@ -805,11 +806,18 @@ export const queryLedgerCategorySpend = async ({
   };
 };
 
-export const queryLedgerWalletPositions = async ({ namespace = 'guest', scope = null, archiveScope = null } = {}) => {
+export const queryLedgerWalletPositions = async ({ namespace = 'guest', scope = null, archiveScope = null, defaultWalletId = null } = {}) => {
   // §74: "Wallet Balance uses ALL financial postings always." The posting sum
   // below deliberately carries no archived_at predicate; requiring the caller
   // to say ALL out loud is what stops a future edit from narrowing it.
   requireBalanceArchiveScope(archiveScope, 'queryLedgerWalletPositions');
+  // `defaultWalletId` matters only on the V6 branch, where a transaction may
+  // carry a NULL wallet_id and the legacy calculation attributes it to the
+  // workspace default (`tx?.walletId || safeDefault` in applyWalletMovement).
+  // A caller migrating off the in-memory balance in Phase 11-C step 2 MUST pass
+  // cfg.defaultWalletId: omitting it falls back to the first wallet by id,
+  // which is the same wallet only when the user never chose a different
+  // default. The V7 branch ignores it — postings always name their account.
   const directDb = await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
     const params = [ns(namespace)];
@@ -841,7 +849,132 @@ export const queryLedgerWalletPositions = async ({ namespace = 'guest', scope = 
       }),
     };
   }
-  return { supported: false, source: 'legacy', rows: [] };
+  // P11-C step 1: the V6 balance, derived from the same transaction columns the
+  // legacy in-memory calculation reads, so a non-cutover workspace has a real
+  // posting-derived balance instead of the empty stub that used to live here.
+  //
+  // Semantics deliberately mirror applyWalletMovement in wallets.js one-for-one:
+  //   - a transfer debits from_wallet by (transfer_from_minor + fee_minor) and
+  //     credits to_wallet by transfer_to_minor;
+  //   - anything else adds its signed wallet_amount_minor to wallet_id;
+  //   - a row with no wallet_id falls back to the default wallet, exactly as
+  //     `tx?.walletId || safeDefault` does — dropping those rows here instead
+  //     would silently under-count a real balance;
+  //   - an unreleased goal allocation reserves its allocation amount.
+  // Any divergence from that is a bug in this query, not a policy difference;
+  // archiveBalanceParity.js exists to catch exactly that.
+  //
+  // §74: no archived_at predicate anywhere below — the balance spans ALL years.
+  //
+  // Scope: `scope` filters which WALLETS are returned, never which movements
+  // count toward them. A movement labelled with another scope still moved real
+  // money in this wallet, so excluding it would report a balance the wallet does
+  // not have. This matches the V7 branch above, which filters `a.scope` but sums
+  // every posting on the account. It is a deliberate difference from the
+  // in-memory path, where callers pre-filter the transaction array by scope and
+  // a cross-scope transfer can therefore go uncounted.
+  const db = await openDb();
+  if (!db) return { supported: false, source: 'legacy', rows: [] };
+  const namespaceValue = ns(namespace);
+  const walletParams = [namespaceValue];
+  let walletScopeClause = '';
+  if (scope && scope !== 'all') { walletScopeClause = ' AND scope = ?'; walletParams.push(String(scope)); }
+  const walletRows = await db.getAllAsync(
+    `SELECT id,name,wallet_type,scope,currency_code,opening_minor,payload_json
+       FROM ledger_wallets
+      WHERE namespace = ?${walletScopeClause}
+      ORDER BY id`,
+    ...walletParams,
+  );
+  if (!walletRows.length) return { supported: false, source: 'legacy', rows: [] };
+
+  const defaultWallet = getDefaultWalletId(
+    walletRows.map(row => ({ id: String(row.id), currency: row.currency_code })),
+    normalizeCurrencyCode(walletRows[0]?.currency_code, 'IQD'),
+    defaultWalletId,
+  );
+
+  const movementRows = await db.getAllAsync(
+    `SELECT
+        COALESCE(wallet_id, ?) AS wallet_id,
+        from_wallet_id,
+        to_wallet_id,
+        kind,
+        SUM(wallet_amount_minor) AS wallet_minor,
+        SUM(transfer_from_minor) AS transfer_from_minor,
+        SUM(transfer_to_minor) AS transfer_to_minor,
+        SUM(fee_minor) AS fee_minor
+       FROM ledger_transactions
+      WHERE namespace = ? AND deleted_at IS NULL
+      GROUP BY COALESCE(wallet_id, ?), from_wallet_id, to_wallet_id, kind`,
+    defaultWallet, namespaceValue, defaultWallet,
+  );
+
+  const totals = new Map(walletRows.map(row => [String(row.id), { physical: 0, reserved: 0 }]));
+  const bump = (walletId, field, amount) => {
+    const entry = totals.get(String(walletId || ''));
+    if (entry) entry[field] += Number(amount || 0);
+  };
+  for (const row of movementRows) {
+    if (String(row.kind || '') === 'transfer') {
+      bump(row.from_wallet_id, 'physical', -(Number(row.transfer_from_minor || 0) + Number(row.fee_minor || 0)));
+      bump(row.to_wallet_id, 'physical', Number(row.transfer_to_minor || 0));
+      continue;
+    }
+    bump(row.wallet_id, 'physical', Number(row.wallet_minor || 0));
+  }
+
+  // Reserved is computed separately: the allocation amount is stored in
+  // payload_json in MAJOR units, so it cannot be summed in SQL without each
+  // wallet's currency exponent. Mirrors getWalletAvailableBalances:
+  // `allocationWalletAmount ?? allocationAmount ?? amt`, absolute, skipped once
+  // the allocation has been released.
+  const walletCurrencies = new Map(walletRows.map(row => [
+    String(row.id), normalizeCurrencyCode(row.currency_code, 'IQD'),
+  ]));
+  const reservedRows = await db.getAllAsync(
+    `SELECT COALESCE(wallet_id, ?) AS wallet_id, payload_json
+       FROM ledger_transactions
+      WHERE namespace = ? AND deleted_at IS NULL
+        AND (flow_type = 'goal_allocation'
+             OR COALESCE(json_extract(payload_json,'$.isGoalSaving'), 0) IN (1, 'true'))
+        AND COALESCE(json_extract(payload_json,'$.allocationReleased'), 0) NOT IN (1, 'true')`,
+    defaultWallet, namespaceValue,
+  );
+  for (const row of reservedRows) {
+    const walletId = String(row.wallet_id || '');
+    const currency = walletCurrencies.get(walletId);
+    if (!currency) continue;
+    const payload = parseJson(row.payload_json, {}) || {};
+    const amount = Math.abs(Number(
+      payload.allocationWalletAmount ?? payload.allocationAmount ?? payload.amt ?? 0,
+    ));
+    if (!amount) continue;
+    bump(walletId, 'reserved', moneyToMinor(amount, currency));
+  }
+
+  return {
+    supported: true,
+    source: 'sqlite_v6',
+    rows: walletRows.map(row => {
+      const currency = normalizeCurrencyCode(row.currency_code, 'IQD');
+      const totalsRow = totals.get(String(row.id)) || { physical: 0, reserved: 0 };
+      const physical = moneyFromMinor(Number(row.opening_minor || 0) + totalsRow.physical, currency);
+      const reserved = moneyFromMinor(totalsRow.reserved, currency);
+      const payload = parseJson(row.payload_json, {}) || {};
+      return {
+        id: String(row.id),
+        name: row.name || '',
+        type: row.wallet_type || payload.type || 'other',
+        scope: row.scope || 'personal',
+        currency,
+        status: payload.status || 'active',
+        physicalBalance: physical,
+        reservedBalance: reserved,
+        availableBalance: physical - reserved,
+      };
+    }),
+  };
 };
 
 export const exportLedgerTransactions = async (namespace = 'guest') => {

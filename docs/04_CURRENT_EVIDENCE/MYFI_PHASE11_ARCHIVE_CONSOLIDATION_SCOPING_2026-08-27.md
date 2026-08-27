@@ -474,3 +474,183 @@ Next exact action: report this increment to Planning & Audit; on approval,
 commit and push (CI-only acceptance, per the standing rule); then scope (1)
 above as its own dedicated sub-phase with an explicit device-gate plan, rather
 than attempting it inside a single further increment.
+
+## 8. Phase 11 closure and the 11-C split (2026-08-27)
+
+### 8.1 Correction: the approved F1 plan did not actually solve F1
+
+The D1 option (ب) ruling — "complete the `openingBalanceMode: 'ledger'`
+migration project-wide, then F1 removal follows" — was recorded in §6/§7 as the
+route to removing the F1 mutation. On re-examination before writing any code,
+**that plan was wrong**, and this section corrects the record rather than
+leaving the earlier reasoning to be discovered as a dead end later.
+
+The mistake was locating the problem in the wrong place. F1 is not fundamentally
+about *how the opening balance is represented*; it is about
+`commitYearArchive` **removing the archived year's transactions from the hot
+workspace array**. Any representation of the opening balance still has to
+compensate for that removal:
+
+- today the compensation is a rewritten `wallet.openingBalance` (violates §73
+  "opening balance");
+- under a completed ledger-mode migration the compensation would have to move
+  into the opening `opening_balance` transaction's own amount instead — which
+  violates §73 "transaction amount", a *worse* outcome, not a fix.
+
+Completing the ledger-mode migration **relocates** the compensation. It does not
+**remove** it. Removing it requires archiving to stop deleting anything at all.
+
+### 8.2 What actually removes F1
+
+Archive must become a pure visibility marker — exactly what V7 already does
+(`archiveFinancialTransactionsV7` deletes no row; it sets
+`archived_at`/`archive_year`). With nothing deleted, the balance is simply the
+ALL-scoped posting sum and no compensation term exists anywhere.
+
+The obstacle is that the Cold Archive exists for a real reason: keeping many
+completed years out of the hot in-memory array is a genuine performance
+requirement (`localArchiveRepository.js` header). So the answer is not "stop
+draining the hot array" — it is **stop reading balances from the hot array**.
+Once the remaining consumers read the posting-derived query instead, the hot
+array is free to be drained without any balance depending on it, and F1 can be
+deleted outright.
+
+Consumers still reading `getWalletBalances`/`getWalletAvailableBalances`
+(11-A survey, minus HomeScreen's SQL path fixed in §7.2): `AddTransModal`,
+`NewItemModal`, `WalletBalanceCard`, `decisionEngine`, `financialCommandBalances`
+(fallback branch), `financialIntegrity`, `notifications`, `HistoryScreen`,
+`HomeScreen` (fallback branch), `SettingsLegacyScreen`, `calc.js`,
+`financialLedgerV7Migration` (metrics only).
+
+### 8.3 Second blocker found: the V6 balance query does not exist
+
+`queryLedgerWalletPositions` is posting-derived and ALL-scoped **only on the V7
+branch**. Its non-cutover branch is a stub: `return { supported: false, source:
+'legacy', rows: [] }`. Every consumer above therefore has no posting-derived
+balance to switch to for users who have not completed the V7 cutover. Building
+that query is a hard prerequisite for §8.2 — switching consumers first would
+collapse the balance to empty for those users.
+
+### 8.4 Planning & Audit ruling — Phase 11 closes, 11-C opens
+
+Ruling (2026-08-27): **close Phase 11 at its current state and open the
+remaining work as its own phase.** The rationale: the remaining scope is no
+longer "archive consolidation" but "unify the wallet-balance source across V6
+and V7 onto derived postings". It warrants its own tracking and its own device
+gate rather than being buried inside Phase 11.
+
+**Phase 11 — CLOSED.** Delivered and pushed with named green CI runs:
+
+| Increment | Commit | CI run |
+|---|---|---|
+| 11-A — scope contract, §3.5 freeze, §72 dead-code removal, §75 declaration | `5916f67` (+ merge `1781d71`) | `33057163679` success |
+| 11-B — parity harness, HomeScreen balance source, F6 removal on both paths | `12d532c` | `33059784018` success |
+
+Quality gate at closure: **126 passed, 0 failed, 11 skipped.**
+
+§71-77 status at closure:
+
+- §71/§72 — archive is a visibility marker in the canonical V7 representation;
+  the dead third representation is gone; the cold archive is retained as a
+  derived cache per D4.
+- §73 — F6 (archive-time reserved release) removed on both the runtime and
+  migration paths. **F1 remains open** and is the reason §73 is not fully
+  satisfied; it is contained, not live, because §3.5's freeze blocks the
+  mutating commit path entirely.
+- §74 — explicit tri-state scope enforced repository-wide; wallet balance
+  asserts ALL. Fully satisfied for the V7 path.
+- §75 — report scope declared; derivation onto postings deferred to 11-C.
+- §76 — cold-archive migration into canonical V7 verified, including the
+  opening-balance reversal, with balance invariance proven across repeated
+  archiving.
+- §77 — export artifact separated from the internal archive and explicitly kept
+  available while the commit path is frozen.
+
+**Phase 11-C — Wallet balance source unification (V6 + V7, posting-derived).**
+Approved scope and order:
+
+1. Build the V6 posting-derived, ALL-scoped balance query (§8.3 prerequisite).
+2. Migrate the remaining consumers in §8.2 onto it, incrementally.
+3. Only then delete the F1 mutation from `commitYearArchive` and lift the §3.5
+   freeze.
+4. D3 repair migration for users who already archived under F1.
+5. D5 report-total derivation onto postings.
+
+Real-device acceptance remains a mandatory gate before any production
+activation of 11-C, per the standing ruling — a green CI run is necessary but
+not sufficient for this phase, because it changes the balance every user sees.
+
+## 9. Phase 11-C step 1 — the V6 wallet-balance query (2026-08-27)
+
+Closes the §8.3 blocker. `queryLedgerWalletPositions`' non-cutover branch was
+`return { supported: false, source: 'legacy', rows: [] }` — a stub. It now
+computes a real ALL-scoped balance from the V6 tables, so step 2 has something
+to migrate consumers onto for users who have not completed the V7 cutover.
+
+### 9.1 Semantics
+
+V6 has no postings table; movement lives in columns on `ledger_transactions`.
+The query mirrors `applyWalletMovement` (`wallets.js`) one-for-one:
+
+| Case | Rule |
+|---|---|
+| transfer | debit `from_wallet_id` by `transfer_from_minor + fee_minor`; credit `to_wallet_id` by `transfer_to_minor` |
+| anything else | add signed `wallet_amount_minor` to `wallet_id` |
+| `wallet_id IS NULL` | falls back to the default wallet, exactly as `tx?.walletId \|\| safeDefault` does |
+| unreleased goal allocation | reserves `allocationWalletAmount ?? allocationAmount ?? amt` |
+| soft-deleted | excluded |
+| archived | **included** — §74, no `archived_at` predicate anywhere |
+
+**Reserved is computed in JS, not SQL, and that is deliberate.** The allocation
+amount is stored in `payload_json` in *major* units, so summing it in SQL would
+require each wallet's currency exponent inside the query. The first
+implementation did exactly that (reading a minor-unit field that does not
+exist) and **the parity test caught it** — reserved came back 0 instead of
+120000. It is now a separate query reduced per row through `moneyToMinor` with
+that wallet's currency.
+
+**Scope filters wallets, never movements.** A movement labelled with another
+scope still moved real money in the wallet, so excluding it would report a
+balance the wallet does not have. This matches the V7 branch (which filters
+`a.scope` but sums every posting on the account) and is a deliberate difference
+from the in-memory path, where callers pre-filter the transaction array and a
+cross-scope transfer can go uncounted. Documented in code and pinned by a test
+that inserts a business-scoped transfer out of a personal wallet and requires
+the debit to land.
+
+**`defaultWalletId` is now a parameter and matters only on the V6 branch.**
+Omitting it falls back to the first wallet by id, which is the same wallet only
+when the user never chose a different default. Step 2 consumers MUST pass
+`cfg.defaultWalletId`; noted at the call site so the migration cannot miss it.
+
+### 9.2 Test
+
+`run-p11c-v6-wallet-positions.cjs` builds one workspace expressed **both ways** —
+as legacy objects and as V6 rows — and requires the shipped SQL to produce
+exactly the legacy numbers, to the minor unit, for physical, reserved and
+available balances on both wallets.
+
+The fixture exercises every branch: income, expense, a transfer with a fee, a
+reserved goal allocation, a released one, a row with `wallet_id IS NULL`, and an
+archived row (to prove ALL scope). The SQL is extracted from the shipped source
+rather than retyped, so a later edit to the query is genuinely covered.
+
+Negative controls run, not assumed:
+- adding `archived_at IS NULL` to the movement query → fails (`w1` balance
+  diverges), confirming §74 is actually enforced by data, not just by comment;
+- removing the `COALESCE(wallet_id, ?)` fallback → fails.
+
+### 9.3 Verification
+
+`npm run test:gate`: **127 passed, 0 failed, 11 skipped.**
+
+`/code-review`: performed on the diff. It surfaced the scope-semantics question
+above, which was resolved by documenting the rule and pinning it with the
+cross-scope test rather than leaving it implicit.
+
+### 9.4 Next
+
+Step 2: migrate the §8.2 consumers onto `queryLedgerWalletPositions`,
+incrementally, each passing `cfg.defaultWalletId`, with
+`archiveBalanceParity.js` available to catch any divergence. Nothing in step 1
+changes what any screen displays — the new branch has no consumers yet.

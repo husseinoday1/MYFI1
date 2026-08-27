@@ -146,6 +146,7 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'p11b_balance_parity', 'run-p11b-balance-parity.cjs'],
   ['UNIT_RUNTIME', 'p11b_homescreen_balance_source', 'run-p11b-homescreen-balance-source.cjs'],
   ['UNIT_RUNTIME', 'p11b_migration_goal_release', 'run-p11b-migration-goal-release.cjs'],
+  ['UNIT_RUNTIME', 'p11c_v6_wallet_positions', 'run-p11c-v6-wallet-positions.cjs'],
   ['UNIT_RUNTIME', 'performance_data', 'performance-data-runtime-v512.test.cjs'],
   ['UNIT_RUNTIME', 'performance_generator', 'performance-generator-runtime-v51.test.cjs'],
   ['UNIT_RUNTIME', 'performance_storage', 'performance-storage-runtime-v512.test.cjs'],
