@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
-import { getSymbol } from '../lib/constants';
+import { CURRENCIES, getSymbol } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
 import { buildFinancialSnapshot, getUpcomingRecurring, homePeriodPills, pct, today } from '../utils/calc';
 import AddTransModal from '../components/AddTransModal';
@@ -174,6 +174,7 @@ export default function HomeScreen({
   const recentLimit = 3;
 
   const [showWalletDetails, setShowWalletDetails] = useState(false);
+  const [walletStripPage, setWalletStripPage] = useState(0);
   const [editing,    setEditing]    = useState(null);
   const [details, setDetails] = useState(null);
   const [expandedRecentId, setExpandedRecentId] = useState(null);
@@ -996,6 +997,76 @@ export default function HomeScreen({
     );
   };
 
+  // REF-01: an always-visible horizontal wallet strip belongs directly under
+  // the hero — the existing renderWalletPanel() below is a DIFFERENT feature
+  // (a "choose default wallet" modal, reachable from the hero's own
+  // "X wallets · Show details" row) and stays untouched. This just displays
+  // walletRows, already computed above for the hero's wallet-summary count;
+  // no new balance calculation happens here.
+  const WALLET_CARD_WIDTH = 148;
+  const renderWalletStrip = () => {
+    if (!modules.wallets || !isHomeSectionVisible('wallets') || walletRows.length === 0) return null;
+    const pageCount = Math.max(1, Math.ceil(walletRows.length / 3));
+    return (
+      <View style={s.walletStripBlock}>
+        <View style={[s.walletStripHead, { flexDirection: rowDir }]}>
+          <Text style={{ color: th.text, fontSize: 15, ...weight('900'), flex: 1, textAlign: align }}>
+            {isAr ? 'المحافظ' : 'Wallets'}
+          </Text>
+          <TouchableOpacity onPress={() => onOpenTab('wallets')}>
+            <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>
+              {isAr ? 'عرض الكل' : 'View all'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          onScroll={(e) => {
+            const page = Math.round(e.nativeEvent.contentOffset.x / (WALLET_CARD_WIDTH * 3));
+            setWalletStripPage(page);
+          }}
+          scrollEventThrottle={32}
+          contentContainerStyle={{ gap: 8, paddingRight: isRTL(cfg.lang) ? 0 : 4, paddingLeft: isRTL(cfg.lang) ? 4 : 0 }}
+        >
+          {walletRows.map((wallet) => {
+            const currencyMeta = CURRENCIES.find((item) => item.code === (wallet.currency || cfg.currency));
+            const currencyName = currencyMeta ? (isAr ? currencyMeta.name : currencyMeta.nameEn) : (wallet.currency || cfg.currency);
+            return (
+              <View key={wallet.id} style={[s.walletStripCard, { width: WALLET_CARD_WIDTH, backgroundColor: th.card, borderColor: th.border }]}>
+                <Text style={{ color: th.text, fontSize: 12, ...weight('800'), textAlign: align }} numberOfLines={1}>
+                  {getWalletLabel(wallet, cfg.lang)}
+                </Text>
+                <View style={[s.walletStripIcon, { backgroundColor: th.primSoft }]}>
+                  <Ionicons name={wallet.id === defaultWalletId ? 'star' : 'wallet-outline'} size={16} color={th.primary} />
+                </View>
+                <Text style={{ color: th.text, fontSize: 14, ...weight('900'), textAlign: align }} numberOfLines={1} adjustsFontSizeToFit>
+                  {hidden ? '••••••' : `${formatMoneyNumber(wallet.availableBalance, wallet.currency || cfg.currency, cfg.lang)} ${wallet.currency || cfg.currency}`}
+                </Text>
+                <Text style={{ color: th.faint, fontSize: 10, ...weight('700'), textAlign: align }} numberOfLines={1}>
+                  {currencyName}
+                </Text>
+              </View>
+            );
+          })}
+        </ScrollView>
+        {pageCount > 1 ? (
+          <View style={[s.walletStripDots, { flexDirection: rowDir }]}>
+            {Array.from({ length: pageCount }).map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  s.walletStripDot,
+                  { backgroundColor: index === walletStripPage ? th.primary : th.border },
+                ]}
+              />
+            ))}
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
   const renderWalletPanel = () => (
     showWalletStrip ? (
       <Modal visible={showWalletDetails} transparent animationType="fade" onRequestClose={() => setShowWalletDetails(false)}>
@@ -1184,6 +1255,7 @@ export default function HomeScreen({
         </View>
         ) : null}
 
+        {renderWalletStrip()}
         {renderWalletPanel()}
 
         {!hasMeaningfulHomeData ? (
@@ -1313,6 +1385,12 @@ const s = StyleSheet.create({
   quickEntryIcon:{ width: 32, height: 32, borderRadius: 10, borderWidth: 0, alignItems: 'center', justifyContent: 'center' },
   quickEntryLabel:{ fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: 'center', maxWidth: '100%' },
   walletSummary:{ alignItems: 'center', gap: 8, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8, marginTop: 10 },
+  walletStripBlock: { marginBottom: 10 },
+  walletStripHead: { alignItems: 'center', marginBottom: 8 },
+  walletStripCard: { borderWidth: 1, borderRadius: RADIUS.md, padding: 10, gap: 4, ...SHADOW.card },
+  walletStripIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginVertical: 2 },
+  walletStripDots: { alignItems: 'center', justifyContent: 'center', gap: 5, marginTop: 8 },
+  walletStripDot: { width: 6, height: 6, borderRadius: 3 },
   monthMetricsBlock:{ marginBottom: 8 },
   monthMetricsHead:{ alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 2 },
   tileGrid:     { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 8 },
