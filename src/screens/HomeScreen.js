@@ -31,6 +31,12 @@ import { deriveDisplayName } from '../lib/accountIdentity';
 import { getMonthTransactionsByKey, getRecentTransactions, getTransactionIndex } from '../lib/transactionIndex';
 import { averageGoalProgress, summarizeCommitmentCurrencies, summarizeGoalCurrencies } from '../lib/entityCurrencySummary';
 import { ARCHIVE_SCOPE } from '../lib/archiveScope';
+import {
+  getLedgerNamespace,
+  queryLedgerSummary,
+  queryLedgerTransactions,
+  queryLedgerWalletPositions,
+} from '../lib/activeLedgerRepository';
 const noop = () => {};
 
 const copy = (lang) => {
@@ -205,18 +211,21 @@ export default function HomeScreen({
       setSqlHome(null);
       return () => { cancelled = true; };
     }
-    // KNOWN INERT — Phase 11-B. getLedgerNamespace, queryLedgerSummary,
-    // queryLedgerTransactions and queryLedgerWalletPositions are used below but
-    // never imported into this module (true at f47bebde, before Phase 11). The
-    // first reference throws ReferenceError, sqlHome stays null, and the screen
-    // silently falls back to getWalletAvailableBalances over the hot in-memory
-    // array — so the posting-derived, ALL-scoped balance this block asks for
-    // has never actually reached the Home screen.
+    // P11-B: this block previously threw ReferenceError on every run (the four
+    // ledger functions below were used but never imported), so sqlHome stayed
+    // null and this screen silently showed the hot-array fallback balance
+    // instead. Fixed by importing them.
     //
-    // Deliberately NOT repaired here: adding the imports switches which source
-    // produces a real user's displayed balance, which is exactly the change
-    // Phase 11-B owns and which needs its own gate and device acceptance.
-    // The archive scopes below are already correct for that revival.
+    // This is not a new, unproven balance source: queryLedgerWalletPositions
+    // (ALL-scoped, posting-derived, no archived_at predicate — see
+    // archiveScope.js) is the same query transactionsSlice.js already uses via
+    // commandWalletPosition to validate whether a real expense can be posted
+    // for these same cutover users. Wiring it into Home only fixes which
+    // screen reads it; it does not introduce a new source of truth.
+    //
+    // Scope: this effect only runs when financialLedgerV7Cutover is true (see
+    // the guard above). Non-cutover users are completely unaffected — sqlHome
+    // stays null for them and the hot-array fallback is unchanged.
     const run = async () => {
       const namespace = getLedgerNamespace(workspaceNamespace, cfg);
       const scope = getActiveScope(cfg);
@@ -697,7 +706,12 @@ export default function HomeScreen({
   // If the user has a ledger, the configured Month summary stays visible even
   // when the current month is still zero. Only a truly empty ledger uses the
   // first-entry state. This keeps Home faithful to the user's Home settings.
-  const hasLedgerEntries = financialLedgerV7Cutover && sqlHome?.summary ? Number(sqlHome.summary.count || 0) > 0 || recent.length > 0 : scopedTrans.length > 0;
+  // Same guard as effectiveMonthSummary above: queryLedgerSummary's V6 legacy
+  // fallback returns no `supported` field at all, so `supported !== false` must
+  // be checked explicitly rather than assumed from sqlHome.summary being truthy.
+  const hasLedgerEntries = financialLedgerV7Cutover && sqlHome?.summary?.supported !== false && sqlHome?.summary
+    ? Number(sqlHome.summary.count || 0) > 0 || recent.length > 0
+    : scopedTrans.length > 0;
   const visibleHomeCards = hasLedgerEntries
     ? homeCards.filter(item => item.visible !== false)
     : [];

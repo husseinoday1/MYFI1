@@ -385,8 +385,15 @@ export const buildFinancialShadowProjectionV7 = ({
   }
   for (const transaction of [...dedupedArchived, ...activeTransactions]) {
     if (!(transaction.isGoalSaving || transaction.flowType === 'goal_allocation')) continue;
-    const isArchived = !!transaction.archivedAt;
-    if (!isArchived && !transaction.allocationReleased) continue;
+    // P11-B / D2: being archived must never by itself release a reserved
+    // allocation (§73) — only a real, user-driven release does. Before this
+    // fix, every archived goal-allocation carried into V7 got a synthetic
+    // release regardless of `allocationReleased`, mirroring the same violation
+    // removed from archiveFinancialTransactionsV7. An archived-but-unreleased
+    // allocation now stays reserved through migration, matching the legacy
+    // layer, where the archived contribution keeps counting via archivedSaved
+    // instead of being released.
+    if (!transaction.allocationReleased) continue;
     const amount = Math.abs(Number(transaction.allocationWalletAmount ?? transaction.allocationAmount ?? 0));
     if (!amount) continue;
     syntheticTransactions.push({

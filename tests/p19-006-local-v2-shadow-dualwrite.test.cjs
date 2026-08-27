@@ -22,7 +22,11 @@ for (const token of [
 
 assert.match(repository, /const prepareLocalEntity[\s\S]*baseRevision:\s*currentRevision/);
 assert.match(repository, /revision:\s*currentRevision \+ 1/);
-assert.match(repository, /insertFinancialTransactionOutbox\(txn, releaseCommand, \{ commandId: shadowCommandId \}\)/);
+// P11-B / D2 removed the archive-time goal_release synthesis this literal call
+// site belonged to (archiveFinancialTransactionsV7 no longer builds a
+// releaseCommand at all). The dual-write contract this line existed to check —
+// a batch's shadowCommandId threaded into every outbox write in the same
+// transaction — is still exercised by the entity-outbox assertion below.
 assert.match(repository, /insertEntityOutbox\(txn, entity, \{ commandId: shadowCommandId \}\)/);
 assert.match(repository, /financialTransactionShadowPayload/);
 assert.doesNotMatch(

@@ -3079,7 +3079,6 @@ export const archiveFinancialTransactionsV7 = async ({
   if (!Number.isInteger(targetYear) || !ids.length) return { supported: true, ok: false, reason: 'archive_input_invalid' };
   return enqueueWrite(async () => {
     let changed = 0;
-    let releasedAllocations = 0;
     await runLedgerExclusiveTransaction(db, async (txn) => {
       const shadowCommandId = await createShadowCommandIdV2(txn);
       for (const id of ids) {
@@ -3116,77 +3115,15 @@ export const archiveFinancialTransactionsV7 = async ({
           payload: { transactionId: id, archiveYear: targetYear, archivedAt, revision },
           createdAt: archivedAt,
         });
-        const original = parseJson(row.payload_json, {}) || {};
-        if ((row.kind === 'goal_allocation' || original.isGoalSaving) && !original.allocationReleased) {
-          const releaseId = `v7-archive-release:${id}`;
-          const existingRelease = await txn.getFirstAsync(
-            `SELECT id FROM ledger_financial_transactions_v7 WHERE namespace=? AND id=? LIMIT 1`,
-            namespace, releaseId,
-          );
-          if (!existingRelease?.id) {
-            const reservedRows = await txn.getAllAsync(
-              `SELECT p.account_id,p.amount_minor,p.currency_code,
-                      a.name,a.account_type,a.scope,a.status,a.created_at,a.updated_at,a.archived_at,
-                      r.numerator,r.denominator
-                 FROM ledger_postings_v7 p
-                 JOIN ledger_accounts_v7 a ON a.namespace=p.namespace AND a.id=p.account_id
-            LEFT JOIN ledger_exchange_rates_v7 r ON r.namespace=p.namespace AND r.id=p.exchange_rate_id
-                WHERE p.namespace=? AND p.transaction_id=? AND p.bucket='reserved' AND p.amount_minor>0
-                ORDER BY p.id`,
-              namespace, id,
-            );
-            if (reservedRows.length) {
-              const baseCurrency = String(original.baseCurrencyCode || 'IQD').toUpperCase();
-              const releaseCommand = buildFinancialLedgerCommand({
-                namespace,
-                wallets: reservedRows.map(item => ({
-                  id: String(item.account_id), name: item.name || '', type: item.account_type || 'other',
-                  scope: item.scope || row.scope || 'personal', currency: item.currency_code,
-                  status: item.status || 'active', createdAt: item.created_at, updatedAt: item.updated_at,
-                  archivedAt: item.archived_at || null,
-                })),
-                baseCurrency,
-                now: archivedAt,
-                transaction: {
-                  id: releaseId,
-                  title: 'Archived goal allocation release',
-                  amt: 0,
-                  walletAmount: 0,
-                  baseAmount: 0,
-                  baseAmountMinor: 0,
-                  allocationAmount: Math.abs(Number(original.allocationAmount || 0)),
-                  allocationBaseAmountMinor: Math.abs(Number(original.allocationBaseAmountMinor || 0)),
-                  releaseAllocations: reservedRows.map(item => ({
-                    walletId: String(item.account_id),
-                    amountMinor: Math.abs(Number(item.amount_minor || 0)),
-                    currencyCode: String(item.currency_code),
-                    exchangeRate: item.currency_code === baseCurrency
-                      ? 1
-                      : Number(item.numerator || 0) / Number(item.denominator || 1) || Number(original.exchangeRate || 1),
-                  })),
-                  baseCurrencyCode: baseCurrency,
-                  dateISO: String(original.dateISO || row.date_iso),
-                  occurredAt: String(original.occurredAt || row.occurred_at || archivedAt),
-                  scope: String(original.scope || row.scope || 'personal'),
-                  flowType: 'goal_release',
-                  isGoalRelease: true,
-                  goalId: original.goalId || null,
-                  hiddenFromHistory: true,
-                  archiveYear: targetYear,
-                  archivedAt,
-                  rateDate: original.rateDate || original.dateISO || row.date_iso,
-                  rateSource: original.rateSource || 'archive_reserved_release',
-                  idempotencyKey: `archive-release:${id}`,
-                  createdAt: archivedAt,
-                  updatedAt: archivedAt,
-                },
-              });
-              await insertCommandWithoutOutbox(txn, releaseCommand);
-              await insertFinancialTransactionOutbox(txn, releaseCommand, { commandId: shadowCommandId });
-              releasedAllocations += 1;
-            }
-          }
-        }
+        // P11-B / D2: archiving a goal_allocation used to synthesize a hidden
+        // goal_release transaction here, moving its reserved posting to
+        // available. That was a real balance change caused solely by pressing
+        // Archive (§73), and it disagreed with the legacy layer, which keeps a
+        // goal's archived contribution counted via archivedSaved rather than
+        // releasing it. Removed: archiving now only sets archived_at/archive_year
+        // on the row above, exactly like every other transaction kind. The
+        // reserved posting is untouched, so the goal's reserved/available split
+        // does not move.
         changed += 1;
       }
       for (const item of Array.isArray(entityChanges) ? entityChanges : []) {
@@ -3210,7 +3147,7 @@ export const archiveFinancialTransactionsV7 = async ({
       namespace, targetYear,
     );
     return {
-      supported: true, ok: true, changed, releasedAllocations,
+      supported: true, ok: true, changed,
       archivedYearCount: Number(row?.count || 0),
     };
   });

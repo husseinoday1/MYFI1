@@ -342,12 +342,135 @@ captured and diffed, and are identical apart from the three tests this work adds
    Coverage returns when 11-B lifts the freeze; 11-B must re-verify it rather
    than trust a green result.
 
-## 7. Next exact action
+## 7. Phase 11-B — increment 1 (2026-08-27)
 
-1. Planning & Audit to note the §6.4 scope refinement (D5's derived-totals half
-   moving to 11-B) and rule on the CI-workflow gap in §6.6.
-2. On explicit user approval: commit 11-A, then resolve the CI gap so a named run
-   ID exists before 11-A is called closed.
-3. Then open 11-B: remove the F1 mutation, revive the Home-screen posting-derived
-   ALL balance (F5), resolve F6 per D2, build the D3 repair migration as its own
-   gate, and switch report totals onto derived postings per D5.
+Branch `impl2/phase11-archive-consolidation-2026-08-27`, on top of the 11-A
+merge commit `1781d71`. Not committed, not pushed as of writing this section.
+
+Planning & Audit rulings for 11-B carried forward from the handoff: option (ب)
+approved for the eventual `openingBalanceMode: 'ledger'` completion (full F1
+removal), with an **explicit real-device acceptance gate required before any
+production activation** — this increment does not touch that gate; it does the
+parts that are safely verifiable by CI alone.
+
+### 7.1 P11B-001 — balance-parity harness
+
+New `src/lib/archiveBalanceParity.js`. Compares the legacy hot-array balance
+against the canonical posting-derived balance, wallet by wallet, in minor
+units. **Has no repair path by design** — per the D3 ruling, disagreement is
+reported, never silently corrected. `summarizeParityForDiagnostics` reduces a
+result to counts and wallet ids only, with no amounts, satisfying Standing
+Engineering Rule 6 before this ever reaches a log or an evidence file.
+
+Test (`p11b-balance-parity.test.mjs`) proves: the two sources agree unarchived;
+they still agree after archiving (the actual precondition for ever switching
+the source); the harness genuinely detects a one-minor-unit drift and an
+absent-wallet case rather than absorbing them; it does not mutate its inputs;
+its diagnostic summary contains no amount; and agreement survives a second
+archive.
+
+### 7.2 HomeScreen balance source revived
+
+The `HomeScreen.js` block flagged as inert in 11-A (four ledger functions used
+but never imported, throwing `ReferenceError` on every run for every
+V7-cutover user) now actually runs. This was judged safe to do inside 11-B
+itself, ahead of the full F1/model migration, because `queryLedgerWalletPositions`
+— the ALL-scoped, posting-derived query this revives — is not a new or unproven
+source: `transactionsSlice.js` already uses the same query (via
+`commandWalletPosition`) to gate whether a real expense can be posted for these
+same cutover users. Wiring it into Home only fixes which screen reads it.
+
+Scope is unchanged for non-cutover users: the effect still bails to
+`sqlHome = null` before any query when `financialLedgerV7Cutover` is false.
+
+Test (`run-p11b-homescreen-balance-source.cjs`) proves: all four functions are
+imported and called; the `KNOWN INERT` marker is gone; the wallet-position call
+still asks for ALL; the cutover guard still bails out first.
+
+**Found by `/code-review` (high effort) and fixed in this increment:**
+`hasLedgerEntries` (line 709, pre-existing code that only became reachable by
+this fix) used `sqlHome?.summary` without the `supported !== false` guard
+`effectiveMonthSummary` uses two lines earlier — and `queryLedgerSummary`'s V6
+legacy-branch return has no `supported` field at all, unlike its sibling
+`queryLedgerWalletPositions`. Because `financialLedgerV7Cutover` (Zustand,
+persisted to AsyncStorage) and `ledger_workspace_state_v7.source_mode`
+(SQLite) are two independently-persisted flags that must stay in lockstep
+across crashes and partial cutovers, a divergence window is realistic, not
+theoretical. Fixed by adding the same guard; regression-tested by asserting
+both call sites share the identical guard expression, with a negative control
+that fails when the guard is removed.
+
+### 7.3 F6 resolved on both code paths (D2)
+
+Archiving a `goal_allocation` used to synthesize a hidden `goal_release`
+transaction, releasing its reserved posting to available balance — a real
+balance change caused solely by pressing Archive (§73), disagreeing with the
+legacy layer, which keeps the contribution counted via `archivedSaved`
+instead of releasing it.
+
+Two separate code paths carried this violation and both are now fixed:
+
+- **`archiveFinancialTransactionsV7`** (`financialLedgerV7Repository.js`) — the
+  runtime archive-time synthesis (83 lines removed). Archiving a goal
+  allocation now only sets `archived_at`/`archive_year`, exactly like every
+  other transaction kind. The `releasedAllocations` return field is gone; its
+  only caller (`dataSlice.js`) never read it.
+- **`buildFinancialShadowProjectionV7`** (`financialLedgerV7Migration.js`) — a
+  symmetric, previously-unnoticed instance in the Cold-Archive-to-V7 migration
+  path: every archived goal-allocation being migrated got a synthetic release
+  regardless of `transaction.allocationReleased`. Fixed to gate on
+  `allocationReleased` alone — a real, user-driven release still carries
+  through migration; "archived" no longer implies "released".
+
+Tests:
+- `financial-ledger-v7-runtime.test.mjs` updated: asserts no release posting is
+  inserted, the reserved-bucket query is never even issued, exactly one
+  outbox mutation syncs (not a hidden second one), and a repeat archive of an
+  already-archived row changes nothing.
+- New `p11b-migration-goal-release.test.mjs`: an archived-but-unreleased
+  allocation keeps its full reserved posting (matches the never-archived
+  case exactly); a genuinely-released allocation still gets its release
+  synthesized whether archived or not.
+- `p19-006-local-v2-shadow-dualwrite.test.cjs`: one assertion referencing the
+  removed call site literally was corrected with a note; the dual-write
+  contract it existed to check remains covered by the entity-outbox assertion
+  beside it.
+
+Both fixes were verified with actual negative controls (reintroducing the old
+condition and confirming the test fails), not just written and trusted.
+
+### 7.4 Verification
+
+`npm run test:gate`: **126 passed, 0 failed, 11 skipped** — up from 125 at the
+end of 11-A (5 new tests registered; the 3.5 freeze test and the ui-contract
+fix both still hold).
+
+`/code-review` at level high: 1 finding, fixed in this increment (§7.2 above).
+
+Not committed or pushed yet.
+
+### 7.5 What remains open in 11-B
+
+Unchanged from the 11-A handoff, still gated on real-device acceptance before
+production activation:
+
+1. **F1 removal** — `commitYearArchive` still rewrites `openingBalance` and
+   truncates `debt.payments`/`goal.savings`. Removing this requires completing
+   the `openingBalanceMode: 'ledger'` migration project-wide (the D1 option ب
+   ruling) so the 14 remaining legacy-balance call sites
+   (`getWalletBalances`/`getWalletAvailableBalances` consumers: `AddTransModal`,
+   `NewItemModal`, `WalletBalanceCard`, `decisionEngine`, `financialCommandBalances`,
+   `financialIntegrity`, `notifications`, `HistoryScreen`, `HomeScreen`'s own
+   fallback, `SettingsLegacyScreen`, `calc.js`) keep working once
+   `openingBalance` is always zero. This is the largest remaining piece and the
+   one the device gate is specifically for.
+2. **D3 repair migration** — existing users who already archived carry a
+   rewritten `openingBalance` and truncated debt/goal history. Needs its own
+   evidenced, verified, non-silent migration, separate from (1).
+3. **D5 report derivation** — moving `cfg.archiveSummaries` floats onto derived
+   postings in `ReportsScreen`.
+
+Next exact action: report this increment to Planning & Audit; on approval,
+commit and push (CI-only acceptance, per the standing rule); then scope (1)
+above as its own dedicated sub-phase with an explicit device-gate plan, rather
+than attempting it inside a single further increment.

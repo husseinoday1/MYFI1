@@ -19,12 +19,14 @@ class FakeDatabase {
     currentTransactionRevision = null,
     currentEntityRevision = null,
     archivedGoal = false,
+    alreadyArchived = false,
   } = {}) {
     this.failOutbox = failOutbox;
     this.existingId = existingId;
     this.currentTransactionRevision = currentTransactionRevision;
     this.currentEntityRevision = currentEntityRevision;
     this.archivedGoal = archivedGoal;
+    this.alreadyArchived = alreadyArchived;
     this.events = [];
     this.meta = new Map();
     this.shadowId = 0;
@@ -72,7 +74,8 @@ class FakeDatabase {
     if (this.archivedGoal && sql.includes('SELECT kind,scope,date_iso,occurred_at,revision,payload_json,archived_at')) {
       return {
         kind: 'goal_allocation', scope: 'personal', date_iso: '2025-08-14',
-        occurred_at: '2025-08-14T12:00:00.000Z', revision: 2, archived_at: null,
+        occurred_at: '2025-08-14T12:00:00.000Z', revision: 2,
+        archived_at: this.alreadyArchived ? '2026-08-14T05:00:00.000Z' : null,
         payload_json: JSON.stringify({
           id: 'goal-archive-1', isGoalSaving: true, goalId: 'goal-1',
           allocationAmount: 25000, allocationBaseAmountMinor: 25000000,
@@ -395,6 +398,9 @@ const run = async () => {
   assert.equal(await clearFinancialWorkspaceV7({ namespace: 'user:test', database: clearDb }), true);
   assert.equal(liveGeneration(clearDb), 1, 'active workspace clear must advance generation in its transaction');
 
+  // P11-B / D2: archiving a goal_allocation must not synthesize a release —
+  // §73 forbids a balance change caused solely by pressing Archive, and the
+  // legacy layer keeps the same contribution counted rather than releasing it.
   const archiveDb = new FakeDatabase({ archivedGoal: true });
   const archived = await archiveFinancialTransactionsV7({
     namespace: 'user:test',
@@ -405,22 +411,37 @@ const run = async () => {
   });
   assert.equal(archived.ok, true);
   assert.equal(archived.changed, 1, `archived changed=${archived.changed}`);
-  assert.equal(archived.releasedAllocations, 1, `released allocations=${archived.releasedAllocations}`);
+  assert.equal('releasedAllocations' in archived, false, 'the release mechanism and its field must be gone');
   const releasePosting = archiveDb.events.find(event => (
     event.type === 'run'
     && event.sql.includes('INSERT INTO ledger_postings_v7')
     && event.args[2] === 'v7-archive-release:goal-archive-1'
   ));
-  assert.equal(releasePosting.args[4], 'reserved');
-  assert.equal(releasePosting.args[5], 'release');
-  assert.equal(releasePosting.args[6], -25000000, 'archive must release the reserved posting atomically');
+  assert.equal(releasePosting, undefined, '§73: archiving must not insert a reserved-release posting');
+  const reservedLookup = archiveDb.events.find(event => (
+    event.type === 'getAll' && event.sql.includes("p.bucket='reserved'")
+  ));
+  assert.equal(reservedLookup, undefined, 'archiving must not even query the reserved bucket any more');
   assert.equal(
     archiveDb.events.filter(event => event.type === 'run' && /INSERT(?: OR IGNORE)? INTO ledger_outbox_v2/.test(event.sql)).length,
-    2,
-    'archive and its hidden release must both be mutation-synced',
+    1,
+    'archiving a single transaction must sync exactly one mutation, not a hidden second one',
   );
   assert.equal(archiveDb.committed, true);
   assert.equal(liveGeneration(archiveDb), 1, `archive generation=${liveGeneration(archiveDb)}`);
+
+  // Repeat-action: archiving the same already-archived transaction again must
+  // still do nothing — the row's archived_at short-circuits before reaching any
+  // of this, so a repeat must change no rows and sync no further mutation.
+  const secondArchive = await archiveFinancialTransactionsV7({
+    namespace: 'user:test',
+    transactionIds: ['goal-archive-1'],
+    year: 2025,
+    archivedAt: '2026-08-15T05:00:00.000Z',
+    database: new FakeDatabase({ archivedGoal: true, alreadyArchived: true }),
+  });
+  assert.equal(secondArchive.ok, true);
+  assert.equal(secondArchive.changed, 0, 'a repeat archive of an already-archived row must change nothing');
 
   console.log('MYFI Financial Ledger V7 repository runtime mock passed.');
 };
