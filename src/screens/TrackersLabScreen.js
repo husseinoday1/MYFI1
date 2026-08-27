@@ -16,6 +16,7 @@ import { filterByActiveScope, getModules } from '../lib/modules';
 import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
 import { isSafelyArchivableTracker, isTrackerPastGracePeriod, latestMovementDate } from '../lib/trackerLifecycle';
+import { remainingInstallments } from '../store/domain';
 
 const money = (value) => Math.round(Math.abs(Number(value) || 0)).toLocaleString();
 const cleanNumber = parseNumberInput;
@@ -258,7 +259,12 @@ export default function TrackersLabScreen({
         const completedAt = oneTimeDone ? latestMovementDate(paymentRows, item.firstDueISO || null) : null;
         const ended = !item.archivedAt && oneTimeDone && isTrackerPastGracePeriod(completedAt);
         const status = oneTimeDone ? 'done' : item.active === false ? 'paused' : paidThisCycle ? 'paidMonth' : 'active';
+        // Derived from the same postings the row already reads — never a stored
+        // counter. paymentRows is already this commitment's payments, so it is
+        // the cheap equivalent of handing over the whole ledger.
+        const installmentsLeft = remainingInstallments(item, paymentRows);
         return {
+          installmentsLeft,
           id: `monthly:${item.id}`,
           sourceId: item.id,
           kind: 'monthly',
@@ -892,7 +898,11 @@ export default function TrackersLabScreen({
                         <View style={[s.trackerStateChip, { backgroundColor: th.cardHigh }]}>
                           <Text style={{ color: th.sub, fontSize: 10, lineHeight: 14, ...weight('800') }}>
                             {item.commitment.subType === 'installment'
-                              ? (isAr ? 'قسط' : 'Installment')
+                              ? (Number.isFinite(item.installmentsLeft)
+                                ? (item.installmentsLeft === 0
+                                  ? (isAr ? 'الأقساط مكتملة' : 'Installments complete')
+                                  : `${isAr ? 'قسط' : 'Installment'} · ${isAr ? `متبقٍ ${item.installmentsLeft} من ${item.commitment.totalInstallments}` : `${item.installmentsLeft} of ${item.commitment.totalInstallments} left`}`)
+                                : (isAr ? 'قسط' : 'Installment'))
                               : (isAr ? 'اشتراك' : 'Subscription')}
                           </Text>
                         </View>

@@ -129,6 +129,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const [commitmentCatTouched, setCommitmentCatTouched] = useState(false);
   const [commitmentRepeatMonthly, setCommitmentRepeatMonthly] = useState(true);
   const [commitmentSubType, setCommitmentSubType] = useState('general');
+  const [commitmentTotalInstallments, setCommitmentTotalInstallments] = useState('');
   const [expandedPicker, setExpandedPicker] = useState(null);
 
   useEffect(() => {
@@ -153,6 +154,8 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setCommitmentCat(suggestCategoryForText(presetName, commitmentCategories));
     setCommitmentCatTouched(false);
     setCommitmentRepeatMonthly(true);
+    setCommitmentSubType('general');
+    setCommitmentTotalInstallments('');
     setExpandedPicker(null);
   }, [visible, linkedPlanMode, presetKind, preset?.linkedName, preset?.linkedCurrency, requestedTrackerType, defaultWalletId, cfg.currency]);
 
@@ -197,6 +200,8 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
       setCommitmentCat(suggestCategoryForText(name, commitmentCategories));
       setCommitmentCatTouched(false);
       setCommitmentRepeatMonthly(true);
+      setCommitmentSubType('general');
+      setCommitmentTotalInstallments('');
     }
     if (value === 'receivable' && !modules.debtsReceivable) {
       await setCfg({ enabledModules: { debtsReceivable: true } });
@@ -240,6 +245,8 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setCommitmentCat('other');
     setCommitmentCatTouched(false);
     setCommitmentRepeatMonthly(true);
+    setCommitmentSubType('general');
+    setCommitmentTotalInstallments('');
     setExpandedPicker(null);
   };
 
@@ -431,6 +438,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         currencyCode: selectedEntityCurrency,
         repeatMonthly: commitmentRepeatMonthly,
         subType: commitmentSubType,
+        totalInstallments: commitmentTotalInstallments,
       });
       handleClose();
       return;
@@ -712,6 +720,13 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                   })}
                 </View>
               ) : null}
+              {isCommitment && commitmentSubType === 'installment' ? renderTextField({
+                label: isAr ? 'عدد الأقساط' : 'Number of installments',
+                value: commitmentTotalInstallments,
+                onChangeText: (value) => setCommitmentTotalInstallments(String(value).replace(/[^0-9]/g, '')),
+                keyboardType: 'numeric',
+                placeholder: isAr ? 'اختياري — مثلاً 12' : 'Optional — e.g. 12',
+              }) : null}
             </>
           )}
 

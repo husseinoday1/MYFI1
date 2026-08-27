@@ -26,6 +26,8 @@ import { secureAuthStorage } from '../src/lib/secureVault.js';
 import { resolveSystemTheme } from '../src/lib/systemTheme.js';
 import { getVisibleHistoryTransactions } from '../src/lib/history.js';
 import { getTransactionTagLabel, inferTransactionTag, normalizeTransactionTag } from '../src/lib/transactionTags.js';
+import { commitmentPaidCycleCount, remainingInstallments } from '../src/store/domain.js';
+import { normalizeCommitments } from '../src/lib/commitments.js';
 import { buildLeakInsights, suggestCategoryFromHistory } from '../src/lib/localIntelligence.js';
 import { commitmentCycleMonth, commitmentDueISO, deferredCommitmentDueISO, getUpcomingCommitments, monthsBetween } from '../src/lib/commitments.js';
 import { filterDismissedNotifications, notificationReadKey, pruneNotificationKeys } from '../src/lib/notificationCenter.js';
@@ -882,6 +884,90 @@ const runLinkedStoreAssertions = async () => {
   assert.equal(state.commitments[0].lastPaidMonth, '2026-08', 'editing a commitment transaction date must update its paid month');
   await state.deleteTrans(commitmentTx.id);
   assert.equal(useStore.getState().commitments[0].lastPaidMonth, null, 'deleting a commitment transaction must reopen it');
+
+  // --- Installment counter: repeat-action proof -----------------------------
+  // The counter is derived, not stored, so the thing that must hold is that
+  // paying the SAME plan over and over walks it down exactly one step per
+  // cycle, floors at zero, and never goes negative no matter how many extra
+  // payments are attempted.
+  useStore.setState({
+    trans: [],
+    debts: [],
+    goals: [],
+    commitments: normalizeCommitments([{
+      id: 'commit-inst', name: 'Car loan', amt: 100, day: 10, active: true,
+      repeatMonthly: true, walletId: 'cash', linkedType: 'none', linkedId: null,
+      subType: 'installment', totalInstallments: 3,
+    }], 'cash', 'IQD'),
+    wallets,
+    cfg: { ...initialCfg, currency: 'IQD', defaultWalletId: 'cash' },
+    user: null,
+  });
+  const instCommitment = () => useStore.getState().commitments.find(item => item.id === 'commit-inst');
+  const instLeft = () => remainingInstallments(instCommitment(), useStore.getState().trans);
+
+  assert.equal(instCommitment().totalInstallments, 3, 'installment plan size must survive normalization');
+  assert.equal(instLeft(), 3, 'an unpaid 3-installment plan must report 3 remaining');
+
+  // Run the same action repeatedly, one cycle month at a time.
+  const instMonths = ['2026-07-10', '2026-08-10', '2026-09-10', '2026-10-10', '2026-11-10'];
+  const instObserved = [];
+  for (const payDate of instMonths) {
+    const result = await useStore.getState().payCommitment('commit-inst', payDate, 'cash');
+    instObserved.push({ ok: result.ok, left: instLeft() });
+  }
+  assert.deepEqual(
+    instObserved,
+    [
+      { ok: true, left: 2 },
+      { ok: true, left: 1 },
+      { ok: true, left: 0 },
+      { ok: true, left: 0 },
+      { ok: true, left: 0 },
+    ],
+    'each installment payment must decrement remaining by exactly one, then floor at zero without going negative',
+  );
+  assert.equal(instLeft() >= 0, true, 'remaining installments must never be negative');
+  assert.equal(commitmentPaidCycleCount(useStore.getState().trans, 'commit-inst'), 5, 'five distinct cycle months must count as five paid cycles');
+
+  // Re-paying an ALREADY-SETTLED cycle must be refused and must not move the
+  // counter. Note this needs the cycle month passed explicitly: payCommitment
+  // advances cycle-by-cycle off lastPaidMonth rather than off the entry date,
+  // so a second call with a later date is a legitimate *next* cycle, not a
+  // duplicate.
+  const instPaidMonth = instCommitment().lastPaidMonth;
+  const instDuplicate = await useStore.getState().payCommitment('commit-inst', '2026-11-20', 'cash', instPaidMonth);
+  assert.equal(instDuplicate.ok, false, 'paying an already-settled cycle again must be refused');
+  assert.equal(instDuplicate.reason, 'already_paid');
+  assert.equal(instLeft(), 0, 'a refused duplicate payment must not change the remaining count');
+
+  // Deleting a payment must give the installment back — the whole point of
+  // deriving instead of storing a counter.
+  const instTxToDelete = useStore.getState().trans.find(tx => tx.isCommitmentPayment && tx.commitmentMonth === '2026-11');
+  assert.ok(instTxToDelete, 'the November installment payment must exist before deletion');
+  await useStore.getState().deleteTrans(instTxToDelete.id);
+  assert.equal(commitmentPaidCycleCount(useStore.getState().trans, 'commit-inst'), 4, 'deleting a payment must drop the paid-cycle count');
+
+  // A commitment reclassified away from 'installment' must not keep a stale plan size.
+  assert.equal(
+    normalizeCommitments([{ id: 'x', name: 'Reclassified', amt: 10, subType: 'subscription', totalInstallments: 12 }], 'cash', 'IQD')[0].totalInstallments,
+    null,
+    'a non-installment commitment must not carry a plan size',
+  );
+  // Garbage and out-of-range plan sizes must fail closed to null, not to a
+  // wrong number. Each input asserts its own exact expected output — a
+  // disjunction here would let a regression through.
+  const instNormalizeCases = [
+    [0, null], [-4, null], ['abc', null], [null, null], [undefined, null],
+    [NaN, null], [Infinity, null], ['', null],
+    [601, null], [1200, null], // out of range fails closed, never clamps
+    [1.7, 2], [12, 12], ['12', 12], [600, 600], [1, 1],
+  ];
+  instNormalizeCases.forEach(([input, expected]) => {
+    const value = normalizeCommitments([{ id: 'y', name: 'Bad', amt: 10, subType: 'installment', totalInstallments: input }], 'cash', 'IQD')[0].totalInstallments;
+    assert.equal(value, expected, `installment count ${String(input)} must normalize to ${String(expected)}, got ${String(value)}`);
+  });
+  assert.equal(remainingInstallments({ id: 'z', totalInstallments: null }, []), null, 'a non-installment commitment has no remaining count');
 
   useStore.setState({
     trans: [],

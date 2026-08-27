@@ -113,6 +113,35 @@ const latestCommitmentMonth = (trans = [], commitmentId) => {
   return months[months.length - 1] || null;
 };
 
+// How many cycles of an installment plan have actually been paid, counted
+// straight off the postings — the same source of truth `latestCommitmentMonth`
+// uses. Deduplicated by cycle month because `payCommitment` already refuses a
+// second payment for a month it has recorded (`already_paid`), so two rows for
+// one cycle (e.g. an edit that lands back on the same month) must still count
+// once.
+export const commitmentPaidCycleCount = (trans = [], commitmentId) => {
+  const months = new Set();
+  (Array.isArray(trans) ? trans : []).forEach(t => {
+    if (!t?.isCommitmentPayment || t.commitmentId !== commitmentId) return;
+    const month = t.commitmentMonth || monthKey(t.dateISO);
+    if (month) months.add(month);
+  });
+  return months.size;
+};
+
+// Installments remaining. DERIVED, never stored: financial contract rule 4
+// says every balance must be derivable from authoritative postings, and a
+// stored counter would silently drift the moment a payment is edited, deleted,
+// restored from backup, or replayed by sync. Deriving also gives the
+// "stops at zero, never negative" behaviour by construction rather than by a
+// guard someone can forget.
+// Returns null when this commitment is not an installment plan.
+export const remainingInstallments = (commitment, trans = []) => {
+  const total = Number(commitment?.totalInstallments);
+  if (!Number.isFinite(total) || total < 1) return null;
+  return Math.max(0, total - commitmentPaidCycleCount(trans, commitment.id));
+};
+
 export const syncCommitmentPaidMonth = (commitments = [], trans = [], commitmentId) =>
   commitments.map(item => {
     if (commitmentId && item.id !== commitmentId) return item;

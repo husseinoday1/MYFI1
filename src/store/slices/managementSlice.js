@@ -82,6 +82,7 @@ export const createManagementSlice = (set, get) => ({
       linkedType: item.linkedType || 'none',
       linkedId: item.linkedId || null,
       subType: item.subType,
+      totalInstallments: item.totalInstallments,
       scope: normalizeScope(item.scope, getEntryScope(get().cfg)),
       repeatMonthly: item.repeatMonthly !== false,
       active: item.active !== false,

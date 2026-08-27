@@ -162,3 +162,62 @@ existing records verbatim).
 Not yet pushed — held for explicit user push approval. The commitment
 `subType` (installment/subscription) schema addition remains outstanding —
 full Verification Floor work, not started in this pass.
+
+---
+
+## Addendum (Implementation 5, 2026-08-27) — `subType` picker live verification CLOSED
+
+The one outstanding gap from the Implementation 4 handoff (interactive
+selection of a `subType` option never driven to completion live) is now
+**closed with a full end-to-end live run** on the Expo-web dev server
+(`http://localhost:8098`, viewport 500x1400).
+
+Path exercised, in order, entirely through the app's own UI:
+
+1. Follow-ups tab → "Commitments" direct-action card → `NewItemModal` opens
+   with `kind: 'commitment'`. Field **"Commitment type" renders with default
+   "General"** — matches `useState('general')`.
+2. Tapping the field opens the picker sheet showing exactly the 3 expected
+   options: General / Installment / Subscription.
+3. **Tapping "Installment" succeeded** — the sheet closed and the field
+   re-rendered as **"Commitment type: Installment"**. This is the specific
+   step Implementation 4 could not complete.
+4. Filled name `Car loan`, amount `250,000`, tapped "Save commitment".
+5. Follow-ups list re-rendered showing the tracker card **"Car loan · Active
+   · Installment · Next: 2026-08-27"** — i.e. the `subType` badge in
+   `TrackersLabScreen.js` reads back correctly from the normalized
+   commitment. "Total commitments" moved 0 → 250,000 د.ع and the
+   All/Commitments filter counts moved 0 → 1.
+
+So the full data path is now live-confirmed, not just code-traced:
+`NewItemModal` state → `addCommitment` → `normalizeCommitments`
+(`normalizeSubType`) → ledger payload → `TrackersLabScreen` badge.
+
+### Why Implementation 4 could not do this (root cause, for future sessions)
+
+Two distinct obstacles, neither a code bug:
+
+- **The `computer` tool is unusable in this environment.** Every call fails
+  with "The Browser pane is currently hidden" after a 30s timeout, including
+  after `tabs_select`. Screenshots likewise. This is a harness/pane
+  limitation, not an app problem. **Workaround: drive the page entirely
+  through `javascript_tool`.**
+- **Naive JS clicking fails on React-Native-Web** because the element that
+  actually carries the React `onClick` is usually 1-3 ancestors above the
+  text node. Dispatching on the text node or on an arbitrary ancestor does
+  nothing silently. **Workaround: walk up the DOM looking for a React props
+  key (`__reactProps$...`) that has an `onClick`, and dispatch a full
+  pointerdown/mousedown/pointerup/mouseup/click sequence on that element.**
+- **Second trap that produced the false "empty rect" reading:** reading
+  `document.body.innerText` in the *same* `javascript_tool` call as the tap
+  returns the pre-render DOM, because React has not flushed yet. It looks
+  exactly like "the click did nothing". **Always read state back in a
+  separate call.**
+
+The tall viewport (500x1400) also matters: it puts the whole picker sheet in
+layout so the option rows have non-empty bounding rects.
+
+### Status
+
+No code change was required — the feature was already correct. This addendum
+records verification only.

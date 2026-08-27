@@ -24,6 +24,26 @@ export const COMMITMENT_SUB_TYPES = ['general', 'installment', 'subscription'];
 const normalizeSubType = (value) =>
   COMMITMENT_SUB_TYPES.includes(value) ? value : 'general';
 
+// The size of an installment plan, as the user entered it — a static plan
+// figure, never a running counter. How many are LEFT is derived from posted
+// payments (`remainingInstallments` in src/store/domain.js), so it can never
+// drift from the ledger, double-decrement, or go negative. Only meaningful
+// for subType 'installment'; forced to null otherwise so a commitment can't
+// carry a stale plan size after being reclassified.
+// Not an amortization schedule: this is a plain count of cycles, with no
+// interest/principal split (see the R04 contract freeze note in
+// docs/MYFI_FINANCIAL_CONTRACT.md).
+// Fails closed to null on anything out of range rather than clamping: a
+// clamped 1200 would render as "600 of 600 left", a plan size the user never
+// entered and cannot tell is wrong (contract rule 5, no silent repair).
+export const MAX_TOTAL_INSTALLMENTS = 600;
+const normalizeTotalInstallments = (value, subType) => {
+  if (subType !== 'installment') return null;
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n < 1 || n > MAX_TOTAL_INSTALLMENTS) return null;
+  return n;
+};
+
 const isMonthKey = value => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(value || ''));
 
 const dateToISO = (date = new Date()) => {
@@ -97,6 +117,7 @@ export const normalizeCommitments = (items = [], fallbackWalletId = null, fallba
     .map(item => {
       const firstDueISO = item.firstDueISO ? normalizeDate(item.firstDueISO) : null;
       const linkedType = normalizeLinkedType(item.linkedType);
+      const subType = normalizeSubType(item.subType);
       return {
         ...item,
         name: String(item.name || '').trim() || 'التزام شهري',
@@ -108,7 +129,8 @@ export const normalizeCommitments = (items = [], fallbackWalletId = null, fallba
         walletId: item.walletId || fallbackWalletId,
         linkedType,
         linkedId: linkedType === 'none' ? null : item.linkedId || null,
-        subType: normalizeSubType(item.subType),
+        subType,
+        totalInstallments: normalizeTotalInstallments(item.totalInstallments, subType),
         deferredUntilISO: isISODate(item.deferredUntilISO) ? item.deferredUntilISO : null,
         deferredCycleMonth: isMonthKey(item.deferredCycleMonth) ? item.deferredCycleMonth : null,
         lastPaidMonth: isMonthKey(item.lastPaidMonth) ? item.lastPaidMonth : null,
