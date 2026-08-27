@@ -188,7 +188,7 @@ export function AppButton({
 // Tinted rounded container behind a standalone icon (list-row leading icons,
 // category glyphs). Purely presentational — the color/tone decision stays with
 // the caller, this just standardizes size/radius/tint per ICON_CONTAINER.
-export function IconContainer({ th, icon, tone, size = 'md', plain = false, style }) {
+export function IconContainer({ th, icon, tone, size = 'md', plain = false, solid = false, style }) {
   const dim = ICON_CONTAINER[size] || ICON_CONTAINER.md;
   const accent = tone || th.primary;
   return (
@@ -203,11 +203,13 @@ export function IconContainer({ th, icon, tone, size = 'md', plain = false, styl
         },
         plain
           ? null
-          : { backgroundColor: `${accent}1A`, borderWidth: 1, borderColor: `${accent}30` },
+          : solid
+            ? { backgroundColor: accent }
+            : { backgroundColor: `${accent}1A`, borderWidth: 1, borderColor: `${accent}30` },
         style,
       ]}
     >
-      <Ionicons name={icon} size={Math.round(dim.size * 0.42)} color={accent} />
+      <Ionicons name={icon} size={Math.round(dim.size * 0.42)} color={solid ? '#FFFFFF' : accent} />
     </View>
   );
 }

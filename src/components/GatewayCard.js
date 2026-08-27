@@ -27,7 +27,7 @@ export function GatewayCard({
       <SurfaceCard th={th} style={s.card}>
         <View style={[s.headRow, { flexDirection: rowDirection(lang) }]}>
           <View style={s.iconWrap}>
-            <IconContainer th={th} icon={icon} tone={toneColor} size="md" />
+            <IconContainer th={th} icon={icon} tone={toneColor} size="md" solid />
             {index != null ? (
               <View
                 style={[
