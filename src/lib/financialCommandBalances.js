@@ -1,5 +1,6 @@
 import { getWalletAvailableBalances, getWalletBalances } from './wallets';
 import { queryLedgerWalletPositions } from './activeLedgerRepository';
+import { ARCHIVE_SCOPE } from './archiveScope';
 
 export const commandWalletPosition = async ({
   cutover = false,
@@ -13,7 +14,7 @@ export const commandWalletPosition = async ({
 } = {}) => {
   if (!walletId) return null;
   if (cutover) {
-    const sql = await queryLedgerWalletPositions({ namespace });
+    const sql = await queryLedgerWalletPositions({ namespace, archiveScope: ARCHIVE_SCOPE.ALL });
     if (sql?.supported) {
       const row = (sql.rows || []).find(item => item.id === walletId);
       if (!row) return null;
@@ -49,7 +50,7 @@ export const commandWalletBalance = async ({
 } = {}) => {
   if (!walletId) return null;
   if (cutover) {
-    const sql = await queryLedgerWalletPositions({ namespace });
+    const sql = await queryLedgerWalletPositions({ namespace, archiveScope: ARCHIVE_SCOPE.ALL });
     if (sql?.supported) {
       const row = (sql.rows || []).find(item => item.id === walletId);
       if (!row) return null;

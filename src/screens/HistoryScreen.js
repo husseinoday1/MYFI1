@@ -20,6 +20,7 @@ import { getVisibleHistoryTransactions, ledgerPageCoversFallback } from '../lib/
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import { getTransactionsNewestFirst } from '../lib/transactionIndex';
 import { activeLedgerSupported, getLedgerNamespace, queryLedgerTransactions } from '../lib/activeLedgerRepository';
+import { ARCHIVE_SCOPE } from '../lib/archiveScope';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
 
@@ -290,7 +291,7 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
         scope: cfg.activeScope !== 'all' ? cfg.activeScope : null,
         fromDate: dateBounds.from || null,
         toDate: dateBounds.to || null,
-        archived: false,
+        archiveScope: ARCHIVE_SCOPE.ACTIVE,
       });
       if (!result?.supported) {
         if (requestId === ledgerRequestRef.current) setLedgerQueryOk(false);

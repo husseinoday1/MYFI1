@@ -124,7 +124,7 @@ export const validateCanonicalLedgerStructure = (model = {}) => {
     // is refused.
     //
     // The reverse — archived with no year recorded — is deliberately NOT refused.
-    // markLedgerYearArchived COALESCEs the two columns independently, so a row
+    // upsertLedgerTransaction COALESCEs the two columns independently, so a row
     // archived without a year is reachable, and blocking it would refuse a
     // legitimate restore on an assumption this module has not verified. An
     // over-strict rule costs a user their restore just as surely as a lax one lets

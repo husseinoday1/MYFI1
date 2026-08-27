@@ -12,6 +12,13 @@ import {
   transactionWalletAmount,
 } from './financialCoreV2';
 import { inferFlowType } from './modules';
+import {
+  ARCHIVE_SCOPE,
+  archiveScopeClause,
+  archiveScopeFlag,
+  requireArchiveScope,
+  requireBalanceArchiveScope,
+} from './archiveScope';
 
 const SCHEMA_VERSION = 6;
 let schemaReady = false;
@@ -414,54 +421,11 @@ export const restoreLedgerTransaction = async (namespace = 'guest', id) => {
   });
 };
 
-export const markLedgerYearArchived = async ({ namespace = 'guest', year, scope = null, archived = true } = {}) => {
-  const db = await openDb();
-  const targetYear = Number(year);
-  if (!db || !Number.isInteger(targetYear)) return false;
-  const namespaceValue = ns(namespace);
-  const archivedAt = archived ? new Date().toISOString() : null;
-  const archiveYear = archived ? targetYear : null;
-  const updatedAt = new Date().toISOString();
-  const params = [archiveYear, archivedAt, updatedAt, namespaceValue, `${targetYear}-%`];
-  let sql = `UPDATE ledger_transactions
-                SET archive_year = ?, archived_at = ?, updated_at = ?
-              WHERE namespace = ? AND date_iso LIKE ? AND deleted_at IS NULL`;
-  if (scope && scope !== 'all') {
-    sql += ' AND scope = ?';
-    params.push(String(scope));
-  }
-  await enqueueWrite(() => db.runAsync(sql, ...params));
-  return true;
-};
-
-export const listLedgerArchivedYears = async (namespace = 'guest') => {
-  const db = await openDb();
-  if (!db) return [];
-  const rows = await db.getAllAsync(
-    `SELECT archive_year AS year,
-            scope,
-            COUNT(*) AS count,
-            SUM(CASE WHEN flow_type = 'income' THEN ABS(base_amount_minor) ELSE 0 END) AS income_minor,
-            SUM(CASE WHEN flow_type IN ('expense','commitment_payment') THEN ABS(base_amount_minor) ELSE 0 END)
-                + SUM(CASE WHEN kind = 'transfer' THEN ABS(fee_base_minor) ELSE 0 END) AS expense_minor,
-            MAX(base_currency) AS base_currency,
-            MAX(archived_at) AS archived_at
-       FROM ledger_transactions
-      WHERE namespace = ? AND archived_at IS NOT NULL AND deleted_at IS NULL
-      GROUP BY archive_year, scope
-      ORDER BY archive_year DESC, scope ASC`,
-    ns(namespace),
-  );
-  return rows.map(row => {
-    const currency = normalizeCurrencyCode(row.base_currency, 'IQD');
-    const income = moneyFromMinor(row.income_minor || 0, currency);
-    const expense = moneyFromMinor(row.expense_minor || 0, currency);
-    return {
-      year: Number(row.year), scope: row.scope || 'personal', count: Number(row.count || 0),
-      income, expense, net: income - expense, archivedAt: row.archived_at || null, local: true,
-    };
-  });
-};
+// P11-A: markLedgerYearArchived and listLedgerArchivedYears lived here and were
+// dead — nothing in src/ or tests/ ever called them. They were a third archive
+// representation alongside the cold archive and V7, which §72 forbids. The
+// ledger_transactions.archive_year/archived_at columns they wrote are still live
+// (the legacy read path and the archived-year exporters use them) and stay.
 
 const decodeTxRow = row => {
   const payload = parseJson(row?.payload_json, {}) || {};
@@ -629,20 +593,22 @@ const v7SummaryFromRows = (rows, walletId = null, fallbackCurrency = 'IQD') => {
 export const queryLedgerTransactions = async ({
   namespace = 'guest', limit = 250, cursor = null, search = '', flowType = null,
   categoryId = null, walletId = null, scope = null, fromDate = null, toDate = null,
-  archived = false, year = null, transactionClass = null,
+  archiveScope = null, year = null, transactionClass = null,
 } = {}) => {
+  const resolvedArchiveScope = requireArchiveScope(archiveScope, 'queryLedgerTransactions');
   const directDb = await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
     return queryV7TransactionPage(directDb, {
       namespace, limit, cursor, search, flowType, categoryId, walletId, scope,
-      fromDate, toDate, archived, year, transactionClass,
+      fromDate, toDate, archived: archiveScopeFlag(resolvedArchiveScope), year, transactionClass,
     });
   }
   const db = await openDb();
   if (!db) return { rows: [], nextCursor: null, supported: false };
   const clauses = ['namespace = ?', 'deleted_at IS NULL'];
   const params = [ns(namespace)];
-  if (archived) clauses.push('archived_at IS NOT NULL'); else clauses.push('archived_at IS NULL');
+  const archivedClause = archiveScopeClause(resolvedArchiveScope);
+  if (archivedClause) clauses.push(archivedClause);
   if (Number.isInteger(Number(year))) { clauses.push('date_iso LIKE ?'); params.push(`${Number(year)}-%`); }
   if (scope && scope !== 'all') { clauses.push('scope = ?'); params.push(String(scope)); }
   if (flowType) { clauses.push('flow_type = ?'); params.push(String(flowType)); }
@@ -682,12 +648,14 @@ export const queryLedgerTransactions = async ({
   };
 };
 
-export const queryLedgerSummary = async ({ namespace = 'guest', fromDate = null, toDate = null, scope = null, walletId = null, includeArchived = false } = {}) => {
+export const queryLedgerSummary = async ({ namespace = 'guest', fromDate = null, toDate = null, scope = null, walletId = null, archiveScope = null } = {}) => {
+  const resolvedArchiveScope = requireArchiveScope(archiveScope, 'queryLedgerSummary');
   const directDb = await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
     const clauses = ['t.namespace=?', 't.deleted_at IS NULL', "t.status='posted'", "COALESCE(json_extract(t.payload_json,'$.hiddenFromHistory'),0)<>1"];
     const params = [ns(namespace)];
-    if (!includeArchived) clauses.push('t.archived_at IS NULL');
+    const v7ArchivedClause = archiveScopeClause(resolvedArchiveScope, 't.archived_at');
+    if (v7ArchivedClause) clauses.push(v7ArchivedClause);
     if (fromDate) { clauses.push('t.date_iso>=?'); params.push(String(fromDate)); }
     if (toDate) { clauses.push('t.date_iso<=?'); params.push(String(toDate)); }
     if (scope && scope !== 'all') { clauses.push('t.scope=?'); params.push(String(scope)); }
@@ -728,7 +696,8 @@ export const queryLedgerSummary = async ({ namespace = 'guest', fromDate = null,
   if (!db) return null;
   const clauses = ['namespace = ?', 'deleted_at IS NULL'];
   const params = [ns(namespace)];
-  if (!includeArchived) clauses.push('archived_at IS NULL');
+  const legacyArchivedClause = archiveScopeClause(resolvedArchiveScope);
+  if (legacyArchivedClause) clauses.push(legacyArchivedClause);
   if (fromDate) { clauses.push('date_iso >= ?'); params.push(String(fromDate)); }
   if (toDate) { clauses.push('date_iso <= ?'); params.push(String(toDate)); }
   if (scope && scope !== 'all') { clauses.push('scope = ?'); params.push(String(scope)); }
@@ -753,13 +722,15 @@ export const queryLedgerSummary = async ({ namespace = 'guest', fromDate = null,
 };
 
 export const queryLedgerCategorySpend = async ({
-  namespace = 'guest', fromDate = null, toDate = null, scope = null, walletId = null, includeArchived = false,
+  namespace = 'guest', fromDate = null, toDate = null, scope = null, walletId = null, archiveScope = null,
 } = {}) => {
+  const resolvedArchiveScope = requireArchiveScope(archiveScope, 'queryLedgerCategorySpend');
   const directDb = await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
     const clauses = ['t.namespace=?', 't.deleted_at IS NULL', "t.status='posted'", "COALESCE(json_extract(t.payload_json,'$.hiddenFromHistory'),0)<>1"];
     const params = [ns(namespace)];
-    if (!includeArchived) clauses.push('t.archived_at IS NULL');
+    const v7ArchivedClause = archiveScopeClause(resolvedArchiveScope, 't.archived_at');
+    if (v7ArchivedClause) clauses.push(v7ArchivedClause);
     if (fromDate) { clauses.push('t.date_iso>=?'); params.push(String(fromDate)); }
     if (toDate) { clauses.push('t.date_iso<=?'); params.push(String(toDate)); }
     if (scope && scope !== 'all') { clauses.push('t.scope=?'); params.push(String(scope)); }
@@ -803,7 +774,8 @@ export const queryLedgerCategorySpend = async ({
   if (!db) return { rows: [], supported: false };
   const clauses = ['namespace = ?', 'deleted_at IS NULL'];
   const params = [ns(namespace)];
-  if (!includeArchived) clauses.push('archived_at IS NULL');
+  const legacyArchivedClause = archiveScopeClause(resolvedArchiveScope);
+  if (legacyArchivedClause) clauses.push(legacyArchivedClause);
   if (fromDate) { clauses.push('date_iso >= ?'); params.push(String(fromDate)); }
   if (toDate) { clauses.push('date_iso <= ?'); params.push(String(toDate)); }
   if (scope && scope !== 'all') { clauses.push('scope = ?'); params.push(String(scope)); }
@@ -833,7 +805,11 @@ export const queryLedgerCategorySpend = async ({
   };
 };
 
-export const queryLedgerWalletPositions = async ({ namespace = 'guest', scope = null } = {}) => {
+export const queryLedgerWalletPositions = async ({ namespace = 'guest', scope = null, archiveScope = null } = {}) => {
+  // §74: "Wallet Balance uses ALL financial postings always." The posting sum
+  // below deliberately carries no archived_at predicate; requiring the caller
+  // to say ALL out loud is what stops a future edit from narrowing it.
+  requireBalanceArchiveScope(archiveScope, 'queryLedgerWalletPositions');
   const directDb = await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
     const params = [ns(namespace)];
@@ -871,7 +847,7 @@ export const queryLedgerWalletPositions = async ({ namespace = 'guest', scope = 
 export const exportLedgerTransactions = async (namespace = 'guest') => {
   const directDb = await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
-    return queryV7PayloadRows(directDb, { namespace, archived: null });
+    return queryV7PayloadRows(directDb, { namespace, archived: archiveScopeFlag(ARCHIVE_SCOPE.ALL) });
   }
   const db = await openDb();
   if (!db) return [];
@@ -886,7 +862,7 @@ export const exportLedgerTransactions = async (namespace = 'guest') => {
 export const exportArchivedLedgerTransactions = async (namespace = 'guest') => {
   const directDb = await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
-    return queryV7PayloadRows(directDb, { namespace, archived: true });
+    return queryV7PayloadRows(directDb, { namespace, archived: archiveScopeFlag(ARCHIVE_SCOPE.ARCHIVED) });
   }
   const db = await openDb();
   if (!db) return [];
@@ -902,7 +878,7 @@ export const exportArchivedLedgerTransactions = async (namespace = 'guest') => {
 export const exportArchivedLedgerYear = async ({ namespace = 'guest', year, scope = null } = {}) => {
   const directDb = await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
-    return queryV7PayloadRows(directDb, { namespace, archived: true, year, scope });
+    return queryV7PayloadRows(directDb, { namespace, archived: archiveScopeFlag(ARCHIVE_SCOPE.ARCHIVED), year, scope });
   }
   const db = await openDb();
   const targetYear = Number(year);

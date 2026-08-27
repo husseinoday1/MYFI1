@@ -18,6 +18,7 @@ import { getWalletLabel } from '../lib/wallets';
 import { formatMonthLabel, monthNames } from '../lib/months';
 import { getTransactionIndex } from '../lib/transactionIndex';
 import { getLedgerNamespace, queryLedgerCategorySpend, queryLedgerSummary } from '../lib/activeLedgerRepository';
+import { ARCHIVE_SCOPE } from '../lib/archiveScope';
 import { currencyGroupsAreBaseOnly, mergeCurrencyAmounts, summarizeCommitmentCurrencies, summarizeDebtCurrencies, summarizeGoalCurrencies } from '../lib/entityCurrencySummary';
 
 const CHART_COLORS = ['#138A57', '#447FC1', '#C18428', '#C25761', '#6E68B5', '#4E8975'];
@@ -180,6 +181,14 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
   const previousMonthKey = `${previousNow.getFullYear()}-${String(previousNow.getMonth() + 1).padStart(2, '0')}`;
   const [scope, setScope] = useState('month');
   const [walletFilter, setWalletFilter] = useState('all');
+  // §75: "the report declares an explicit scope". Until Phase 11-B moves the
+  // archived contribution onto derived postings, the archived half can only be
+  // read from cfg.archiveSummaries, which has no per-wallet breakdown — so a
+  // wallet-filtered report can only speak for the active years. That was already
+  // true before Phase 11; the difference is that it is now stated rather than
+  // implied by a bare `walletFilter === 'all'` test at each use site.
+  const reportArchiveScope = walletFilter === 'all' ? ARCHIVE_SCOPE.ALL : ARCHIVE_SCOPE.ACTIVE;
+  const includesArchivedYears = reportArchiveScope === ARCHIVE_SCOPE.ALL;
   const [detailKey, setDetailKey] = useState(null);
   const [selectedMonthKey, setSelectedMonthKey] = useState(currentMonthKey);
   const [comparisonMode, setComparisonMode] = useState('none');
@@ -269,11 +278,13 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
         const [summary, categorySpend] = await Promise.all([
           queryLedgerSummary({
             namespace, ...periodDateBounds, scope: activeScope,
-            walletId: walletFilter === 'all' ? null : walletFilter, includeArchived: false,
+            walletId: walletFilter === 'all' ? null : walletFilter,
+            archiveScope: ARCHIVE_SCOPE.ACTIVE,
           }),
           queryLedgerCategorySpend({
             namespace, ...periodDateBounds, scope: activeScope,
-            walletId: walletFilter === 'all' ? null : walletFilter, includeArchived: false,
+            walletId: walletFilter === 'all' ? null : walletFilter,
+            archiveScope: ARCHIVE_SCOPE.ACTIVE,
           }),
         ]);
         if (!cancelled) setSqlPeriod({ summary, categories: categorySpend?.rows || [] });
@@ -352,7 +363,7 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
     const active = financialLedgerV7Cutover && sqlPeriod?.summary?.supported !== false && sqlPeriod?.summary
       ? { inc: Number(sqlPeriod.summary.income || 0), exp: Number(sqlPeriod.summary.expense || 0), bal: Number(sqlPeriod.summary.net || 0) }
       : financialReport.stats;
-    const archived = walletFilter === 'all'
+    const archived = includesArchivedYears
       ? scopedArchiveSummaries.filter(item => (
           scope === 'all' || (scope === 'year' && Number(item.year) === selectedMonth.getFullYear())
         ))
@@ -362,9 +373,9 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
       exp: total.exp + Number(item.expense || 0),
       bal: total.bal + Number(item.net || 0),
     }), active);
-  }, [financialReport.stats, sqlPeriod, financialLedgerV7Cutover, scopedArchiveSummaries, scope, selectedMonth, walletFilter]);
+  }, [financialReport.stats, sqlPeriod, financialLedgerV7Cutover, scopedArchiveSummaries, scope, selectedMonth, includesArchivedYears]);
   const reportEntryCount = useMemo(() => {
-    const archivedCount = walletFilter === 'all'
+    const archivedCount = includesArchivedYears
       ? scopedArchiveSummaries
           .filter(item => scope === 'all' || (scope === 'year' && Number(item.year) === selectedMonth.getFullYear()))
           .reduce((sum, item) => sum + Number(item.count || 0), 0)
@@ -373,7 +384,7 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
       ? Number(sqlPeriod.summary.count || 0)
       : periodTrans.length;
     return activeCount + archivedCount;
-  }, [periodTrans.length, sqlPeriod, financialLedgerV7Cutover, scopedArchiveSummaries, scope, selectedMonth, walletFilter]);
+  }, [periodTrans.length, sqlPeriod, financialLedgerV7Cutover, scopedArchiveSummaries, scope, selectedMonth, includesArchivedYears]);
 
   const owedCurrencyGroups = useMemo(
     () => summarizeDebtCurrencies(viewDebts, 'owed', cfg.currency),

@@ -17,6 +17,7 @@ import { describeSmartSource } from '../lib/smartEntry';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
 import { exportMyfiPackage, pickMyfiPackage, saveMyfiPackageToDevice, shareMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
 import { getColdArchiveNamespace, listColdArchiveYears, loadColdArchiveYear } from '../lib/localArchiveRepository';
+import { ARCHIVE_COMMIT_FROZEN, archiveCommitFreezeNotice } from '../lib/archiveCommitFreeze';
 import { filterByActiveScope, getActiveScope, getTransactionDisplayAmount, transactionFeatureEnabled } from '../lib/modules';
 import { getTransactionTagMeta } from '../lib/transactionTags';
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
@@ -223,6 +224,14 @@ export default function ArchiveScreen() {
   };
 
   const confirmArchiveCommit = (year, checksum) => {
+    // §77 keeps the export file and the internal archive apart, and the freeze
+    // follows that line: the user still has their saved archive package, only
+    // the commit that would remove the year from active data is withheld.
+    if (ARCHIVE_COMMIT_FROZEN) {
+      const notice = archiveCommitFreezeNotice(isAr);
+      Alert.alert(notice.title, notice.body);
+      return;
+    }
     Alert.alert(
       isAr ? `تأكيد أرشفة ${year}` : `Confirm ${year} archive`,
       isAr
@@ -527,7 +536,13 @@ export default function ArchiveScreen() {
             <View style={[s.safetyCard, { backgroundColor: th.primSoft, borderColor: `${th.primary}44`, flexDirection: rowDir }]}>
               <Ionicons name="shield-checkmark-outline" size={20} color={th.primary} />
               <Text style={{ color: th.primary, fontSize: 12, lineHeight: 19, ...weight('800'), flex: 1, textAlign: align }}>
-                {isAr ? 'تُحفظ السنة أولاً داخل SQLite وتُفحص، ثم تُزال من السجل النشط. السنة الحالية لا يمكن أرشفتها.' : 'The year is stored and verified in SQLite before leaving active history. The current year cannot be archived.'}
+                {ARCHIVE_COMMIT_FROZEN
+                  ? (isAr
+                    ? 'يمكنك إنشاء ملف أرشيف السنة والاحتفاظ به. إخراج السنة من البيانات النشطة موقوف مؤقتاً حتى إعادة بنائه بحيث لا يغيّر أي رصيد.'
+                    : 'You can create and keep a year archive file. Removing the year from active data is paused until it is rebuilt so that it changes no balance.')
+                  : (isAr
+                    ? 'تُحفظ السنة أولاً داخل SQLite وتُفحص، ثم تُزال من السجل النشط. السنة الحالية لا يمكن أرشفتها.'
+                    : 'The year is stored and verified in SQLite before leaving active history. The current year cannot be archived.')}
               </Text>
             </View>
           ) : null}

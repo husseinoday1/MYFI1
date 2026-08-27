@@ -20,6 +20,7 @@ import {
 import { buildPerformanceTestWorkspaceAsync, DEFAULT_PERFORMANCE_TEST_TIER } from '../../dev/performanceTestData';
 import { clearPerformanceSnapshot, flushScheduledPerformanceSnapshot } from '../../dev/performanceTestStorage';
 import { clearColdArchives, exportColdArchives, getColdArchiveNamespace, replaceColdArchives, storeColdArchiveYear, storeColdArchiveYears } from '../../lib/localArchiveRepository';
+import { ARCHIVE_COMMIT_FROZEN, ARCHIVE_COMMIT_FROZEN_REASON } from '../../lib/archiveCommitFreeze';
 import { compareTransactionsNewestFirst } from '../../lib/transactionIndex';
 import { activeLedgerSupported, clearLedgerNamespace, getLedgerNamespace, replaceLedgerSnapshot } from '../../lib/activeLedgerRepository';
 import { archiveFinancialTransactionsV7, clearFinancialWorkspaceV7 } from '../../lib/financialLedgerV7Repository';
@@ -543,6 +544,13 @@ export const createDataSlice = (set, get) => ({
   },
 
   commitYearArchive: async (year, packageChecksum = '', requestedScope = null, options = {}) => {
+    // §3.5 freeze (Phase 11-A). This check comes before the maintenance barrier
+    // on purpose: a frozen commit must not even take the barrier, let alone
+    // reach the openingBalance / debt / goal rewrites further down.
+    if (ARCHIVE_COMMIT_FROZEN) {
+      set({ ledgerError: ARCHIVE_COMMIT_FROZEN_REASON });
+      return false;
+    }
     // P19-015A2: archive moves hot/cold financial state under one maintenance barrier.
     if (!options?.maintenanceOwned) {
       return get().runFinancialMaintenance(

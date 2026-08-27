@@ -158,7 +158,7 @@ assert.ok(!/^s*imports/m.test(moduleText),
   'the validator is a pure function over the model and should need no imports at all');
 console.log('[PASS] shares nothing with the UI normalisation helpers');
 
-// The reverse direction must NOT be refused: markLedgerYearArchived sets the two
+// The reverse direction must NOT be refused: upsertLedgerTransaction sets the two
 // columns independently, so archived-without-a-year is reachable, and refusing it
 // would block a legitimate restore.
 const archivedNoYear = ledger();
