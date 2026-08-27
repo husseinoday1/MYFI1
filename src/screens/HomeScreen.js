@@ -1112,12 +1112,17 @@ export default function HomeScreen({
           </TouchableOpacity>
         </View>
 
+        {/* REF-01: the hero card is solid brand green in both light and dark, not
+            the pale/dark "container" tint th.primaryContainer resolves to
+            (#DCEFE5 light / #15382A dark) — using th.primary here is what the
+            image actually shows, and it's also why the period-pill overlays
+            below were low-contrast against the old pale background. */}
         {isHomeSectionVisible('hero') ? (
-        <View style={[s.hero, { backgroundColor: th.primaryContainer, borderColor: `${th.primary}55` }]}>
+        <View style={[s.hero, { backgroundColor: th.primary, borderColor: `${th.primary}55` }]}>
           <View style={[s.heroTop, { flexDirection: rowDir }]}>
             <View style={{ flex: 1 }}>
-              <Text style={[s.heroLabel, { color: th.sub, textAlign: align }]}>{isAr ? 'الرصيد المتاح' : 'Available balance'}</Text>
-              <Text style={[s.heroAmount, { color: th.onPrimaryContainer, textAlign: align }]} numberOfLines={1} adjustsFontSizeToFit>
+              <Text style={[s.heroLabel, { color: 'rgba(255,255,255,0.82)', textAlign: align }]}>{isAr ? 'الرصيد المتاح' : 'Available balance'}</Text>
+              <Text style={[s.heroAmount, { color: th.onPrimary, textAlign: align }]} numberOfLines={1} adjustsFontSizeToFit>
                 {moneyText(signed(heroBalance))}
               </Text>
             </View>
@@ -1126,7 +1131,7 @@ export default function HomeScreen({
                 onPress={() => setCfg({ homeBalancesHidden: !hidden })}
                 style={[s.heroIconBtn, { backgroundColor: 'rgba(255,255,255,0.10)' }]}
               >
-                <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={15} color={th.onPrimaryContainer} />
+                <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={15} color={th.onPrimary} />
               </TouchableOpacity>
             </View>
           </View>
@@ -1142,7 +1147,7 @@ export default function HomeScreen({
                 : pillItem.key === 'week' ? C.periodWeek
                 : pillItem.key === 'month' ? C.periodMonth
                 : C.periodYear;
-              const deltaColor = pillItem.net > 0 ? th.inc : pillItem.net < 0 ? th.exp : th.onPrimaryContainer;
+              const deltaColor = pillItem.net > 0 ? th.inc : pillItem.net < 0 ? th.exp : th.onPrimary;
               return (
                 <TouchableOpacity
                   key={pillItem.key}
@@ -1152,7 +1157,7 @@ export default function HomeScreen({
                     { backgroundColor: active ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.10)', borderColor: active ? 'rgba(255,255,255,0.4)' : 'transparent' },
                   ]}
                 >
-                  <Text style={{ color: th.onPrimaryContainer, fontSize: 10, ...weight('800'), textAlign: 'center' }} numberOfLines={1}>
+                  <Text style={{ color: 'rgba(255,255,255,0.82)', fontSize: 10, ...weight('800'), textAlign: 'center' }} numberOfLines={1}>
                     {pillLabel}
                   </Text>
                   <Text style={{ color: deltaColor, fontSize: 11, ...weight('900'), textAlign: 'center' }} numberOfLines={1}>
@@ -1167,11 +1172,11 @@ export default function HomeScreen({
               onPress={() => setShowWalletDetails(prev => !prev)}
               style={[s.walletSummary, { backgroundColor: 'rgba(255,255,255,0.10)', borderColor: 'rgba(255,255,255,0.12)', flexDirection: rowDir }]}
             >
-              <Ionicons name="wallet-outline" size={14} color={th.onPrimaryContainer} />
-              <Text style={{ color: th.onPrimaryContainer, fontSize: 12, ...weight('900'), flex: 1, textAlign: align }}>
+              <Ionicons name="wallet-outline" size={14} color={th.onPrimary} />
+              <Text style={{ color: th.onPrimary, fontSize: 12, ...weight('900'), flex: 1, textAlign: align }}>
                 {walletRows.length} {C.walletsWord}
               </Text>
-              <Text style={{ color: th.onPrimaryContainer, fontSize: 12, ...weight('900') }}>
+              <Text style={{ color: th.onPrimary, fontSize: 12, ...weight('900') }}>
                 {showWalletDetails ? C.hideDetails : C.showDetails}
               </Text>
             </TouchableOpacity>
