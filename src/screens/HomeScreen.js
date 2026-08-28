@@ -30,13 +30,14 @@ import { formatMonthLabel } from '../lib/months';
 import { deriveDisplayName } from '../lib/accountIdentity';
 import { getMonthTransactionsByKey, getRecentTransactions, getTransactionIndex } from '../lib/transactionIndex';
 import { averageGoalProgress, summarizeCommitmentCurrencies, summarizeGoalCurrencies } from '../lib/entityCurrencySummary';
+import { getLedgerNamespace, queryLedgerSummary, queryLedgerTransactions, queryLedgerWalletPositions } from '../lib/activeLedgerRepository';
 const noop = () => {};
 
 const copy = (lang) => {
   const ar = lang === 'ar';
   return {
     overview: ar ? 'نظرة عامة' : 'Overview',
-    allTransactions: ar ? 'كل المعاملات' : 'All transactions',
+    allTransactions: ar ? 'عرض كل الحركات' : 'View all transactions',
     currentMoney: ar ? 'المتبقي بعد الصرف' : 'Left after spending',
     thisMonth: ar ? 'هذا الشهر' : 'This month',
     periodDay: ar ? 'اليوم' : 'Today',
@@ -101,8 +102,8 @@ const copy = (lang) => {
     showDetails: ar ? 'إظهار' : 'Show',
     netMonth: ar ? 'صافي الشهر' : 'Month net',
     dueSoon: ar ? 'مستحقات' : 'Due',
-    monthSummary: ar ? '\u0645\u0644\u062e\u0635 \u0627\u0644\u0634\u0647\u0631' : 'Month summary',
-    netWord: ar ? '\u0627\u0644\u0635\u0627\u0641\u064a' : 'Net',
+    monthSummary: ar ? 'ملخص الشهر' : 'Month summary',
+    netWord: ar ? 'الصافي' : 'Net',
     showBalance: ar ? 'إظهار' : 'Show',
     hideBalance: ar ? 'إخفاء' : 'Hide',
     hiddenAmount: '****',
@@ -150,7 +151,7 @@ export default function HomeScreen({
   const align = textAlignFor(cfg.lang);
   const rowDir = rowDirFor(cfg.lang);
   const modules = getModules(cfg);
-  const accountName = deriveDisplayName({ user, cfg }) || (isAr ? '\u062d\u0633\u0627\u0628 \u0645\u062d\u0644\u064a' : 'Local account');
+  const accountName = deriveDisplayName({ user, cfg }) || (isAr ? 'حساب محلي' : 'Local account');
   const accountInitial = (accountName || 'M').trim().charAt(0).toUpperCase();
   const scopedTransAll = useMemo(
     () => filterByActiveScope(trans, cfg),
@@ -176,6 +177,7 @@ export default function HomeScreen({
   const [walletStripPage, setWalletStripPage] = useState(0);
   const [attentionExpanded, setAttentionExpanded] = useState(false);
   const [savingsExpanded, setSavingsExpanded] = useState(false);
+  const [recentExpanded, setRecentExpanded] = useState(true);
   const [editing,    setEditing]    = useState(null);
   const [details, setDetails] = useState(null);
   const [expandedRecentId, setExpandedRecentId] = useState(null);
@@ -584,7 +586,7 @@ export default function HomeScreen({
                 buttonStyle={{ backgroundColor: th.cardHigh, width: 32, height: 32, borderRadius: 10 }}
                 items={[
                   !protectedOpening ? { label: C.select, icon: 'checkmark-circle-outline', color: th.primary, onPress: () => recentSelection.toggle(t.id) } : null,
-                  { label: cfg.lang === 'ar' ? '\u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644' : 'Details', icon: 'reader-outline', color: th.primary, onPress: () => setDetails(t) },
+                  { label: cfg.lang === 'ar' ? 'التفاصيل' : 'Details', icon: 'reader-outline', color: th.primary, onPress: () => setDetails(t) },
                   editable ? { label: L.editTrans, icon: 'create-outline', color: th.primary, onPress: () => setEditing(t) } : null,
                   !protectedOpening ? { label: L.delete, icon: 'trash-outline', color: th.exp, danger: true, onPress: () => confirmDeleteRow(t) } : null,
                 ]}
@@ -720,7 +722,7 @@ export default function HomeScreen({
   const dueTextFor = (item) => {
     if (item.attentionType === 'commitment') {
       if (item.isDeferred && !item.actionable) {
-        return `${cfg.lang === 'ar' ? '\u0645\u0624\u062c\u0644 \u0625\u0644\u0649' : 'Deferred to'} ${formatCommitmentDate(item.dueISO, cfg.lang)}`;
+        return `${cfg.lang === 'ar' ? 'مؤجل إلى' : 'Deferred to'} ${formatCommitmentDate(item.dueISO, cfg.lang)}`;
       }
       const label = formatCommitmentMonth(item.dueISO, cfg.lang);
       if (item.monthsUntil < 0) return `${C.overdue} - ${label}`;
@@ -1123,51 +1125,82 @@ export default function HomeScreen({
     ) : null
   );
 
+  // Collapsible like Needs Attention / Savings — same header-toggle pattern,
+  // defaulting to open. `recent` is already capped to recentLimit (3)
+  // upstream; this section never fetches or renders more than that inline —
+  // "View all transactions" below routes to the existing History screen.
   const renderRecentSection = () => (
     <View>
-      <View style={[s.recentHead, { flexDirection: rowDir }]}>
-        <Text style={[s.recentTitle, { color: th.text, textAlign: align }]}>{L.recent}</Text>
-        <TouchableOpacity onPress={() => onOpenTab('history')} style={s.recentAllLink}>
-          <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.allTransactions}</Text>
-        </TouchableOpacity>
-      </View>
-      <MultiSelectBar
-        th={th}
-        lang={cfg.lang}
-        active={recentSelection.selecting}
-        count={recentSelection.selectedCount}
-        total={recent.length}
-        allSelected={recentSelection.allSelected}
-        onStart={recentSelection.start}
-        onToggleAll={recentSelection.toggleAll}
-        onDelete={confirmDeleteRecent}
-        onCancel={recentSelection.cancel}
-      />
-      {recent.length === 0 ? (
-        <View style={[s.empty, { borderColor: th.border }]}>
-          <Ionicons name="receipt-outline" size={34} color={th.faint} />
-          <Text style={{ color: th.text, ...weight('900'), fontSize: 15, marginTop: 10, textAlign: 'center' }}>
-            {C.emptyTitle}
-          </Text>
-          <Text style={{ color: th.sub, fontSize: 12, textAlign: 'center', marginTop: 6 }}>
-            {C.emptyBody}
-          </Text>
-          <View style={[s.emptyActions, { flexDirection: rowDir }]}>
-            <TouchableOpacity onPress={onAddIncome} style={[s.emptyAction, { backgroundColor: th.incBg, borderColor: `${th.inc}44` }]}>
-              <FinancialDirectionMark kind="income" color={th.inc} size={17} lang={cfg.lang} />
-              <Text style={{ color: th.inc, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة دخل' : 'Add income'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={onAddExpense} style={[s.emptyAction, { backgroundColor: th.expBg, borderColor: `${th.exp}44` }]}>
-              <FinancialDirectionMark kind="expense" color={th.exp} size={17} lang={cfg.lang} />
-              <Text style={{ color: th.exp, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة مصروف' : 'Add expense'}</Text>
-            </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => {
+          if (recentExpanded && recentSelection.selecting) recentSelection.cancel();
+          setRecentExpanded(value => !value);
+        }}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: recentExpanded }}
+        accessibilityLabel={`${recentExpanded ? C.hideDetails : C.showDetails} ${L.recent}`}
+        style={[s.recentHead, { flexDirection: rowDir }]}
+      >
+        <View style={[s.recentHeadTitle, { flexDirection: rowDir }]}>
+          <View style={[s.recentHeadIcon, { backgroundColor: th.cardHigh }]}>
+            <Ionicons name="receipt-outline" size={17} color={th.primary} />
           </View>
+          <Text style={[s.recentTitle, { color: th.text, textAlign: align }]}>{L.recent}</Text>
         </View>
-      ) : (
-        <View style={[s.recentList, { backgroundColor: th.card, borderColor: th.border }]}>
-          {recent.map(renderRow)}
-        </View>
-      )}
+        <Ionicons name={recentExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={th.primary} />
+      </TouchableOpacity>
+
+      {recentExpanded ? (
+        <>
+          <MultiSelectBar
+            th={th}
+            lang={cfg.lang}
+            active={recentSelection.selecting}
+            count={recentSelection.selectedCount}
+            total={recent.length}
+            allSelected={recentSelection.allSelected}
+            onStart={recentSelection.start}
+            onToggleAll={recentSelection.toggleAll}
+            onDelete={confirmDeleteRecent}
+            onCancel={recentSelection.cancel}
+          />
+          {recent.length === 0 ? (
+            <View style={[s.empty, { borderColor: th.border }]}>
+              <Ionicons name="receipt-outline" size={34} color={th.faint} />
+              <Text style={{ color: th.text, ...weight('900'), fontSize: 15, marginTop: 10, textAlign: 'center' }}>
+                {C.emptyTitle}
+              </Text>
+              <Text style={{ color: th.sub, fontSize: 12, textAlign: 'center', marginTop: 6 }}>
+                {C.emptyBody}
+              </Text>
+              <View style={[s.emptyActions, { flexDirection: rowDir }]}>
+                <TouchableOpacity onPress={onAddIncome} style={[s.emptyAction, { backgroundColor: th.incBg, borderColor: `${th.inc}44` }]}>
+                  <FinancialDirectionMark kind="income" color={th.inc} size={17} lang={cfg.lang} />
+                  <Text style={{ color: th.inc, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة دخل' : 'Add income'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={onAddExpense} style={[s.emptyAction, { backgroundColor: th.expBg, borderColor: `${th.exp}44` }]}>
+                  <FinancialDirectionMark kind="expense" color={th.exp} size={17} lang={cfg.lang} />
+                  <Text style={{ color: th.exp, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة مصروف' : 'Add expense'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <>
+              <View style={[s.recentList, { backgroundColor: th.card, borderColor: th.border }]}>
+                {recent.map(renderRow)}
+              </View>
+              <TouchableOpacity
+                onPress={() => onOpenTab('history')}
+                accessibilityRole="button"
+                style={[s.recentAllLink, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}
+              >
+                <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.allTransactions}</Text>
+                <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={15} color={th.primary} />
+              </TouchableOpacity>
+            </>
+          )}
+        </>
+      ) : null}
     </View>
   );
 
@@ -1211,7 +1244,7 @@ export default function HomeScreen({
             onPress={() => setCenterMode('profile')}
             style={[s.profileButton, { backgroundColor: th.card, borderColor: th.border }]}
             accessibilityRole="button"
-            accessibilityLabel={isAr ? '\u0641\u062a\u062d \u0627\u0644\u062d\u0633\u0627\u0628' : 'Open account'}
+            accessibilityLabel={isAr ? 'فتح الحساب' : 'Open account'}
           >
             <View style={[s.profileAvatar, { backgroundColor: th.primSoft }]}>
               {cfg.avatarUri ? <Image source={{ uri: cfg.avatarUri }} style={s.profileAvatarImage} /> : <Text style={{ color: th.primary, fontSize: 13, ...weight('900') }}>{accountInitial}</Text>}
@@ -1498,8 +1531,10 @@ const s = StyleSheet.create({
   sectionTitle: { fontSize: 12, ...weight('900'), marginBottom: 8, marginTop: 4 },
   row:          { minHeight: 58, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: RADIUS.lg, borderWidth: 1, marginBottom: 6, gap: 8 },
   recentHead:   { minHeight: 44, alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  recentHeadTitle:{ flex: 1, alignItems: 'center', gap: 8, minWidth: 0 },
+  recentHeadIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   recentTitle:  { flex: 1, fontSize: 14, lineHeight: 20, ...weight('900') },
-  recentAllLink:{ minHeight: 40, minWidth: 92, alignItems: 'center', justifyContent: 'center' },
+  recentAllLink:{ minHeight: 42, borderRadius: RADIUS.md, borderWidth: 1, marginTop: 8, marginBottom: 2, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12 },
   recentList:   { borderRadius: RADIUS.lg, borderWidth: 1, overflow: 'hidden' },
   recentRow:    { borderWidth: 0, borderRadius: 0, marginBottom: 0, paddingVertical: 9 },
   rowShell:     { width: '100%', alignItems: 'center', gap: 8 },

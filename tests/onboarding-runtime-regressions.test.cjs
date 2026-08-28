@@ -10,7 +10,8 @@ const constants = read('src/lib/constants.js');
 
 assert(onboarding.includes('detectSystemLang'), 'Onboarding must import system language detection');
 assert(onboarding.includes('useState(detectSystemLang())'), 'First-run onboarding must start from the device language');
-assert(onboarding.includes('LanguagePicker') && onboarding.includes('WelcomeSlide') && onboarding.includes('languageConfirmed'), 'The welcome screen must explicitly confirm the user language');
+assert(onboarding.includes('LanguagePicker') && onboarding.includes('WelcomeSlide'), 'The welcome screen must offer a language toggle');
+assert(!onboarding.includes('languageConfirmed') && !onboarding.includes("langMode: 'manual'"), 'The welcome language toggle must stay local to onboarding reading direction only, and must not persist as a whole-app preference');
 assert(onboarding.includes('const WELCOME_STEP = 0;') && onboarding.includes('const QUESTION_START_STEP = 1;') && onboarding.includes('const STEP_COUNT = ESSENTIALS_STEP + 1;'), 'Onboarding must remain a concise five-step flow with language on welcome');
 assert(onboarding.includes('PERSONALIZATION_QUESTIONS') && onboarding.includes('PersonalizationSlide'), 'Onboarding must use three visual personalization questions');
 assert(onboarding.includes('ChoiceSheet') && onboarding.includes('EssentialsSlide'), 'Onboarding must collect the real financial essentials through accessible selectors');

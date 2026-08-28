@@ -125,7 +125,7 @@ const copy = lang => {
     moneySetup_notSureSub: ar ? 'ابدأ بمحفظة ويمكنك التوسّع لاحقاً' : 'Start with one wallet and expand later',
     // Financial essentials
     customizeTitle: ar ? 'خصص تجربتك' : 'Customize your experience',
-    customizeBody: ar ? 'اختر البلد والعملة والمظهر، ثم سمِّ محفظتك الأولى.' : 'Choose your country, currency, appearance, and name your first wallet.',
+    customizeBody: ar ? 'اختر البلد والعملة والمظهر، ثم سمِّ محفظتك الأولى.' : 'Choose your country, currency, appearance, and name your first wallet.',
     country: ar ? 'البلد' : 'Country',
     baseCurrency: ar ? 'العملة' : 'Currency',
     appearance: ar ? 'المظهر' : 'Appearance',
@@ -190,8 +190,12 @@ const STEP_COUNT = ESSENTIALS_STEP + 1;
 export default function OnboardingScreen({ cfg, onDone }) {
   const { setCfg, editWallet } = useStore();
   const [step, setStep] = useState(0);
+  // Reader language is intentionally local to onboarding. It controls only
+  // onboarding copy/direction and is NEVER persisted into cfg.lang/langMode —
+  // the app's real language stays whatever it already is (device-detected by
+  // default) until the user changes it explicitly from Settings.
+  const appLang = cfg.langMode === 'system' ? detectSystemLang() : (cfg.lang || detectSystemLang());
   const [lang, setLang] = useState(detectSystemLang());
-  const [languageConfirmed, setLanguageConfirmed] = useState(false);
   const isAr = lang === 'ar';
   // Preview the appearance choice immediately. Before this, the screen kept
   // reading cfg.theme (the previously saved preference) until Start was
@@ -220,7 +224,10 @@ export default function OnboardingScreen({ cfg, onDone }) {
     || CURRENCIES.find(item => item.code === cfg.currency)
     || CURRENCIES.find(item => item.code === 'IQD')
     || CURRENCIES[0];
-  const effectiveWalletName = walletName.trim() || T.walletDefaultName;
+  // The default wallet name follows the app's ACTUAL language (appLang, the
+  // real persisted setting), not the temporary onboarding reading language —
+  // those are deliberately different values now.
+  const effectiveWalletName = walletName.trim() || copy(appLang).walletDefaultName;
 
   const goNext = () => setStep(s => Math.min(STEP_COUNT - 1, s + 1));
   const goBack = () => setStep(s => Math.max(0, s - 1));
@@ -245,8 +252,6 @@ export default function OnboardingScreen({ cfg, onDone }) {
       activeScope: profileType === 'personal_business' ? 'all' : walletScope,
       enabledModules: modulesForPersonalization(answers, profileType),
       demoMode: false,
-      langMode: 'manual',
-      lang,
       themeMode: 'manual',
       theme: themeChoice,
       onboardingPriorities: focusPriorities,
@@ -263,7 +268,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
 
   const stepBody = () => {
     if (step === WELCOME_STEP) {
-      return <WelcomeSlide th={th} isAr={isAr} T={T} selectedLanguage={lang} languageConfirmed={languageConfirmed} onSelectLanguage={(value) => { setLang(value); setLanguageConfirmed(true); }} />;
+      return <WelcomeSlide th={th} isAr={isAr} T={T} selectedLanguage={lang} onSelectLanguage={setLang} />;
     }
     if (step >= QUESTION_START_STEP && step < ESSENTIALS_STEP) {
       const question = PERSONALIZATION_QUESTIONS[step - QUESTION_START_STEP];
@@ -285,7 +290,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
           country={selectedCountry} currency={selectedCurrency}
           themeChoice={themeChoice}
           walletName={walletName} onChangeWalletName={setWalletName}
-          placeholder={T.walletDefaultName}
+          placeholder={copy(appLang).walletDefaultName}
           onCountry={() => setChoice('country')}
           onCurrency={() => setChoice('currency')}
           onAppearance={() => setChoice('appearance')}
@@ -299,11 +304,9 @@ export default function OnboardingScreen({ cfg, onDone }) {
     ? PERSONALIZATION_QUESTIONS[step - QUESTION_START_STEP]
     : null;
   const activeAnswer = activeQuestion ? personalization[activeQuestion.id] : null;
-  const canAdvance = step === WELCOME_STEP
-    ? languageConfirmed
-    : activeQuestion
-      ? (activeQuestion.multiple ? selectedValues(activeAnswer).length > 0 : Boolean(activeAnswer))
-      : true;
+  const canAdvance = activeQuestion
+    ? (activeQuestion.multiple ? selectedValues(activeAnswer).length > 0 : Boolean(activeAnswer))
+    : true;
   return (
     <View style={[s.screen, { backgroundColor: th.bg }]}>
       <View style={[s.topBar, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
@@ -392,44 +395,35 @@ export default function OnboardingScreen({ cfg, onDone }) {
   );
 }
 
-function LanguagePicker({ th, selected, confirmed, onSelect }) {
-  const options = [
-    { key: 'ar', title: 'العربية', subtitle: 'Arabic', icon: 'text-outline' },
-    { key: 'en', title: 'English', subtitle: 'English', icon: 'language-outline' },
-  ];
+// Small, unobtrusive pill toggle — top-right of Welcome only, not its own
+// step, not a card grid, not titled "choose language". Switches onboarding
+// reading language/direction immediately; never persisted (see appLang above).
+function LanguagePicker({ th, selected, onSelect }) {
+  const options = ['ar', 'en'];
   return (
-    <View style={[s.languagePicker, { backgroundColor: th.card, borderColor: th.border }]}>
-      <Text style={[s.languagePickerTitle, { color: th.sub }]}>اختر اللغة / Choose language</Text>
-      <View style={s.languageOptions}>
-        {options.map(option => {
-          const isSelected = confirmed && selected === option.key;
-          return (
+    <View style={[s.languagePicker, { borderColor: th.border, backgroundColor: th.cardHigh }]}>
+      {options.map((key, index) => {
+        const active = selected === key;
+        return (
+          <React.Fragment key={key}>
+            {index > 0 ? <View style={[s.languageSeparator, { backgroundColor: th.border }]} /> : null}
             <TouchableOpacity
-              key={option.key}
-              onPress={() => onSelect(option.key)}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: isSelected }}
-              style={[
-                s.languageOption,
-                { backgroundColor: isSelected ? th.primSoft : th.cardHigh, borderColor: isSelected ? th.primary : th.border },
-              ]}
+              onPress={() => onSelect(key)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={key === 'ar' ? 'العربية' : 'English'}
+              style={[s.languageOption, { backgroundColor: active ? th.primSoft : 'transparent' }]}
             >
-              <Text style={[s.languageCode, { color: isSelected ? th.primary : th.text }]}>{option.key.toUpperCase()}</Text>
-              <Text style={[s.languageName, { color: th.sub }]}>{option.title}</Text>
-              {isSelected ? (
-                <View style={[s.languageCheck, { backgroundColor: th.primary }]}>
-                  <Ionicons name="checkmark" size={12} color={th.onPrimary} />
-                </View>
-              ) : null}
+              <Text style={[s.languageCode, { color: active ? th.primary : th.sub }]}>{key.toUpperCase()}</Text>
             </TouchableOpacity>
-          );
-        })}
-      </View>
+          </React.Fragment>
+        );
+      })}
     </View>
   );
 }
 
-function WelcomeSlide({ th, isAr, T, selectedLanguage, languageConfirmed, onSelectLanguage }) {
+function WelcomeSlide({ th, isAr, T, selectedLanguage, onSelectLanguage }) {
   const cards = [
     { key: 'expenses', label: T.expenses, icon: 'bar-chart-outline' },
     { key: 'planning', label: T.planning, icon: 'calendar-outline' },
@@ -437,11 +431,11 @@ function WelcomeSlide({ th, isAr, T, selectedLanguage, languageConfirmed, onSele
   ];
   return (
     <View style={s.slide}>
+      <LanguagePicker th={th} selected={selectedLanguage} onSelect={onSelectLanguage} />
       <View style={s.heroCopy}>
         <Text style={[s.heroTitle, { color: th.text }]}>{T.welcomeTitle}</Text>
         <Text style={[s.heroBody, { color: th.sub }]}>{T.welcomeBody}</Text>
       </View>
-      <LanguagePicker th={th} selected={selectedLanguage} confirmed={languageConfirmed} onSelect={onSelectLanguage} />
       <View style={[s.welcomeCards, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
         {cards.map(card => (
           <View key={card.key} style={[s.welcomeCard, { backgroundColor: th.card, borderColor: th.border }]}>
@@ -588,13 +582,10 @@ const s = StyleSheet.create({
   welcomeCardLabel: { fontSize: 11, ...weight('900') },
   trustBadge: { marginTop: 16, borderRadius: 14, borderWidth: 1, paddingVertical: 10, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', gap: 7 },
   trustBadgeText: { fontSize: 11, ...weight('800') },
-  languagePicker: { borderRadius: 16, borderWidth: 1, padding: 10, marginBottom: 12 },
-  languagePickerTitle: { fontSize: 10, lineHeight: 16, textAlign: 'center', ...weight('800'), marginBottom: 8 },
-  languageOptions: { flexDirection: 'row', gap: 8 },
-  languageOption: { flex: 1, minHeight: 62, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', position: 'relative', paddingHorizontal: 8 },
-  languageCode: { fontSize: 16, lineHeight: 20, ...weight('900') },
-  languageName: { fontSize: 10, lineHeight: 15, ...weight('700'), marginTop: 2 },
-  languageCheck: { width: 19, height: 19, borderRadius: 10, alignItems: 'center', justifyContent: 'center', position: 'absolute', top: 6, right: 6 },
+  languagePicker: { alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', borderRadius: 999, borderWidth: 1, padding: 3, marginBottom: 14 },
+  languageOption: { minWidth: 36, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+  languageCode: { fontSize: 10, lineHeight: 14, ...weight('900'), letterSpacing: 0.6 },
+  languageSeparator: { width: 1, height: 14, marginHorizontal: 2 },
   priorityRow: { minHeight: 52, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14 },
   priorityLabel: { flex: 1, fontSize: 13, ...weight('800') },
   priorityCheck: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
