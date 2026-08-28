@@ -193,13 +193,13 @@ export default function OnboardingScreen({ cfg, onDone }) {
   const { setCfg, editWallet } = useStore();
   const [step, setStep] = useState(0);
   // `lang` drives onboarding's own reading direction/copy across all five
-  // steps from the moment it's picked on Welcome. It is a live preview only
-  // while onboarding is in progress — it becomes the app's real language
-  // (cfg.lang/langMode) only once, at the end, when Essentials' own
-  // Language row is confirmed and the user presses Start (see finish()).
-  // Changing it again on Essentials updates the preview for the rest of
-  // onboarding too, same as Welcome's toggle does.
-  const appLang = cfg.langMode === 'system' ? detectSystemLang() : (cfg.lang || detectSystemLang());
+  // steps from the moment it's picked on Welcome, including the default
+  // wallet name and placeholder (both use T/lang, never a separately-saved
+  // language) - it is a live preview only while onboarding is in progress;
+  // it becomes the app's real language (cfg.lang/langMode) only once, at
+  // the end, when Essentials' own Language row is confirmed and the user
+  // presses Start (see finish()). Changing it again on Essentials updates
+  // the preview for the rest of onboarding too, same as Welcome's toggle.
   const [lang, setLang] = useState(detectSystemLang());
   const isAr = lang === 'ar';
   // Preview the appearance choice immediately. Before this, the screen kept
@@ -229,10 +229,10 @@ export default function OnboardingScreen({ cfg, onDone }) {
     || CURRENCIES.find(item => item.code === cfg.currency)
     || CURRENCIES.find(item => item.code === 'IQD')
     || CURRENCIES[0];
-  // The default wallet name follows the app's currently-saved language
-  // (appLang) until finish() runs and commits whatever language the user
-  // lands on in onboarding as the new app language.
-  const effectiveWalletName = walletName.trim() || copy(appLang).walletDefaultName;
+  // The default wallet name follows the same live language as everything
+  // else on screen (T/lang) — finish() commits this same `lang` value as
+  // the new app language, so the name and the app language always match.
+  const effectiveWalletName = walletName.trim() || T.walletDefaultName;
 
   const goNext = () => setStep(s => Math.min(STEP_COUNT - 1, s + 1));
   const goBack = () => setStep(s => Math.max(0, s - 1));
@@ -297,7 +297,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
           country={selectedCountry} currency={selectedCurrency}
           themeChoice={themeChoice} language={lang}
           walletName={walletName} onChangeWalletName={setWalletName}
-          placeholder={copy(appLang).walletDefaultName}
+          placeholder={T.walletDefaultName}
           onCountry={() => setChoice('country')}
           onCurrency={() => setChoice('currency')}
           onAppearance={() => setChoice('appearance')}
@@ -432,7 +432,7 @@ function LanguagePicker({ th, selected, onSelect }) {
             {index > 0 ? <View style={[s.languageSeparator, { backgroundColor: th.border }]} /> : null}
             <TouchableOpacity
               onPress={() => onSelect(key)}
-              accessibilityRole="button"
+              accessibilityRole="radio"
               accessibilityState={{ selected: active }}
               accessibilityLabel={key === 'ar' ? 'العربية' : 'English'}
               style={[s.languageOption, { backgroundColor: active ? th.primSoft : 'transparent' }]}
