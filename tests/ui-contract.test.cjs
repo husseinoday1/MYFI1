@@ -144,6 +144,7 @@ const pdf = fs.readFileSync(path.join(srcRoot, 'lib', 'pdf.js'), 'utf8');
 const constants = fs.readFileSync(path.join(srcRoot, 'lib', 'constants.js'), 'utf8');
 const trackers = fs.readFileSync(path.join(srcRoot, 'screens', 'TrackersLabScreen.js'), 'utf8');
 const home = fs.readFileSync(path.join(srcRoot, 'screens', 'HomeScreen.js'), 'utf8');
+const myMoney = fs.readFileSync(path.join(srcRoot, 'screens', 'MyMoneyScreen.js'), 'utf8');
 const onboarding = fs.readFileSync(path.join(srcRoot, 'screens', 'OnboardingScreen.js'), 'utf8');
 
 /* MYFI_ONBOARDING_DELEGATED_CURRENT_CONTRACT */
@@ -165,8 +166,8 @@ assert.equal(history.includes('tagBadge'), false, 'History rows must not show tr
 assert.equal(history.includes('amountRange'), false, 'History filter sheet must stay compact');
 assert.equal(history.includes('searchableTransactionTags'), false, 'Transaction tags must remain searchable metadata, not a separate crowded filter');
 assert(reports.indexOf('const financialReport =') < reports.indexOf('const stats ='), 'Reports must create the shared report model before reading its stats');
-assert(reports.includes('periodCard: { minHeight: 72'), 'Reports period selector must use the professional compact command-bar height');
-assert(reports.includes('shareCenterBtn: { width: 64, minHeight: 72'), 'Reports share action must align exactly with the period command card');
+assert(reports.includes('periodCard: { minHeight: 64') && reports.includes('reportTabs:'), 'Reports must use a compact period control followed by clear report tabs');
+assert(reports.includes('reportShareBtn: { width: 42, height: 42'), 'Reports share action must remain a compact header action');
 assert.equal(reports.includes('monthlyBudget'), false, 'Reports must not show the monthly spending limit card');
 assert.equal(reports.includes("value: 'budget'"), false, 'Reports PDF sharing must not expose the removed budget section');
 assert.equal(reports.includes('spendingLimit'), false, 'Reports must not keep monthly spending limit styles');
@@ -186,7 +187,18 @@ assert(walletBalanceCard.includes('defaultPill'), 'Wallet list must identify the
 assert(notificationCenter.includes('selectionBar') && notificationCenter.includes('deleteSelectedButton'), 'Notifications must expose a clear select/delete-selected workflow');
 assert.equal(notificationCenter.includes('>{L.tap}</Text>'), false, 'Notification cards must not repeat an obvious tap-to-open instruction');
 assert(home.includes("quickEntryAction:{ flex: 1, flexBasis: 0"), 'Home quick actions must share equal width regardless of action count');
+assert(home.includes('walletRows.length <= 1') && home.includes('renderWalletSelector'), 'A single wallet must not repeat its balance below the Home balance card');
+assert(home.includes("accessibilityRole=\"radio\"") && home.includes('walletSelectorChip'), 'Multiple wallets must act as a compact default-wallet selector, not repeated balance cards');
 assert.equal(home.includes('s.heroFacts'), false, 'Home hero must stay focused on Available balance only');
+assert(home.includes('s.homeGreeting') && home.includes('A quick view of your money today'), 'Home must lead with a compact greeting before the financial summary');
+assert.equal(home.includes('homePeriodPills'), false, 'Home must not show period controls that do not change the available balance');
+const homePrimaryOrder = home.slice(home.indexOf('{renderQuickEntry()}'));
+assert(homePrimaryOrder.indexOf('{renderQuickEntry()}') < homePrimaryOrder.indexOf('s.monthMetricsBlock') && homePrimaryOrder.indexOf('s.monthMetricsBlock') < homePrimaryOrder.indexOf('{renderWalletSelector()}'), 'Home must keep quick add before the month summary and compact wallet selector');
+assert(myMoney.includes("key: 'history'") && myMoney.includes("key: 'budget'") && myMoney.includes("key: 'reports'"), 'My Money must expose only its three real navigation gateways');
+assert.equal(myMoney.includes('GatewayCard'), false, 'My Money must not turn navigation into dense financial summary cards');
+assert.equal(myMoney.includes('onOpenWallets'), false, 'Wallet management must not be duplicated as a primary My Money gateway');
+assert(myMoney.includes('onAddTransaction') && myMoney.includes('onOpenBudget'), 'My Money shortcuts must lead to real transaction and budget actions');
+assert.equal(myMoney.includes('خطة توزيع الدخل'), false, 'Income allocation must stay hidden until its real phase-five path exists');
 assert(homeCenter.includes('identityText') && homeCenter.includes('accountState'), 'Account center must use a compact identity card with explicit connection state');
 assert(legacySettings.includes('monthNameStyle') && legacySettings.includes('monthStyleLabel'), 'Advanced settings must preserve the global month display preference');
 assert(constants.includes("monthNameStyle: 'system'"), 'Month display preference must follow the phone by default');
@@ -255,7 +267,7 @@ assert.equal(notificationCenter.includes('dismiss(itemKeys)'), false, 'Notificat
 assert(home.includes('profileButton') && !home.includes('profilePill'), 'Home top bar must use a balanced avatar-only account action');
 assert(home.includes('accountInitial'), 'Home avatar action must preserve the account identity initial');
 assert.equal(homeCenter.includes('profileHandle'), false, 'Account center must not invent a second username/handle identity');
-assert(home.includes('avatarUri') && home.includes('walletPopup'), 'Home must support a local avatar and popup wallet picker');
+assert(home.includes('avatarUri') && !home.includes('walletPopup'), 'Home must support a local avatar without restoring the retired wallet popup picker');
 assert(home.includes('attentionHeader'), 'Important states must use the shared attention header');
 assert(home.includes('expandedRecentId'), 'Home transactions must expose inline expandable details');
 assert(home.includes('detailsToggle'), 'Home transaction rows must use a down-arrow details toggle');
@@ -336,13 +348,14 @@ assert(walletBalanceCard.includes("'الكلي' : 'Total'") && walletBalanceCard
 assert(constants.includes("{ key: 'saving', visible: true }") && constants.includes("{ key: 'net', visible: true }"), 'Home month summary must include Savings and Net by default');
 assert(constants.includes('HOME_LAYOUT_VERSION = 3'), 'Home layout must migrate existing profiles to the restored four-card summary');
 assert(home.includes("item.key === 'saving'") && home.includes('monthSavingTotal'), 'Home must calculate and render actual current-month goal savings');
-assert(home.indexOf("{visibleHomeCards.length > 0 ? (") < home.indexOf("{cfg.entryMode === 'quick' ? ("), 'Direct actions must appear immediately after Month summary');
+assert(home.indexOf('{renderQuickEntry()}') < home.indexOf('{visibleHomeCards.length > 0 ? (') && home.indexOf('{visibleHomeCards.length > 0 ? (') < home.indexOf('{renderWalletSelector()}'), 'Direct actions must appear immediately after the Available balance; the compact wallet source selector follows the month summary');
 assert(walletBalanceCard.includes('lock-closed-outline') && walletBalanceCard.includes('محجوز للتوفير'), 'Reserved savings must use a clear compact locked-savings treatment in the wallet list');
 assert(walletBalanceCard.includes(".sort((a, b) => (a.id === defaultId ? -1"), 'The selected default wallet must sort to the first position');
-assert(home.includes("onSelectWallet={(id) => { setCfg({ defaultWalletId: id }); }}"), 'Selecting a Home wallet must update the default wallet without hiding the list before the reorder is visible');
+assert(home.includes("onPress={() => setCfg({ defaultWalletId: wallet.id })}") && !home.includes('renderWalletPanel'), 'Tapping a Home wallet must set it as default directly without opening the old wallet list');
 assert(trackers.includes('filterRailTitle') && trackers.includes('filterCount'), 'Tracker type selection must expose direct type chips with counts');
 assert(reports.includes('walletRailBlock') && reports.includes('walletChip') && !reports.includes("setSheet('wallet')"), 'Report wallet selection must use a direct horizontal wallet rail instead of a dropdown');
 assert(reports.includes('reportInsightList') && reports.includes('reportRows') && reports.includes('reportInlineDetail'), 'Reports must use one compact drill-down list with each active detail rendered inline under its own row');
+assert(reports.includes('reportTabs') && reports.includes('topCategoriesCard') && reports.includes('showMoreReports'), 'Reports overview must surface the summary and top categories before progressive extra details');
 assert.equal(reports.includes('<SectionCard th={th} title={C.smartTitle}'), false, 'Reports main view must remove non-essential Smart insight clutter');
 assert(settings.includes('saveIdentity') && settings.includes('editIdentity'), 'Account must let local and connected users edit identity from one detail screen');
 assert(settings.includes('pickAvatar') && settings.includes('T.changePhoto') && settings.includes('T.removePhoto'), 'Account must provide add/change/remove photo controls');
@@ -430,7 +443,7 @@ assert(legacySettings.includes("MONTH_NAME_STYLES.filter(style => style !== 'sys
 assert(legacySettings.includes('INTERNAL_DEMO_ENABLED ? (') && legacySettings.includes('بيانات اختبار داخلية'), 'Demo data must remain available only as an internal advanced test tool');
 
 assert(reports.includes('const reportRows = [') && reports.includes("key: 'comparison'"), 'Comparison must be part of the same report row model as other reports');
-assert(reports.includes('reportRows.map((item, index) =>') && reports.includes('reportInlineDetail'), 'Each report detail must expand directly below the selected report row');
+assert(reports.includes('visibleReportRows.map((item, index) =>') && reports.includes('reportInlineDetail'), 'Each report detail must expand directly below the selected report row');
 assert.equal(reports.includes('s.reportCompareRow'), false, 'Comparison must not use a visually different top-level row');
 assert.equal(reports.includes('reportCompareText'), false, 'Legacy comparison-row styling must be removed');
 

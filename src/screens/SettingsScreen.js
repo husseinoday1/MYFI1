@@ -1077,6 +1077,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
           <View style={s.rootHead}>
             <Text style={[s.brandEyebrow, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>MYFI</Text>
             <Text style={[s.rootTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{screenTitle}</Text>
+            <Text style={[s.rootSubtitle, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'عدّل ما يغيّر تجربتك فعلاً، والباقي يبقى هادئًا.' : 'Change what truly shapes your experience; leave the rest calm.'}</Text>
           </View>
         ) : (
           <PageHeader
@@ -1395,28 +1396,28 @@ function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accou
 
       <SectionLabel th={th} isAr={isAr} text={isAr ? 'المظهر واللغة' : 'Appearance & Language'} />
       <MenuGroup th={th}>
-        <MenuRow th={th} isAr={isAr} icon="language-outline" title={T.language} subtitle={languageNote} value={languageValue} onPress={() => onChoice('language')} />
-        <MenuRow th={th} isAr={isAr} icon="color-palette-outline" title={T.appearance} subtitle={themeNote} value={themeValue} onPress={() => onChoice('theme')} />
-        <MenuRow th={th} isAr={isAr} icon="phone-portrait-outline" title={T.rotation} subtitle={rotationNote} value={rotationValue} onPress={() => onChoice('orientation')} />
+        <MenuRow th={th} isAr={isAr} icon="language-outline" iconColor={th.transfer} title={T.language} subtitle={languageNote} value={languageValue} onPress={() => onChoice('language')} />
+        <MenuRow th={th} isAr={isAr} icon="color-palette-outline" iconColor={th.primary} title={T.appearance} subtitle={themeNote} value={themeValue} onPress={() => onChoice('theme')} />
+        <MenuRow th={th} isAr={isAr} icon="phone-portrait-outline" iconColor={th.warn} title={T.rotation} subtitle={rotationNote} value={rotationValue} onPress={() => onChoice('orientation')} />
       </MenuGroup>
 
       <SectionLabel th={th} isAr={isAr} text={isAr ? 'التفضيلات المالية' : 'Financial Preferences'} />
       <MenuGroup th={th}>
-        <MenuRow th={th} isAr={isAr} icon="flag-outline" title={T.country} value={`${selectedCountry.flag} ${isAr ? selectedCountry.name : selectedCountry.nameEn}`} onPress={() => onChoice('country')} />
-        <MenuRow th={th} isAr={isAr} icon="cash-outline" title={T.currency} value={`${selectedCurrency.code} · ${selectedCurrency.sym}`} onPress={() => onChoice('currency')} />
+        <MenuRow th={th} isAr={isAr} icon="flag-outline" iconColor={th.transfer} title={T.country} value={`${selectedCountry.flag} ${isAr ? selectedCountry.name : selectedCountry.nameEn}`} onPress={() => onChoice('country')} />
+        <MenuRow th={th} isAr={isAr} icon="cash-outline" iconColor={th.inc} title={T.currency} value={`${selectedCurrency.code} · ${selectedCurrency.sym}`} onPress={() => onChoice('currency')} />
         <MenuRow th={th} isAr={isAr} icon="wallet-outline" title={T.financial} subtitle={T.financialSub} onPress={onAdvanced} last />
       </MenuGroup>
 
       <SectionLabel th={th} isAr={isAr} text={isAr ? 'التجربة والمساعدة' : 'Experience & Help'} />
       <MenuGroup th={th}>
-        <MenuRow th={th} isAr={isAr} icon="apps-outline" title={T.featureVisibility} subtitle={T.featureVisibilitySub} onPress={() => onOpen('features')} />
-        <MenuRow th={th} isAr={isAr} icon="notifications-outline" title={T.notifications} subtitle={T.notificationsSub} onPress={() => onOpen('notifications')} />
-        <MenuRow th={th} isAr={isAr} icon="book-outline" title={T.guide} subtitle={T.guideProfessionalSub} onPress={() => onOpen('guide')} last />
+        <MenuRow th={th} isAr={isAr} icon="apps-outline" iconColor={th.primary} title={T.featureVisibility} subtitle={T.featureVisibilitySub} onPress={() => onOpen('features')} />
+        <MenuRow th={th} isAr={isAr} icon="notifications-outline" iconColor={th.warn} title={T.notifications} subtitle={T.notificationsSub} onPress={() => onOpen('notifications')} />
+        <MenuRow th={th} isAr={isAr} icon="book-outline" iconColor={th.transfer} title={T.guide} subtitle={T.guideProfessionalSub} onPress={() => onOpen('guide')} last />
       </MenuGroup>
 
       <SectionLabel th={th} isAr={isAr} text={isAr ? 'الخصوصية والأمان' : 'Privacy & Security'} />
       <MenuGroup th={th}>
-        <MenuRow th={th} isAr={isAr} icon="shield-checkmark-outline" title={T.security} subtitle={T.securitySub} onPress={() => onOpen('security')} last />
+        <MenuRow th={th} isAr={isAr} icon="shield-checkmark-outline" iconColor={th.inc} title={T.security} subtitle={T.securitySub} onPress={() => onOpen('security')} last />
       </MenuGroup>
     </>
   );
@@ -2230,15 +2231,16 @@ const s = StyleSheet.create({
   versionPill: { minHeight: 28, borderRadius: 14, paddingHorizontal: 11, alignItems: 'center', justifyContent: 'center', marginTop: 11 },
   versionPillText: { fontSize: 10, lineHeight: 15, ...weight('900') },
   aboutPurpose: { fontSize: 12, lineHeight: 20, ...weight('700'), marginTop: 14, paddingHorizontal: 4 },
-  rootHead: { marginBottom: 16 },
+  rootHead: { marginBottom: 18 },
   brandEyebrow: { fontSize: 12, lineHeight: 18, letterSpacing: 1.2, ...weight('900') },
   rootTitle: { fontSize: 26, lineHeight: 35, ...weight('900'), marginTop: 2 },
+  rootSubtitle: { fontSize: 12, lineHeight: 18, ...weight('700'), marginTop: 4, maxWidth: 310 },
   pageHeader: { minHeight: 54, alignItems: 'center', gap: 11, marginBottom: 14 },
   backButton: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   pageTitle: { flex: 1, fontSize: 22, lineHeight: 31, ...weight('900'), textAlign: 'center' },
   headerSpacer: { width: 40 },
   advancedMenuWrap: { paddingHorizontal: 16, paddingTop: 4 },
-  accountCard: { minHeight: 92, borderRadius: 20, borderWidth: 1, padding: 14, alignItems: 'center', gap: 12 },
+  accountCard: { minHeight: 92, borderRadius: RADIUS.xl, borderWidth: 1, padding: 14, alignItems: 'center', gap: 12, ...SHADOW.card },
   avatar: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
   accountCardName: { fontSize: 15, lineHeight: 21, ...weight('900') },
   accountCardEmail: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 2 },
