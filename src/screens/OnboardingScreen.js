@@ -129,9 +129,11 @@ const copy = lang => {
     country: ar ? 'البلد' : 'Country',
     baseCurrency: ar ? 'العملة' : 'Currency',
     appearance: ar ? 'المظهر' : 'Appearance',
+    language: ar ? 'لغة التطبيق' : 'App language',
     chooseCountry: ar ? 'اختر البلد' : 'Choose country',
     chooseCurrency: ar ? 'اختر العملة' : 'Choose currency',
     chooseAppearance: ar ? 'اختر المظهر' : 'Choose appearance',
+    chooseLanguage: ar ? 'اختر لغة التطبيق' : 'Choose app language',
     arabic: ar ? 'العربية' : 'Arabic',
     english: ar ? 'English' : 'English',
     light: ar ? 'فاتح' : 'Light',
@@ -190,10 +192,13 @@ const STEP_COUNT = ESSENTIALS_STEP + 1;
 export default function OnboardingScreen({ cfg, onDone }) {
   const { setCfg, editWallet } = useStore();
   const [step, setStep] = useState(0);
-  // Reader language is intentionally local to onboarding. It controls only
-  // onboarding copy/direction and is NEVER persisted into cfg.lang/langMode —
-  // the app's real language stays whatever it already is (device-detected by
-  // default) until the user changes it explicitly from Settings.
+  // `lang` drives onboarding's own reading direction/copy across all five
+  // steps from the moment it's picked on Welcome. It is a live preview only
+  // while onboarding is in progress — it becomes the app's real language
+  // (cfg.lang/langMode) only once, at the end, when Essentials' own
+  // Language row is confirmed and the user presses Start (see finish()).
+  // Changing it again on Essentials updates the preview for the rest of
+  // onboarding too, same as Welcome's toggle does.
   const appLang = cfg.langMode === 'system' ? detectSystemLang() : (cfg.lang || detectSystemLang());
   const [lang, setLang] = useState(detectSystemLang());
   const isAr = lang === 'ar';
@@ -224,9 +229,9 @@ export default function OnboardingScreen({ cfg, onDone }) {
     || CURRENCIES.find(item => item.code === cfg.currency)
     || CURRENCIES.find(item => item.code === 'IQD')
     || CURRENCIES[0];
-  // The default wallet name follows the app's ACTUAL language (appLang, the
-  // real persisted setting), not the temporary onboarding reading language —
-  // those are deliberately different values now.
+  // The default wallet name follows the app's currently-saved language
+  // (appLang) until finish() runs and commits whatever language the user
+  // lands on in onboarding as the new app language.
   const effectiveWalletName = walletName.trim() || copy(appLang).walletDefaultName;
 
   const goNext = () => setStep(s => Math.min(STEP_COUNT - 1, s + 1));
@@ -245,6 +250,8 @@ export default function OnboardingScreen({ cfg, onDone }) {
       .map(key => ({ spending: 'expenses', planning: 'planning', obligations: 'debts', saving: 'goals' }[key]))
       .filter(Boolean);
     await setCfg({
+      langMode: 'manual',
+      lang,
       country: countryCode,
       currency: currencyCode,
       baseCurrencyConfirmedAt: new Date().toISOString(),
@@ -288,12 +295,13 @@ export default function OnboardingScreen({ cfg, onDone }) {
         <EssentialsSlide
           th={th} isAr={isAr} T={T}
           country={selectedCountry} currency={selectedCurrency}
-          themeChoice={themeChoice}
+          themeChoice={themeChoice} language={lang}
           walletName={walletName} onChangeWalletName={setWalletName}
           placeholder={copy(appLang).walletDefaultName}
           onCountry={() => setChoice('country')}
           onCurrency={() => setChoice('currency')}
           onAppearance={() => setChoice('appearance')}
+          onLanguage={() => setChoice('language')}
         />
       );
     }
@@ -391,13 +399,28 @@ export default function OnboardingScreen({ cfg, onDone }) {
         th={th}
         lang={lang}
       />
+      <ChoiceSheet
+        visible={choice === 'language'}
+        title={T.chooseLanguage}
+        value={lang}
+        options={[
+          { value: 'ar', label: T.arabic, icon: 'language-outline' },
+          { value: 'en', label: T.english, icon: 'language-outline' },
+        ]}
+        onSelect={(value) => setLang(value)}
+        onClose={() => setChoice(null)}
+        th={th}
+        lang={lang}
+      />
     </View>
   );
 }
 
 // Small, unobtrusive pill toggle — top-right of Welcome only, not its own
 // step, not a card grid, not titled "choose language". Switches onboarding
-// reading language/direction immediately; never persisted (see appLang above).
+// reading language/direction immediately for every step; only becomes the
+// app's real language when finish() runs (see the Language row on
+// Essentials, which reads/writes this same value).
 function LanguagePicker({ th, selected, onSelect }) {
   const options = ['ar', 'en'];
   return (
@@ -507,9 +530,9 @@ function PersonalizationSlide({ th, isAr, T, question, value, onSelect }) {
 }
 
 function EssentialsSlide({
-  th, isAr, T, country, currency, themeChoice,
+  th, isAr, T, country, currency, themeChoice, language,
   walletName, onChangeWalletName, placeholder,
-  onCountry, onCurrency, onAppearance,
+  onCountry, onCurrency, onAppearance, onLanguage,
 }) {
   return (
     <View style={s.slide}>
@@ -518,6 +541,7 @@ function EssentialsSlide({
         <Text style={[s.heroBody, { color: th.sub }]}>{T.customizeBody}</Text>
       </View>
       <View style={[s.setupCard, { backgroundColor: th.card, borderColor: th.border }]}>
+        <SetupRow th={th} isAr={isAr} icon="language-outline" label={T.language} value={language === 'ar' ? T.arabic : T.english} onPress={onLanguage} />
         <SetupRow th={th} isAr={isAr} icon="location-outline" label={T.country} value={country ? `${country.flag} ${isAr ? country.name : country.nameEn}` : T.chooseCountry} onPress={onCountry} />
         <SetupRow th={th} isAr={isAr} icon="cash-outline" label={T.baseCurrency} value={currency ? `${currency.code} · ${currency.sym}` : T.chooseCurrency} onPress={onCurrency} />
         <SetupRow th={th} isAr={isAr} icon={themeChoice === 'dark' ? 'moon-outline' : 'sunny-outline'} label={T.appearance} value={themeChoice === 'dark' ? T.dark : T.light} onPress={onAppearance} last />

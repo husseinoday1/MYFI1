@@ -1126,11 +1126,14 @@ export default function HomeScreen({
   );
 
   // Collapsible like Needs Attention / Savings — same header-toggle pattern,
-  // defaulting to open. `recent` is already capped to recentLimit (3)
-  // upstream; this section never fetches or renders more than that inline —
-  // "View all transactions" below routes to the existing History screen.
+  // defaulting to open, same tinted outer panel, and same disappear-when-
+  // empty behavior (renderHomeSection only calls this when recent.length is
+  // non-zero, so the empty state below is now unreachable by design — kept
+  // only as a defensive fallback, never actually shown). `recent` is already
+  // capped to recentLimit (3) upstream; "View all transactions" routes to
+  // the existing History screen.
   const renderRecentSection = () => (
-    <View>
+    <View style={[s.recentPanel, { backgroundColor: th.primSoft, borderColor: `${th.primary}44` }]}>
       <TouchableOpacity
         onPress={() => {
           if (recentExpanded && recentSelection.selecting) recentSelection.cancel();
@@ -1142,7 +1145,7 @@ export default function HomeScreen({
         style={[s.recentHead, { flexDirection: rowDir }]}
       >
         <View style={[s.recentHeadTitle, { flexDirection: rowDir }]}>
-          <View style={[s.recentHeadIcon, { backgroundColor: th.cardHigh }]}>
+          <View style={[s.recentHeadIcon, { backgroundColor: th.card }]}>
             <Ionicons name="receipt-outline" size={17} color={th.primary} />
           </View>
           <Text style={[s.recentTitle, { color: th.text, textAlign: align }]}>{L.recent}</Text>
@@ -1207,7 +1210,7 @@ export default function HomeScreen({
   const renderHomeSection = (item) => {
     if (item.key === 'attention') return (attentionItems.length || healthNeedsAttention) ? <React.Fragment key={item.key}>{renderAttentionSection()}</React.Fragment> : null;
     if (item.key === 'goals') return activeGoals.length ? <React.Fragment key={item.key}>{renderGoalsSection()}</React.Fragment> : null;
-    if (item.key === 'recentTransactions') return <React.Fragment key={item.key}>{renderRecentSection()}</React.Fragment>;
+    if (item.key === 'recentTransactions') return recent.length > 0 ? <React.Fragment key={item.key}>{renderRecentSection()}</React.Fragment> : null;
     return null;
   };
 
@@ -1530,6 +1533,7 @@ const s = StyleSheet.create({
   savingEmpty:{ minHeight: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   sectionTitle: { fontSize: 12, ...weight('900'), marginBottom: 8, marginTop: 4 },
   row:          { minHeight: 58, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: RADIUS.lg, borderWidth: 1, marginBottom: 6, gap: 8 },
+  recentPanel:  { borderRadius: RADIUS.lg, borderWidth: 1, padding: 11, marginTop: 4, marginBottom: 10 },
   recentHead:   { minHeight: 44, alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   recentHeadTitle:{ flex: 1, alignItems: 'center', gap: 8, minWidth: 0 },
   recentHeadIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },

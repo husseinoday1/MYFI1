@@ -61,12 +61,44 @@ instead of the shared folder that caused the original conflict.
   light/dark color test also now passes clean).
 - `npm run verify:android` (`expo export --platform android`): bundles
   clean, 1170 modules, no errors.
-- Not yet done: interactive Expo-web click-through of the full onboarding
-  flow and Home's Recent Transactions section. Skipped for now given the
-  standing CI-only-builds / no-separate-staging-env rule and token-budget
-  discipline — the static gate plus a clean Android export bundle is the
-  verification floor for this change; a full manual UI walkthrough can be
-  requested if wanted before push.
+- Attempted a live Expo-web walkthrough via the harness's browser-preview
+  tool. It resolves the dev server's working directory to the session's
+  main directory, not this worktree — the first launch attempt actually
+  started Metro against the shared folder (`...\Документы\MYFI`), not
+  `MYFI-Implementation6`. Stopped it immediately (no writes occurred) and
+  did not retry; relying on `test:gate:static` + a clean `verify:android`
+  export as the verification floor instead, consistent with the standing
+  CI-only-builds / no-separate-staging-env rule.
+
+## Follow-up scope added after the conflict resolution (same session)
+The user clarified two more things once the conflict fix landed:
+
+1. **Essentials (step 5) needed its own, real app-language setting** — the
+   Welcome-page toggle only ever controlled the onboarding reading
+   preview (already correct, see above), but the user's intent was for
+   Essentials to *also* offer a language choice that behaves like
+   country/currency/appearance: a real, persisted app setting. Added a
+   fourth `SetupRow` to `EssentialsSlide` (`T.language`, sourced from the
+   same `lang` state Welcome's toggle already drives) plus a matching
+   `ChoiceSheet`. `finish()` now writes `langMode: 'manual'` and `lang`
+   into `setCfg` — so language is confirmed once, at the end of
+   onboarding, not gated early on Welcome. Updated both onboarding tests
+   again to assert this (Essentials must expose the language row;
+   `finish()` must commit it) instead of the intermediate "never persists
+   anywhere" assertion from the first pass.
+2. **HomeScreen.js Recent Transactions section**: made it match the
+   existing Needs Attention / Savings pattern exactly — it now (a) is
+   fully omitted from Home when there are zero recent transactions
+   (matching `renderHomeSection`'s existing `goals`/`attention`
+   empty-hides-the-whole-section behavior), instead of always rendering
+   an empty-state card, and (b) gets the same tinted outer panel
+   (`th.primSoft` background, `${th.primary}44` border) that Savings
+   uses, replacing its previous neutral `th.card`/`th.border` styling.
+   Added `s.recentPanel` alongside the existing `attentionPanel`/
+   `savingPanel` styles.
+
+Re-ran `npm run test:gate:static` after both: still **72 / 0 / 11**.
+Re-ran `npm run verify:android`: clean export, no errors.
 
 ## Status
 Not committed as of writing this file — evidence is written first, per
