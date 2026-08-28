@@ -654,3 +654,88 @@ Step 2: migrate the §8.2 consumers onto `queryLedgerWalletPositions`,
 incrementally, each passing `cfg.defaultWalletId`, with
 `archiveBalanceParity.js` available to catch any divergence. Nothing in step 1
 changes what any screen displays — the new branch has no consumers yet.
+
+## 10. Phase 11-C / D3 — the F1 repair plan (2026-08-27)
+
+### 10.1 Why this came before step 2
+
+Step 2 (migrating balance consumers) is deferred. The design track's branch
+`fix/p00-tc-001-contract-baseline-reconciliation` is 56 files / +4320 lines and
+rewrites `HomeScreen.js` (+498) while adding six new screens — one of which,
+`MyMoneyScreen.js`, reads the legacy in-memory balance in four more places. The
+§8.2 consumer list is therefore already stale and will keep moving. Migrating
+consumers now would be work spent on merge conflicts.
+
+Two findings handed to Planning & Audit from that survey:
+
+- **The design branch still carries the missing-import defect** fixed in 11-B
+  (`getLedgerNamespace`, `queryLedgerSummary`, `queryLedgerWalletPositions` used
+  without imports at their lines 220/226/228). If the eventual merge resolves
+  `HomeScreen.js` in their favour, the defect returns and the Home balance
+  silently reverts to the hot array. Planning is notifying the design session.
+- `MyMoneyScreen.js` adds four new legacy-balance call sites, so 11-C step 2 must
+  re-survey rather than trust the recorded list.
+
+D3 is unaffected by any of this: it is data logic under `src/lib/`, with no
+screen surface.
+
+### 10.2 What the plan does
+
+`src/lib/archiveF1RepairPlan.js` reconstructs, for one workspace, what
+`commitYearArchive` damaged before the §3.5 freeze:
+
+| Damage | Repair source |
+|---|---|
+| `wallet.openingBalance += archived movement` | subtract the same movement back out, reusing `archivedWalletMovement` from `store/domain.js` — the identical arithmetic the V7 shadow migration already relies on, so the two cannot drift |
+| `debt.payments` for the year removed into `archivedPaid` | the Cold Archive stores the **pre-mutation** entities (`commitYearArchive` passes `current.debts` in and computes `nextDebts` separately), so the original payments survive there |
+| `goal.savings` for the year removed into `archivedSaved` | same |
+
+Restored payments are unioned by payment identity (`id`, date, amount, note) —
+not by date+amount alone, which would merge two genuine same-day same-amount
+payments and destroy history while claiming to repair it. `archivedPaid` /
+`archivedSaved` are cleared when their entries return to the list, because
+`paid = archivedPaid + sum(payments)` would otherwise double-count.
+
+**It builds a plan and never applies one.** There is no repair path in the
+module, per D3 and `src/lib/CLAUDE.md` ("never auto-correct balances").
+`summarizeRepairPlanForDiagnostics` reduces a plan to counts and ids with no
+amounts, for Standing Rule 6.
+
+### 10.3 A hazard the test states rather than hides
+
+The debt and goal repairs are idempotent — re-running finds nothing, because a
+restored payment is already in the list. **The opening-balance repair is not.**
+`openingBalance` carries no marker recording whether the archived movement was
+already subtracted, so a repaired wallet looks identical to a damaged one and
+applying the plan twice would subtract twice.
+
+This is asserted explicitly in the test rather than left to be discovered. It is
+also the concrete reason D3's "explicit, evidenced migration with a recorded
+applied-state" is a requirement and not ceremony: any application of this plan
+must record that it ran, per workspace, and refuse to run twice.
+
+### 10.4 Test
+
+`p11c-d3-repair-plan.test.mjs` does not assert against hand-written expected
+numbers. It takes a pristine workspace, **runs the real `commitYearArchive`
+arithmetic forward** to damage it exactly as the shipped code did, then requires
+the plan to recover the originals — so the plan is pinned to the app's
+arithmetic, not to mine. It also asserts the fixture actually caused damage
+first, so the repair assertions cannot pass vacuously.
+
+Covered: opening balance restored for an inflated and a deflated wallet; all
+payments and savings restored; totals recounted once; a never-archived workspace
+reported clean; second-pass idempotence for debts and goals; the documented
+non-idempotence for wallets; no input mutation; an amount-free diagnostic
+summary.
+
+Negative controls run: flipping the opening-balance sign fails; keeping
+`archivedPaid` (the double-count) fails.
+
+### 10.5 Verification
+
+`npm run test:gate`: **128 passed, 0 failed, 11 skipped.**
+
+Nothing in this commit changes app behaviour — the module has no callers yet.
+Wiring it into an actual migration is a separate step and needs the recorded
+applied-state described in §10.3.
