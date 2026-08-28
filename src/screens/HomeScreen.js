@@ -36,7 +36,7 @@ const copy = (lang) => {
   const ar = lang === 'ar';
   return {
     overview: ar ? 'نظرة عامة' : 'Overview',
-    allTransactions: ar ? 'كل المعاملات' : 'All transactions',
+    allTransactions: ar ? 'عرض كل الحركات' : 'View all transactions',
     currentMoney: ar ? 'المتبقي بعد الصرف' : 'Left after spending',
     thisMonth: ar ? 'هذا الشهر' : 'This month',
     periodDay: ar ? 'اليوم' : 'Today',
@@ -176,6 +176,7 @@ export default function HomeScreen({
   const [walletStripPage, setWalletStripPage] = useState(0);
   const [attentionExpanded, setAttentionExpanded] = useState(false);
   const [savingsExpanded, setSavingsExpanded] = useState(false);
+  const [recentExpanded, setRecentExpanded] = useState(true);
   const [editing,    setEditing]    = useState(null);
   const [details, setDetails] = useState(null);
   const [expandedRecentId, setExpandedRecentId] = useState(null);
@@ -1125,49 +1126,76 @@ export default function HomeScreen({
 
   const renderRecentSection = () => (
     <View>
-      <View style={[s.recentHead, { flexDirection: rowDir }]}>
-        <Text style={[s.recentTitle, { color: th.text, textAlign: align }]}>{L.recent}</Text>
-        <TouchableOpacity onPress={() => onOpenTab('history')} style={s.recentAllLink}>
-          <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.allTransactions}</Text>
-        </TouchableOpacity>
-      </View>
-      <MultiSelectBar
-        th={th}
-        lang={cfg.lang}
-        active={recentSelection.selecting}
-        count={recentSelection.selectedCount}
-        total={recent.length}
-        allSelected={recentSelection.allSelected}
-        onStart={recentSelection.start}
-        onToggleAll={recentSelection.toggleAll}
-        onDelete={confirmDeleteRecent}
-        onCancel={recentSelection.cancel}
-      />
-      {recent.length === 0 ? (
-        <View style={[s.empty, { borderColor: th.border }]}>
-          <Ionicons name="receipt-outline" size={34} color={th.faint} />
-          <Text style={{ color: th.text, ...weight('900'), fontSize: 15, marginTop: 10, textAlign: 'center' }}>
-            {C.emptyTitle}
-          </Text>
-          <Text style={{ color: th.sub, fontSize: 12, textAlign: 'center', marginTop: 6 }}>
-            {C.emptyBody}
-          </Text>
-          <View style={[s.emptyActions, { flexDirection: rowDir }]}>
-            <TouchableOpacity onPress={onAddIncome} style={[s.emptyAction, { backgroundColor: th.incBg, borderColor: `${th.inc}44` }]}>
-              <FinancialDirectionMark kind="income" color={th.inc} size={17} lang={cfg.lang} />
-              <Text style={{ color: th.inc, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة دخل' : 'Add income'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={onAddExpense} style={[s.emptyAction, { backgroundColor: th.expBg, borderColor: `${th.exp}44` }]}>
-              <FinancialDirectionMark kind="expense" color={th.exp} size={17} lang={cfg.lang} />
-              <Text style={{ color: th.exp, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة مصروف' : 'Add expense'}</Text>
-            </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => {
+          if (recentExpanded && recentSelection.selecting) recentSelection.cancel();
+          setRecentExpanded(value => !value);
+        }}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: recentExpanded }}
+        accessibilityLabel={`${recentExpanded ? C.hideDetails : C.showDetails} ${L.recent}`}
+        style={[s.recentHead, { flexDirection: rowDir }]}
+      >
+        <View style={[s.recentHeadTitle, { flexDirection: rowDir }]}>
+          <View style={[s.recentHeadIcon, { backgroundColor: th.cardHigh }]}>
+            <Ionicons name="receipt-outline" size={17} color={th.primary} />
           </View>
+          <Text style={[s.recentTitle, { color: th.text, textAlign: align }]}>{L.recent}</Text>
         </View>
-      ) : (
-        <View style={[s.recentList, { backgroundColor: th.card, borderColor: th.border }]}>
-          {recent.map(renderRow)}
-        </View>
-      )}
+        <Ionicons name={recentExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={th.primary} />
+      </TouchableOpacity>
+
+      {recentExpanded ? (
+        <>
+          <MultiSelectBar
+            th={th}
+            lang={cfg.lang}
+            active={recentSelection.selecting}
+            count={recentSelection.selectedCount}
+            total={recent.length}
+            allSelected={recentSelection.allSelected}
+            onStart={recentSelection.start}
+            onToggleAll={recentSelection.toggleAll}
+            onDelete={confirmDeleteRecent}
+            onCancel={recentSelection.cancel}
+          />
+          {recent.length === 0 ? (
+            <View style={[s.empty, { borderColor: th.border }]}>
+              <Ionicons name="receipt-outline" size={34} color={th.faint} />
+              <Text style={{ color: th.text, ...weight('900'), fontSize: 15, marginTop: 10, textAlign: 'center' }}>
+                {C.emptyTitle}
+              </Text>
+              <Text style={{ color: th.sub, fontSize: 12, textAlign: 'center', marginTop: 6 }}>
+                {C.emptyBody}
+              </Text>
+              <View style={[s.emptyActions, { flexDirection: rowDir }]}>
+                <TouchableOpacity onPress={onAddIncome} style={[s.emptyAction, { backgroundColor: th.incBg, borderColor: `${th.inc}44` }]}>
+                  <FinancialDirectionMark kind="income" color={th.inc} size={17} lang={cfg.lang} />
+                  <Text style={{ color: th.inc, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة دخل' : 'Add income'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={onAddExpense} style={[s.emptyAction, { backgroundColor: th.expBg, borderColor: `${th.exp}44` }]}>
+                  <FinancialDirectionMark kind="expense" color={th.exp} size={17} lang={cfg.lang} />
+                  <Text style={{ color: th.exp, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة مصروف' : 'Add expense'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <>
+              <View style={[s.recentList, { backgroundColor: th.card, borderColor: th.border }]}>
+                {recent.map(renderRow)}
+              </View>
+              <TouchableOpacity
+                onPress={() => onOpenTab('history')}
+                accessibilityRole="button"
+                style={[s.recentAllLink, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}
+              >
+                <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.allTransactions}</Text>
+                <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={15} color={th.primary} />
+              </TouchableOpacity>
+            </>
+          )}
+        </>
+      ) : null}
     </View>
   );
 
@@ -1498,8 +1526,10 @@ const s = StyleSheet.create({
   sectionTitle: { fontSize: 12, ...weight('900'), marginBottom: 8, marginTop: 4 },
   row:          { minHeight: 58, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: RADIUS.lg, borderWidth: 1, marginBottom: 6, gap: 8 },
   recentHead:   { minHeight: 44, alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  recentHeadTitle:{ flex: 1, alignItems: 'center', gap: 8, minWidth: 0 },
+  recentHeadIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   recentTitle:  { flex: 1, fontSize: 14, lineHeight: 20, ...weight('900') },
-  recentAllLink:{ minHeight: 40, minWidth: 92, alignItems: 'center', justifyContent: 'center' },
+  recentAllLink:{ minHeight: 42, borderRadius: RADIUS.md, borderWidth: 1, marginTop: 8, marginBottom: 2, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12 },
   recentList:   { borderRadius: RADIUS.lg, borderWidth: 1, overflow: 'hidden' },
   recentRow:    { borderWidth: 0, borderRadius: 0, marginBottom: 0, paddingVertical: 9 },
   rowShell:     { width: '100%', alignItems: 'center', gap: 8 },

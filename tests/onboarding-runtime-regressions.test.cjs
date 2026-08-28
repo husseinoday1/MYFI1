@@ -10,7 +10,11 @@ const constants = read('src/lib/constants.js');
 
 assert(onboarding.includes('detectSystemLang'), 'Onboarding must import system language detection');
 assert(onboarding.includes('useState(detectSystemLang())'), 'First-run onboarding must start from the device language');
-assert(onboarding.includes('LanguagePicker') && onboarding.includes('WelcomeSlide') && onboarding.includes('languageConfirmed'), 'The welcome screen must explicitly confirm the user language');
+assert(onboarding.includes('LanguagePicker') && onboarding.includes('WelcomeSlide'), 'The welcome screen must expose the compact AR/EN reader control');
+assert.equal(onboarding.includes('languageConfirmed'), false, 'Onboarding reader language must not require a blocking confirmation state');
+assert.equal(onboarding.includes("      langMode: 'manual',\n      lang,"), false, 'Onboarding reader language must not persist as the app language');
+assert(onboarding.includes("const appLang = cfg.langMode === 'system'"), 'Persistent defaults must continue to follow the real app language');
+assert(onboarding.includes('walletName.trim() || copy(appLang).walletDefaultName'), 'Reader language must not silently change the stored default wallet name');
 assert(onboarding.includes('const WELCOME_STEP = 0;') && onboarding.includes('const QUESTION_START_STEP = 1;') && onboarding.includes('const STEP_COUNT = ESSENTIALS_STEP + 1;'), 'Onboarding must remain a concise five-step flow with language on welcome');
 assert(onboarding.includes('PERSONALIZATION_QUESTIONS') && onboarding.includes('PersonalizationSlide'), 'Onboarding must use three visual personalization questions');
 assert(onboarding.includes('ChoiceSheet') && onboarding.includes('EssentialsSlide'), 'Onboarding must collect the real financial essentials through accessible selectors');

@@ -19,10 +19,10 @@ presentation/navigation/UX-contract only.
 - **Purpose / user question answered:** first-run setup; "what is this app
   and can I trust it with my money."
 - **Approved structure (revised 2026-08-28):** exact 5 steps — Welcome with
-  a compact AR/EN language choice directly below its copy → three
-  personalization questions (the goals question is multi-select) → Essentials
-  and start. The language selection changes onboarding copy and RTL/LTR
-  immediately, then persists as the app-wide preference. The privacy
+  a small AR/EN reader control at the top side → three personalization
+  questions (the goals question is multi-select) → Essentials and start.
+  AR/EN changes onboarding copy and RTL/LTR only for the current onboarding
+  session and does not change the app-wide language preference. The privacy
   note appears within Essentials and does not create a separate step.
 - **Required sections:** per-step content defined in
   `14_MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md` (REF-02/03/03B/03D/03C/03E).

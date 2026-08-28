@@ -145,6 +145,107 @@ const constants = fs.readFileSync(path.join(srcRoot, 'lib', 'constants.js'), 'ut
 const trackers = fs.readFileSync(path.join(srcRoot, 'screens', 'TrackersLabScreen.js'), 'utf8');
 const home = fs.readFileSync(path.join(srcRoot, 'screens', 'HomeScreen.js'), 'utf8');
 const onboarding = fs.readFileSync(path.join(srcRoot, 'screens', 'OnboardingScreen.js'), 'utf8');
+/* MYFI_ONBOARDING_CANONICAL_CONTRACT_2026_08_28_START */
+
+// This is the single authoritative Onboarding UI contract.
+// Historical Stage 4/5/6 Onboarding assertions are intentionally retired.
+// Product Owner authority: 2026-08-28.
+
+assert(
+  onboarding.includes('const PERSONALIZATION_QUESTIONS = [')
+    && onboarding.includes("id: 'context'")
+    && onboarding.includes("id: 'focus'")
+    && onboarding.includes("id: 'moneySetup'"),
+  'Onboarding must contain exactly the current personalization model: usage context, financial goals, and money organization',
+);
+
+assert(
+  onboarding.includes("id: 'focus'")
+    && onboarding.includes('multiple: true'),
+  'The financial-goal question must remain multi-select',
+);
+
+assert(
+  onboarding.includes('const WELCOME_STEP = 0;')
+    && onboarding.includes('const QUESTION_START_STEP = 1;')
+    && onboarding.includes('const ESSENTIALS_STEP = QUESTION_START_STEP + PERSONALIZATION_QUESTIONS.length;')
+    && onboarding.includes('const STEP_COUNT = ESSENTIALS_STEP + 1;'),
+  'Onboarding must remain the approved five-screen flow: Welcome, three personalization questions, and Essentials',
+);
+
+assert(
+  onboarding.includes('function LanguagePicker')
+    && onboarding.includes("const options = ['ar', 'en'];")
+    && onboarding.includes("languagePicker: { alignSelf: 'flex-end'"),
+  'Welcome must expose a compact AR/EN reader control at the top side',
+);
+
+assert(
+  onboarding.includes("const [lang, setLang] = useState(detectSystemLang());")
+    && onboarding.includes("const appLang = cfg.langMode === 'system'"),
+  'Onboarding reader language and persistent app language must remain separate states',
+);
+
+assert.equal(
+  onboarding.includes('languageConfirmed'),
+  false,
+  'Reader language must not be a blocking onboarding confirmation step',
+);
+
+assert.equal(
+  onboarding.includes("      langMode: 'manual',\n      lang,"),
+  false,
+  'Temporary AR/EN reader selection must never persist as the app language',
+);
+
+assert(
+  onboarding.includes('walletName.trim() || copy(appLang).walletDefaultName'),
+  'Default wallet naming must follow the real app language rather than the temporary reader language',
+);
+
+assert(
+  onboarding.includes('function EssentialsSlide')
+    && onboarding.includes('ChoiceSheet')
+    && onboarding.includes('countryCode')
+    && onboarding.includes('currencyCode')
+    && onboarding.includes('themeChoice')
+    && onboarding.includes('walletName'),
+  'Essentials must contain country, currency, appearance, and first-wallet setup',
+);
+
+assert(
+  onboarding.includes('privacyStrip')
+    && onboarding.includes('trustBadge')
+    && onboarding.includes('welcomeCards'),
+  'Onboarding must retain concise trust/privacy and product-value presentation',
+);
+
+assert.equal(
+  /skipCurrent|T\.skip|skipButton|skipText/.test(onboarding),
+  false,
+  'Onboarding must not expose a Skip path',
+);
+
+assert.equal(
+  onboarding.includes('finishSummary'),
+  false,
+  'Onboarding must go directly to Home without a redundant completion screen',
+);
+
+assert.equal(
+  onboarding.includes('enterDemoMode') || onboarding.includes('startMode'),
+  false,
+  'Demo/test-data selection must remain outside user onboarding',
+);
+
+assert.equal(
+  onboarding.includes('<View style={s.ideaVisual}>'),
+  false,
+  'The obsolete fake-phone illustration must not return to onboarding',
+);
+
+/* MYFI_ONBOARDING_CANONICAL_CONTRACT_2026_08_28_END */
+
 assert.equal(/<TextInpu\b/.test(history), false, 'History must use the imported TextInput component');
 assert.equal(/<SectionLis\b/.test(history), false, 'History must use the imported SectionList component');
 assert(history.includes('onPress={applyDraft}'), 'History filters must have an explicit apply action');
@@ -256,7 +357,11 @@ assert.equal(home.includes('payCommitment(item.id'), false, 'Home commitment act
 assert(home.includes('onQuickCommitment(item.id)'), 'Home commitment actions must route through the wallet-aware payment modal');
 assert(home.includes('postponeCommitmentFromHome') && home.includes('deferCommitment'), 'Home commitment tasks must expose the existing deferral action');
 assert(home.includes('item.actionable'), 'Home must include actionable commitments in important states');
-assert(home.includes("item.key === 'attention' && attentionItems.length > 0"), 'Due commitments must force important states onto Home');
+assert(
+  home.includes("item.key === 'attention'")
+    && home.includes('attentionItems.length || healthNeedsAttention'),
+  'Important states must remain visible for due items or financial-health warnings',
+);
 
 /* MYFI_STAGE3_FINAL_VISUAL_CONTRACT */
 assert(
@@ -345,8 +450,6 @@ assert(home.includes('const recentLimit = 3;'), 'Home recent activity must show 
 assert(home.includes('savingPanel') && home.includes('savingSummary') && home.includes('savingGoalRow'), 'Home savings must use the same compact panel hierarchy as other Home sections');
 assert(history.includes('typeRail') && history.includes('typeChip') && history.includes('historyHead'), 'History must use the refreshed direct-filter visual hierarchy');
 assert.equal(history.includes("renderFilterPicker({ id: 'type'"), false, 'History transaction type must not be duplicated inside the advanced filter sheet');
-assert(onboarding.includes('dashboardCard') && onboarding.includes('insightCard') && onboarding.includes('PromiseRow'), 'Onboarding must communicate value with real finance, insight, and concise trust rows');
-assert.equal(onboarding.includes('finishSummary'), false, 'Onboarding must not add a redundant completion screen');
 assert(reports.includes('netSummaryCard') && reports.includes("ar ? 'تفاصيل الفترة' : 'Period details'"), 'Reports must use the new net-only summary and compact period detail list');
 assert(settings.includes('profileHero') && settings.includes('AccountPage') && settings.includes('AuthModal'), 'Account must use a dedicated professional profile screen with optional cloud connection');
 
@@ -359,8 +462,6 @@ assert(settings.includes('Connect MYFI account') && settings.includes("account: 
 assert(history.includes('historyFilterAction') && history.includes('filterCountBadge'), 'History advanced filters must be reachable from the compact header action');
 assert(history.includes('dayHeader') && history.includes('rowFirst') && history.includes('rowLast'), 'History transactions must read as grouped ledger rows rather than isolated floating cards');
 assert(history.includes("diff === 0") && history.includes("diff === 1"), 'History day labels must use Today/Yesterday semantics when applicable');
-assert(onboarding.includes('dashboardCard') && onboarding.includes('localFirst') && onboarding.includes('unifiedEngine'), 'Onboarding welcome must be financial-first and local-first without setup choices');
-assert.equal(onboarding.includes('<View style={s.ideaVisual}>'), false, 'Onboarding must remove the decorative fake-phone illustration from the primary welcome path');
 assert(homeCenter.includes('identityNameRow') && !homeCenter.includes('style={[s.identityFacts'), 'Home account center must use a compact identity summary rather than metric-style account fact cards');
 
 
@@ -390,17 +491,8 @@ assert(transactionDetails.includes('C.delete') && transactionDetails.includes('t
 assert(appRoot.includes("const INTERNAL_DEMO_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_INTERNAL_DEMO === '1';"), 'Demo tools must be gated behind an explicit internal development flag');
 assert(appRoot.includes('INTERNAL_DEMO_ENABLED && cfg.demoMode'), 'Demo banner must never appear in the normal user build');
 assert(appRoot.includes("if (!ready || INTERNAL_DEMO_ENABLED || !cfg.demoMode) return;") && appRoot.includes('exitDemoMode?.()'), 'A legacy demo session must automatically restore real data in normal user builds');
-assert(appRoot.includes("if (cfg.langMode !== 'system') return undefined;") && appRoot.includes('detectSystemLang()'), 'System language must be detected silently instead of exposed as an onboarding choice');
 assert(appRoot.includes("const orientationMode = ['system', 'auto', 'portrait'].includes(cfg.orientationMode)"), 'Orientation must preserve device, explicit auto-rotate, and portrait choices');
 
-assert.equal(onboarding.includes('enterDemoMode'), false, 'Demo mode must not be part of the user onboarding flow');
-assert.equal(onboarding.includes('startMode'), false, 'Onboarding must not ask users to choose real versus demo data');
-assert.equal(onboarding.includes('finishSummary'), false, 'Onboarding must go directly to Home without a redundant completion screen');
-assert.equal(onboarding.includes('systemLanguage'), false, 'Onboarding must not show Follow device as a visible choice');
-assert.equal(onboarding.includes('monthNames'), false, 'Onboarding must not ask for device-derived date preferences');
-assert.equal(onboarding.includes('themeMode'), false, 'Onboarding must not ask for device-derived appearance preferences');
-assert(onboarding.includes('[0, 1, 2].map') && onboarding.includes("step === 2 ? T.start : T.next"), 'Onboarding must stay a concise three-step flow');
-assert(onboarding.includes('dashboardCard') && onboarding.includes('insightCard') && onboarding.includes('quickSetupCard'), 'Onboarding must combine product value with a compact usage/country/currency setup');
 
 assert(settings.includes('title={T.rotation}'), 'Screen rotation must stay in the public Settings UX');
 assert(settings.includes("choice === 'orientation'"), 'Screen rotation must use the same device/manual choice pattern as language and appearance');
@@ -425,7 +517,6 @@ assert(appPrimitives.includes("{income ? '+' : '-'}"), 'Income and expense direc
 assert(home.includes("backgroundColor: th.incBg") && home.includes("backgroundColor: th.expBg"), 'Home income and expense actions must use semantic green/red surfaces');
 assert(history.includes("direction: 'income', color: th.inc") && history.includes("direction: 'expense', color: th.exp"), 'History income and expense choices must use green plus/red minus semantics');
 assert(reports.includes('kind="income" color={th.inc}') && reports.includes('kind="expense" color={th.exp}'), 'Report empty-state actions must use green plus/red minus semantics');
-assert(onboarding.includes('direction="income"') && onboarding.includes('direction="expense"'), 'Onboarding preview must use plus/minus direction marks');
 assert(legacySettings.includes("direction: item.key === 'income' ? 'income' : item.key === 'expense' ? 'expense' : null"), 'Advanced Home metric settings must use plus/minus direction marks');
 assert(legacySettings.includes("direction: 'expense', color: th.exp") && legacySettings.includes("direction: 'income', color: th.inc"), 'Category flow choices must use red minus/green plus semantics');
 assert(theme.includes('inc: BRAND_GREEN') && theme.includes("exp: '#C74F5C'") && theme.includes("exp: '#E06B76'"), 'Light and dark themes must preserve green income and red expense colors');

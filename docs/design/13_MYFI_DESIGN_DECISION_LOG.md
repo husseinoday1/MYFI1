@@ -52,15 +52,17 @@ labeling judged a superseded artifact against the majority + text.
 
 **Date:** 2026-08-28
 **Decision:** Onboarding — REVISED by the Product Owner. Replace the rigid
-account-type idea and broad priorities multi-select with four short,
-single-answer personalization questions: usage context, first goal, money
-organization, and preferred interface detail. Use the answers to tune only
-supported module visibility. Combine country/language/currency/appearance
-and first-wallet naming into Essentials, then end with Privacy and Start.
+account-type idea and broad priorities multi-select with three short
+personalization questions: usage context, first financial goal (multi-select),
+and current money organization. Use the answers to tune only supported module
+visibility. Keep a small AR/EN control at the top side of Welcome solely as an
+onboarding reader-language control; it must not change or persist the actual
+app language. Essentials contains country, currency, appearance, and first-
+wallet naming, followed by the embedded Privacy notice and Start action.
 Remove Skip entirely; Back remains available.
-**Supersedes:** the exact 6-step ordering approved on 2026-08-26 and the
-separate final completion screen. The earlier reference images remain style
-and content inputs, not the current step-count authority.
+**Supersedes:** the exact 6-step ordering approved on 2026-08-26, the removed
+detail-level question, the separate final completion screen, and any earlier
+interpretation that persisted the Welcome AR/EN reader choice as app language.
 **Financial/data impact:** no transaction, balance, ledger, FX, SQLite,
 migration, backup, restore, auth, sync, or SecureStore change. Existing-user
 financial data remains preserved.
