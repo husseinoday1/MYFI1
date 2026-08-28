@@ -43,6 +43,7 @@ const staticContracts = [
   'r04-1-account-lifecycle.test.cjs',
   'lifecycle-reset-wallet-search.test.cjs',
   'onboarding-preview.test.cjs',
+  'onboarding-runtime-regressions.test.cjs',
   'performance-data-lab-v51.test.cjs',
   'performance-data-persistence-v511.test.cjs',
   'phase10-restore-benchmark-memory.test.cjs',

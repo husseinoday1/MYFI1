@@ -58,7 +58,7 @@ assert(!support.includes('NestedSettingsMenu'), 'Help must not hide its entries 
 assert(settings.includes("const [openGuide, setOpenGuide] = useState('start');"), 'Guide topics should expand inline instead of adding more pages');
 
 // Previously completed Home / History / Reports behavior stays intact.
-assert(home.includes('hasMeaningfulHomeData'), 'Home progressive disclosure regressed');
+assert(home.includes('const hasLedgerEntries =') && home.includes('const visibleHomeCards = hasLedgerEntries'), 'Home progressive disclosure must use the current ledger-based visibility contract');
 assert(history.includes('hasEntries={scopedTrans.length > 0}'), 'History empty-state progressive disclosure regressed');
 assert(reports.includes('const comparisonPeriodSummary = useMemo(() => {'), 'Compact report comparison-period summary regressed');
 assert(reports.includes('{comparisonPeriodSummary.primary}'));
