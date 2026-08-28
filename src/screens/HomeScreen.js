@@ -106,6 +106,9 @@ const copy = (lang) => {
     showBalance: ar ? 'إظهار' : 'Show',
     hideBalance: ar ? 'إخفاء' : 'Hide',
     hiddenAmount: '****',
+    ledgerUnavailable: ar ? 'تعذر تحديث الرصيد الآن' : 'Could not refresh balance',
+    ledgerUnavailableHint: ar ? 'لم نعرض رقمًا قديمًا. تحقق من الاتصال ثم أعد المحاولة.' : 'We did not show an older number. Check your connection and try again.',
+    retryLedger: ar ? 'إعادة المحاولة' : 'Try again',
     noActiveGoals: ar ? 'لا توجد أهداف نشطة' : 'No active goals',
     quickActions: ar ? 'الإضافة السريعة' : 'Quick add',
     quickExpense: ar ? 'إضافة مصروف' : 'Add expense',
@@ -202,11 +205,15 @@ export default function HomeScreen({
     [commitments, cfg.activeScope, cfg.profileType, modules.commitments],
   );
   const [sqlHome, setSqlHome] = useState(null);
+  const [sqlHomeError, setSqlHomeError] = useState(false);
+  const [ledgerRetry, setLedgerRetry] = useState(0);
   const currentMonthKey = today().slice(0, 7);
+  const ledgerReadFailed = financialLedgerV7Cutover && sqlHomeError;
   useEffect(() => {
     let cancelled = false;
     if (!financialLedgerV7Cutover) {
       setSqlHome(null);
+      setSqlHomeError(false);
       return () => { cancelled = true; };
     }
     const run = async () => {
@@ -214,23 +221,32 @@ export default function HomeScreen({
       const scope = getActiveScope(cfg);
       const [year, month] = currentMonthKey.split('-').map(Number);
       const lastDay = new Date(year, month, 0).getDate();
-      try {
-        const [summary, recentPage, positions] = await Promise.all([
-          queryLedgerSummary({ namespace, fromDate: `${currentMonthKey}-01`, toDate: `${currentMonthKey}-${String(lastDay).padStart(2, '0')}`, scope }),
-          queryLedgerTransactions({ namespace, limit: recentLimit, scope, archived: false }),
-          queryLedgerWalletPositions({ namespace, scope }),
-        ]);
-        if (!cancelled) setSqlHome({ summary, recent: recentPage?.rows || [], positions: positions?.rows || [] });
-      } catch {
-        if (!cancelled) setSqlHome(null);
+      const [summary, recentPage, positions] = await Promise.all([
+        queryLedgerSummary({ namespace, fromDate: `${currentMonthKey}-01`, toDate: `${currentMonthKey}-${String(lastDay).padStart(2, '0')}`, scope }),
+        queryLedgerTransactions({ namespace, limit: recentLimit, scope, archived: false }),
+        queryLedgerWalletPositions({ namespace, scope }),
+      ]);
+      if (summary?.supported !== true || recentPage?.supported !== true || positions?.supported !== true) {
+        throw new Error('home_ledger_read_unsupported');
       }
+      return { summary, recent: recentPage?.rows || [], positions: positions?.rows || [] };
     };
-    run();
+    void run()
+      .then((result) => {
+        if (cancelled) return;
+        setSqlHome(result);
+        setSqlHomeError(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSqlHome(null);
+        setSqlHomeError(true);
+      });
     return () => { cancelled = true; };
-  }, [financialLedgerV7Cutover, workspaceNamespace, cfg.activeScope, cfg.profileType, cfg.currency, currentMonthKey]);
+  }, [financialLedgerV7Cutover, workspaceNamespace, cfg.activeScope, cfg.profileType, cfg.currency, currentMonthKey, ledgerRetry]);
   const recent = useMemo(
-    () => financialLedgerV7Cutover && sqlHome?.recent?.length ? sqlHome.recent : getRecentTransactions(scopedTrans, recentLimit),
-    [financialLedgerV7Cutover, sqlHome, scopedTrans, recentLimit],
+    () => ledgerReadFailed ? [] : financialLedgerV7Cutover && sqlHome?.recent?.length ? sqlHome.recent : getRecentTransactions(scopedTrans, recentLimit),
+    [ledgerReadFailed, financialLedgerV7Cutover, sqlHome, scopedTrans, recentLimit],
   );
   const scopedTransactionIndex = useMemo(() => getTransactionIndex(scopedTrans), [scopedTrans]);
   const recentSelection = useMultiSelect(recent
@@ -246,6 +262,7 @@ export default function HomeScreen({
     [wallets, trans, cfg.currency, defaultWalletId, cfg.activeScope, cfg.profileType],
   );
   const walletRows = useMemo(() => {
+    if (financialLedgerV7Cutover && sqlHomeError) return [];
     if (!financialLedgerV7Cutover || !sqlHome?.positions?.length) return fallbackWalletRows;
     const byId = new Map((scopedWallets.length ? scopedWallets : wallets).map(item => [String(item.id), item]));
     return sqlHome.positions.map(position => ({
@@ -253,7 +270,7 @@ export default function HomeScreen({
       ...position,
       balance: position.physicalBalance,
     })).sort((a, b) => (a.id === defaultWalletId ? -1 : b.id === defaultWalletId ? 1 : 0));
-  }, [financialLedgerV7Cutover, sqlHome, fallbackWalletRows, scopedWallets, wallets, defaultWalletId]);
+  }, [financialLedgerV7Cutover, sqlHome, sqlHomeError, fallbackWalletRows, scopedWallets, wallets, defaultWalletId]);
   const walletMap = useMemo(() => {
     const normalized = normalizeWallets(scopedWallets.length ? scopedWallets : wallets, cfg.currency);
     return new Map(normalized.map(wallet => [wallet.id, wallet]));
@@ -277,7 +294,7 @@ export default function HomeScreen({
   const healthNeedsAttention = snapshot.health === 'danger' || snapshot.health === 'warning' || snapshot.health === 'watch';
   const canTransfer = walletRows.length > 1;
   const heroBalance = getWalletBaseAvailableTotal(walletRows, cfg.currency);
-  const heroBalanceText = `${heroBalance < 0 ? '-' : ''}${cfg.currency} ${fmt(Math.abs(heroBalance))}`;
+  const heroBalanceText = ledgerReadFailed ? '—' : `${heroBalance < 0 ? '-' : ''}${cfg.currency} ${fmt(Math.abs(heroBalance))}`;
   const activeGoals = scopedGoals.filter(goal => goal.active !== false && Number(goal.target || 0) > 0);
   const goalCurrencyGroups = useMemo(
     () => summarizeGoalCurrencies(activeGoals, cfg.currency, { activeOnly: true }),
@@ -685,7 +702,9 @@ export default function HomeScreen({
   // If the user has a ledger, the configured Month summary stays visible even
   // when the current month is still zero. Only a truly empty ledger uses the
   // first-entry state. This keeps Home faithful to the user's Home settings.
-  const hasLedgerEntries = financialLedgerV7Cutover && sqlHome?.summary ? Number(sqlHome.summary.count || 0) > 0 || recent.length > 0 : scopedTrans.length > 0;
+  const hasLedgerEntries = ledgerReadFailed
+    ? false
+    : financialLedgerV7Cutover && sqlHome?.summary ? Number(sqlHome.summary.count || 0) > 0 || recent.length > 0 : scopedTrans.length > 0;
   const visibleHomeCards = hasLedgerEntries
     ? homeCards.filter(item => item.visible !== false)
     : [];
@@ -1239,7 +1258,18 @@ export default function HomeScreen({
             </View>
           </View>
           <View style={[s.heroRule, { backgroundColor: th.primary }]} />
-          <Text style={[s.heroMeta, { color: th.sub, textAlign: align }]}>{isAr ? 'المتاح للاستخدام الآن' : 'Ready to use now'}</Text>
+          {ledgerReadFailed ? (
+            <View style={[s.ledgerReadError, { backgroundColor: th.warnBg, borderColor: `${th.warn}44`, flexDirection: rowDir }]}>
+              <Ionicons name="cloud-offline-outline" size={16} color={th.warn} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[s.ledgerReadErrorTitle, { color: th.warn, textAlign: align }]}>{C.ledgerUnavailable}</Text>
+                <Text style={[s.ledgerReadErrorHint, { color: th.sub, textAlign: align }]}>{C.ledgerUnavailableHint}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setLedgerRetry(value => value + 1)} accessibilityLabel={C.retryLedger} style={[s.ledgerRetry, { backgroundColor: th.card }]}>
+                <Ionicons name="refresh-outline" size={16} color={th.primary} />
+              </TouchableOpacity>
+            </View>
+          ) : <Text style={[s.heroMeta, { color: th.sub, textAlign: align }]}>{isAr ? 'المتاح للاستخدام الآن' : 'Ready to use now'}</Text>}
         </View>
         ) : null}
 
@@ -1342,6 +1372,10 @@ const s = StyleSheet.create({
   heroAmount:   { fontSize: 30, lineHeight: 38, ...weight('900'), marginTop: 3 },
   heroRule:     { height: 4, borderRadius: 2, marginTop: 14 },
   heroMeta:     { fontSize: 10, lineHeight: 15, ...weight('800'), marginTop: 8 },
+  ledgerReadError: { borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', gap: 8, padding: 9, marginTop: 9 },
+  ledgerReadErrorTitle: { fontSize: 11, lineHeight: 16, ...weight('900') },
+  ledgerReadErrorHint: { fontSize: 9, lineHeight: 14, ...weight('700'), marginTop: 1 },
+  ledgerRetry: { width: 34, height: 34, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center' },
   heroFact:     { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 54, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   factDivider:  { width: 1, height: 30 },
   quickEntry:   { marginBottom: 14 },

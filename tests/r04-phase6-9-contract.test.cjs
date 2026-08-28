@@ -82,6 +82,13 @@ assert(!goalDelete.includes('trans: s.trans.filter'), 'deleting a goal still del
 
 const home = read('src/screens/HomeScreen.js');
 assert(home.includes('queryLedgerSummary') && home.includes('queryLedgerWalletPositions'), 'Home is not SQL-first after cutover');
+const homeLedgerRunStart = home.indexOf('const run = async');
+const homeNamespaceRead = home.indexOf('const namespace = getLedgerNamespace', homeLedgerRunStart);
+const homeLedgerCatch = home.indexOf('.catch(() => {', homeLedgerRunStart);
+assert(homeLedgerRunStart >= 0 && homeNamespaceRead > homeLedgerRunStart && homeLedgerCatch > homeNamespaceRead, 'Home ledger namespace/read path is not guarded by a promise catch boundary');
+assert(home.includes('setSqlHomeError(true)') && home.includes('ledgerUnavailable'), 'Home ledger failure does not surface a clear user state');
+assert(home.includes('if (financialLedgerV7Cutover && sqlHomeError) return [];'), 'Home can still show fallback wallet balances after a V7 ledger read failure');
+assert(home.includes('() => ledgerReadFailed ? []'), 'Home can still show fallback recent transactions after a V7 ledger read failure');
 const reports = read('src/screens/ReportsScreen.js');
 assert(reports.includes('queryLedgerSummary') && reports.includes('queryLedgerCategorySpend'), 'Reports aggregations are not SQL-first after cutover');
 
