@@ -6,7 +6,7 @@ import { useStore } from '../store/useStore';
 import { TH } from '../lib/theme';
 import { FinancialDirectionMark, Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import WalletBalanceCard from '../components/WalletBalanceCard';
-import { CAT_COLORS, getSymbol } from '../lib/constants';
+import { CAT_COLORS, getSymbol, normalizeIncomeAllocationPlan } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
 import { buildFinancialReport, calcStats, catSpend, debtSummary } from '../utils/calc';
 import { buildLeakInsights } from '../lib/localIntelligence';
@@ -75,6 +75,13 @@ const copy = (lang) => {
     income: ar ? 'الدخل' : 'Income',
     expense: ar ? 'المصروف' : 'Expense',
     net: ar ? 'صافي الدخل' : 'Net income',
+    reportsTitle: ar ? 'التقارير والتحليلات' : 'Reports & Analytics',
+    reportsSubtitle: ar ? 'اقرأ وضعك المالي بوضوح' : 'Understand your financial picture clearly',
+    overview: ar ? 'نظرة عامة' : 'Overview',
+    moreDetails: ar ? 'تفاصيل إضافية' : 'More details',
+    hideDetails: ar ? 'إخفاء التفاصيل الإضافية' : 'Hide extra details',
+    topCategories: ar ? 'أعلى فئات الإنفاق' : 'Top spending categories',
+    viewSpending: ar ? 'عرض تحليل الإنفاق' : 'View spending analysis',
     surplus: ar ? 'فائض' : 'Surplus',
     deficit: ar ? 'عجز' : 'Deficit',
     entries: ar ? 'حركة' : 'entries',
@@ -149,7 +156,7 @@ const copy = (lang) => {
   };
 };
 
-export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = () => {} }) {
+export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = () => {}, onOpenBasira = () => {}, onOpenIncomeAllocation = () => {} }) {
   const { trans, debts, goals, wallets, commitments, cats, cfg, financialLedgerV7Cutover, workspaceNamespace } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const C = copy(cfg.lang);
@@ -187,7 +194,10 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
   const [scope, setScope] = useState('month');
   const [walletFilter, setWalletFilter] = useState('all');
   const [detailKey, setDetailKey] = useState(null);
+  const [reportView, setReportView] = useState('overview');
+  const [showMoreReports, setShowMoreReports] = useState(false);
   const [selectedMonthKey, setSelectedMonthKey] = useState(currentMonthKey);
+  const [simpleReferenceKey, setSimpleReferenceKey] = useState(previousMonthKey);
   const [comparisonMode, setComparisonMode] = useState('none');
   const [comparisonView, setComparisonView] = useState('chart');
   const [comparisonExpanded, setComparisonExpanded] = useState(false);
@@ -484,6 +494,20 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
       percent: total ? Math.round((Number(item.spent || 0) / total) * 100) : 0,
     }));
   }, [periodTrans, cats, sqlPeriod, financialLedgerV7Cutover]);
+  const incomePlan = normalizeIncomeAllocationPlan(cfg.incomeAllocationPlan);
+  const hasIncomePlan = Number(incomePlan?.income || 0) > 0;
+  const planFlexibleAmount = Number(incomePlan?.income || 0) * ((Number(incomePlan?.allocations?.needs || 0) + Number(incomePlan?.allocations?.wants || 0)) / 100);
+  const simpleReference = useMemo(() => {
+    if (scope !== 'month') return null;
+    const reference = comparisonTrans(simpleReferenceKey, 'month');
+    return calcStats(reference);
+  }, [scope, simpleReferenceKey, transactionIndex, walletFilter, cfg.defaultWalletId]);
+  const simpleReferenceLabel = useMemo(() => {
+    const [year, month] = String(simpleReferenceKey).split('-').map(Number);
+    return Number.isFinite(year) && Number.isFinite(month)
+      ? formatMonthLabel(year, month - 1, { style: monthStyle, length: 'short' })
+      : simpleReferenceKey;
+  }, [simpleReferenceKey, monthStyle]);
   const comparisonOptions = comparisonMode === 'month' ? monthOptions : yearOptions;
   const comparisonLimit = comparisonMode === 'month' ? 12 : 10;
   const comparisonSeries = useMemo(() => comparisonPeriods
@@ -680,6 +704,24 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
     },
   ];
 
+  const reportTabs = [
+    { key: 'overview', label: C.overview, detailKey: null },
+    { key: 'spending', label: C.expense, detailKey: 'spending' },
+    { key: 'income', label: C.income, detailKey: 'cashflow' },
+    { key: 'obligations', label: ar ? 'الالتزامات' : 'Dues', detailKey: 'obligations' },
+  ].filter(item => item.key !== 'obligations' || (modules.debtsOwed || modules.debtsReceivable || modules.commitments));
+  const visibleReportRows = reportView === 'overview'
+    ? reportRows
+    : reportRows.filter(item => item.key === detailKey);
+
+  const selectReportView = (nextView) => {
+    const next = reportTabs.find(item => item.key === nextView);
+    setReportView(nextView);
+    setDetailKey(next?.detailKey || null);
+    if (nextView === 'obligations') setWalletFilter('all');
+    if (nextView !== 'overview') setShowMoreReports(false);
+  };
+
   const selectPeriod = (value) => {
     if (/^\d{4}-\d{2}$/.test(value)) {
       setSelectedMonthKey(value);
@@ -697,39 +739,39 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
   return (
     <>
       <ScrollView style={{ flex: 1, backgroundColor: th.bg }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled contentContainerStyle={s.screen}>
-        <View style={[s.reportTopRow, { flexDirection: rowDir }]}>
-          <TouchableOpacity
-            onPress={() => setSheet('scope')}
-            style={[s.periodCard, { flex: 1, backgroundColor: th.primaryContainer, borderColor: `${th.primary}45`, flexDirection: rowDir }]}
-          >
-            <View style={[s.periodIcon, { backgroundColor: th.primary }]}>
-              <Ionicons name="calendar-outline" size={22} color={th.onPrimary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.periodLabel, { color: th.primary, textAlign: align }]}>
-                {scope === 'month' ? C.monthPeriod : scope === 'year' ? C.yearPeriod : C.allTime}
-              </Text>
-              <Text
-                style={[s.periodValue, { color: th.text, textAlign: align, writingDirection: writingDirectionFor(cfg.lang) }]}
-                numberOfLines={1}
-              >
-                {periodLabel}
-              </Text>
-              <Text style={[s.periodHint, { color: th.faint, textAlign: align }]}>{C.periodHint}</Text>
-            </View>
-            <View style={[s.periodAction, { backgroundColor: th.primSoft }]}>
-              <Ionicons name="options-outline" size={18} color={th.primary} />
-            </View>
-          </TouchableOpacity>
+        <View style={[s.reportTitleRow, { flexDirection: rowDir }]}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[s.reportTitle, { color: th.text, textAlign: align }]}>{C.reportsTitle}</Text>
+            <Text style={[s.reportSubtitle, { color: th.sub, textAlign: align }]}>{C.reportsSubtitle}</Text>
+          </View>
           <TouchableOpacity
             onPress={() => hasReportContent && setSheet('share')}
             accessibilityLabel={C.exportTitle}
-            style={[s.shareCenterBtn, { backgroundColor: th.primary, borderColor: th.primary, opacity: hasReportContent ? 1 : 0.45 }]}
+            style={[s.reportShareBtn, { backgroundColor: th.primSoft, opacity: hasReportContent ? 1 : 0.45 }]}
           >
-            <Ionicons name="share-social-outline" size={21} color={th.onPrimary} />
-            <Text style={[s.shareCenterLabel, { color: th.onPrimary }]}>{C.export}</Text>
+            <Ionicons name="share-social-outline" size={19} color={th.primary} />
           </TouchableOpacity>
         </View>
+        <TouchableOpacity
+          onPress={() => setSheet('scope')}
+          style={[s.periodCard, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}
+        >
+          <View style={[s.periodIcon, { backgroundColor: th.primSoft }]}>
+            <Ionicons name="calendar-outline" size={19} color={th.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.periodLabel, { color: th.sub, textAlign: align }]}>
+              {scope === 'month' ? C.monthPeriod : scope === 'year' ? C.yearPeriod : C.allTime}
+            </Text>
+            <Text
+              style={[s.periodValue, { color: th.text, textAlign: align, writingDirection: writingDirectionFor(cfg.lang) }]}
+              numberOfLines={1}
+            >
+              {periodLabel}
+            </Text>
+          </View>
+          <Ionicons name={ar ? 'chevron-back' : 'chevron-forward'} size={17} color={th.primary} />
+        </TouchableOpacity>
 
         {modules.wallets && walletOptions.length > 1 ? (
           <View style={s.walletRailBlock}>
@@ -813,7 +855,75 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
           </View>
         </View>
 
-        <View style={[s.reportInsightList, { backgroundColor: th.card, borderColor: th.border }, !hasReportContent ? { display: 'none' } : null]}>
+        {hasReportContent && reportView === 'overview' ? (
+          <>
+            <View style={[s.summaryGrid, { flexDirection: rowDir }]}>
+              <SummaryMetric label={C.income} value={stats.inc} color={th.inc} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <SummaryMetric label={C.expense} value={stats.exp} color={th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+              <SummaryMetric label={C.net} value={stats.bal} color={stats.bal >= 0 ? th.inc : th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
+            </View>
+            <View style={[s.topCategoriesCard, { backgroundColor: th.card, borderColor: th.border }]}>
+              <View style={[s.topCategoriesHead, { flexDirection: rowDir }]}>
+                <View style={[s.reportInsightHeadIcon, { backgroundColor: th.expBg }]}>
+                  <Ionicons name="pie-chart-outline" size={17} color={th.exp} />
+                </View>
+                <Text style={[s.reportInsightHeadTitle, { color: th.text, textAlign: align, flex: 1 }]}>{C.topCategories}</Text>
+              </View>
+              {categories.length ? categories.slice(0, 3).map(item => (
+                <CategoryRow key={item.id} item={item} th={th} lang={cfg.lang} sym={sym} />
+              )) : <Empty th={th} text={C.noData} />}
+            </View>
+
+            {scope === 'month' && simpleReference ? (
+              <View style={[s.simpleComparisonCard, { backgroundColor: th.card, borderColor: th.border }]}>
+                <View style={[s.simpleComparisonHead, { flexDirection: rowDir }]}>
+                  <View style={[s.reportInsightHeadIcon, { backgroundColor: th.primSoft }]}>
+                    <Ionicons name="git-compare-outline" size={17} color={th.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.reportInsightHeadTitle, { color: th.text, textAlign: align }]}>{ar ? 'مقارنة سريعة' : 'Quick comparison'}</Text>
+                    <Text style={[s.simpleComparisonHint, { color: th.sub, textAlign: align }]}>{ar ? `مقابل ${simpleReferenceLabel}` : `Against ${simpleReferenceLabel}`}</Text>
+                  </View>
+                </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[s.simpleReferenceRail, { flexDirection: rowDir }]}>
+                  {monthOptions.slice(0, 12).filter(option => option.value !== selectedMonthKey).map(option => {
+                    const active = option.value === simpleReferenceKey;
+                    return <TouchableOpacity key={option.value} onPress={() => setSimpleReferenceKey(option.value)} style={[s.simpleReferenceChip, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : th.border }]}><Text style={[s.simpleReferenceText, { color: active ? th.primary : th.sub }]}>{option.label}</Text></TouchableOpacity>;
+                  })}
+                </ScrollView>
+                <View style={[s.simpleCompareMetrics, { flexDirection: rowDir }]}>
+                  <SimpleComparisonMetric th={th} lang={cfg.lang} label={C.expense} nowValue={stats.exp} referenceValue={simpleReference.exp} color={th.exp} currency={cfg.currency} />
+                  <SimpleComparisonMetric th={th} lang={cfg.lang} label={C.net} nowValue={stats.bal} referenceValue={simpleReference.bal} color={stats.bal >= 0 ? th.inc : th.exp} currency={cfg.currency} />
+                </View>
+              </View>
+            ) : null}
+
+            {hasIncomePlan ? (
+              <TouchableOpacity onPress={onOpenIncomeAllocation} style={[s.planRealityCard, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}>
+                <View style={[s.planRealityIcon, { backgroundColor: th.primSoft }]}><Ionicons name="pie-chart-outline" size={18} color={th.primary} /></View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[s.planRealityTitle, { color: th.text, textAlign: align }]}>{ar ? 'خطتك مقابل الواقع' : 'Your plan vs. actual'}</Text>
+                  <Text style={[s.planRealityHint, { color: th.sub, textAlign: align }]}>{ar ? `المصروف الفعلي ${money(stats.exp, cfg.lang, cfg.currency)} ${sym} · مساحة الصرف المخططة ${money(planFlexibleAmount, cfg.lang, cfg.currency)} ${sym}` : `Actual spending ${money(stats.exp, cfg.lang, cfg.currency)} ${sym} · planned spending room ${money(planFlexibleAmount, cfg.lang, cfg.currency)} ${sym}`}</Text>
+                </View>
+                <Ionicons name={ar ? 'chevron-back' : 'chevron-forward'} size={17} color={th.primary} />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity onPress={onOpenIncomeAllocation} style={[s.planRealityCard, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}>
+                <View style={[s.planRealityIcon, { backgroundColor: th.primSoft }]}><Ionicons name="pie-chart-outline" size={18} color={th.primary} /></View>
+                <View style={{ flex: 1, minWidth: 0 }}><Text style={[s.planRealityTitle, { color: th.text, textAlign: align }]}>{ar ? 'أنشئ خطة توزيع دخلك' : 'Create your income plan'}</Text><Text style={[s.planRealityHint, { color: th.sub, textAlign: align }]}>{ar ? 'احفظ نسبك، ثم ارجع لترى الصرف بجانب خطتك.' : 'Save your percentages, then return to see spending beside your plan.'}</Text></View>
+                <Ionicons name={ar ? 'chevron-back' : 'chevron-forward'} size={17} color={th.primary} />
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity onPress={onOpenBasira} style={[s.basiraGateway, { backgroundColor: th.primSoft, borderColor: `${th.primary}44`, flexDirection: rowDir }]}>
+              <View style={[s.basiraGatewayIcon, { backgroundColor: th.primary }]}><Ionicons name="sparkles-outline" size={19} color={th.onPrimary} /></View>
+              <View style={{ flex: 1, minWidth: 0 }}><Text style={[s.basiraGatewayTitle, { color: th.primary, textAlign: align }]}>{ar ? 'افتح بصيرة MYFI' : 'Open MYFI Insight'}</Text><Text style={[s.basiraGatewayHint, { color: th.sub, textAlign: align }]}>{ar ? 'قارن أي فترات، وافهم التغير مع دليله.' : 'Compare any periods and see the evidence behind change.'}</Text></View>
+              <Ionicons name={ar ? 'chevron-back' : 'chevron-forward'} size={18} color={th.primary} />
+            </TouchableOpacity>
+          </>
+        ) : null}
+
+        <View style={[s.reportInsightList, { backgroundColor: th.card, borderColor: th.border, display: 'none' }]}>
           <View style={[s.reportInsightHead, { flexDirection: rowDir }]}>
             <View style={[s.reportInsightHeadIcon, { backgroundColor: th.primSoft }]}>
               <Ionicons name="analytics-outline" size={17} color={th.primary} />
@@ -823,7 +933,7 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
             </Text>
           </View>
 
-          {reportRows.map((item, index) => {
+          {visibleReportRows.map((item, index) => {
             const active = detailKey === item.key;
             return (
               <View key={item.key}>
@@ -1820,6 +1930,21 @@ function SummaryMetric({ label, value, color, th, lang, currency, sym }) {
   );
 }
 
+function SimpleComparisonMetric({ th, lang, label, nowValue, referenceValue, color, currency }) {
+  const ar = lang === 'ar';
+  const delta = Number(nowValue || 0) - Number(referenceValue || 0);
+  const deltaLabel = delta === 0
+    ? (ar ? 'بدون تغيير' : 'No change')
+    : `${delta > 0 ? '+' : ''}${money(delta, lang, currency)}`;
+  return (
+    <View style={[s.simpleCompareMetric, { backgroundColor: th.cardHigh }]}>
+      <Text style={[s.simpleCompareMetricLabel, { color: th.sub, textAlign: ar ? 'right' : 'left' }]}>{label}</Text>
+      <Text style={[s.simpleCompareMetricValue, { color }]} numberOfLines={1}>{money(nowValue, lang, currency)}</Text>
+      <Text style={[s.simpleCompareDelta, { color: delta <= 0 ? th.inc : th.exp }]}>{deltaLabel}</Text>
+    </View>
+  );
+}
+
 function ComparisonMetric({ label, value, color, lang, currency, sym }) {
   return (
     <View style={s.comparisonMetric}>
@@ -1977,15 +2102,19 @@ function Empty({ th, text }) {
 
 const s = StyleSheet.create({
   screen: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 104 },
-  reportTopRow: { alignItems: 'stretch', gap: 8, marginBottom: 9 },
-  shareCenterBtn: { width: 64, minHeight: 72, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5 },
-  shareCenterLabel: { fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: 'center' },
-  periodCard: { minHeight: 72, borderRadius: 18, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9, alignItems: 'center', gap: 10, overflow: 'hidden' },
+  reportTitleRow: { minHeight: 48, alignItems: 'center', gap: 10, marginBottom: 10 },
+  reportTitle: { fontSize: 22, lineHeight: 29, ...weight('900') },
+  reportSubtitle: { fontSize: 11, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  reportShareBtn: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  periodCard: { minHeight: 64, borderRadius: 18, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9, alignItems: 'center', gap: 10, overflow: 'hidden', marginBottom: 9 },
   periodIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   periodLabel: { fontSize: 11, lineHeight: 16, ...weight('800') },
   periodValue: { fontSize: 16, lineHeight: 22, ...weight('900'), marginTop: 0 },
   periodHint: { fontSize: 10, lineHeight: 14, ...weight('700'), marginTop: 0 },
   periodAction: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  reportTabs: { minHeight: 46, borderRadius: RADIUS.lg, padding: 4, gap: 4, marginBottom: 10 },
+  reportTab: { flex: 1, minWidth: 0, minHeight: 38, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  reportTabText: { fontSize: 10, lineHeight: 15, ...weight('900'), textAlign: 'center' },
   netSummaryCard: { minHeight: 92, borderRadius: 18, borderWidth: 1, alignItems: 'center', gap: 11, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 10 },
   netSummaryIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   netSummaryLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
@@ -2012,6 +2141,31 @@ const s = StyleSheet.create({
   reportInsightValue: { maxWidth: '100%', fontSize: 12, lineHeight: 17, ...weight('900'), textAlign: 'right' },
   reportInlineDetail: { borderTopWidth: 1, paddingHorizontal: 8, paddingTop: 10, paddingBottom: 6 },
   reportInlineStack: { gap: 8 },
+  topCategoriesCard: { borderRadius: 18, borderWidth: 1, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 12, marginBottom: 10 },
+  topCategoriesHead: { minHeight: 34, alignItems: 'center', gap: 8, paddingHorizontal: 2, paddingBottom: 8 },
+  simpleComparisonCard: { borderRadius: RADIUS.xl, borderWidth: 1, padding: 12, marginBottom: 10 },
+  simpleComparisonHead: { alignItems: 'center', gap: 8 },
+  simpleComparisonHint: { fontSize: 10, lineHeight: 15, ...weight('700'), marginTop: 1 },
+  simpleReferenceRail: { gap: 6, paddingTop: 10, paddingBottom: 10 },
+  simpleReferenceChip: { minHeight: 32, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+  simpleReferenceText: { fontSize: 10, lineHeight: 14, ...weight('900') },
+  simpleCompareMetrics: { gap: 8 },
+  simpleCompareMetric: { flex: 1, minWidth: 0, borderRadius: RADIUS.md, padding: 9 },
+  simpleCompareMetricLabel: { fontSize: 10, lineHeight: 14, ...weight('800') },
+  simpleCompareMetricValue: { fontSize: 13, lineHeight: 19, ...weight('900'), marginTop: 3 },
+  simpleCompareDelta: { fontSize: 10, lineHeight: 14, ...weight('900'), marginTop: 1 },
+  planRealityCard: { minHeight: 76, borderRadius: RADIUS.xl, borderWidth: 1, padding: 12, alignItems: 'center', gap: 10, marginBottom: 10 },
+  planRealityIcon: { width: 38, height: 38, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center' },
+  planRealityTitle: { fontSize: 13, lineHeight: 18, ...weight('900') },
+  planRealityHint: { fontSize: 10, lineHeight: 15, ...weight('700'), marginTop: 2 },
+  basiraGateway: { minHeight: 78, borderRadius: RADIUS.xl, borderWidth: 1, padding: 12, alignItems: 'center', gap: 10, marginBottom: 10 },
+  basiraGatewayIcon: { width: 38, height: 38, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center' },
+  basiraGatewayTitle: { fontSize: 13, lineHeight: 18, ...weight('900') },
+  basiraGatewayHint: { fontSize: 10, lineHeight: 15, ...weight('700'), marginTop: 2 },
+  topCategoriesLink: { minHeight: 30, borderRadius: 15, justifyContent: 'center', paddingHorizontal: 7 },
+  topCategoriesLinkText: { fontSize: 10, lineHeight: 14, ...weight('900') },
+  moreReportsToggle: { minHeight: 44, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', gap: 8, paddingHorizontal: 12, marginBottom: 10 },
+  moreReportsToggleText: { fontSize: 12, lineHeight: 17, ...weight('900') },
   netPositionRow: { minHeight: 42, borderRadius: RADIUS.md, paddingHorizontal: 11, marginTop: 10, alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   netPositionLabel: { flex: 1, fontSize: 12, ...weight('800') },
   netPositionValue: { fontSize: 13, ...weight('900') },

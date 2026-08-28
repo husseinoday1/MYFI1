@@ -22,6 +22,42 @@ const money = (value) => Math.round(Math.abs(Number(value) || 0)).toLocaleString
 const cleanNumber = parseNumberInput;
 const monthStartISO = (value = today()) => `${String(value).slice(0, 7)}-01`;
 
+const specializedScreen = (variant, isAr) => {
+  const screens = {
+    debts: {
+      filter: 'debts', icon: 'people-outline',
+      title: isAr ? 'الديون والمستحقات' : 'Debts & Receivables',
+      subtitle: isAr ? 'ما عليك وما لك، مع السداد والتحصيل في مكان واضح.' : 'What you owe and are owed, with clear repayment and collection.',
+      addLabel: isAr ? 'إضافة دين أو مستحق' : 'Add debt or receivable',
+    },
+    commitments: {
+      filter: 'monthly', icon: 'calendar-outline',
+      title: isAr ? 'الالتزامات' : 'Commitments',
+      subtitle: isAr ? 'الفواتير والمبالغ المتكررة التي تحتاج دفعًا في موعدها.' : 'Recurring bills and amounts that need paying on time.',
+      addLabel: isAr ? 'إضافة التزام' : 'Add commitment',
+    },
+    installments: {
+      filter: 'installment', icon: 'card-outline',
+      title: isAr ? 'الأقساط' : 'Installments',
+      subtitle: isAr ? 'اعرف القسط القادم وما تبقى من خطتك.' : 'See the next installment and what remains on your plan.',
+      addLabel: isAr ? 'إضافة قسط' : 'Add installment',
+    },
+    subscriptions: {
+      filter: 'subscription', icon: 'repeat-outline',
+      title: isAr ? 'الاشتراكات' : 'Subscriptions',
+      subtitle: isAr ? 'راجع التجديدات قبل أن تُسحب تلقائيًا.' : 'Review renewals before they charge again.',
+      addLabel: isAr ? 'إضافة اشتراك' : 'Add subscription',
+    },
+    savings: {
+      filter: 'saving', icon: 'flag-outline',
+      title: isAr ? 'الأهداف والتوفير' : 'Goals & Savings',
+      subtitle: isAr ? 'تابع تقدم أهدافك وأضف للتوفير عندما تكون جاهزًا.' : 'Follow your goals and add savings when you are ready.',
+      addLabel: isAr ? 'إضافة هدف' : 'Add goal',
+    },
+  };
+  return screens[variant] || null;
+};
+
 const copy = (lang) => {
   const ar = lang === 'ar';
   const releaseGoal = ar ? '\u0625\u062a\u0627\u062d\u0629 \u0627\u0644\u0645\u0628\u0644\u063a' : 'Make funds available';
@@ -135,6 +171,7 @@ export default function TrackersLabScreen({
   onNewTracker,
   onOpenPaymentHistory,
   initialFilter = 'all',
+  screenVariant = null,
 }) {
   const {
     trans, debts, goals, commitments, wallets, cfg,
@@ -151,6 +188,7 @@ export default function TrackersLabScreen({
   const isAr = isRTL(cfg.lang);
   const align = textAlignFor(cfg.lang);
   const rowDir = rowDirFor(cfg.lang);
+  const specialized = specializedScreen(screenVariant, isAr);
   const modules = getModules(cfg);
   const movementLabels = (kind) => {
     if (kind === 'receivable') {
@@ -383,8 +421,14 @@ export default function TrackersLabScreen({
     archivedTrackers.length ? { key: 'archived', label: T.archived, count: archivedTrackers.length } : null,
   ].filter(Boolean);
   useEffect(() => {
+    if (specialized?.filter) return;
     if (!filters.some(item => item.key === filter)) setFilter('all');
-  }, [filter, endedTrackers.length, archivedTrackers.length, installmentCount, subscriptionCount, modules.debtsOwed, modules.debtsReceivable, modules.goals, modules.commitments]);
+  }, [filter, specialized?.filter, endedTrackers.length, archivedTrackers.length, installmentCount, subscriptionCount, modules.debtsOwed, modules.debtsReceivable, modules.goals, modules.commitments]);
+  useEffect(() => {
+    if (!specialized?.filter) return;
+    setFilter(specialized.filter);
+    setOpenId(null);
+  }, [specialized?.filter]);
   useEffect(() => {
     if (!focusRequest?.nonce) return;
     const nextKind = focusRequest.kind === 'goal'
@@ -405,6 +449,8 @@ export default function TrackersLabScreen({
       ? archivedTrackers
     : filter === 'all'
       ? currentTrackers
+    : filter === 'debts'
+      ? currentTrackers.filter(item => item.kind === 'owed' || item.kind === 'receivable')
     : filter === 'installment' || filter === 'subscription'
       ? commitmentsOfSubType(filter)
       : currentTrackers.filter(item => item.kind === filter);
@@ -728,10 +774,40 @@ export default function TrackersLabScreen({
     ]);
   };
 
+  const openSpecializedAdd = () => {
+    if (screenVariant === 'savings') {
+      onNewTracker?.({ trackerType: 'goal' });
+      return;
+    }
+    if (screenVariant === 'commitments') {
+      onNewTracker?.({ trackerType: 'commitment', commitmentSubType: 'general' });
+      return;
+    }
+    if (screenVariant === 'installments') {
+      onNewTracker?.({ trackerType: 'commitment', commitmentSubType: 'installment' });
+      return;
+    }
+    if (screenVariant === 'subscriptions') {
+      onNewTracker?.({ trackerType: 'commitment', commitmentSubType: 'subscription' });
+      return;
+    }
+    onNewTracker?.({});
+  };
+
   return (
     <>
     <ScrollView style={{ flex: 1, backgroundColor: th.bg }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 112 }}>
-      {summaryTiles.length ? (
+      {specialized ? (
+        <View style={[s.specializedHeader, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}>
+          <View style={[s.specializedHeaderIcon, { backgroundColor: th.primSoft }]}>
+            <Ionicons name={specialized.icon} size={23} color={th.primary} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[s.specializedHeaderTitle, { color: th.text, textAlign: align }]}>{specialized.title}</Text>
+            <Text style={[s.specializedHeaderSub, { color: th.sub, textAlign: align }]}>{specialized.subtitle}</Text>
+          </View>
+        </View>
+      ) : summaryTiles.length ? (
         <View style={[s.summaryGrid, { flexDirection: rowDir }]}>
           {summaryTiles.map(item => (
             <SummaryTile
@@ -744,7 +820,7 @@ export default function TrackersLabScreen({
           ))}
         </View>
       ) : null}
-      {onOpenPaymentHistory ? (
+      {!specialized && onOpenPaymentHistory ? (
         <TouchableOpacity
           onPress={onOpenPaymentHistory}
           style={[s.paymentHistoryRow, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}
@@ -758,7 +834,7 @@ export default function TrackersLabScreen({
           <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={16} color={th.faint} />
         </TouchableOpacity>
       ) : null}
-      {cfg.entryMode === 'quick' ? (
+      {!specialized && cfg.entryMode === 'quick' ? (
         <View style={[s.trackerQuickEntry, { backgroundColor: th.card, borderColor: th.border }]}>
           <Text style={[s.trackerQuickEntryTitle, { color: th.sub, textAlign: align }]}>
             {isAr ? 'إجراءات مباشرة' : 'Direct actions'}
@@ -794,7 +870,7 @@ export default function TrackersLabScreen({
           </View>
         </View>
       ) : null}
-      <View style={s.filterBlock}>
+      {!specialized ? <View style={s.filterBlock}>
         <Text style={[s.filterRailTitle, { color: th.sub, textAlign: align }]}>
           {isAr ? 'نوع المتابعة' : 'Tracker type'}
         </Text>
@@ -830,7 +906,19 @@ export default function TrackersLabScreen({
             );
           })}
         </ScrollView>
-      </View>
+      </View> : null}
+
+      {specialized ? (
+        <TouchableOpacity
+          onPress={openSpecializedAdd}
+          accessibilityRole="button"
+          accessibilityLabel={specialized.addLabel}
+          style={[s.specializedAdd, { backgroundColor: th.primary, flexDirection: rowDir }]}
+        >
+          <Ionicons name="add" size={18} color={th.onPrimary} />
+          <Text style={s.specializedAddText}>{specialized.addLabel}</Text>
+        </TouchableOpacity>
+      ) : null}
 
       <MultiSelectBar
         th={th}
@@ -848,7 +936,7 @@ export default function TrackersLabScreen({
       {visible.length === 0 ? (
         <View style={[s.empty, { backgroundColor: th.card, borderColor: th.border }]}>
           <Ionicons name="albums-outline" size={34} color={th.faint} />
-          <Text style={{ color: th.sub, fontSize: 13, ...weight('800'), marginTop: 8 }}>{T.empty}</Text>
+          <Text style={{ color: th.sub, fontSize: 13, ...weight('800'), marginTop: 8 }}>{specialized ? (isAr ? 'لا توجد عناصر هنا بعد.' : 'Nothing here yet.') : T.empty}</Text>
         </View>
       ) : visible.map(item => {
         const open = !selection.selecting && openId === item.id;
@@ -1417,6 +1505,12 @@ function SummaryTile({ th, lang, item, value }) {
 }
 
 const s = StyleSheet.create({
+  specializedHeader: { minHeight: 100, borderRadius: RADIUS.xl, borderWidth: 1, padding: 16, alignItems: 'center', gap: 12, marginBottom: 12, ...SHADOW.card },
+  specializedHeaderIcon: { width: 46, height: 46, borderRadius: RADIUS.lg, alignItems: 'center', justifyContent: 'center' },
+  specializedHeaderTitle: { fontSize: 19, lineHeight: 26, ...weight('900') },
+  specializedHeaderSub: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 3 },
+  specializedAdd: { minHeight: 48, borderRadius: RADIUS.lg, alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 14, marginBottom: 12 },
+  specializedAddText: { color: '#FFFFFF', fontSize: 13, lineHeight: 18, ...weight('900') },
   paymentHistoryRow: { minHeight: 54, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 12, marginBottom: 10 },
   trackerQuickEntry: { borderRadius: 18, borderWidth: 1, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 10, marginBottom: 10 },
   trackerQuickEntryTitle: { fontSize: 12, lineHeight: 17, ...weight('800'), marginBottom: 7 },

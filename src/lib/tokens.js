@@ -29,11 +29,15 @@ export const SPACE = {
 };
 
 export const RADIUS = {
-  sm: 6,
-  md: 8,
-  lg: 8,
-  xl: 8,
-  sheet: 18,
+  // The product uses generous, calm surfaces: small controls remain compact,
+  // while cards and sheets clearly separate groups without heavy shadows.
+  // Keeping this scale central prevents legacy square-card geometry from
+  // leaking back into newly rebuilt screens.
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  sheet: 28,
   pill: 999,
 };
 

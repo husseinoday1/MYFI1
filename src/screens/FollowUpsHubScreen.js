@@ -1,30 +1,19 @@
 import React, { useMemo } from 'react';
-import { Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
 import { useTheme } from '../lib/useTheme';
 import { formatMoneyNumber } from '../lib/money';
 import { filterByActiveScope } from '../lib/modules';
-import { debtSummary, goalSummary, getUpcomingRecurring } from '../utils/calc';
+import { debtSummary, goalSummary } from '../utils/calc';
 import { getUpcomingCommitments, formatCommitmentDate } from '../lib/commitments';
-import { CAT_COLORS } from '../lib/constants';
-import { ScreenScroll, PageIntro, SectionTitle, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
-import { GatewayCard } from '../components/GatewayCard';
+import { AppButton, ScreenScroll, SectionTitle, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
+import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 
-// Installment/subscription tone reuse follows the same rule MyMoneyScreen.js
-// already documents: prefer the app's existing CAT_COLORS palette over new
-// catalog hex (user direction, 2026-08-26). COMMITMENT_TONE copies the exact
-// literal already used for the 'monthly' filter chip in TrackersLabScreen.js
-// (not a token — that screen doesn't have one for this either).
-const COMMITMENT_TONE = '#356FAF';
-const INSTALLMENTS_TONE = CAT_COLORS[6];
-const SUBSCRIPTIONS_TONE = CAT_COLORS[2];
-
-// Follow-ups hub — a thin router, same shape as MyMoneyScreen.js. Every
-// count/value below comes from an existing helper (debtSummary, goalSummary,
-// getUpcomingCommitments, getUpcomingRecurring) already used elsewhere in the
-// app (Home, TrackersLabScreen) — no new financial calculation happens here,
-// only display aggregation of numbers those helpers already produce.
+// The Follow-ups hub is intentionally a calm router: it surfaces only work
+// that needs attention, then takes the user into a dedicated kind-specific
+// screen. Financial calculations and mutations remain in their existing
+// tracker flows; this component only chooses the reading order.
 export default function FollowUpsHubScreen({
   onOpenDebts,
   onOpenCommitments,
@@ -35,239 +24,144 @@ export default function FollowUpsHubScreen({
   onNewTracker,
 }) {
   const { th, lang, isAr, cfg } = useTheme();
-  const { trans, debts, goals, commitments } = useStore();
+  const { debts, goals, commitments } = useStore();
 
-  const scopedDebts = useMemo(() => filterByActiveScope(debts, cfg), [debts, cfg]);
-  const scopedGoals = useMemo(() => filterByActiveScope(goals, cfg), [goals, cfg]);
-  const scopedCommitments = useMemo(() => filterByActiveScope(commitments, cfg), [commitments, cfg]);
-  const scopedTrans = useMemo(() => filterByActiveScope(trans, cfg), [trans, cfg]);
-
-  const debtsOwed = useMemo(() => debtSummary(scopedDebts, 'owed'), [scopedDebts]);
-  const goalsSummary = useMemo(() => goalSummary(scopedGoals), [scopedGoals]);
-
-  // Called once; the three sub-lists below are derived by filtering this
-  // one result on subType, not by calling the helper again.
-  const upcomingCommitments = useMemo(() => getUpcomingCommitments(scopedCommitments), [scopedCommitments]);
-
-  const genericCommitments = useMemo(
-    () => upcomingCommitments.filter((c) => c.subType !== 'installment' && c.subType !== 'subscription'),
-    [upcomingCommitments],
-  );
-  const installmentCommitments = useMemo(
-    () => upcomingCommitments.filter((c) => c.subType === 'installment'),
-    [upcomingCommitments],
-  );
-  const subscriptionCommitments = useMemo(
-    () => upcomingCommitments.filter((c) => c.subType === 'subscription'),
-    [upcomingCommitments],
+  const scopedDebts = useMemo(() => filterByActiveScope(debts, cfg), [debts, cfg.activeScope, cfg.profileType]);
+  const scopedGoals = useMemo(() => filterByActiveScope(goals, cfg), [goals, cfg.activeScope, cfg.profileType]);
+  const scopedCommitments = useMemo(() => filterByActiveScope(commitments, cfg), [commitments, cfg.activeScope, cfg.profileType]);
+  const debtsSummary = useMemo(() => debtSummary(scopedDebts, 'owed'), [scopedDebts]);
+  const savingsSummary = useMemo(() => goalSummary(scopedGoals), [scopedGoals]);
+  const upcoming = useMemo(() => getUpcomingCommitments(scopedCommitments), [scopedCommitments]);
+  const dueSoon = useMemo(
+    () => upcoming.filter(item => item.daysUntil <= 7 && item.daysUntil >= -31).slice(0, 3),
+    [upcoming],
   );
 
-  const upcomingRecurring = useMemo(
-    () => getUpcomingRecurring(scopedTrans).filter((item) => item.daysUntil <= 31),
-    [scopedTrans],
-  );
-
-  const needsAttention = useMemo(() => {
-    const mappedCommitments = upcomingCommitments
-      .filter((c) => c.daysUntil <= 31)
-      .map((c) => ({ title: c.name, amt: c.amt, daysUntil: c.daysUntil, dueISO: c.dueISO }));
-    const mappedRecurring = upcomingRecurring.map((r) => ({ title: r.title, amt: r.amt, daysUntil: r.daysUntil }));
-    return [...mappedCommitments, ...mappedRecurring]
-      .sort((a, b) => a.daysUntil - b.daysUntil)
-      .slice(0, 4);
-  }, [upcomingCommitments, upcomingRecurring]);
-
-  const money = (v) => `${formatMoneyNumber(v, cfg.currency, cfg.lang)} ${cfg.currency}`;
+  const commitmentsCount = upcoming.filter(item => item.subType !== 'installment' && item.subType !== 'subscription').length;
+  const installmentsCount = upcoming.filter(item => item.subType === 'installment').length;
+  const subscriptionsCount = upcoming.filter(item => item.subType === 'subscription').length;
+  const money = (value) => `${formatMoneyNumber(value, cfg.currency, cfg.lang)} ${cfg.currency}`;
+  const gateways = [
+    {
+      key: 'debts', icon: 'people-outline', tone: th.exp,
+      title: isAr ? 'الديون والمستحقات' : 'Debts & Receivables',
+      description: debtsSummary.count ? (isAr ? `${debtsSummary.count} متابعة نشطة · ${money(debtsSummary.remaining)}` : `${debtsSummary.count} active · ${money(debtsSummary.remaining)}`) : (isAr ? 'سجّل ما عليك وما لك عند الآخرين' : 'Track money you owe and are owed'),
+      onPress: onOpenDebts,
+    },
+    {
+      key: 'commitments', icon: 'calendar-outline', tone: th.warn,
+      title: isAr ? 'الالتزامات' : 'Commitments',
+      description: commitmentsCount ? (isAr ? `${commitmentsCount} التزام متابع` : `${commitmentsCount} commitments to follow`) : (isAr ? 'الفواتير والمواعيد المتكررة' : 'Bills and recurring due dates'),
+      onPress: onOpenCommitments,
+    },
+    {
+      key: 'installments', icon: 'card-outline', tone: th.warn,
+      title: isAr ? 'الأقساط' : 'Installments',
+      description: installmentsCount ? (isAr ? `${installmentsCount} قسط نشط` : `${installmentsCount} active installments`) : (isAr ? 'تابع القسط القادم وما تبقى' : 'Follow the next payment and what remains'),
+      onPress: onOpenInstallments,
+    },
+    {
+      key: 'subscriptions', icon: 'repeat-outline', tone: th.transfer,
+      title: isAr ? 'الاشتراكات' : 'Subscriptions',
+      description: subscriptionsCount ? (isAr ? `${subscriptionsCount} اشتراك متكرر` : `${subscriptionsCount} recurring subscriptions`) : (isAr ? 'اعرف ما سيتجدد قبل موعده' : 'Know what renews before it is due'),
+      onPress: onOpenSubscriptions,
+    },
+    {
+      key: 'savings', icon: 'flag-outline', tone: th.primary,
+      title: isAr ? 'الأهداف والتوفير' : 'Goals & Savings',
+      description: savingsSummary.count ? (isAr ? `${savingsSummary.count} هدف نشط · المتبقي ${money(savingsSummary.remaining)}` : `${savingsSummary.count} active goals · ${money(savingsSummary.remaining)} left`) : (isAr ? 'حوّل الادخار إلى أهداف واضحة' : 'Turn saving into clear goals'),
+      onPress: onOpenGoals,
+    },
+  ];
 
   return (
     <ScreenScroll th={th}>
-      <PageIntro
-        th={th}
-        lang={lang}
-        icon="checkmark-done-outline"
-        title={isAr ? 'المتابعات' : 'Follow-ups'}
-        subtitle={isAr ? 'كل ما تحتاج متابعته حتى يكتمل' : 'Everything you need to follow up on, until it is done'}
-      />
-
-      <SectionTitle th={th} lang={lang}>{isAr ? 'ملخص المتابعات' : 'Follow-ups summary'}</SectionTitle>
-      <View style={{ flexDirection: rowDirection(lang), gap: 8 }}>
-        <SummaryTile th={th} lang={lang} icon="calendar-outline" tone={COMMITMENT_TONE} value={`${genericCommitments.length}`} label={isAr ? 'التزامات' : 'Commitments'} />
-        <SummaryTile th={th} lang={lang} icon="card-outline" tone={INSTALLMENTS_TONE} value={`${installmentCommitments.length}`} label={isAr ? 'أقساط' : 'Installments'} />
-        <SummaryTile th={th} lang={lang} icon="sync-outline" tone={SUBSCRIPTIONS_TONE} value={`${subscriptionCommitments.length}`} label={isAr ? 'اشتراكات' : 'Subscriptions'} />
-        <SummaryTile th={th} lang={lang} icon="flag-outline" tone={th.primary} value={`${goalsSummary.count}`} label={isAr ? 'أهداف' : 'Goals'} />
-        <SummaryTile th={th} lang={lang} icon="person-outline" tone={th.exp} value={`${debtsOwed.count}`} label={isAr ? 'ديون' : 'Debts'} />
+      <View style={s.heading}>
+        <Text style={[s.title, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'المتابعات' : 'Follow-ups'}</Text>
+        <Text style={[s.subtitle, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'رتّب ما يحتاج قرارًا أو موعدًا أو تقدّمًا' : 'Keep the things that need action, a date, or progress in order'}</Text>
       </View>
 
-      <View style={{ flexDirection: rowDirection(lang), gap: 10 }}>
-        <QuickShortcut th={th} lang={lang} icon="arrow-down-outline" tone={th.exp} label={isAr ? 'دين عليّ' : 'Debt I owe'} onPress={() => onNewTracker?.({ trackerType: 'owed' })} />
-        <QuickShortcut th={th} lang={lang} icon="arrow-up-outline" tone={th.inc} label={isAr ? 'مستحق لي' : 'Owed to me'} onPress={() => onNewTracker?.({ trackerType: 'receivable' })} />
-        <QuickShortcut th={th} lang={lang} icon="calendar-outline" tone={COMMITMENT_TONE} label={isAr ? 'التزام' : 'Commitment'} onPress={() => onNewTracker?.({ trackerType: 'commitment' })} />
-        <QuickShortcut th={th} lang={lang} icon="wallet-outline" tone={th.primary} label={isAr ? 'هدف' : 'Goal'} onPress={() => onNewTracker?.({ trackerType: 'goal' })} />
-      </View>
-
-      {needsAttention.length > 0 ? (
+      {dueSoon.length ? (
         <>
           <SectionTitle th={th} lang={lang}>{isAr ? 'يحتاج انتباهك' : 'Needs attention'}</SectionTitle>
-          <View style={{ gap: 8 }}>
-            {needsAttention.map((item, idx) => (
-              <View
-                key={idx}
-                style={{
-                  flexDirection: rowDirection(lang),
-                  alignItems: 'center',
-                  gap: 8,
-                  backgroundColor: th.card,
-                  borderRadius: 14,
-                  padding: 10,
-                }}
-              >
-                <View
-                  style={{
-                    width: 3,
-                    alignSelf: 'stretch',
-                    borderRadius: 2,
-                    backgroundColor: item.daysUntil < 0 ? th.exp : th.warn,
-                  }}
-                />
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={{ color: th.text, fontSize: 13, fontWeight: '600', textAlign: textAlign(lang) }} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  <Text style={{ color: th.sub, fontSize: 11, textAlign: textAlign(lang) }} numberOfLines={1}>
-                    {item.dueISO ? `${formatCommitmentDate(item.dueISO, lang)} · ` : ''}{money(item.amt)}
-                  </Text>
+          <View style={s.attentionList}>
+            {dueSoon.map(item => {
+              const overdue = item.daysUntil < 0;
+              const tone = overdue ? th.exp : th.warn;
+              return (
+                <View key={item.id} style={[s.attentionRow, { backgroundColor: overdue ? th.expBg : th.warnBg, borderColor: `${tone}42`, flexDirection: rowDirection(lang) }]}>
+                  <View style={[s.attentionIcon, { backgroundColor: `${tone}22` }]}><Ionicons name={overdue ? 'alert-circle-outline' : 'time-outline'} size={18} color={tone} /></View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[s.attentionTitle, { color: th.text, textAlign: textAlign(lang) }]} numberOfLines={1}>{item.name}</Text>
+                    <Text style={[s.attentionMeta, { color: th.sub, textAlign: textAlign(lang) }]} numberOfLines={1}>
+                      {formatCommitmentDate(item.dueISO, lang)} · {money(item.amt)}
+                    </Text>
+                  </View>
+                  <Text style={[s.attentionState, { color: tone }]}>{overdue ? (isAr ? 'متأخر' : 'Overdue') : (isAr ? 'قريب' : 'Soon')}</Text>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         </>
       ) : null}
 
-      <SectionTitle th={th} lang={lang}>{isAr ? 'الأقسام الرئيسية' : 'Main sections'}</SectionTitle>
-      <View style={{ gap: 10 }}>
-        <GatewayCard
-          th={th}
-          lang={lang}
-          index={1}
-          tone={th.exp}
-          icon="person-outline"
-          title={isAr ? 'الديون والمستحقات' : 'Debts & Receivables'}
-          value={money(debtsOwed.remaining)}
-          meta={isAr ? `${debtsOwed.count} دين نشط` : `${debtsOwed.count} active debts`}
-          linkLabel={isAr ? 'عرض الديون' : 'View debts'}
-          onPress={onOpenDebts}
-        />
-        <GatewayCard
-          th={th}
-          lang={lang}
-          index={2}
-          tone={COMMITMENT_TONE}
-          icon="calendar-outline"
-          title={isAr ? 'الالتزامات' : 'Commitments'}
-          value={`${genericCommitments.length}`}
-          linkLabel={isAr ? 'عرض الالتزامات' : 'View commitments'}
-          onPress={onOpenCommitments}
-        />
-        <GatewayCard
-          th={th}
-          lang={lang}
-          index={3}
-          tone={INSTALLMENTS_TONE}
-          icon="card-outline"
-          title={isAr ? 'الأقساط' : 'Installments'}
-          value={`${installmentCommitments.length}`}
-          linkLabel={isAr ? 'عرض الأقساط' : 'View installments'}
-          onPress={onOpenInstallments}
-        />
-        <GatewayCard
-          th={th}
-          lang={lang}
-          index={4}
-          tone={SUBSCRIPTIONS_TONE}
-          icon="sync-outline"
-          title={isAr ? 'الاشتراكات' : 'Subscriptions'}
-          value={`${subscriptionCommitments.length}`}
-          linkLabel={isAr ? 'عرض الاشتراكات' : 'View subscriptions'}
-          onPress={onOpenSubscriptions}
-        />
-        <GatewayCard
-          th={th}
-          lang={lang}
-          index={5}
-          tone={th.primary}
-          icon="flag-outline"
-          title={isAr ? 'الأهداف والادخار' : 'Goals & Savings'}
-          value={money(goalsSummary.remaining)}
-          meta={isAr ? `${goalsSummary.count} هدف نشط` : `${goalsSummary.count} active goals`}
-          linkLabel={isAr ? 'عرض الأهداف' : 'View goals'}
-          onPress={onOpenGoals}
-        />
-        <GatewayCard
-          th={th}
-          lang={lang}
-          index={6}
-          tone={th.sub}
-          icon="receipt-outline"
-          title={isAr ? 'سجل الدفعات' : 'Payment History'}
-          meta={isAr ? 'كل الدفعات المسجلة' : 'Every recorded payment'}
-          linkLabel={isAr ? 'عرض السجل' : 'View history'}
-          onPress={onOpenPaymentHistory}
-        />
+      <SectionTitle th={th} lang={lang}>{isAr ? 'اختر ما تريد متابعته' : 'Choose what to follow'}</SectionTitle>
+      <View style={s.gatewayList}>
+        {gateways.map(item => <FollowUpGateway key={item.key} th={th} lang={lang} {...item} />)}
       </View>
+
+      <AppButton
+        th={th}
+        lang={lang}
+        icon="add"
+        label={isAr ? 'إضافة متابعة' : 'Add follow-up'}
+        onPress={() => onNewTracker?.({})}
+        style={{ marginTop: SPACE.xl }}
+      />
+      <Touchable onPress={onOpenPaymentHistory} style={[s.historyLink, { backgroundColor: th.cardHigh, flexDirection: rowDirection(lang) }]}>
+        <Ionicons name="receipt-outline" size={18} color={th.sub} />
+        <Text style={[s.historyText, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'سجل الدفعات' : 'Payment history'}</Text>
+        <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={17} color={th.faint} />
+      </Touchable>
     </ScreenScroll>
   );
 }
 
-function SummaryTile({ th, lang, icon, label, value, tone }) {
-  return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: th.card,
-        borderRadius: 14,
-        paddingVertical: 12,
-        paddingHorizontal: 6,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-      }}
-    >
-      <View
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: 18,
-          backgroundColor: `${tone}22`,
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: 2,
-        }}
-      >
-        <Ionicons name={icon} size={18} color={tone} />
-      </View>
-      <Text style={{ color: th.text, fontSize: 16, fontWeight: '700', textAlign: textAlign(lang) }}>
-        {value}
-      </Text>
-      <Text style={{ color: th.sub, fontSize: 10, textAlign: 'center' }} numberOfLines={1}>{label}</Text>
-    </View>
-  );
-}
-
-function QuickShortcut({ th, icon, tone, label, onPress }) {
+function FollowUpGateway({ th, lang, icon, tone, title, description, onPress }) {
+  const isAr = lang === 'ar';
   return (
     <Touchable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityHint={description}
       onPress={onPress}
-      style={{
-        flex: 1,
-        alignItems: 'center',
-        gap: 6,
-        paddingVertical: 12,
-        borderRadius: 14,
-        backgroundColor: th.cardHigh,
-      }}
+      style={[s.gateway, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDirection(lang) }]}
     >
-      <Ionicons name={icon} size={20} color={tone} />
-      <Text style={{ color: th.text, fontSize: 10, fontWeight: '900', textAlign: 'center' }} numberOfLines={1}>{label}</Text>
+      <View style={[s.gatewayIcon, { backgroundColor: `${tone}18` }]}><Ionicons name={icon} size={21} color={tone} /></View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.gatewayTitle, { color: th.text, textAlign: textAlign(lang) }]}>{title}</Text>
+        <Text style={[s.gatewayDescription, { color: th.sub, textAlign: textAlign(lang) }]} numberOfLines={2}>{description}</Text>
+      </View>
+      <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={20} color={th.faint} />
     </Touchable>
   );
 }
+
+const s = StyleSheet.create({
+  heading: { marginTop: 4, marginBottom: SPACE.xl },
+  title: { fontSize: 27, lineHeight: 34, ...weight('900') },
+  subtitle: { fontSize: 13, lineHeight: 20, ...weight('700'), marginTop: 5 },
+  attentionList: { gap: SPACE.sm },
+  attentionRow: { minHeight: 68, borderRadius: RADIUS.xl, borderWidth: 1, padding: SPACE.md, alignItems: 'center', gap: SPACE.sm },
+  attentionIcon: { width: 36, height: 36, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center' },
+  attentionTitle: { fontSize: 13, lineHeight: 18, ...weight('900') },
+  attentionMeta: { fontSize: 11, lineHeight: 16, ...weight('700'), marginTop: 2 },
+  attentionState: { fontSize: 11, lineHeight: 16, ...weight('900') },
+  gatewayList: { gap: SPACE.md },
+  gateway: { minHeight: 88, borderRadius: RADIUS.xl, borderWidth: 1, padding: SPACE.lg, alignItems: 'center', gap: SPACE.md, ...SHADOW.card },
+  gatewayIcon: { width: 44, height: 44, borderRadius: RADIUS.lg, alignItems: 'center', justifyContent: 'center' },
+  gatewayTitle: { fontSize: 16, lineHeight: 22, ...weight('900') },
+  gatewayDescription: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 2 },
+  historyLink: { minHeight: 48, borderRadius: RADIUS.lg, marginTop: SPACE.md, paddingHorizontal: SPACE.md, alignItems: 'center', gap: SPACE.sm },
+  historyText: { flex: 1, fontSize: 12, lineHeight: 17, ...weight('900') },
+});

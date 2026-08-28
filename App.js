@@ -33,6 +33,8 @@ import MoreScreen from './src/screens/MoreScreen';
 import WalletsAccountsScreen from './src/screens/WalletsAccountsScreen';
 import PaymentHistoryScreen from './src/screens/PaymentHistoryScreen';
 import PlanBudgetScreen from './src/screens/PlanBudgetScreen';
+import IncomeAllocationScreen from './src/screens/IncomeAllocationScreen';
+import BasiraScreen from './src/screens/BasiraScreen';
 import AddTransModal from './src/components/AddTransModal';
 import NewItemModal from './src/components/NewItemModal';
 import DraggableFab from './src/components/DraggableFab';
@@ -78,6 +80,8 @@ const HUB_TABS = ['home', 'mymoney', 'trackers', 'more'];
 // tab, so never subject to the visibleTabs filter/reset guard below).
 const SECONDARY_SCREEN_KEYS = [
   'history', 'reports', 'settings', 'wallets', 'budget', 'paymentHistory',
+  'incomeAllocation',
+  'basira',
   'followupsAll', 'followupsDebts', 'followupsCommitments', 'followupsInstallments', 'followupsSubscriptions', 'followupsGoals',
 ];
 
@@ -977,7 +981,8 @@ function AppRoot() {
     ),
     followupsDebts: (
       <TrackersLabScreen
-        initialFilter="owed"
+        initialFilter="debts"
+        screenVariant="debts"
         onQuickPay={openQuickPay}
         onQuickSave={openQuickSave}
         onQuickCommitment={openQuickCommitment}
@@ -989,6 +994,7 @@ function AppRoot() {
     followupsCommitments: (
       <TrackersLabScreen
         initialFilter="monthly"
+        screenVariant="commitments"
         onQuickPay={openQuickPay}
         onQuickSave={openQuickSave}
         onQuickCommitment={openQuickCommitment}
@@ -1000,6 +1006,7 @@ function AppRoot() {
     followupsInstallments: (
       <TrackersLabScreen
         initialFilter="installment"
+        screenVariant="installments"
         onQuickPay={openQuickPay}
         onQuickSave={openQuickSave}
         onQuickCommitment={openQuickCommitment}
@@ -1011,6 +1018,7 @@ function AppRoot() {
     followupsSubscriptions: (
       <TrackersLabScreen
         initialFilter="subscription"
+        screenVariant="subscriptions"
         onQuickPay={openQuickPay}
         onQuickSave={openQuickSave}
         onQuickCommitment={openQuickCommitment}
@@ -1022,6 +1030,7 @@ function AppRoot() {
     followupsGoals: (
       <TrackersLabScreen
         initialFilter="saving"
+        screenVariant="savings"
         onQuickPay={openQuickPay}
         onQuickSave={openQuickSave}
         onQuickCommitment={openQuickCommitment}
@@ -1031,7 +1040,7 @@ function AppRoot() {
       />
     ),
     paymentHistory: <PaymentHistoryScreen />,
-    reports: <ReportsScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} />,
+    reports: <ReportsScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} onOpenBasira={() => setTab('basira')} onOpenIncomeAllocation={() => setTab('incomeAllocation')} />,
     settings: <SettingsScreen tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} />,
     mymoney: (
       <MyMoneyScreen
@@ -1046,14 +1055,14 @@ function AppRoot() {
     more: (
       <MoreScreen
         onOpenSettingsPage={openSettingsPage}
-        onAddTransaction={() => openAddExp(true)}
-        onTransfer={openTransfer}
-        onOpenBudget={() => setTab('budget')}
+        onOpenIncomeAllocation={() => setTab('incomeAllocation')}
         onOpenArchive={() => setArchiveOpen(true)}
       />
     ),
     wallets: <WalletsAccountsScreen />,
     budget: <PlanBudgetScreen />,
+    incomeAllocation: <IncomeAllocationScreen />,
+    basira: <BasiraScreen onOpenHistory={() => setTab('history')} onOpenFollowUps={() => setTab('trackers')} />,
   };
 
   return (

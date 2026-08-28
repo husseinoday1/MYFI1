@@ -1375,7 +1375,7 @@ function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accou
   const rotationNote = cfg.orientationMode === 'system' ? T.followsDevice : null;
   return (
     <>
-      <SectionLabel th={th} isAr={isAr} text={T.accountCloud} />
+      <SectionLabel th={th} isAr={isAr} text={isAr ? 'الحساب والمزامنة' : 'Account & Sync'} />
       <TouchableOpacity onPress={() => onOpen('account')} activeOpacity={0.76} style={[s.accountCard, { backgroundColor: th.card, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
         <Avatar th={th} cfg={cfg} initial={accountInitial} size={58} />
         <View style={{ flex: 1, minWidth: 0 }}>
@@ -1393,33 +1393,30 @@ function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accou
         <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={18} color={th.faint} />
       </TouchableOpacity>
 
-      <SectionLabel th={th} isAr={isAr} text={T.general} />
+      <SectionLabel th={th} isAr={isAr} text={isAr ? 'المظهر واللغة' : 'Appearance & Language'} />
       <MenuGroup th={th}>
         <MenuRow th={th} isAr={isAr} icon="language-outline" title={T.language} subtitle={languageNote} value={languageValue} onPress={() => onChoice('language')} />
         <MenuRow th={th} isAr={isAr} icon="color-palette-outline" title={T.appearance} subtitle={themeNote} value={themeValue} onPress={() => onChoice('theme')} />
         <MenuRow th={th} isAr={isAr} icon="phone-portrait-outline" title={T.rotation} subtitle={rotationNote} value={rotationValue} onPress={() => onChoice('orientation')} />
+      </MenuGroup>
+
+      <SectionLabel th={th} isAr={isAr} text={isAr ? 'التفضيلات المالية' : 'Financial Preferences'} />
+      <MenuGroup th={th}>
         <MenuRow th={th} isAr={isAr} icon="flag-outline" title={T.country} value={`${selectedCountry.flag} ${isAr ? selectedCountry.name : selectedCountry.nameEn}`} onPress={() => onChoice('country')} />
-        <MenuRow th={th} isAr={isAr} icon="cash-outline" title={T.currency} value={`${selectedCurrency.code} · ${selectedCurrency.sym}`} onPress={() => onChoice('currency')} last />
+        <MenuRow th={th} isAr={isAr} icon="cash-outline" title={T.currency} value={`${selectedCurrency.code} · ${selectedCurrency.sym}`} onPress={() => onChoice('currency')} />
+        <MenuRow th={th} isAr={isAr} icon="wallet-outline" title={T.financial} subtitle={T.financialSub} onPress={onAdvanced} last />
       </MenuGroup>
 
-      <SectionLabel th={th} isAr={isAr} text={T.money} />
+      <SectionLabel th={th} isAr={isAr} text={isAr ? 'التجربة والمساعدة' : 'Experience & Help'} />
       <MenuGroup th={th}>
-        <MenuRow th={th} isAr={isAr} icon="wallet-outline" title={T.financial} subtitle={T.financialSub} onPress={onAdvanced} />
-        <MenuRow th={th} isAr={isAr} icon="options-outline" title={T.featureVisibility} subtitle={T.featureVisibilitySub} onPress={() => onOpen('features')} />
-        <MenuRow th={th} isAr={isAr} icon="notifications-outline" title={T.notifications} subtitle={T.notificationsSub} onPress={() => onOpen('notifications')} last />
+        <MenuRow th={th} isAr={isAr} icon="apps-outline" title={T.featureVisibility} subtitle={T.featureVisibilitySub} onPress={() => onOpen('features')} />
+        <MenuRow th={th} isAr={isAr} icon="notifications-outline" title={T.notifications} subtitle={T.notificationsSub} onPress={() => onOpen('notifications')} />
+        <MenuRow th={th} isAr={isAr} icon="book-outline" title={T.guide} subtitle={T.guideProfessionalSub} onPress={() => onOpen('guide')} last />
       </MenuGroup>
 
-      <SectionLabel th={th} isAr={isAr} text={T.privacyData} />
+      <SectionLabel th={th} isAr={isAr} text={isAr ? 'الخصوصية والأمان' : 'Privacy & Security'} />
       <MenuGroup th={th}>
-        <MenuRow th={th} isAr={isAr} icon="server-outline" title={T.data} subtitle={T.dataSub} onPress={() => onOpen('data')} />
         <MenuRow th={th} isAr={isAr} icon="shield-checkmark-outline" title={T.security} subtitle={T.securitySub} onPress={() => onOpen('security')} last />
-      </MenuGroup>
-
-      <SectionLabel th={th} isAr={isAr} text={T.support} />
-      <MenuGroup th={th}>
-        <MenuRow th={th} isAr={isAr} icon="book-outline" title={T.guide} subtitle={T.guideProfessionalSub} onPress={() => onOpen('guide')} />
-        <MenuRow th={th} isAr={isAr} icon="help-buoy-outline" title={T.helpCenter} subtitle={T.helpCenterSub} onPress={() => onOpen('support')} />
-        <MenuRow th={th} isAr={isAr} icon="information-circle-outline" title={T.about} subtitle={T.aboutSub} value={process.env.EXPO_PUBLIC_MYFI_VERSION || '1.0.0'} onPress={() => onOpen('about')} last />
       </MenuGroup>
     </>
   );

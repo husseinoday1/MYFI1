@@ -1,197 +1,124 @@
-import React, { useState } from 'react';
-import { Modal, Pressable, Text, View } from 'react-native';
+import React from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/useTheme';
-import { ScreenScroll, PageIntro, SectionTitle, SurfaceCard, Touchable, IconContainer, rowDirection, textAlign } from '../components/AppPrimitives';
-import { SectionListRow } from '../components/SectionListRow';
-import { RADIUS, SPACE } from '../lib/tokens';
+import { ScreenScroll, SectionTitle, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
+import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 
-function ShortcutItem({ th, lang, icon, label, onPress }) {
+// More is navigation, not a dashboard. Every row below opens a real screen;
+// no decorative settings, placeholder dialogs, or trust claims live here.
+export default function MoreScreen({
+  onOpenSettingsPage,
+  onOpenIncomeAllocation,
+  onOpenArchive,
+}) {
+  const { th, lang, isAr } = useTheme();
+  const groups = [
+    {
+      title: isAr ? 'أدواتي' : 'My tools',
+      items: [
+        {
+          key: 'income-allocation', icon: 'pie-chart-outline', tone: th.primary,
+          title: isAr ? 'توزيع الدخل' : 'Income allocation',
+          description: isAr ? 'ضع نسبك واحفظ خطة الشهر التي تناسبك' : 'Set your percentages and save the monthly plan that fits you',
+          onPress: onOpenIncomeAllocation,
+        },
+        {
+          key: 'archive', icon: 'archive-outline', tone: th.sub,
+          title: isAr ? 'الأرشيف' : 'Archive',
+          description: isAr ? 'الحسابات والفئات والمتابعات المؤرشفة' : 'Archived accounts, categories, and follow-ups',
+          onPress: onOpenArchive,
+        },
+      ],
+    },
+    {
+      title: isAr ? 'بياناتك' : 'Your data',
+      items: [{
+        key: 'data', icon: 'cloud-outline', tone: th.transfer,
+        title: isAr ? 'البيانات والملفات' : 'Data & files',
+        description: isAr ? 'نسخ احتياطي، استعادة، تصدير واستيراد' : 'Backup, restore, export, and import',
+        onPress: () => onOpenSettingsPage?.('data'),
+      }],
+    },
+    {
+      title: isAr ? 'المساعدة' : 'Help',
+      items: [
+        {
+          key: 'guide', icon: 'book-outline', tone: th.primary,
+          title: isAr ? 'دليل MYFI' : 'MYFI guide',
+          description: isAr ? 'إجابات عملية حسب المهمة التي تريد إنجازها' : 'Practical help for the task you want to finish',
+          onPress: () => onOpenSettingsPage?.('guide'),
+        },
+        {
+          key: 'support', icon: 'help-buoy-outline', tone: th.primary,
+          title: isAr ? 'الدعم والمساعدة' : 'Support & help',
+          description: isAr ? 'الأسئلة الشائعة وطرق التواصل' : 'FAQs and ways to get help',
+          onPress: () => onOpenSettingsPage?.('support'),
+        },
+      ],
+    },
+  ];
+
   return (
-    <Touchable onPress={onPress} style={{ flex: 1, alignItems: 'center', gap: 6, paddingVertical: 4 }}>
-      <View style={{ width: 52, height: 52, borderRadius: RADIUS.lg, backgroundColor: th.primSoft, alignItems: 'center', justifyContent: 'center' }}>
-        <Ionicons name={icon} size={22} color={th.primary} />
+    <ScreenScroll th={th}>
+      <View style={s.heading}>
+        <Text style={[s.title, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'المزيد' : 'More'}</Text>
+        <Text style={[s.subtitle, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'أدواتك وبياناتك والمساعدة في مكان هادئ' : 'Your tools, data, and help in one calm place'}</Text>
       </View>
-      <Text style={{ color: th.text, fontSize: 11, fontWeight: '900', textAlign: 'center' }} numberOfLines={1}>
-        {label}
-      </Text>
+
+      {groups.map(group => (
+        <View key={group.title}>
+          <SectionTitle th={th} lang={lang}>{group.title}</SectionTitle>
+          <View style={[s.group, { backgroundColor: th.card, borderColor: th.border }]}>
+            {group.items.map((item, index) => <MoreRow key={item.key} th={th} lang={lang} last={index === group.items.length - 1} {...item} />)}
+          </View>
+        </View>
+      ))}
+
+      <SectionTitle th={th} lang={lang}>{isAr ? 'التطبيق' : 'App'}</SectionTitle>
+      <View style={[s.group, { backgroundColor: th.card, borderColor: th.border }]}>
+        <MoreRow
+          th={th}
+          lang={lang}
+          last
+          icon="settings-outline"
+          tone={th.primary}
+          title={isAr ? 'الإعدادات' : 'Settings'}
+          description={isAr ? 'المظهر واللغة والخصوصية والحساب' : 'Appearance, language, privacy, and account'}
+          onPress={() => onOpenSettingsPage?.('root')}
+        />
+      </View>
+    </ScreenScroll>
+  );
+}
+
+function MoreRow({ th, lang, icon, tone, title, description, onPress, last }) {
+  const isAr = lang === 'ar';
+  return (
+    <Touchable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityHint={description}
+      onPress={onPress}
+      style={[s.row, { flexDirection: rowDirection(lang), borderBottomColor: last ? 'transparent' : th.border }]}
+    >
+      <View style={[s.rowIcon, { backgroundColor: `${tone}18` }]}><Ionicons name={icon} size={20} color={tone} /></View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[s.rowTitle, { color: th.text, textAlign: textAlign(lang) }]}>{title}</Text>
+        <Text style={[s.rowDescription, { color: th.sub, textAlign: textAlign(lang) }]} numberOfLines={2}>{description}</Text>
+      </View>
+      <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={19} color={th.faint} />
     </Touchable>
   );
 }
 
-function TrustBadge({ th, lang, icon, tone, title, description }) {
-  return (
-    <View style={{ flex: 1, alignItems: 'center', gap: 4, backgroundColor: `${tone}12`, borderRadius: RADIUS.lg, paddingVertical: 12, paddingHorizontal: 6 }}>
-      <IconContainer th={th} icon={icon} tone={tone} size="sm" />
-      <Text style={{ color: th.text, fontSize: 10, fontWeight: '900', textAlign: 'center' }} numberOfLines={2}>
-        {title}
-      </Text>
-      <Text style={{ color: th.sub, fontSize: 8, textAlign: 'center' }} numberOfLines={3}>
-        {description}
-      </Text>
-    </View>
-  );
-}
-
-// More hub — a thin router. Per docs/design/07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md
-// "More": My Shortcuts, My Tools, Data & Files, Benefits/Rewards, MYFI & Help,
-// Settings. Data & Files / MYFI & Help / Settings all route into the existing,
-// unmodified SettingsScreen via its already-existing openRequest deep-link
-// (App.js's openSettingsPage) — this screen does NOT extract or duplicate
-// DataPage/GuidePage/SupportPage/AboutPage, since moving that content out of
-// SettingsScreen.js is Settings/Legacy consolidation (roadmap Step 4), out of
-// scope here.
-//
-// Known, flagged simplifications (see the Step 3 evidence file):
-// - "My Shortcuts" is spec'd in the approved reference as a swipeable,
-//   user-customizable carousel (pagination dots for multiple pages) — this
-//   build ships one static row of 3 defaults; carousel + customization are
-//   not implemented.
-// - "My Tools" and "Benefits" route to a plain "coming soon" placeholder —
-//   their sub-items are documented in the approved reference but building
-//   them (categories/currencies/templates for My Tools; an actual
-//   Premium/rewards system for Benefits) is out of scope here. Archive is
-//   the one My Tools sub-item that already exists and is wired directly
-//   (roadmap Step 5, see below).
-export default function MoreScreen({ onOpenSettingsPage, onAddTransaction, onTransfer, onOpenBudget, onOpenArchive }) {
-  const { th, lang, isAr } = useTheme();
-  const [placeholder, setPlaceholder] = useState(null);
-
-  return (
-    <ScreenScroll th={th}>
-      <PageIntro
-        th={th}
-        lang={lang}
-        icon="ellipsis-horizontal-outline"
-        title={isAr ? 'المزيد' : 'More'}
-        subtitle={isAr ? 'كل الأدوات التي تحتاجها في مكان واحد' : 'All the tools you need in one place'}
-      />
-
-      <View style={{ flexDirection: rowDirection(lang), alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-        <SectionTitle th={th} lang={lang} style={{ marginBottom: 0 }}>{isAr ? 'اختصاراتي' : 'My Shortcuts'}</SectionTitle>
-        {/* Shortcut customization/reordering isn't implemented yet — visual affordance only. */}
-        <Touchable
-          onPress={() => {}}
-          style={{ flexDirection: rowDirection(lang), alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 28, borderRadius: RADIUS.pill, borderWidth: 1, borderColor: th.border }}
-        >
-          <Ionicons name="pencil-outline" size={12} color={th.sub} />
-          <Text style={{ color: th.sub, fontSize: 11, fontWeight: '800' }}>{isAr ? 'تعديل' : 'Edit'}</Text>
-        </Touchable>
-      </View>
-      <Text style={{ color: th.faint, fontSize: 10, textAlign: textAlign(lang), marginBottom: 8 }}>
-        {isAr ? 'اضغط مطولاً لتغيير الترتيب' : 'Long-press to reorder'}
-      </Text>
-      <SurfaceCard th={th} style={{ padding: 12, marginBottom: 14, flexDirection: rowDirection(lang), gap: 8 }}>
-        <ShortcutItem th={th} lang={lang} icon="add-circle-outline" label={isAr ? 'إضافة حركة' : 'Add'} onPress={onAddTransaction} />
-        <ShortcutItem th={th} lang={lang} icon="swap-horizontal-outline" label={isAr ? 'تحويل' : 'Transfer'} onPress={onTransfer} />
-        <ShortcutItem th={th} lang={lang} icon="pie-chart-outline" label={isAr ? 'الميزانية' : 'Budget'} onPress={onOpenBudget} />
-      </SurfaceCard>
-
-      <SurfaceCard th={th} style={{ padding: 4, marginBottom: 10 }}>
-        <SectionListRow
-          th={th} lang={lang} icon="briefcase-outline" tone={th.primary}
-          title={isAr ? 'أدواتي' : 'My Tools'}
-          description={isAr ? 'التصنيفات، العملات والحسابات، القوالب' : 'Categories, currencies & accounts, templates'}
-          bordered
-          onPress={() => setPlaceholder(isAr ? 'أدواتي' : 'My Tools')}
-        />
-        {/* Archive relocated here from Settings > Data & storage per roadmap
-            Step 5 (2026-08-26) — same ArchiveScreen, same onOpenArchive
-            wiring, content/logic unchanged. */}
-        <SectionListRow
-          th={th} lang={lang} icon="archive-outline" tone={th.primary}
-          title={isAr ? 'الأرشيف' : 'Archive'}
-          description={isAr ? 'الحسابات والفئات المؤرشفة' : 'Archived accounts and categories'}
-          onPress={onOpenArchive}
-        />
-      </SurfaceCard>
-
-      <SurfaceCard th={th} style={{ padding: 4, marginBottom: 10 }}>
-        <SectionListRow
-          th={th} lang={lang} icon="cloud-upload-outline" tone={th.transfer}
-          title={isAr ? 'البيانات والملفات' : 'Data & Files'}
-          description={isAr ? 'النسخ الاحتياطي، الاستعادة، التصدير والاستيراد' : 'Backup, restore, export and import'}
-          onPress={() => onOpenSettingsPage?.('data')}
-        />
-      </SurfaceCard>
-
-      <SurfaceCard th={th} style={{ padding: 4, marginBottom: 10 }}>
-        <SectionListRow
-          th={th} lang={lang} icon="trophy-outline" tone={th.warn}
-          title={isAr ? 'المزايا' : 'Benefits'}
-          description={isAr ? 'Premium، المكافآت، ودعوة صديق' : 'Premium, rewards, and invite a friend'}
-          onPress={() => setPlaceholder(isAr ? 'المزايا' : 'Benefits')}
-        />
-      </SurfaceCard>
-
-      <SurfaceCard th={th} style={{ padding: 4, marginBottom: 10 }}>
-        <SectionListRow
-          th={th} lang={lang} icon="headset-outline" tone={th.primary}
-          title={isAr ? 'المساعدة' : 'Help'}
-          description={isAr ? 'مركز المساعدة، تواصل معنا، الأسئلة الشائعة' : 'Help center, contact us, FAQ'}
-          bordered
-          onPress={() => onOpenSettingsPage?.('support')}
-        />
-        <SectionListRow
-          th={th} lang={lang} icon="information-circle-outline" tone={th.primary}
-          title={isAr ? 'عن MYFI' : 'About MYFI'}
-          description={isAr ? 'هوية المنتج، الإصدار ومبادئ الخصوصية' : 'Product identity, version, and privacy principles'}
-          onPress={() => onOpenSettingsPage?.('about')}
-        />
-      </SurfaceCard>
-
-      <SurfaceCard th={th} style={{ padding: 4, marginBottom: 14 }}>
-        <SectionListRow
-          th={th} lang={lang} icon="settings-outline" tone={th.primary}
-          title={isAr ? 'الإعدادات' : 'Settings'}
-          description={isAr ? 'إعدادات التطبيق والحساب والأمان والتفضيلات' : 'App, account, security, and preferences'}
-          onPress={() => onOpenSettingsPage?.('root')}
-        />
-      </SurfaceCard>
-
-      <SectionTitle th={th} lang={lang}>{isAr ? 'ملاحظات مهمة' : 'Important notes'}</SectionTitle>
-      <View style={{ flexDirection: rowDirection(lang), gap: 6, marginBottom: 4 }}>
-        <TrustBadge
-          th={th} lang={lang} tone={th.primary} icon="shield-checkmark-outline"
-          title={isAr ? 'خصوصيتك أولاً' : 'Privacy first'}
-          description={isAr ? 'بياناتك آمنة ومحفوظة بعناية تامة' : 'Your data is kept safe and secure'}
-        />
-        <TrustBadge
-          th={th} lang={lang} tone={th.primary} icon="cloud-done-outline"
-          title={isAr ? 'نسخ احتياطي آمن' : 'Safe backups'}
-          description={isAr ? 'لا تفقد بياناتك، اعمل نسخًا احتياطية بانتظام' : "Don't lose your data — back up regularly"}
-        />
-        <TrustBadge
-          th={th} lang={lang} tone={th.warn} icon="trophy-outline"
-          title={isAr ? 'كن أكثر مع MYFI' : 'Get more with MYFI'}
-          description={isAr ? 'اكتشف المزايا التي تجعل تجربتك أفضل' : 'Discover the benefits that make it better'}
-        />
-        <TrustBadge
-          th={th} lang={lang} tone={th.primary} icon="headset-outline"
-          title={isAr ? 'نحن هنا لمساعدتك' : "We're here to help"}
-          description={isAr ? 'فريق الدعم جاهز للإجابة على استفساراتك' : 'Support is ready to answer your questions'}
-        />
-      </View>
-
-      <Modal visible={!!placeholder} transparent animationType="fade" onRequestClose={() => setPlaceholder(null)}>
-        <View style={{ flex: 1, backgroundColor: th.overlay, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <Pressable style={{ position: 'absolute', top: 0, bottom: 0, start: 0, end: 0 }} onPress={() => setPlaceholder(null)} />
-          <View style={{ backgroundColor: th.card, borderRadius: 18, padding: 20, width: '100%', maxWidth: 340, gap: 10, alignItems: 'center' }}>
-            <Ionicons name="construct-outline" size={28} color={th.primary} />
-            <Text style={{ color: th.text, fontSize: 15, fontWeight: '900', textAlign: 'center' }}>
-              {placeholder || (isAr ? 'قريباً' : 'Coming soon')}
-            </Text>
-            <Text style={{ color: th.sub, fontSize: 12, textAlign: 'center' }}>
-              {isAr
-                ? 'هذا القسم قيد الإعداد وسيتوفر في تحديث لاحق.'
-                : 'This section is being built and will arrive in a later update.'}
-            </Text>
-            <Pressable onPress={() => setPlaceholder(null)} style={{ marginTop: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: th.primSoft }}>
-              <Text style={{ color: th.primary, fontWeight: '900' }}>{isAr ? 'حسناً' : 'OK'}</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-    </ScreenScroll>
-  );
-}
+const s = StyleSheet.create({
+  heading: { marginTop: 4, marginBottom: SPACE.xl },
+  title: { fontSize: 27, lineHeight: 34, ...weight('900') },
+  subtitle: { fontSize: 13, lineHeight: 20, ...weight('700'), marginTop: 5 },
+  group: { borderRadius: RADIUS.xl, borderWidth: 1, overflow: 'hidden', ...SHADOW.card },
+  row: { minHeight: 74, alignItems: 'center', gap: SPACE.md, paddingHorizontal: SPACE.md, paddingVertical: 11, borderBottomWidth: 1 },
+  rowIcon: { width: 40, height: 40, borderRadius: RADIUS.lg, alignItems: 'center', justifyContent: 'center' },
+  rowTitle: { fontSize: 13, lineHeight: 18, ...weight('900') },
+  rowDescription: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 2 },
+});

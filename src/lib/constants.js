@@ -203,6 +203,33 @@ export const DEF_QUICK_ACTIONS = [
 export const DEF_START_TAB = 'home';
 const HOME_LAYOUT_VERSION = 3;
 
+export const INCOME_ALLOCATION_BUCKETS = ['needs', 'wants', 'savings', 'debt', 'investment'];
+export const DEF_INCOME_ALLOCATION_PLAN = {
+  version: 1,
+  strategy: 'balanced',
+  income: 0,
+  allocations: { needs: 50, wants: 30, savings: 20, debt: 0, investment: 0 },
+  updatedAt: null,
+};
+
+export const normalizeIncomeAllocationPlan = (plan = {}) => {
+  const source = plan && typeof plan === 'object' ? plan : {};
+  const rawAllocations = source.allocations && typeof source.allocations === 'object' ? source.allocations : {};
+  const allocations = INCOME_ALLOCATION_BUCKETS.reduce((next, key) => ({
+    ...next,
+    [key]: Math.max(0, Math.min(100, Math.round(Number(rawAllocations[key] ?? DEF_INCOME_ALLOCATION_PLAN.allocations[key]) || 0))),
+  }), {});
+  const total = INCOME_ALLOCATION_BUCKETS.reduce((sum, key) => sum + allocations[key], 0);
+  const valid = total === 100;
+  return {
+    version: 1,
+    strategy: ['balanced', 'debtFirst', 'saveFirst', 'custom'].includes(source.strategy) ? source.strategy : 'custom',
+    income: Math.max(0, Number(source.income) || 0),
+    allocations: valid ? allocations : { ...DEF_INCOME_ALLOCATION_PLAN.allocations },
+    updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : null,
+  };
+};
+
 export const DEF_CFG = {
   theme: 'dark', themeMode: 'system', lang: detectSystemLang(), langMode: 'system', currency: 'IQD',
   orientationMode: 'system',
@@ -225,6 +252,7 @@ export const DEF_CFG = {
   hideNotificationDetails: true,
   categoryBudgets: {},
   categoryBudgetsByMonth: {},
+  incomeAllocationPlan: DEF_INCOME_ALLOCATION_PLAN,
 };
 
 const normalizeModules = (modules = {}) =>
@@ -315,6 +343,7 @@ export const normalizeCfg = (cfg = {}) => {
         .map(([month, map]) => [month, Object.fromEntries(Object.entries(map).filter(([, value]) => Number(value) > 0))])
         .filter(([, map]) => Object.keys(map).length > 0),
     ),
+    incomeAllocationPlan: normalizeIncomeAllocationPlan(cfg.incomeAllocationPlan),
     // Monthly recurrence is a core entry capability. Existing profiles that
     // hid the old optional module are migrated back to the enabled state.
     enabledModules: { ...normalizeModules(cfg.enabledModules), recurring: true },

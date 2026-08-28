@@ -107,6 +107,9 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
   const requestedTrackerType = ['owed', 'receivable', 'goal', 'commitment'].includes(preset?.trackerType)
     ? preset.trackerType
     : null;
+  const requestedCommitmentSubType = ['general', 'installment', 'subscription'].includes(preset?.commitmentSubType)
+    ? preset.commitmentSubType
+    : 'general';
   const dedicatedTrackerLaunch = isTracker && !!requestedTrackerType && !linkedPlanMode;
   const presetKind = preset?.linkedType === 'goal'
     ? 'goal'
@@ -155,10 +158,10 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     setCommitmentCat(suggestCategoryForText(presetName, commitmentCategories));
     setCommitmentCatTouched(false);
     setCommitmentRepeatMonthly(true);
-    setCommitmentSubType('general');
+    setCommitmentSubType(requestedCommitmentSubType);
     setCommitmentTotalInstallments('');
     setExpandedPicker(null);
-  }, [visible, linkedPlanMode, presetKind, preset?.linkedName, preset?.linkedCurrency, requestedTrackerType, defaultWalletId, cfg.currency]);
+  }, [visible, linkedPlanMode, presetKind, preset?.linkedName, preset?.linkedCurrency, requestedTrackerType, requestedCommitmentSubType, defaultWalletId, cfg.currency]);
 
   const currentKind = linkedPlanMode
     ? presetKind
