@@ -12,7 +12,7 @@ import AddTransModal from '../components/AddTransModal';
 import { filterByActiveScope, filterFeatureEntities, filterTransactionsByEnabledFeatures, getActiveScope, getModules, getTransactionDisplayAmount } from '../lib/modules';
 import { getDefaultWalletId, getWalletAvailableBalances, getWalletBaseAvailableTotal, getWalletLabel, normalizeWallets } from '../lib/wallets';
 import { formatCommitmentDate, formatCommitmentMonth, getUpcomingCommitments } from '../lib/commitments';
-import { FinancialDirectionMark, MetricCard, SectionTitle, Touchable as TouchableOpacity } from '../components/AppPrimitives';
+import { FinancialDirectionMark, SectionTitle, Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { RADIUS, SHADOW, SPACE, TYPE, weight } from '../lib/tokens';
 import ActionMenu from '../components/ActionMenu';
 import { describeSmartSource } from '../lib/smartEntry';
@@ -42,7 +42,6 @@ const copy = (lang) => {
     periodDay: ar ? 'اليوم' : 'Today',
     periodWeek: ar ? 'هذا الاسبوع' : 'This week',
     periodMonth: ar ? 'هذا الشهر' : 'This month',
-    periodYear: ar ? 'هذا العام' : 'This year',
     monthEnd: ar ? 'نهاية الشهر' : 'Month end',
     dailyRoom: ar ? 'المتاح يومياً' : 'Daily room',
     afterDebts: ar ? 'بعد استحقاقات دين عليّ' : 'After debts due',
@@ -108,7 +107,7 @@ const copy = (lang) => {
     hideBalance: ar ? 'إخفاء' : 'Hide',
     hiddenAmount: '****',
     noActiveGoals: ar ? 'لا توجد أهداف نشطة' : 'No active goals',
-    quickActions: ar ? 'إجراءات مباشرة' : 'Direct actions',
+    quickActions: ar ? 'الإضافة السريعة' : 'Quick add',
     quickExpense: ar ? 'إضافة مصروف' : 'Add expense',
     quickIncome: ar ? 'إضافة دخل' : 'Add income',
     quickTransfer: ar ? 'تحويل بين المحافظ' : 'Transfer between wallets',
@@ -175,6 +174,8 @@ export default function HomeScreen({
 
   const [showWalletDetails, setShowWalletDetails] = useState(false);
   const [walletStripPage, setWalletStripPage] = useState(0);
+  const [attentionExpanded, setAttentionExpanded] = useState(false);
+  const [savingsExpanded, setSavingsExpanded] = useState(false);
   const [editing,    setEditing]    = useState(null);
   const [details, setDetails] = useState(null);
   const [expandedRecentId, setExpandedRecentId] = useState(null);
@@ -283,6 +284,7 @@ export default function HomeScreen({
   const healthNeedsAttention = snapshot.health === 'danger' || snapshot.health === 'warning' || snapshot.health === 'watch';
   const canTransfer = walletRows.length > 1;
   const heroBalance = getWalletBaseAvailableTotal(walletRows, cfg.currency);
+  const heroBalanceText = `${heroBalance < 0 ? '-' : ''}${cfg.currency} ${fmt(Math.abs(heroBalance))}`;
   const activeGoals = scopedGoals.filter(goal => goal.active !== false && Number(goal.target || 0) > 0);
   const goalCurrencyGroups = useMemo(
     () => summarizeGoalCurrencies(activeGoals, cfg.currency, { activeOnly: true }),
@@ -322,11 +324,6 @@ export default function HomeScreen({
         ? sum + Math.abs(Number(item.allocationAmount || 0))
         : sum;
     }, 0);
-  const hasCashFlowActivity = currentMonthRows.length > 0;
-  const hasMonthActivity = hasCashFlowActivity || monthSavingTotal > 0 || dueCommitments.length > 0;
-  const hasMeaningfulHomeData = hasMonthActivity
-    || activeGoals.length > 0
-    || walletRows.some(wallet => Math.abs(Number(wallet.balance || 0)) > 0 || Math.abs(Number(wallet.availableBalance || 0)) > 0);
   const attentionItems = useMemo(() => ([
     ...dueCommitments.map(item => ({ ...item, attentionType: 'commitment', sortDays: item.monthsUntil * 32 })),
     ...upcoming.filter(item => item.daysUntil <= 31).map(item => ({ ...item, attentionType: 'recurring', sortDays: item.daysUntil })),
@@ -336,10 +333,11 @@ export default function HomeScreen({
   const findCat = (catId) => cats.find(c => c.id === catId) || cats.find(c => c.id === 'other') || cats[0] || {};
   const findWallet = (walletId) => walletMap.get(walletId) || walletRows[0];
   const isHomeSectionVisible = (key) => homeSectionsMap.get(key) !== false;
-  const showWalletStrip = isHomeSectionVisible('wallets') && modules.wallets && walletRows.length > 0 && (!isHomeSectionVisible('hero') || showWalletDetails);
   const effectiveMonthSummary = financialLedgerV7Cutover && sqlHome?.summary?.supported !== false && sqlHome?.summary
     ? { inc: Number(sqlHome.summary.income || 0), exp: Number(sqlHome.summary.expense || 0), net: Number(sqlHome.summary.net || 0), count: Number(sqlHome.summary.count || 0) }
     : { inc: Number(snapshot.month.inc || 0), exp: Number(snapshot.month.exp || 0), net: Number(snapshot.month.net || 0), count: currentMonthRows.length };
+  const monthFlowTotal = Math.abs(effectiveMonthSummary.inc) + Math.abs(effectiveMonthSummary.exp);
+  const monthIncomeShare = monthFlowTotal > 0 ? pct(Math.abs(effectiveMonthSummary.inc), monthFlowTotal, { cap: true }) : 0;
   const homeCards = homeCardsCfg.map((item) => {
     if (item.key === 'income') {
       return {
@@ -488,7 +486,7 @@ export default function HomeScreen({
     </View>
   );
 
-  const renderRow = (t) => {
+  const renderRow = (t, index) => {
     const cat = findCat(t.cat);
     const amount = getTransactionDisplayAmount(t);
     const wallet = findWallet(t.walletId);
@@ -518,9 +516,11 @@ export default function HomeScreen({
         key={t.id}
         style={[
           s.row,
+          s.recentRow,
           {
             backgroundColor: recentSelection.selected.has(t.id) ? th.primSoft : th.card,
             borderColor: recentSelection.selected.has(t.id) ? th.primary : th.border,
+            borderBottomWidth: index === recent.length - 1 ? 0 : StyleSheet.hairlineWidth,
           },
         ]}
       >
@@ -561,7 +561,7 @@ export default function HomeScreen({
                   : `${cfg.lang === 'ar' ? cat.label : cat.labelEn} - ${t.dateISO}${modules.wallets && t.walletId ? ` - ${getWalletLabel(wallet, cfg.lang)}` : ''}${t.recurring ? ` - ${cfg.lang === 'ar' ? 'متكرر' : 'recurring'}` : ''}`}
               </Text>
             </View>
-            <Text style={{ color: semanticColor, ...weight('900'), fontSize: 15 }}>
+            <Text style={{ color: semanticColor, ...weight('900'), fontSize: 15, writingDirection: 'ltr' }}>
               {moneyText(`${isTransfer ? fmt(t.transferAmount) : `${amount > 0 ? '+' : '-'}${fmt(amount)}`} ${sym}`)}
             </Text>
           </Pressable>
@@ -670,23 +670,22 @@ export default function HomeScreen({
   };
 
 
-  const renderMoneyTile = ({ icon, direction, label, value, color, bg, onPress }, width = '49%') => (
+  const renderMoneyTile = ({ icon, direction, label, value, color, onPress, separatorStyle }) => (
     <TouchableOpacity
-      style={[s.tile, { width }]}
+      style={[s.monthMetric, separatorStyle]}
       onPress={onPress}
     >
-      <MetricCard
-        th={th}
-        lang={cfg.lang}
-        icon={icon}
-        direction={direction}
-        label={label}
-        value={moneyText(value)}
-        tone={color}
-        style={{ width: '100%', backgroundColor: bg || th.card, borderColor: th.border }}
-        valueStyle={s.tileValue}
-        compact
-      />
+      <View style={[s.monthMetricLabelRow, { flexDirection: rowDir }]}>
+        {direction
+          ? <FinancialDirectionMark kind={direction} color={color} size={15} lang={cfg.lang} />
+          : <Ionicons name={icon} size={14} color={color} />}
+        <Text style={[s.monthMetricLabel, { color: th.sub, textAlign: align }]} numberOfLines={1}>
+          {label}
+        </Text>
+      </View>
+      <Text style={[s.monthMetricValue, { color, textAlign: align, writingDirection: 'ltr' }]} numberOfLines={1} adjustsFontSizeToFit>
+        {moneyText(value)}
+      </Text>
     </TouchableOpacity>
   );
 
@@ -697,11 +696,15 @@ export default function HomeScreen({
   const visibleHomeCards = hasLedgerEntries
     ? homeCards.filter(item => item.visible !== false)
     : [];
-  const moneyTileWidth = (index) => (
-    visibleHomeCards.length === 1 || (visibleHomeCards.length === 3 && index === 2)
-      ? '100%'
-      : '49%'
-  );
+  const quickEntryActions = [
+    { key: 'income', label: isAr ? 'دخل' : 'Income', direction: 'income', color: th.inc, onPress: onAddIncome },
+    { key: 'expense', label: isAr ? 'مصروف' : 'Expense', direction: 'expense', color: th.exp, onPress: onAddExpense },
+    modules.wallets && canTransfer
+      ? { key: 'transfer', label: isAr ? 'تحويل' : 'Transfer', icon: 'swap-horizontal-outline', color: th.transfer, onPress: onTransfer }
+      : null,
+    { key: 'smart', label: C.smartEntry, icon: 'sparkles-outline', color: th.primary, onPress: onSmartEntry },
+  ].filter(Boolean);
+  const orderedQuickEntryActions = isAr ? [...quickEntryActions].reverse() : quickEntryActions;
   const topGoalRows = [...activeGoals]
     .sort((a, b) => (Number(b.cur || 0) / Math.max(1, Number(b.target || 0))) - (Number(a.cur || 0) / Math.max(1, Number(a.target || 0))))
     .slice(0, 2);
@@ -885,8 +888,14 @@ export default function HomeScreen({
   };
 
   const renderAttentionSection = () => (
-    <View style={[s.attentionPanel, importantS.panel, { backgroundColor: th.card, borderColor: th.border }]}>
-      <View style={[s.attentionHeader, importantS.header, { flexDirection: rowDir }]}>
+    <View style={[s.attentionPanel, importantS.panel, { backgroundColor: th.warnBg, borderColor: `${th.warn}44` }]}>
+      <TouchableOpacity
+        onPress={() => setAttentionExpanded(value => !value)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: attentionExpanded }}
+        accessibilityLabel={`${attentionExpanded ? C.hideDetails : C.showDetails} ${C.attention}`}
+        style={[s.attentionHeader, importantS.header, { flexDirection: rowDir, marginBottom: attentionExpanded ? 6 : 0 }]}
+      >
         <View style={[s.attentionHeaderTitle, { flexDirection: rowDir }]}>
           <View style={[s.attentionHeaderIcon, importantS.headerIcon, { backgroundColor: th.warnBg }]}>
             <Ionicons name="alert-circle-outline" size={18} color={th.warn} />
@@ -900,9 +909,10 @@ export default function HomeScreen({
             <Text style={{ color: th.warn, fontSize: 11, ...weight('900') }}>{attentionItems.length}</Text>
           </View>
         ) : null}
-      </View>
+        <Ionicons name={attentionExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={th.warn} />
+      </TouchableOpacity>
 
-      {healthNeedsAttention ? (
+      {attentionExpanded && healthNeedsAttention ? (
         <View style={[importantS.card, { backgroundColor: `${healthColor}12`, borderColor: `${healthColor}44`, flexDirection: rowDir, alignItems: 'center', gap: 8 }]}>
           <Ionicons name="pulse-outline" size={16} color={healthColor} />
           <Text style={{ color: healthColor, fontSize: 12, ...weight('800'), flex: 1, textAlign: align }}>
@@ -911,49 +921,57 @@ export default function HomeScreen({
         </View>
       ) : null}
 
-      {attentionItems.length === 0 ? (
+      {attentionExpanded && attentionItems.length === 0 ? (
         healthNeedsAttention ? null : (
           <View style={[s.clearPanel, importantS.clearPanel, { borderColor: th.border, backgroundColor: th.cardHigh }]}>
             <Ionicons name="checkmark-circle-outline" size={19} color={th.inc} />
             <Text style={{ color: th.inc, fontSize: 13, ...weight('900') }}>{C.allClear}</Text>
           </View>
         )
-      ) : (
+      ) : attentionExpanded ? (
         <View style={importantS.items}>
           {attentionItems.slice(0, 4).map(renderAttentionRow)}
         </View>
-      )}
+      ) : null}
     </View>
+  );
+
+  const renderSavingsHeader = () => (
+    <TouchableOpacity
+      onPress={() => setSavingsExpanded(value => !value)}
+      accessibilityRole="button"
+      accessibilityState={{ expanded: savingsExpanded }}
+      accessibilityLabel={`${savingsExpanded ? C.hideDetails : C.showDetails} ${C.savingThisMonth}`}
+      style={[s.savingHeader, { flexDirection: rowDir, marginBottom: savingsExpanded ? 7 : 0 }]}
+    >
+      <View style={[s.savingHeaderIcon, { backgroundColor: th.card }]}>
+        <Ionicons name="flag-outline" size={17} color={th.primary} />
+      </View>
+      <Text style={[s.savingTitle, { color: th.text, textAlign: align }]}>{C.savingThisMonth}</Text>
+      {activeGoals.length ? (
+        <View style={[s.savingCount, { backgroundColor: th.card }]}>
+          <Text style={{ color: th.primary, fontSize: 10, ...weight('900') }}>{activeGoals.length}</Text>
+        </View>
+      ) : null}
+      <Ionicons name={savingsExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={th.primary} />
+    </TouchableOpacity>
   );
 
   const renderGoalsSection = () => {
     if (!activeGoals.length) return (
-      <View style={[s.savingPanel, { backgroundColor: th.card, borderColor: th.border }]}>
-        <View style={[s.savingHeader, { flexDirection: rowDir }]}>
-          <View style={[s.savingHeaderIcon, { backgroundColor: th.primSoft }]}>
-            <Ionicons name="flag-outline" size={17} color={th.primary} />
-          </View>
-          <Text style={[s.savingTitle, { color: th.text, textAlign: align }]}>{C.savingThisMonth}</Text>
-        </View>
-        <View style={[s.savingEmpty, { backgroundColor: th.cardHigh }]}>
+      <View style={[s.savingPanel, { backgroundColor: th.primSoft, borderColor: `${th.primary}44` }]}>
+        {renderSavingsHeader()}
+        {savingsExpanded ? <View style={[s.savingEmpty, { backgroundColor: th.cardHigh }]}>
           <Text style={{ color: th.sub, fontSize: 12, ...weight('800'), textAlign: 'center' }}>{C.noActiveGoals}</Text>
-        </View>
+        </View> : null}
       </View>
     );
 
     return (
-      <View style={[s.savingPanel, { backgroundColor: th.card, borderColor: th.border }]}>
-        <View style={[s.savingHeader, { flexDirection: rowDir }]}>
-          <View style={[s.savingHeaderIcon, { backgroundColor: th.primSoft }]}>
-            <Ionicons name="flag-outline" size={17} color={th.primary} />
-          </View>
-          <Text style={[s.savingTitle, { color: th.text, textAlign: align }]}>{C.savingThisMonth}</Text>
-          <View style={[s.savingCount, { backgroundColor: th.primSoft }]}>
-            <Text style={{ color: th.primary, fontSize: 10, ...weight('900') }}>{activeGoals.length}</Text>
-          </View>
-        </View>
+      <View style={[s.savingPanel, { backgroundColor: th.primSoft, borderColor: `${th.primary}44` }]}>
+        {renderSavingsHeader()}
 
-        <View style={[s.savingSummary, { flexDirection: rowDir }]}>
+        {savingsExpanded ? <><View style={[s.savingSummary, { flexDirection: rowDir }]}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={[s.savingSummaryLabel, { color: th.sub, textAlign: align }]}>{C.saved}</Text>
             <Text
@@ -992,7 +1010,7 @@ export default function HomeScreen({
               </View>
             );
           })}
-        </View>
+        </View></> : null}
       </View>
     );
   };
@@ -1003,7 +1021,7 @@ export default function HomeScreen({
   // "X wallets · Show details" row) and stays untouched. This just displays
   // walletRows, already computed above for the hero's wallet-summary count;
   // no new balance calculation happens here.
-  const WALLET_CARD_WIDTH = 148;
+  const WALLET_CARD_WIDTH = 112;
   const renderWalletStrip = () => {
     // Deliberately NOT gated on modules.wallets (a business-profile-only flag
     // for the multi-wallet FEATURE SET — selecting among wallets, transfers,
@@ -1020,7 +1038,7 @@ export default function HomeScreen({
           <Text style={{ color: th.text, fontSize: 15, ...weight('900'), flex: 1, textAlign: align }}>
             {isAr ? 'المحافظ' : 'Wallets'}
           </Text>
-          <TouchableOpacity onPress={() => onOpenTab('wallets')}>
+          <TouchableOpacity onPress={() => onOpenTab('wallets')} style={s.walletStripLink}>
             <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>
               {isAr ? 'عرض الكل' : 'View all'}
             </Text>
@@ -1040,20 +1058,24 @@ export default function HomeScreen({
             const currencyMeta = CURRENCIES.find((item) => item.code === (wallet.currency || cfg.currency));
             const currencyName = currencyMeta ? (isAr ? currencyMeta.name : currencyMeta.nameEn) : (wallet.currency || cfg.currency);
             return (
-              <View key={wallet.id} style={[s.walletStripCard, { width: WALLET_CARD_WIDTH, backgroundColor: th.card, borderColor: th.border }]}>
+              <TouchableOpacity
+                key={wallet.id}
+                onPress={() => setShowWalletDetails(true)}
+                style={[s.walletStripCard, { width: WALLET_CARD_WIDTH, backgroundColor: th.card, borderColor: th.border }]}
+              >
                 <Text style={{ color: th.text, fontSize: 12, ...weight('800'), textAlign: align }} numberOfLines={1}>
                   {getWalletLabel(wallet, cfg.lang)}
                 </Text>
                 <View style={[s.walletStripIcon, { backgroundColor: th.primSoft }]}>
                   <Ionicons name={wallet.id === defaultWalletId ? 'star' : 'wallet-outline'} size={16} color={th.primary} />
                 </View>
-                <Text style={{ color: th.text, fontSize: 14, ...weight('900'), textAlign: align }} numberOfLines={1} adjustsFontSizeToFit>
+                <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: align, writingDirection: 'ltr' }} numberOfLines={1} adjustsFontSizeToFit>
                   {hidden ? '••••••' : `${formatMoneyNumber(wallet.availableBalance, wallet.currency || cfg.currency, cfg.lang)} ${wallet.currency || cfg.currency}`}
                 </Text>
                 <Text style={{ color: th.faint, fontSize: 10, ...weight('700'), textAlign: align }} numberOfLines={1}>
                   {currencyName}
                 </Text>
-              </View>
+              </TouchableOpacity>
             );
           })}
         </ScrollView>
@@ -1075,7 +1097,7 @@ export default function HomeScreen({
   };
 
   const renderWalletPanel = () => (
-    showWalletStrip ? (
+    walletRows.length > 0 ? (
       <Modal visible={showWalletDetails} transparent animationType="fade" onRequestClose={() => setShowWalletDetails(false)}>
         <View style={[s.walletPopupOverlay, { backgroundColor: th.overlay }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowWalletDetails(false)} />
@@ -1103,7 +1125,12 @@ export default function HomeScreen({
 
   const renderRecentSection = () => (
     <View>
-      <SectionTitle th={th} lang={cfg.lang}>{L.recent}</SectionTitle>
+      <View style={[s.recentHead, { flexDirection: rowDir }]}>
+        <Text style={[s.recentTitle, { color: th.text, textAlign: align }]}>{L.recent}</Text>
+        <TouchableOpacity onPress={() => onOpenTab('history')} style={s.recentAllLink}>
+          <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.allTransactions}</Text>
+        </TouchableOpacity>
+      </View>
       <MultiSelectBar
         th={th}
         lang={cfg.lang}
@@ -1136,7 +1163,11 @@ export default function HomeScreen({
             </TouchableOpacity>
           </View>
         </View>
-      ) : recent.map(renderRow)}
+      ) : (
+        <View style={[s.recentList, { backgroundColor: th.card, borderColor: th.border }]}>
+          {recent.map(renderRow)}
+        </View>
+      )}
     </View>
   );
 
@@ -1174,7 +1205,6 @@ export default function HomeScreen({
             ) : null}
           </TouchableOpacity>
           <View style={s.brandLockup}>
-            <Ionicons name="layers" size={22} color={th.primary} />
             <Text style={[s.brandTitle, { color: th.primary }]}>MYFI</Text>
           </View>
           <TouchableOpacity
@@ -1199,17 +1229,30 @@ export default function HomeScreen({
         <View style={[s.hero, { backgroundColor: th.primary, borderColor: `${th.primary}55` }]}>
           <View style={[s.heroTop, { flexDirection: rowDir }]}>
             <View style={{ flex: 1 }}>
-              <Text style={[s.heroLabel, { color: 'rgba(255,255,255,0.82)', textAlign: align }]}>{isAr ? 'الرصيد المتاح' : 'Available balance'}</Text>
-              <Text style={[s.heroAmount, { color: th.onPrimary, textAlign: align }]} numberOfLines={1} adjustsFontSizeToFit>
-                {moneyText(signed(heroBalance))}
+              <View style={[s.heroLabelRow, { flexDirection: rowDir }]}>
+                <Text style={[s.heroLabel, { color: 'rgba(255,255,255,0.82)', textAlign: align }]}>{isAr ? 'الرصيد المتاح' : 'Available balance'}</Text>
+                <TouchableOpacity
+                  onPress={() => setCfg({ homeBalancesHidden: !hidden })}
+                  style={s.heroVisibilityBtn}
+                  hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={hidden ? C.showBalance : C.hideBalance}
+                >
+                  <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={14} color="rgba(255,255,255,0.82)" />
+                </TouchableOpacity>
+              </View>
+              <Text style={[s.heroAmount, { color: th.onPrimary, textAlign: align, writingDirection: 'ltr' }]} numberOfLines={1} adjustsFontSizeToFit>
+                {moneyText(heroBalanceText)}
               </Text>
             </View>
             <View style={[s.heroTools, { flexDirection: rowDir }]}>
               <TouchableOpacity
-                onPress={() => setCfg({ homeBalancesHidden: !hidden })}
-                style={[s.heroIconBtn, { backgroundColor: 'rgba(255,255,255,0.10)' }]}
+                onPress={() => onOpenTab('wallets')}
+                style={[s.heroIconBtn, { backgroundColor: 'rgba(255,255,255,0.14)', borderColor: 'rgba(255,255,255,0.20)' }]}
+                accessibilityRole="button"
+                accessibilityLabel={isAr ? 'فتح المحافظ' : 'Open wallets'}
               >
-                <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={15} color={th.onPrimary} />
+                <Ionicons name="wallet-outline" size={20} color={th.onPrimary} />
               </TouchableOpacity>
             </View>
           </View>
@@ -1219,13 +1262,11 @@ export default function HomeScreen({
               available balance regardless of period (a "balance for today"
               alone would not be a different figure from the total). */}
           <View style={[s.periodPillRow, { flexDirection: rowDir }]}>
-            {periodPills.map(pillItem => {
+            {periodPills.filter(pillItem => pillItem.key !== 'year').map(pillItem => {
               const active = activePeriod === pillItem.key;
               const pillLabel = pillItem.key === 'day' ? C.periodDay
                 : pillItem.key === 'week' ? C.periodWeek
-                : pillItem.key === 'month' ? C.periodMonth
-                : C.periodYear;
-              const deltaColor = pillItem.net > 0 ? th.inc : pillItem.net < 0 ? th.exp : th.onPrimary;
+                : C.periodMonth;
               return (
                 <TouchableOpacity
                   key={pillItem.key}
@@ -1235,78 +1276,74 @@ export default function HomeScreen({
                     { backgroundColor: active ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.10)', borderColor: active ? 'rgba(255,255,255,0.4)' : 'transparent' },
                   ]}
                 >
-                  <Text style={{ color: 'rgba(255,255,255,0.82)', fontSize: 10, ...weight('800'), textAlign: 'center' }} numberOfLines={1}>
-                    {pillLabel}
-                  </Text>
-                  <Text style={{ color: deltaColor, fontSize: 11, ...weight('900'), textAlign: 'center' }} numberOfLines={1}>
+                  <View style={[s.periodPillLabelRow, { flexDirection: rowDir }]}>
+                    {pillItem.net === 0
+                      ? <Ionicons name="remove" size={12} color="rgba(255,255,255,0.72)" />
+                      : <FinancialDirectionMark kind={pillItem.net > 0 ? 'income' : 'expense'} color="rgba(255,255,255,0.84)" size={12} lang={cfg.lang} />}
+                    <Text style={{ color: 'rgba(255,255,255,0.82)', fontSize: 10, ...weight('800'), textAlign: 'center' }} numberOfLines={1}>
+                      {pillLabel}
+                    </Text>
+                  </View>
+                  <Text style={{ color: th.onPrimary, fontSize: 11, ...weight('900'), textAlign: 'center', writingDirection: 'ltr', opacity: active ? 1 : 0.84 }} numberOfLines={1}>
                     {moneyText(`${pillItem.net > 0 ? '+' : pillItem.net < 0 ? '-' : ''}${fmt(Math.abs(pillItem.net))}`)}
                   </Text>
                 </TouchableOpacity>
               );
             })}
           </View>
-          {modules.wallets && walletRows.length > 0 ? (
-            <TouchableOpacity
-              onPress={() => setShowWalletDetails(prev => !prev)}
-              style={[s.walletSummary, { backgroundColor: 'rgba(255,255,255,0.10)', borderColor: 'rgba(255,255,255,0.12)', flexDirection: rowDir }]}
-            >
-              <Ionicons name="wallet-outline" size={14} color={th.onPrimary} />
-              <Text style={{ color: th.onPrimary, fontSize: 12, ...weight('900'), flex: 1, textAlign: align }}>
-                {walletRows.length} {C.walletsWord}
-              </Text>
-              <Text style={{ color: th.onPrimary, fontSize: 12, ...weight('900') }}>
-                {showWalletDetails ? C.hideDetails : C.showDetails}
-              </Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
         ) : null}
 
         {renderWalletStrip()}
         {renderWalletPanel()}
 
-        {!hasMeaningfulHomeData ? (
-          <View style={[s.starterNote, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}>
-            <View style={[s.starterNoteIcon, { backgroundColor: th.primSoft }]}><Ionicons name="add-circle-outline" size={18} color={th.primary} /></View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={[s.starterNoteTitle, { color: th.text, textAlign: align }]}>{isAr ? 'ابدأ بحركة واحدة' : 'Start with one entry'}</Text>
-              <Text style={[s.starterNoteBody, { color: th.sub, textAlign: align }]}>{isAr ? 'سجّل دخلاً أو مصروفاً، وبعدها تظهر مؤشرات الشهر والتقارير تلقائياً.' : 'Add income or an expense; monthly metrics and reports will appear automatically.'}</Text>
-            </View>
-          </View>
-        ) : null}
-
         {visibleHomeCards.length > 0 ? (
         <View style={s.monthMetricsBlock}>
           <View style={[s.monthMetricsHead, { flexDirection: rowDir }]}>
-            <Text style={{ color: th.sub, fontSize: 12, ...weight('900'), textAlign: align, flex: 1 }}>
+            <Text style={{ color: th.text, fontSize: 14, ...weight('900'), textAlign: align, flex: 1 }}>
               {C.monthSummary}
             </Text>
-            <Text style={{ color: th.text, fontSize: 13, ...weight('900') }}>
-              {currentMonthName}
-            </Text>
+            <View style={[s.monthBadge, { backgroundColor: th.primSoft }]}>
+              <Text style={{ color: th.primary, fontSize: 10, ...weight('900') }}>
+                {currentMonthName}
+              </Text>
+            </View>
           </View>
-          <View style={s.tileGrid}>
-            {visibleHomeCards.map((item, index) => (
-              <React.Fragment key={item.key}>
-                {renderMoneyTile(item, moneyTileWidth(index))}
-              </React.Fragment>
-            ))}
+          <View style={[s.monthSummarySurface, { backgroundColor: th.card, borderColor: th.border }]}>
+            <View style={[s.monthMetricGrid, { flexDirection: rowDir }]}>
+              {visibleHomeCards.map((item, index) => (
+                <React.Fragment key={item.key}>{renderMoneyTile({
+                  ...item,
+                  separatorStyle: {
+                    borderColor: th.border,
+                    borderTopWidth: index >= 2 ? 1 : 0,
+                    ...(index % 2 === 1 ? (isAr ? { borderRightWidth: 1 } : { borderLeftWidth: 1 }) : {}),
+                  },
+                })}</React.Fragment>
+              ))}
+            </View>
+            <View style={[s.monthFlowBar, { backgroundColor: th.cardHigh }]}>
+              {monthFlowTotal > 0 ? (
+                <>
+                  <View style={{ width: `${monthIncomeShare}%`, height: '100%', backgroundColor: th.inc }} />
+                  <View style={{ flex: 1, height: '100%', backgroundColor: th.exp }} />
+                </>
+              ) : null}
+            </View>
           </View>
         </View>
         ) : null}
         {cfg.entryMode === 'quick' ? (
-          <View style={[s.quickEntry, { backgroundColor: th.card, borderColor: th.border }]}>
-            <Text style={[s.quickEntryTitle, { color: th.sub, textAlign: align }]}>{C.quickActions}</Text>
+          <View style={[s.quickEntry, s.quickEntrySurface, { backgroundColor: th.card, borderColor: th.border }]}>
+            <View style={[s.quickEntryHead, { flexDirection: rowDir }]}>
+              <View style={[s.quickEntryHeadIcon, { backgroundColor: th.primSoft }]}>
+                <Ionicons name="add" size={18} color={th.primary} />
+              </View>
+              <Text style={[s.quickEntryTitle, { color: th.text, textAlign: align }]}>{C.quickActions}</Text>
+            </View>
             <View style={[s.quickEntryRow, { flexDirection: rowDir }]}>
-              {[
-                { key: 'expense', label: isAr ? 'مصروف' : 'Expense', direction: 'expense', color: th.exp, onPress: onAddExpense },
-                { key: 'income', label: isAr ? 'دخل' : 'Income', direction: 'income', color: th.inc, onPress: onAddIncome },
-                modules.wallets && canTransfer
-                  ? { key: 'transfer', label: isAr ? 'تحويل' : 'Transfer', icon: 'swap-horizontal-outline', color: th.primary, onPress: onTransfer }
-                  : null,
-                { key: 'smart', label: C.smartEntry, icon: 'sparkles-outline', color: th.warn, onPress: onSmartEntry },
-              ].filter(Boolean).map(action => (
-                <TouchableOpacity key={action.key} onPress={action.onPress} style={[s.quickEntryAction, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+              {orderedQuickEntryActions.map(action => (
+                <TouchableOpacity key={action.key} onPress={action.onPress} style={s.quickEntryAction}>
                   <View style={[s.quickEntryIcon, { backgroundColor: `${action.color}18`, borderColor: `${action.color}44` }]}>
                     {action.direction
                       ? <FinancialDirectionMark kind={action.direction} color={action.color} size={20} lang={cfg.lang} />
@@ -1357,14 +1394,14 @@ export default function HomeScreen({
 
 const s = StyleSheet.create({
   topBar:       { alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  topBarSpacer: { width: 42 },
-  notifyBtn:    { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  topBarSpacer: { width: 44 },
+  notifyBtn:    { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   notifyBadge:  { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, position: 'absolute', top: -4, right: -4 },
-  brandLockup:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  brandLockup:  { flexDirection: 'row', alignItems: 'center' },
 
-  headerIconBtn: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  profileButton: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  profileAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' },
+  headerIconBtn: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  profileButton: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  profileAvatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' },
   profileAvatarImage: { width: '100%', height: '100%', borderRadius: 16 },
   walletPopupOverlay: { flex: 1, justifyContent: 'flex-end' },
   walletPopup: { maxHeight: '78%', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, padding: 16, paddingBottom: 24 },
@@ -1375,34 +1412,46 @@ const s = StyleSheet.create({
 
 
   brandTitle:   { fontSize: 23, lineHeight: 28, ...weight('900'), letterSpacing: 0 },
-  hero:         { borderRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 10, ...SHADOW.card },
+  hero:         { borderRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 14, marginBottom: 12, ...SHADOW.card },
   heroTop:      { alignItems: 'flex-start', gap: 8 },
+  heroLabelRow: { alignItems: 'center', gap: 7 },
   heroLabel:    { fontSize: TYPE.meta, lineHeight: 17, ...weight('900') },
-  heroAmount:   { fontSize: 27, lineHeight: 32, ...weight('900'), marginTop: 2 },
+  heroVisibilityBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+  heroAmount:   { fontSize: 29, lineHeight: 36, ...weight('900'), marginTop: 3 },
   heroTools:    { alignItems: 'center', gap: 6 },
-  heroIconBtn:  { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  periodPillRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
-  periodPill:   { flex: 1, borderRadius: RADIUS.pill, borderWidth: 1, paddingVertical: 6, gap: 1 },
+  heroIconBtn:  { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  periodPillRow: { flexDirection: 'row', gap: 6, marginTop: 12 },
+  periodPill:   { flex: 1, minHeight: 48, borderRadius: RADIUS.pill, borderWidth: 1, paddingVertical: 6, paddingHorizontal: 4, justifyContent: 'center', gap: 1 },
+  periodPillLabelRow:{ alignItems: 'center', justifyContent: 'center', gap: 4 },
   heroFact:     { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 54, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   factDivider:  { width: 1, height: 30 },
-  quickEntry:   { borderRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 10, marginBottom: 10, ...SHADOW.subtle },
-  quickEntryTitle:{ fontSize: 12, lineHeight: 17, ...weight('800'), marginBottom: 7 },
+  quickEntry:   { marginBottom: 14 },
+  quickEntrySurface:{ borderWidth: 1, borderRadius: RADIUS.lg, padding: 10 },
+  quickEntryHead:{ minHeight: 32, alignItems: 'center', gap: 8, marginBottom: 7 },
+  quickEntryHeadIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  quickEntryTitle:{ flex: 1, fontSize: 14, lineHeight: 19, ...weight('900') },
   quickEntryRow: { alignItems: 'stretch', justifyContent: 'space-between', gap: 7 },
-  quickEntryAction:{ flex: 1, flexBasis: 0, minWidth: 0, minHeight: 64, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 3 },
-  quickEntryIcon:{ width: 32, height: 32, borderRadius: 10, borderWidth: 0, alignItems: 'center', justifyContent: 'center' },
+  quickEntryAction:{ flex: 1, flexBasis: 0, minWidth: 0, minHeight: 66, borderRadius: 13, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 3 },
+  quickEntryIcon:{ width: 40, height: 40, borderRadius: 20, borderWidth: 0, alignItems: 'center', justifyContent: 'center' },
   quickEntryLabel:{ fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: 'center', maxWidth: '100%' },
   walletSummary:{ alignItems: 'center', gap: 8, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8, marginTop: 10 },
-  walletStripBlock: { marginBottom: 10 },
-  walletStripHead: { alignItems: 'center', marginBottom: 8 },
-  walletStripCard: { borderWidth: 1, borderRadius: RADIUS.md, padding: 10, gap: 4, ...SHADOW.card },
-  walletStripIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginVertical: 2 },
+  walletStripBlock: { marginBottom: 14 },
+  walletStripHead: { minHeight: 40, alignItems: 'center', marginBottom: 6 },
+  walletStripLink: { minHeight: 40, minWidth: 64, alignItems: 'center', justifyContent: 'center' },
+  walletStripCard: { minHeight: 112, borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 9, paddingVertical: 9, justifyContent: 'space-between', gap: 3 },
+  walletStripIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginVertical: 1 },
   walletStripDots: { alignItems: 'center', justifyContent: 'center', gap: 5, marginTop: 8 },
   walletStripDot: { width: 6, height: 6, borderRadius: 3 },
-  monthMetricsBlock:{ marginBottom: 8 },
-  monthMetricsHead:{ alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 2 },
-  tileGrid:     { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 8 },
-  tile:         { width: '48%', marginBottom: 8 },
-  tileValue:    { fontSize: 15, lineHeight: 21 },
+  monthMetricsBlock:{ marginBottom: 14 },
+  monthMetricsHead:{ alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 2, gap: 8 },
+  monthBadge:{ minHeight: 26, borderRadius: 13, paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center' },
+  monthSummarySurface: { borderWidth: 1, borderRadius: RADIUS.lg, overflow: 'hidden' },
+  monthMetricGrid: { flexWrap: 'wrap' },
+  monthMetric: { width: '50%', minHeight: 68, paddingHorizontal: 10, paddingVertical: 9, justifyContent: 'center' },
+  monthMetricLabelRow: { alignItems: 'center', gap: 6, marginBottom: 4 },
+  monthMetricLabel: { flex: 1, minWidth: 0, fontSize: 11, lineHeight: 16, ...weight('800') },
+  monthMetricValue: { fontSize: 14, lineHeight: 20, ...weight('900') },
+  monthFlowBar: { height: 5, borderRadius: 3, overflow: 'hidden', flexDirection: 'row', marginHorizontal: 9, marginTop: 3, marginBottom: 4 },
   walletPanel:  { borderRadius: RADIUS.xl, borderWidth: 1, overflow: 'hidden', marginBottom: 12, ...SHADOW.card },
   walletPanelHead:{ minHeight: 54, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 13, borderBottomWidth: 1 },
   walletPanelTitle:{ alignItems: 'center', gap: 9 },
@@ -1431,7 +1480,7 @@ const s = StyleSheet.create({
   attentionHeaderIcon:{ width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   attentionCount:{ minWidth: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7 },
   clearPanel:   { minHeight: 48, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginBottom: 9 },
-  savingPanel:  { borderRadius: 16, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 9, marginTop: 4, marginBottom: 10 },
+  savingPanel:  { borderRadius: 16, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 11, marginTop: 4, marginBottom: 10 },
   savingHeader: { minHeight: 32, alignItems: 'center', gap: 8, marginBottom: 7 },
   savingHeaderIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   savingTitle:  { flex: 1, fontSize: 13, lineHeight: 18, ...weight('900') },
@@ -1448,6 +1497,11 @@ const s = StyleSheet.create({
   savingEmpty:{ minHeight: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   sectionTitle: { fontSize: 12, ...weight('900'), marginBottom: 8, marginTop: 4 },
   row:          { minHeight: 58, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: RADIUS.lg, borderWidth: 1, marginBottom: 6, gap: 8 },
+  recentHead:   { minHeight: 44, alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  recentTitle:  { flex: 1, fontSize: 14, lineHeight: 20, ...weight('900') },
+  recentAllLink:{ minHeight: 40, minWidth: 92, alignItems: 'center', justifyContent: 'center' },
+  recentList:   { borderRadius: RADIUS.lg, borderWidth: 1, overflow: 'hidden' },
+  recentRow:    { borderWidth: 0, borderRadius: 0, marginBottom: 0, paddingVertical: 9 },
   rowShell:     { width: '100%', alignItems: 'center', gap: 8 },
   rowMain:      { flex: 1, alignItems: 'center' },
   detailsToggle:{ width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
@@ -1465,10 +1519,6 @@ const s = StyleSheet.create({
   empty:        { alignItems: 'center', padding: 24, borderWidth: 1, borderRadius: RADIUS.xl, borderStyle: 'dashed', backgroundColor: 'rgba(255,255,255,0.02)' },
   emptyActions: { width: '100%', gap: 8, marginTop: 14 },
   emptyAction:  { flex: 1, minHeight: 40, borderRadius: 13, paddingHorizontal: 10, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
-  starterNote: { borderWidth: 1, borderRadius: RADIUS.lg, paddingHorizontal: 12, paddingVertical: 11, alignItems: 'center', gap: 10, marginBottom: 12 },
-  starterNoteIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  starterNoteTitle: { fontSize: 12, lineHeight: 17, ...weight('900') },
-  starterNoteBody: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 2 },
 });
 
 // STAGE3_IMPORTANT_VISUAL_FINAL

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TH } from '../lib/theme';
 import { COUNTRIES, CURRENCIES, detectSystemLang } from '../lib/constants';
@@ -10,30 +10,68 @@ import { defaultScopeForProfile, profileModuleDefaults } from '../lib/modules';
 import { weight } from '../lib/tokens';
 import ChoiceSheet from '../components/ChoiceSheet';
 
-// 6-step onboarding, LOCKED per docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md
-// §7: "1. Welcome -> 2. What matters to you first? -> 3. Customize your
-// experience -> 4. Create first wallet -> 5. Privacy first -> 6. Everything
-// is ready." Full per-step visual detail: 14_MYFI_APPROVED_VISUAL_REFERENCE_
-// REGISTER.md (REF-02/03/03B/03D/03C/03E) — copy below is taken directly
-// from those approved images. Replaces a 3-slide marketing-preview flow that
-// did not match the locked spec (found and rebuilt 2026-08-27).
-//
-// The prior file's account-type-removal note still applies and is preserved:
-// no Personal/Business/Dual selector anywhere in this flow — "priorities"
-// (step 2) is a different, explicitly-allowed concept (interests, not
-// account type) per the locked doc's own wording.
-const PRIORITY_KEYS = ['expenses', 'planning', 'debts', 'goals', 'understand', 'everything'];
-const DEFAULT_PRIORITIES = ['expenses', 'planning', 'goals'];
+// Product Owner update, 2026-08-28: replace the rigid account-type choice and
+// the broad multi-select priorities page with three short personalization
+// questions. Only the goals question remains intentionally multi-select:
+// goals are complementary, while the other questions are mutually exclusive.
+// These describe how the user wants MYFI configured; they are not
+// identity labels and do not invent family sharing or bank connectivity.
+const PERSONALIZATION_QUESTIONS = [
+  { id: 'context', title: 'contextTitle', body: 'contextBody', fallback: 'employee', options: [
+    ['student', 'school-outline'], ['employee', 'briefcase-outline'], ['freelancer', 'storefront-outline'], ['household', 'home-outline'],
+  ] },
+  { id: 'focus', title: 'focusTitle', body: 'focusBody', fallback: ['spending'], multiple: true, options: [
+    ['spending', 'wallet-outline'], ['planning', 'calendar-outline'], ['obligations', 'time-outline'], ['saving', 'flag-outline'],
+  ] },
+  { id: 'moneySetup', title: 'moneySetupTitle', body: 'moneySetupBody', fallback: 'oneWallet', options: [
+    ['oneWallet', 'wallet-outline'], ['multiWallet', 'albums-outline'], ['personalWork', 'swap-horizontal-outline'], ['notSure', 'help-circle-outline'],
+  ] },
+];
+
+const resolvedPersonalization = answers => Object.fromEntries(
+  PERSONALIZATION_QUESTIONS.map(question => {
+    const answer = answers[question.id];
+    const resolved = question.multiple
+      ? (Array.isArray(answer) && answer.length ? answer : question.fallback)
+      : (answer || question.fallback);
+    return [question.id, resolved];
+  }),
+);
+
+const selectedValues = value => (Array.isArray(value) ? value : (value ? [value] : []));
+
+const profileTypeForPersonalization = answers => {
+  const choice = resolvedPersonalization(answers);
+  // "Freelancer" and "Personal and work" are the only selections that
+  // represent two real financial scopes. Household deliberately remains a
+  // personal workspace: MYFI does not imply unsupported shared accounts.
+  return choice.context === 'freelancer' || choice.moneySetup === 'personalWork'
+    ? 'personal_business'
+    : 'personal';
+};
+
+const modulesForPersonalization = (answers, profileType) => {
+  const choice = resolvedPersonalization(answers);
+  const focus = selectedValues(choice.focus);
+  return {
+    ...profileModuleDefaults(profileType),
+    wallets: choice.moneySetup === 'multiWallet' || choice.moneySetup === 'personalWork',
+    debtsOwed: focus.includes('obligations'),
+    debtsReceivable: choice.context === 'freelancer' || choice.moneySetup === 'personalWork',
+    goals: focus.includes('saving'),
+    commitments: focus.includes('obligations') || choice.context === 'household',
+    budgets: focus.includes('planning') || focus.includes('spending'),
+    recurring: focus.includes('obligations') || choice.context === 'freelancer',
+  };
+};
 
 const copy = lang => {
   const ar = lang === 'ar';
   return {
-    skip: ar ? 'تخطي' : 'Skip',
     back: ar ? 'رجوع' : 'Back',
     next: ar ? 'متابعة' : 'Continue',
     start: ar ? 'ابدأ استخدام MYFI' : 'Start using MYFI',
     begin: ar ? 'ابدأ' : 'Start',
-    notNow: ar ? 'ليس الآن' : 'Not now',
     // Step 1 — Welcome (REF-02)
     welcomeTitle: ar ? 'مرحباً بك في MYFI' : 'Welcome to MYFI',
     welcomeBody: ar
@@ -55,16 +93,44 @@ const copy = lang => {
     priority_goals: ar ? 'الادخار والأهداف' : 'Saving and goals',
     priority_understand: ar ? 'فهم وضعي المالي' : 'Understand my financial standing',
     priority_everything: ar ? 'استخدام شامل' : 'Comprehensive use',
-    // Step 3 — Customize (REF-03B)
+    contextTitle: ar ? 'ما الذي يصف استخدامك أكثر؟' : 'What best describes your use?',
+    contextBody: ar ? 'نستخدم الإجابة لترتيب البداية فقط، ويمكنك تغييرها لاحقاً.' : 'We use this only to shape your starting setup. You can change it later.',
+    context_student: ar ? 'طالب' : 'Student',
+    context_studentSub: ar ? 'مصروف ودراسة وأهداف قريبة' : 'Spending, study, and near-term goals',
+    context_employee: ar ? 'موظف' : 'Employee',
+    context_employeeSub: ar ? 'راتب ومصروفات والتزامات' : 'Salary, spending, and commitments',
+    context_freelancer: ar ? 'عمل حر' : 'Freelancer',
+    context_freelancerSub: ar ? 'دخل متغير ومصاريف عمل' : 'Variable income and work costs',
+    context_household: ar ? 'إدارة المنزل' : 'Household',
+    context_householdSub: ar ? 'ميزانية ومصروفات والتزامات منزلية' : 'Household budget, spending, and commitments',
+    focusTitle: ar ? 'ما أول نتيجة تريدها من MYFI؟' : 'What is your first goal with MYFI?',
+    focusBody: ar ? 'اختر هدفاً واحداً أو أكثر؛ يمكنك اختيار الخيارات الأربعة كلها.' : 'Choose one or more goals. You can select all four.',
+    focus_spending: ar ? 'ضبط المصروف' : 'Control spending',
+    focus_spendingSub: ar ? 'تسجيل وفهم أين يذهب المال' : 'Track and understand where money goes',
+    focus_planning: ar ? 'تخطيط الشهر' : 'Plan the month',
+    focus_planningSub: ar ? 'موازنة واضحة قبل الصرف' : 'Build a clear budget before spending',
+    focus_obligations: ar ? 'تنظيم الالتزامات' : 'Manage obligations',
+    focus_obligationsSub: ar ? 'ديون ودفعات ومواعيد' : 'Debts, payments, and due dates',
+    focus_saving: ar ? 'زيادة الادخار' : 'Grow savings',
+    focus_savingSub: ar ? 'أهداف وتقدم واضح' : 'Goals with visible progress',
+    moneySetupTitle: ar ? 'كيف ترتب أموالك اليوم؟' : 'How is your money organized today?',
+    moneySetupBody: ar ? 'هذا يحدد هل نُظهر أدوات المحافظ المتعددة من البداية.' : 'This decides whether multi-wallet tools appear from the start.',
+    moneySetup_oneWallet: ar ? 'محفظة واحدة' : 'One wallet',
+    moneySetup_oneWalletSub: ar ? 'بداية بسيطة ومباشرة' : 'A simple, direct start',
+    moneySetup_multiWallet: ar ? 'عدة محافظ أو حسابات' : 'Several wallets',
+    moneySetup_multiWalletSub: ar ? 'نقد وبنك وادخار مثلاً' : 'Cash, bank, and savings for example',
+    moneySetup_personalWork: ar ? 'شخصي وعمل' : 'Personal and work',
+    moneySetup_personalWorkSub: ar ? 'تحتاج فصلاً أوضح بينهما' : 'You need a clearer separation',
+    moneySetup_notSure: ar ? 'لست متأكداً' : 'Not sure yet',
+    moneySetup_notSureSub: ar ? 'ابدأ بمحفظة ويمكنك التوسّع لاحقاً' : 'Start with one wallet and expand later',
+    // Financial essentials
     customizeTitle: ar ? 'خصص تجربتك' : 'Customize your experience',
-    customizeBody: ar ? 'اختر البلد واللغة والعملة والمظهر بما يناسبك.' : 'Choose the country, language, currency, and appearance that suit you.',
+    customizeBody: ar ? 'اختر البلد والعملة والمظهر، ثم سمِّ محفظتك الأولى.' : 'Choose your country, currency, appearance, and name your first wallet.',
     country: ar ? 'البلد' : 'Country',
-    language: ar ? 'اللغة' : 'Language',
     baseCurrency: ar ? 'العملة' : 'Currency',
     appearance: ar ? 'المظهر' : 'Appearance',
     chooseCountry: ar ? 'اختر البلد' : 'Choose country',
     chooseCurrency: ar ? 'اختر العملة' : 'Choose currency',
-    chooseLanguage: ar ? 'اختر اللغة' : 'Choose language',
     chooseAppearance: ar ? 'اختر المظهر' : 'Choose appearance',
     arabic: ar ? 'العربية' : 'Arabic',
     english: ar ? 'English' : 'English',
@@ -113,14 +179,25 @@ const copy = lang => {
   };
 };
 
-const STEP_COUNT = 6;
+// Five concise screens: welcome with its language choice, three visual
+// personalization questions, then the financial essentials. Privacy remains
+// a short, visible notice inside essentials instead of becoming a sixth screen.
+const WELCOME_STEP = 0;
+const QUESTION_START_STEP = 1;
+const ESSENTIALS_STEP = QUESTION_START_STEP + PERSONALIZATION_QUESTIONS.length;
+const STEP_COUNT = ESSENTIALS_STEP + 1;
 
 export default function OnboardingScreen({ cfg, onDone }) {
   const { setCfg, editWallet } = useStore();
   const [step, setStep] = useState(0);
   const [lang, setLang] = useState(detectSystemLang());
+  const [languageConfirmed, setLanguageConfirmed] = useState(false);
   const isAr = lang === 'ar';
-  const th = TH[cfg.theme] || TH.dark;
+  // Preview the appearance choice immediately. Before this, the screen kept
+  // reading cfg.theme (the previously saved preference) until Start was
+  // pressed, which made the selector look broken.
+  const [themeChoice, setThemeChoice] = useState(cfg.theme === 'light' ? 'light' : 'dark');
+  const th = TH[themeChoice] || TH[cfg.theme] || TH.dark;
   const T = copy(lang);
   const localeCountry = useMemo(() => {
     try {
@@ -131,19 +208,11 @@ export default function OnboardingScreen({ cfg, onDone }) {
   }, []);
   const initialCountry = localeCountry || null;
   const initialSuggestedCurrency = COUNTRIES.find(item => item.code === initialCountry)?.currency || '';
-  // Account-type selection (Personal/Business/Dual) removed from onboarding
-  // per docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md §7
-  // (LOCKED — explicitly prohibits this step). Every new account starts
-  // 'personal' silently; it can still be changed later via the existing,
-  // unmodified Settings > ... > profile-type control.
-  const profileType = 'personal';
-  const [priorities, setPriorities] = useState(DEFAULT_PRIORITIES);
+  const [personalization, setPersonalization] = useState({});
   const [countryCode, setCountryCode] = useState(initialCountry);
   const [currencyCode, setCurrencyCode] = useState(initialSuggestedCurrency);
   const [currencyTouched, setCurrencyTouched] = useState(false);
-  const [themeChoice, setThemeChoice] = useState(cfg.theme === 'light' ? 'light' : 'dark');
   const [walletName, setWalletName] = useState('');
-  const [privacyAgreed, setPrivacyAgreed] = useState(true);
   const [choice, setChoice] = useState(null);
 
   const selectedCountry = COUNTRIES.find(item => item.code === countryCode) || null;
@@ -158,28 +227,34 @@ export default function OnboardingScreen({ cfg, onDone }) {
 
   const finish = async () => {
     if (!countryCode || !currencyCode) {
-      setStep(2);
+      setStep(STEP_COUNT - 1);
       setChoice(!countryCode ? 'country' : 'currency');
       return;
     }
-    const scope = defaultScopeForProfile(profileType);
+    const answers = resolvedPersonalization(personalization);
+    const profileType = profileTypeForPersonalization(answers);
+    const walletScope = defaultScopeForProfile(profileType);
+    const focusPriorities = selectedValues(answers.focus)
+      .map(key => ({ spending: 'expenses', planning: 'planning', obligations: 'debts', saving: 'goals' }[key]))
+      .filter(Boolean);
     await setCfg({
       country: countryCode,
       currency: currencyCode,
       baseCurrencyConfirmedAt: new Date().toISOString(),
       profileType,
-      activeScope: scope,
-      enabledModules: { ...profileModuleDefaults(profileType), commitments: true },
+      activeScope: profileType === 'personal_business' ? 'all' : walletScope,
+      enabledModules: modulesForPersonalization(answers, profileType),
       demoMode: false,
       langMode: 'manual',
       lang,
       themeMode: 'manual',
       theme: themeChoice,
-      onboardingPriorities: priorities,
+      onboardingPriorities: focusPriorities,
+      onboardingPersonalization: answers,
     });
     const walletUpdated = await editWallet(DEFAULT_WALLET_ID, {
       currency: currencyCode,
-      scope,
+      scope: walletScope,
       name: effectiveWalletName,
     });
     if (walletUpdated === false) return;
@@ -187,50 +262,48 @@ export default function OnboardingScreen({ cfg, onDone }) {
   };
 
   const stepBody = () => {
-    if (step === 0) {
-      return <WelcomeSlide th={th} isAr={isAr} T={T} />;
+    if (step === WELCOME_STEP) {
+      return <WelcomeSlide th={th} isAr={isAr} T={T} selectedLanguage={lang} languageConfirmed={languageConfirmed} onSelectLanguage={(value) => { setLang(value); setLanguageConfirmed(true); }} />;
     }
-    if (step === 1) {
-      return <PrioritySlide th={th} isAr={isAr} T={T} priorities={priorities} onToggle={(key) => setPriorities(prev => prev.includes(key) ? prev.filter(item => item !== key) : [...prev, key])} />;
-    }
-    if (step === 2) {
+    if (step >= QUESTION_START_STEP && step < ESSENTIALS_STEP) {
+      const question = PERSONALIZATION_QUESTIONS[step - QUESTION_START_STEP];
       return (
-        <CustomizeSlide
+        <PersonalizationSlide
+          th={th}
+          isAr={isAr}
+          T={T}
+          question={question}
+          value={personalization[question.id]}
+          onSelect={value => setPersonalization(current => ({ ...current, [question.id]: value }))}
+        />
+      );
+    }
+    if (step === ESSENTIALS_STEP) {
+      return (
+        <EssentialsSlide
           th={th} isAr={isAr} T={T}
           country={selectedCountry} currency={selectedCurrency}
-          lang={lang} themeChoice={themeChoice}
+          themeChoice={themeChoice}
+          walletName={walletName} onChangeWalletName={setWalletName}
+          placeholder={T.walletDefaultName}
           onCountry={() => setChoice('country')}
           onCurrency={() => setChoice('currency')}
-          onLanguage={() => setChoice('language')}
           onAppearance={() => setChoice('appearance')}
         />
       );
     }
-    if (step === 3) {
-      return (
-        <WalletSlide
-          th={th} isAr={isAr} T={T}
-          walletName={walletName} onChangeWalletName={setWalletName}
-          placeholder={T.walletDefaultName}
-          currency={selectedCurrency}
-        />
-      );
-    }
-    if (step === 4) {
-      return <PrivacySlide th={th} isAr={isAr} T={T} agreed={privacyAgreed} onToggleAgree={() => setPrivacyAgreed(v => !v)} />;
-    }
-    return (
-      <CompleteSlide
-        th={th} isAr={isAr} T={T}
-        priorities={priorities}
-        country={selectedCountry} currency={selectedCurrency}
-        walletName={effectiveWalletName}
-      />
-    );
+    return null;
   };
 
-  const canAdvance = step !== 4 || privacyAgreed;
-
+  const activeQuestion = step >= QUESTION_START_STEP && step < ESSENTIALS_STEP
+    ? PERSONALIZATION_QUESTIONS[step - QUESTION_START_STEP]
+    : null;
+  const activeAnswer = activeQuestion ? personalization[activeQuestion.id] : null;
+  const canAdvance = step === WELCOME_STEP
+    ? languageConfirmed
+    : activeQuestion
+      ? (activeQuestion.multiple ? selectedValues(activeAnswer).length > 0 : Boolean(activeAnswer))
+      : true;
   return (
     <View style={[s.screen, { backgroundColor: th.bg }]}>
       <View style={[s.topBar, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
@@ -247,13 +320,17 @@ export default function OnboardingScreen({ cfg, onDone }) {
         </View>
       </View>
       <View style={[s.stepMeta, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-        <TouchableOpacity onPress={() => setStep(STEP_COUNT - 1)}>
-          <Text style={[s.skipText, { color: th.primary }]}>{T.skip}</Text>
-        </TouchableOpacity>
         <Text style={[s.stepCount, { color: th.faint }]}>{isAr ? `${step + 1} من ${STEP_COUNT}` : `${step + 1} of ${STEP_COUNT}`}</Text>
       </View>
 
-      <View style={s.stage}>{stepBody()}</View>
+      <ScrollView
+        style={s.stage}
+        contentContainerStyle={s.stageContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {stepBody()}
+      </ScrollView>
 
       <View style={s.bottomArea}>
         <TouchableOpacity
@@ -263,7 +340,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
           style={[s.primaryButton, { backgroundColor: canAdvance ? th.primary : th.cardHigh }]}
         >
           <Text style={[s.primaryButtonText, { color: canAdvance ? th.onPrimary : th.faint }]}>
-            {step === STEP_COUNT - 1 ? T.start : (step === 0 ? T.begin : T.next)}
+            {step === STEP_COUNT - 1 ? T.start : (step === WELCOME_STEP ? T.begin : T.next)}
           </Text>
           {step === STEP_COUNT - 1 ? null : <Ionicons name={isAr ? 'arrow-back' : 'arrow-forward'} size={18} color={canAdvance ? th.onPrimary : th.faint} />}
         </TouchableOpacity>
@@ -299,19 +376,6 @@ export default function OnboardingScreen({ cfg, onDone }) {
         lang={lang}
       />
       <ChoiceSheet
-        visible={choice === 'language'}
-        title={T.chooseLanguage}
-        value={lang}
-        options={[
-          { value: 'ar', label: T.arabic, leading: 'ع' },
-          { value: 'en', label: T.english, leading: 'EN' },
-        ]}
-        onSelect={(value) => setLang(value)}
-        onClose={() => setChoice(null)}
-        th={th}
-        lang={lang}
-      />
-      <ChoiceSheet
         visible={choice === 'appearance'}
         title={T.chooseAppearance}
         value={themeChoice}
@@ -328,8 +392,44 @@ export default function OnboardingScreen({ cfg, onDone }) {
   );
 }
 
-// Step 1 — REF-02
-function WelcomeSlide({ th, isAr, T }) {
+function LanguagePicker({ th, selected, confirmed, onSelect }) {
+  const options = [
+    { key: 'ar', title: 'العربية', subtitle: 'Arabic', icon: 'text-outline' },
+    { key: 'en', title: 'English', subtitle: 'English', icon: 'language-outline' },
+  ];
+  return (
+    <View style={[s.languagePicker, { backgroundColor: th.card, borderColor: th.border }]}>
+      <Text style={[s.languagePickerTitle, { color: th.sub }]}>اختر اللغة / Choose language</Text>
+      <View style={s.languageOptions}>
+        {options.map(option => {
+          const isSelected = confirmed && selected === option.key;
+          return (
+            <TouchableOpacity
+              key={option.key}
+              onPress={() => onSelect(option.key)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: isSelected }}
+              style={[
+                s.languageOption,
+                { backgroundColor: isSelected ? th.primSoft : th.cardHigh, borderColor: isSelected ? th.primary : th.border },
+              ]}
+            >
+              <Text style={[s.languageCode, { color: isSelected ? th.primary : th.text }]}>{option.key.toUpperCase()}</Text>
+              <Text style={[s.languageName, { color: th.sub }]}>{option.title}</Text>
+              {isSelected ? (
+                <View style={[s.languageCheck, { backgroundColor: th.primary }]}>
+                  <Ionicons name="checkmark" size={12} color={th.onPrimary} />
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function WelcomeSlide({ th, isAr, T, selectedLanguage, languageConfirmed, onSelectLanguage }) {
   const cards = [
     { key: 'expenses', label: T.expenses, icon: 'bar-chart-outline' },
     { key: 'planning', label: T.planning, icon: 'calendar-outline' },
@@ -341,6 +441,7 @@ function WelcomeSlide({ th, isAr, T }) {
         <Text style={[s.heroTitle, { color: th.text }]}>{T.welcomeTitle}</Text>
         <Text style={[s.heroBody, { color: th.sub }]}>{T.welcomeBody}</Text>
       </View>
+      <LanguagePicker th={th} selected={selectedLanguage} confirmed={languageConfirmed} onSelect={onSelectLanguage} />
       <View style={[s.welcomeCards, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
         {cards.map(card => (
           <View key={card.key} style={[s.welcomeCard, { backgroundColor: th.card, borderColor: th.border }]}>
@@ -359,74 +460,82 @@ function WelcomeSlide({ th, isAr, T }) {
   );
 }
 
-// Step 2 — REF-03
-function PrioritySlide({ th, isAr, T, priorities, onToggle }) {
+function PersonalizationSlide({ th, isAr, T, question, value, onSelect }) {
+  const values = selectedValues(value);
+  const toggle = key => {
+    if (!question.multiple) {
+      onSelect(key);
+      return;
+    }
+    onSelect(values.includes(key)
+      ? values.filter(item => item !== key)
+      : [...values, key]);
+  };
   return (
     <View style={s.slide}>
       <View style={s.heroCopy}>
-        <Text style={[s.heroTitle, { color: th.text }]}>{T.priorityTitle}</Text>
-        <Text style={[s.heroBody, { color: th.sub }]}>{T.priorityBody}</Text>
+        <Text style={[s.heroTitle, { color: th.text }]}>{T[question.title]}</Text>
+        <Text style={[s.heroBody, { color: th.sub }]}>{T[question.body]}</Text>
       </View>
-      <View style={{ gap: 9 }}>
-        {PRIORITY_KEYS.map(key => {
-          const checked = priorities.includes(key);
+      <View style={[s.personalizationGrid, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+        {question.options.map(([key, icon]) => {
+          const selected = values.includes(key);
           return (
             <TouchableOpacity
               key={key}
-              onPress={() => onToggle(key)}
+              onPress={() => toggle(key)}
+              accessibilityRole={question.multiple ? 'checkbox' : 'radio'}
+              accessibilityState={question.multiple ? { checked: selected } : { selected }}
               style={[
-                s.priorityRow,
-                { flexDirection: isAr ? 'row-reverse' : 'row', backgroundColor: checked ? th.primSoft : th.card, borderColor: checked ? th.primary : th.border },
+                s.personalizationOption,
+                {
+                  backgroundColor: selected ? th.primSoft : th.card,
+                  borderColor: selected ? th.primary : th.border,
+                },
               ]}
             >
-              <Text style={[s.priorityLabel, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T[`priority_${key}`]}</Text>
-              <View style={[s.priorityCheck, { backgroundColor: checked ? th.primary : 'transparent', borderColor: checked ? th.primary : th.border }]}>
-                {checked ? <Ionicons name="checkmark" size={14} color={th.onPrimary} /> : null}
+              <View style={[s.personalizationIcon, { backgroundColor: selected ? th.primary : th.cardHigh }]}>
+                <Ionicons name={icon} size={25} color={selected ? th.onPrimary : th.primary} />
               </View>
+              <Text style={[s.personalizationLabel, { color: th.text }]}>{T[`${question.id}_${key}`]}</Text>
+              <Text style={[s.personalizationSub, { color: th.sub }]}>{T[`${question.id}_${key}Sub`]}</Text>
+              {selected ? (
+                <View style={[s.personalizationCheck, { backgroundColor: th.primary }]}>
+                  <Ionicons name="checkmark" size={12} color={th.onPrimary} />
+                </View>
+              ) : null}
             </TouchableOpacity>
           );
         })}
       </View>
-      <Text style={[s.hintText, { color: th.faint, textAlign: 'center' }]}>{T.priorityHint}</Text>
     </View>
   );
 }
 
-// Step 3 — REF-03B
-function CustomizeSlide({ th, isAr, T, country, currency, lang, themeChoice, onCountry, onCurrency, onLanguage, onAppearance }) {
+function EssentialsSlide({
+  th, isAr, T, country, currency, themeChoice,
+  walletName, onChangeWalletName, placeholder,
+  onCountry, onCurrency, onAppearance,
+}) {
   return (
     <View style={s.slide}>
-      <View style={[s.heroCopy, { marginBottom: 14 }]}>
+      <View style={[s.heroCopy, { marginBottom: 12 }]}>
         <Text style={[s.heroTitle, { color: th.text }]}>{T.customizeTitle}</Text>
         <Text style={[s.heroBody, { color: th.sub }]}>{T.customizeBody}</Text>
       </View>
       <View style={[s.setupCard, { backgroundColor: th.card, borderColor: th.border }]}>
         <SetupRow th={th} isAr={isAr} icon="location-outline" label={T.country} value={country ? `${country.flag} ${isAr ? country.name : country.nameEn}` : T.chooseCountry} onPress={onCountry} />
-        <SetupRow th={th} isAr={isAr} icon="language-outline" label={T.language} value={lang === 'ar' ? T.arabic : T.english} onPress={onLanguage} />
         <SetupRow th={th} isAr={isAr} icon="cash-outline" label={T.baseCurrency} value={currency ? `${currency.code} · ${currency.sym}` : T.chooseCurrency} onPress={onCurrency} />
         <SetupRow th={th} isAr={isAr} icon={themeChoice === 'dark' ? 'moon-outline' : 'sunny-outline'} label={T.appearance} value={themeChoice === 'dark' ? T.dark : T.light} onPress={onAppearance} last />
       </View>
-      <View style={[s.privacyStrip, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-        <View style={[s.privacyStripIcon, { backgroundColor: th.primSoft }]}><Ionicons name="lock-closed-outline" size={17} color={th.primary} /></View>
-        <Text style={[s.privacyStripText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.customizeNotice}</Text>
-      </View>
-    </View>
-  );
-}
-
-// Step 4 — REF-03D
-function WalletSlide({ th, isAr, T, walletName, onChangeWalletName, placeholder, currency }) {
-  return (
-    <View style={s.slide}>
-      <View style={[s.walletIconWrap, { backgroundColor: th.primSoft }]}>
-        <Ionicons name="wallet-outline" size={30} color={th.primary} />
-      </View>
-      <View style={[s.heroCopy, { marginTop: 14 }]}>
-        <Text style={[s.heroTitle, { color: th.text }]}>{T.walletTitle}</Text>
-        <Text style={[s.heroBody, { color: th.sub }]}>{T.walletBody}</Text>
-      </View>
-      <View style={[s.walletInputCard, { backgroundColor: th.card, borderColor: th.border }]}>
-        <Text style={[s.quickLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.walletNameLabel}</Text>
+      <View style={[s.walletInputCard, { backgroundColor: th.card, borderColor: th.border, marginTop: 12 }]}>
+        <View style={[s.walletInputHead, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+          <View style={[s.quickIcon, { backgroundColor: th.primSoft }]}><Ionicons name="wallet-outline" size={17} color={th.primary} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.quickValue, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.walletNameLabel}</Text>
+            <Text style={[s.quickLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.walletNameHint}</Text>
+          </View>
+        </View>
         <TextInput
           value={walletName}
           onChangeText={onChangeWalletName}
@@ -435,90 +544,10 @@ function WalletSlide({ th, isAr, T, walletName, onChangeWalletName, placeholder,
           style={[s.walletInput, { color: th.text, textAlign: isAr ? 'right' : 'left', borderColor: th.border }]}
         />
       </View>
-      <Text style={[s.hintText, { color: th.faint, textAlign: 'center' }]}>{T.walletNameHint}</Text>
-      <View style={[s.setupCard, { backgroundColor: th.card, borderColor: th.border, marginTop: 10 }]}>
-        <View style={[s.setupRow, { borderBottomColor: 'transparent', flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-          <View style={[s.quickIcon, { backgroundColor: th.primSoft }]}><Ionicons name="cash-outline" size={17} color={th.primary} /></View>
-          <View style={{ flex: 1 }}>
-            <Text style={[s.quickLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.baseCurrency}</Text>
-            <Text style={[s.quickValue, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{currency ? `${currency.code} · ${currency.sym}` : ''}</Text>
-          </View>
-          <Ionicons name="checkmark-circle" size={18} color={th.primary} />
-        </View>
-      </View>
-      <Text style={[s.hintText, { color: th.faint, textAlign: 'center' }]}>{T.walletCurrencyConfirmed}</Text>
-      <Text style={[s.hintText, { color: th.faint, textAlign: 'center', marginTop: 6 }]}>{T.walletCurrencyRule}</Text>
-    </View>
-  );
-}
-
-// Step 5 — REF-03C
-function PrivacySlide({ th, isAr, T, agreed, onToggleAgree }) {
-  const rows = [
-    { icon: 'phone-portrait-outline', title: T.privacyLocal, sub: T.privacyLocalSub },
-    { icon: 'sync-outline', title: T.privacySync, sub: T.privacySyncSub },
-    { icon: 'shield-checkmark-outline', title: T.privacyPermissions, sub: T.privacyPermissionsSub },
-  ];
-  return (
-    <View style={s.slide}>
-      <View style={s.heroCopy}>
-        <Text style={[s.heroTitle, { color: th.text }]}>{T.privacyTitle}</Text>
-        <Text style={[s.heroBody, { color: th.sub }]}>{T.privacyBody}</Text>
-      </View>
-      <View style={{ gap: 10 }}>
-        {rows.map(row => (
-          <View key={row.title} style={[s.privacyRow, { backgroundColor: th.card, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-            <View style={[s.privacyRowIcon, { backgroundColor: th.primSoft }]}><Ionicons name={row.icon} size={20} color={th.primary} /></View>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.privacyRowTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{row.title}</Text>
-              <Text style={[s.privacyRowSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{row.sub}</Text>
-            </View>
-          </View>
-        ))}
-      </View>
-      <TouchableOpacity
-        onPress={onToggleAgree}
-        style={[s.agreeRow, { backgroundColor: agreed ? th.primSoft : th.card, borderColor: agreed ? th.primary : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}
-      >
-        <View style={[s.priorityCheck, { backgroundColor: agreed ? th.primary : 'transparent', borderColor: agreed ? th.primary : th.border }]}>
-          {agreed ? <Ionicons name="checkmark" size={14} color={th.onPrimary} /> : null}
-        </View>
-        <Text style={[s.agreeText, { color: th.text }]}>{T.privacyAgree}</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-// Step 6 — REF-03E
-function CompleteSlide({ th, isAr, T, priorities, country, currency, walletName }) {
-  const priorityLabels = priorities.map(key => T[`priority_${key}`]).join(isAr ? '، ' : ', ');
-  return (
-    <View style={s.slide}>
-      <View style={[s.completeCheck, { backgroundColor: th.primSoft }]}>
-        <Ionicons name="checkmark-circle" size={54} color={th.primary} />
-      </View>
-      <View style={[s.heroCopy, { marginTop: 14 }]}>
-        <Text style={[s.heroTitle, { color: th.text }]}>{T.completeTitle}</Text>
-        <Text style={[s.heroBody, { color: th.sub }]}>{T.completeBody}</Text>
-      </View>
-      <View style={[s.setupCard, { backgroundColor: th.card, borderColor: th.border }]}>
-        <SummaryRow th={th} isAr={isAr} icon="flag-outline" label={T.summaryPriorities} value={priorityLabels || '—'} />
-        <SummaryRow th={th} isAr={isAr} icon="location-outline" label={T.summaryCountry} value={country ? `${country.flag} ${isAr ? country.name : country.nameEn}` : '—'} />
-        <SummaryRow th={th} isAr={isAr} icon="cash-outline" label={T.summaryCurrency} value={currency ? `${currency.code} · ${currency.sym}` : '—'} />
-        <SummaryRow th={th} isAr={isAr} icon="wallet-outline" label={T.summaryWallet} value={walletName} sub={T.summaryWalletHint} last />
-      </View>
-    </View>
-  );
-}
-
-function SummaryRow({ th, isAr, icon, label, value, sub, last = false }) {
-  return (
-    <View style={[s.setupRow, { borderBottomColor: last ? 'transparent' : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-      <View style={[s.quickIcon, { backgroundColor: th.primSoft }]}><Ionicons name={icon} size={17} color={th.primary} /></View>
-      <View style={{ flex: 1 }}>
-        <Text style={[s.quickLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{label}</Text>
-        <Text style={[s.quickValue, { color: th.text, textAlign: isAr ? 'right' : 'left' }]} numberOfLines={2}>{value}</Text>
-        {sub ? <Text style={[s.hintText, { color: th.faint, textAlign: isAr ? 'right' : 'left', marginTop: 2 }]}>{sub}</Text> : null}
+      <Text style={[s.hintText, { color: th.faint, textAlign: 'center' }]}>{T.walletCurrencyRule}</Text>
+      <View style={[s.privacyStrip, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+        <View style={[s.privacyStripIcon, { backgroundColor: th.primSoft }]}><Ionicons name="shield-checkmark-outline" size={17} color={th.primary} /></View>
+        <Text style={[s.privacyStripText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.customizeNotice}</Text>
       </View>
     </View>
   );
@@ -545,10 +574,10 @@ const s = StyleSheet.create({
   brandWrap: { alignItems: 'center', gap: 8 },
   brandMark: { width: 26, height: 26, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   brand: { fontSize: 15, lineHeight: 21, ...weight('900'), letterSpacing: 1 },
-  stepMeta: { height: 30, alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
-  skipText: { fontSize: 12, ...weight('900') },
+  stepMeta: { height: 30, alignItems: 'center', justifyContent: 'flex-end', marginBottom: 4 },
   stepCount: { fontSize: 11, ...weight('800') },
-  stage: { flex: 1, justifyContent: 'center' },
+  stage: { flex: 1 },
+  stageContent: { flexGrow: 1, justifyContent: 'center', paddingVertical: 8 },
   slide: { width: '100%', alignItems: 'stretch' },
   heroCopy: { alignItems: 'center', marginBottom: 20 },
   heroTitle: { fontSize: 26, lineHeight: 34, textAlign: 'center', ...weight('900'), maxWidth: 340 },
@@ -559,9 +588,22 @@ const s = StyleSheet.create({
   welcomeCardLabel: { fontSize: 11, ...weight('900') },
   trustBadge: { marginTop: 16, borderRadius: 14, borderWidth: 1, paddingVertical: 10, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', gap: 7 },
   trustBadgeText: { fontSize: 11, ...weight('800') },
+  languagePicker: { borderRadius: 16, borderWidth: 1, padding: 10, marginBottom: 12 },
+  languagePickerTitle: { fontSize: 10, lineHeight: 16, textAlign: 'center', ...weight('800'), marginBottom: 8 },
+  languageOptions: { flexDirection: 'row', gap: 8 },
+  languageOption: { flex: 1, minHeight: 62, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', position: 'relative', paddingHorizontal: 8 },
+  languageCode: { fontSize: 16, lineHeight: 20, ...weight('900') },
+  languageName: { fontSize: 10, lineHeight: 15, ...weight('700'), marginTop: 2 },
+  languageCheck: { width: 19, height: 19, borderRadius: 10, alignItems: 'center', justifyContent: 'center', position: 'absolute', top: 6, right: 6 },
   priorityRow: { minHeight: 52, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14 },
   priorityLabel: { flex: 1, fontSize: 13, ...weight('800') },
   priorityCheck: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  personalizationGrid: { flexWrap: 'wrap', justifyContent: 'space-between', gap: 10 },
+  personalizationOption: { width: '48.5%', minHeight: 150, borderRadius: 18, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 14, position: 'relative' },
+  personalizationIcon: { width: 54, height: 54, borderRadius: 27, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  personalizationLabel: { fontSize: 15, lineHeight: 21, textAlign: 'center', ...weight('900') },
+  personalizationSub: { fontSize: 10, lineHeight: 16, textAlign: 'center', ...weight('700'), marginTop: 5 },
+  personalizationCheck: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', position: 'absolute', top: 9, right: 9 },
   hintText: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 10 },
   setupCard: { borderRadius: 18, borderWidth: 1, overflow: 'hidden', marginTop: 4 },
   setupRow: { minHeight: 62, borderBottomWidth: 1, alignItems: 'center', gap: 10, paddingHorizontal: 12 },
@@ -573,6 +615,7 @@ const s = StyleSheet.create({
   privacyStripText: { flex: 1, fontSize: 10, lineHeight: 16, ...weight('700') },
   walletIconWrap: { alignSelf: 'center', width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
   walletInputCard: { borderRadius: 16, borderWidth: 1, padding: 14, gap: 8 },
+  walletInputHead: { alignItems: 'center', gap: 10 },
   walletInput: { minHeight: 44, fontSize: 15, ...weight('800'), borderWidth: 1, borderRadius: 12, paddingHorizontal: 12 },
   privacyRow: { minHeight: 64, borderRadius: 16, borderWidth: 1, alignItems: 'center', gap: 12, paddingHorizontal: 14 },
   privacyRowIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },

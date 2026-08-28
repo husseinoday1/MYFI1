@@ -86,16 +86,27 @@ the first row). **Settings search itself is an implementation/Expo
 validation detail, not a hard requirement** — if Settings stays small and
 clear, search may be omitted without reopening this document.
 
-## 7. Onboarding flow — LOCKED
+## 7. Onboarding flow — LOCKED (revised 2026-08-28)
 
-1. Welcome → 2. What matters to you first? → 3. Customize your experience →
-4. Create first wallet → 5. Privacy first → 6. Everything is ready.
+1. Welcome with an explicit AR/EN language choice directly beneath the welcome
+copy → 2–4. Three short personalization questions → 5. Essentials (country,
+currency, appearance, first-wallet name) and start. Language changes the
+onboarding copy and RTL/LTR direction immediately, then is stored as the
+app-wide manual language preference.
 
-No Personal/Business/Dual account-type selection; no opening-balance
-requirement; permissions requested contextually per-feature; existing users
-get a short "What Changed" flow instead of the full sequence. Full
-per-step detail: `14_MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`
-(REF-02/03/03B/03D/03C/03E).
+The three questions cover usage context, first financial goal, and current
+money organization. The goal question allows one or more selections because
+its choices are complementary; the other two remain single-answer. They tune supported module
+visibility; freelancer or personal-and-work answers derive the existing mixed
+financial scope without rendering a rigid account-type selector or inventing
+capabilities.
+There is no Skip path: each question requires one answer and Back remains
+available. Privacy is a concise notice on Essentials, not a separate blocking
+step. No opening-balance requirement; permissions are requested
+contextually per-feature; existing users get a short "What Changed" flow
+instead of the full sequence. REF-02/03/03B/03D/03C remain visual-content
+references; REF-03E's separate completion screen is superseded by the
+combined Privacy-and-start ending.
 
 ## 8. Rationale for the IA change
 

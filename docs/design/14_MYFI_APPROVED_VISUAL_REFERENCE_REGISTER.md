@@ -19,6 +19,19 @@ be checked against real pixels instead of only this register's prose.
 
 ---
 
+## Onboarding authority update — 2026-08-28
+
+The Product Owner's newer direct instruction supersedes the fixed six-step
+sequence recorded below. The current flow is Welcome → four short
+personalization questions → Essentials → Privacy and Start, with no Skip
+action. REF-02/03/03B/03D/03C remain approved visual/content inputs;
+REF-03E's separate completion step is historical and is no longer part of
+normal first-run navigation. The personalization option layout is informed by
+the user-supplied 2×2 question reference, but uses MYFI brand green rather than
+copying that reference's purple identity.
+
+---
+
 ## REF-01 — Home (Light + Dark, side-by-side)
 
 - **Screen:** Home

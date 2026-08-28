@@ -18,9 +18,12 @@ presentation/navigation/UX-contract only.
 
 - **Purpose / user question answered:** first-run setup; "what is this app
   and can I trust it with my money."
-- **Approved structure:** exact 6 steps — Welcome → What matters to you
-  first? → Customize your experience → Create first wallet → Privacy first
-  → Everything is ready.
+- **Approved structure (revised 2026-08-28):** exact 5 steps — Welcome with
+  a compact AR/EN language choice directly below its copy → three
+  personalization questions (the goals question is multi-select) → Essentials
+  and start. The language selection changes onboarding copy and RTL/LTR
+  immediately, then persists as the app-wide preference. The privacy
+  note appears within Essentials and does not create a separate step.
 - **Required sections:** per-step content defined in
   `14_MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md` (REF-02/03/03B/03D/03C/03E).
 - **Navigation entry/exit:** entry = first app launch (new install); exit =
@@ -28,8 +31,7 @@ presentation/navigation/UX-contract only.
   instead, not re-entry into full onboarding.
 - **Primary actions:** step-by-step "Continue" (متابعة) / final "Start using
   MYFI."
-- **Secondary actions:** "Skip" (تخطي) on early steps, "Back" (رجوع)
-  throughout.
+- **Secondary actions:** "Back" (رجوع) throughout. No Skip action.
 - **Quick Add behavior:** N/A (not applicable during onboarding).
 - **Empty/loading/error states:** N/A — a linear setup flow, not a data
   screen. Errors would be step-local validation only (e.g. a required
@@ -40,14 +42,14 @@ presentation/navigation/UX-contract only.
 - **RTL:** Arabic-only in every reference; no English reference exists to
   compare mirroring against.
 - **Accessibility:** not evaluated.
-- **Reusable components:** `MultiSelect` (priorities step), new
-  `SelectorRow` (customize step, per `05_MYFI_COMPONENT_ARCHITECTURE.md`).
+- **Reusable components:** two-column personalization option cards,
+  `SelectorRow`/`ChoiceSheet` for Essentials.
 - **Reusable business logic:** wallet creation, currency/country selection
   already exist in some form in `OnboardingScreen.js` (390 lines, active).
-- **Known implementation gap:** current flow's exact step order/content vs.
-  the locked 6-step target is **UNKNOWN** — not verified line-by-line in
-  this pass. Whether it currently asks for an opening balance or an
-  account-type selection is also **UNKNOWN** and must be checked first.
+- **Known implementation state:** `OnboardingScreen.js` implements the
+  revised five-step flow, stores the three answers, and uses them to tune
+  supported module visibility. It does not request an opening balance or
+  expose an account-type/Skip choice.
 - **Expo/device validation items:** step transition feel, keyboard behavior
   on the wallet-name field, Dark-theme appearance.
 - **Future/conditional items:** none identified.

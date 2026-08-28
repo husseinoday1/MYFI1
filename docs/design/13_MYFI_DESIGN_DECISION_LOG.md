@@ -50,6 +50,23 @@ labeling judged a superseded artifact against the majority + text.
 
 ---
 
+**Date:** 2026-08-28
+**Decision:** Onboarding — REVISED by the Product Owner. Replace the rigid
+account-type idea and broad priorities multi-select with four short,
+single-answer personalization questions: usage context, first goal, money
+organization, and preferred interface detail. Use the answers to tune only
+supported module visibility. Combine country/language/currency/appearance
+and first-wallet naming into Essentials, then end with Privacy and Start.
+Remove Skip entirely; Back remains available.
+**Supersedes:** the exact 6-step ordering approved on 2026-08-26 and the
+separate final completion screen. The earlier reference images remain style
+and content inputs, not the current step-count authority.
+**Financial/data impact:** no transaction, balance, ledger, FX, SQLite,
+migration, backup, restore, auth, sync, or SecureStore change. Existing-user
+financial data remains preserved.
+
+---
+
 **Date:** 2026-08-26
 **Decision:** Category color governance — APPROVED. Categories may use a
 broader-than-brand palette under six governance conditions (muted,

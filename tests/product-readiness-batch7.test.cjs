@@ -20,13 +20,16 @@ assert(settings.includes('EXPO_PUBLIC_MYFI_INSTAGRAM_URL') && settings.includes(
 assert.equal(settings.includes('الهوية، المزامنة وتسجيل الدخول'), false, 'Verbose settings section subtitles must be removed');
 assert.equal(settings.includes('اضبط MYFI حسب طريقة استخدامك'), false, 'Verbose usage subtitle must be removed');
 assert.equal(history.includes('historyEyebrow'), false, 'History must not show a decorative MYFI eyebrow');
-// Onboarding is now the LOCKED 6-step flow per
-// docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md §7 (Welcome
-// -> Priorities -> Customize -> Create first wallet -> Privacy -> Complete),
-// replacing the prior 3-slide (value/insight/setup) design this assertion
-// used to check for. Updated 2026-08-27 to check for the current, intentional
-// 6-step contract instead — not deleted, not skipped.
-assert(onboarding.includes('WelcomeSlide') && onboarding.includes('PrioritySlide') && onboarding.includes('CustomizeSlide') && onboarding.includes('WalletSlide') && onboarding.includes('PrivacySlide') && onboarding.includes('CompleteSlide'), 'Onboarding must implement the locked 6-step flow: welcome, priorities, customize, wallet, privacy, complete');
+// The approved flow is deliberately five screens: Welcome with its explicit
+// language choice -> three visual personalization questions -> financial essentials.
+// Privacy is visible in Essentials, not an extra blocking screen.
+assert(onboarding.includes('LanguagePicker') && onboarding.includes('WelcomeSlide') && onboarding.includes('PERSONALIZATION_QUESTIONS') && onboarding.includes('PersonalizationSlide') && onboarding.includes('EssentialsSlide'), 'Onboarding must implement the language choice inside welcome, three personalization questions, and financial essentials');
+assert(onboarding.includes('const WELCOME_STEP = 0;') && onboarding.includes('const QUESTION_START_STEP = 1;') && onboarding.includes('const STEP_COUNT = ESSENTIALS_STEP + 1;') && onboarding.includes('step >= QUESTION_START_STEP && step < ESSENTIALS_STEP'), 'Onboarding must expose exactly three questionnaire steps inside the five-step flow after welcome');
+assert(onboarding.includes('languageConfirmed') && onboarding.includes("langMode: 'manual'"), 'The welcome language selection must require confirmation and persist as a whole-app preference');
+assert(onboarding.includes('modulesForPersonalization') && onboarding.includes('onboardingPersonalization: answers'), 'Onboarding answers must configure supported modules instead of acting as decorative profile labels');
+assert(onboarding.includes("multiple: true") && onboarding.includes("accessibilityRole={question.multiple ? 'checkbox' : 'radio'}") && onboarding.includes('onboardingPriorities: focusPriorities'), 'The complementary goals question must allow one or more selections and persist every selected priority');
+assert.equal(onboarding.includes("id: 'detail'"), false, 'Onboarding must not ask the ambiguous detail-level question');
+assert.equal(/skipCurrent|T\.skip|skipButton|skipText/.test(onboarding), false, 'Onboarding must not expose a skip path');
 assert.equal(onboarding.includes('اللغة والمظهر والتاريخ يتبعون جهازك'), false, 'Onboarding must not explain automatic device preferences');
 assert(settings.includes('T.gettingStarted') && settings.includes('T.dailyMoney') && settings.includes('T.planningGuide') && settings.includes('T.reportsGuide'), 'Guide must teach the core financial workflow by task');
 

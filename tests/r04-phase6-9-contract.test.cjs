@@ -42,12 +42,11 @@ assert(modules.includes('cfg.activeScope'), 'mixed personal/business mode still 
 const onboarding = read('src/screens/OnboardingScreen.js');
 assert(onboarding.includes('countryCode') && onboarding.includes('currencyCode') && onboarding.includes('baseCurrencyConfirmedAt'), 'first-run country/base-currency confirmation gate missing');
 // Reversed 2026-08-26 per docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md
-// §7 (LOCKED — explicitly prohibits a Personal/Business/Dual selector during
-// onboarding). New accounts now default to 'personal' silently; the existing
-// SettingsLegacyScreen.js:665 profile-type control remains the (unchanged)
-// way to change it later.
+// §7 prohibits rendering a rigid Personal/Business/Dual selector during
+// onboarding. The visual role and money-organisation questions may derive a
+// supported profile mode, and Settings retains the direct change path.
 assert(!/typeOptions|setProfileType/.test(onboarding), 'onboarding still renders a first-run usage-type selector');
-assert(onboarding.includes("const profileType = 'personal';"), 'onboarding no longer defaults profileType to personal silently');
+assert(onboarding.includes('profileTypeForPersonalization') && onboarding.includes("? 'personal_business'"), 'onboarding questions do not produce a supported financial profile when relevant');
 
 const domain = read('src/store/domain.js');
 assert(domain.includes('categoryBudgetsByMonth') && domain.includes('hasBudgets'), 'budget values do not lock base-currency meaning');
