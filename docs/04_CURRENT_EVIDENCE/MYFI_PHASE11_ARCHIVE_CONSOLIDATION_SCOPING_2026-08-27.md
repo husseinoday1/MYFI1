@@ -739,3 +739,83 @@ Negative controls run: flipping the opening-balance sign fails; keeping
 Nothing in this commit changes app behaviour — the module has no callers yet.
 Wiring it into an actual migration is a separate step and needs the recorded
 applied-state described in §10.3.
+
+## 11. Phase 11-C / D5 — deriving archived-year totals (2026-08-27)
+
+### 11.1 What was built, and what deliberately was not
+
+D5 rules that archived-year totals must be derived at display time rather than
+read from the floats in `cfg.archiveSummaries`. §75 rules that historical totals
+must not change silently. Those two together make this a **two-step** change,
+and this commit is the first step only:
+
+1. **derive and compare** — build the same totals from the ledger and check them
+   against what is stored (this commit);
+2. **switch the display source** in `ReportsScreen` — deferred, because it is
+   the step that can move a number a user has already seen.
+
+`src/lib/archiveSummaryDerivation.js` provides both halves of step 1:
+`deriveArchivedYearSummary` (ledger totals for one archived year) and
+`compareArchivedYearSummary` / `compareArchiveSummaries` (stored vs derived).
+There is no repair path — a divergence is a finding, never something the module
+overwrites.
+
+### 11.2 Three decisions worth recording
+
+**ARCHIVED scope, not ALL.** The archived total is added to a separately-queried
+active total in `ReportsScreen`. Deriving with ALL would double-count the active
+years.
+
+**Matched by date bounds, not `archive_year`.** `cfg.archiveSummaries` is keyed
+by the year of each transaction's own date (`yearOf(item.dateISO)` in
+`commitYearArchive`), so date bounds are what make stored and derived
+comparable at all.
+
+**Compared in minor units.** The stored side is float, the derived side is
+integer minor units. Comparing floats directly would report `0.1 + 0.2` against
+`0.3` as a divergence — a false alarm that either blocks a safe switch or trains
+someone to ignore the check. The currency drives the rounding, so the test also
+pins that IQD's third decimal is a real difference and not noise.
+
+### 11.3 "Could not check" is not "agrees"
+
+`ok` requires that every stored summary was **comparable and agreed**, and that
+at least one was checked. An unsupported derivation, a missing stored summary,
+or a workspace with zero archived years all report `ok: false`. This is the
+whole point of the gate: it exists to block a source switch, so an inconclusive
+result must never read as a pass. Both cases are pinned by tests, and by a
+negative control that flips `ok` to ignore the zero-check case and fails.
+
+### 11.4 Test
+
+`p11c-d5-archive-summary-parity.test.mjs` covers: agreement; a one-cent income
+drift caught; a net drift caught; a count disagreement failing even when every
+amount matches; float noise correctly *not* reported; IQD's third decimal
+correctly reported; incomparable inputs failing closed with the underlying
+reason carried through; per-summary scope reaching the derivation so a personal
+and a business summary for the same year are never compared against each other;
+a missing derivation function rejecting rather than passing; an amount-free
+diagnostic summary; and no mutation of the stored summary.
+
+Negative controls run: dropping the count from the match test fails; letting
+zero checks read as `ok` fails.
+
+### 11.5 Verification
+
+`npm run test:gate`: **129 passed, 0 failed, 11 skipped.**
+
+Nothing here changes app behaviour — the module has no callers yet, and
+`ReportsScreen` still reads the stored summaries exactly as before.
+
+### 11.6 Remaining in 11-C
+
+| Item | State |
+|---|---|
+| Step 1 — V6 balance query | done (§9) |
+| Step 2 — migrate balance consumers | **deferred**: design branch is rewriting the same files and adding new call sites (§10.1); needs a re-survey plus the device gate |
+| F1 removal + §3.5 unfreeze | blocked on step 2 |
+| D3 repair | plan built (§10); applying it needs a recorded applied-state (§10.3) |
+| D5 derivation | compare built (this section); switching the display source needs a clean comparison on real data plus the device gate |
+
+Everything still open is gated on either the design track settling or the
+real-device acceptance, both of which are outside this session's control.
