@@ -125,7 +125,7 @@ const copy = lang => {
     moneySetup_notSureSub: ar ? 'ابدأ بمحفظة ويمكنك التوسّع لاحقاً' : 'Start with one wallet and expand later',
     // Financial essentials
     customizeTitle: ar ? 'خصص تجربتك' : 'Customize your experience',
-    customizeBody: ar ? 'اختر البلد والعملة والمظهر، ثم سمِّ محفظتك الأولى.' : 'Choose your country, currency, appearance, and name your first wallet.',
+    customizeBody: ar ? 'اختر البلد والعملة والمظهر، ثم سمِّ محفظتك الأولى.' : 'Choose your country, currency, appearance, and name your first wallet.',
     country: ar ? 'البلد' : 'Country',
     baseCurrency: ar ? 'العملة' : 'Currency',
     appearance: ar ? 'المظهر' : 'Appearance',
@@ -136,9 +136,6 @@ const copy = lang => {
     english: ar ? 'English' : 'English',
     light: ar ? 'فاتح' : 'Light',
     dark: ar ? 'داكن' : 'Dark',
-    customizeNotice: ar
-      ? 'تجربة آمنة وخاصة — تفضيلاتك تُحفظ بأمان ويمكنك تغييرها لاحقاً من الإعدادات.'
-      : 'A safe and private experience — your preferences are saved securely and can be changed later from Settings.',
     // Step 4 — Create first wallet (REF-03D)
     walletTitle: ar ? 'إعداد المحفظة الأولى' : 'Set up your first wallet',
     walletBody: ar
@@ -190,8 +187,9 @@ const STEP_COUNT = ESSENTIALS_STEP + 1;
 export default function OnboardingScreen({ cfg, onDone }) {
   const { setCfg, editWallet } = useStore();
   const [step, setStep] = useState(0);
+  // `lang` previews onboarding copy/direction immediately, then becomes the
+  // app language once the user finishes the flow.
   const [lang, setLang] = useState(detectSystemLang());
-  const [languageConfirmed, setLanguageConfirmed] = useState(false);
   const isAr = lang === 'ar';
   // Preview the appearance choice immediately. Before this, the screen kept
   // reading cfg.theme (the previously saved preference) until Start was
@@ -263,7 +261,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
 
   const stepBody = () => {
     if (step === WELCOME_STEP) {
-      return <WelcomeSlide th={th} isAr={isAr} T={T} selectedLanguage={lang} languageConfirmed={languageConfirmed} onSelectLanguage={(value) => { setLang(value); setLanguageConfirmed(true); }} />;
+      return <WelcomeSlide th={th} isAr={isAr} T={T} />;
     }
     if (step >= QUESTION_START_STEP && step < ESSENTIALS_STEP) {
       const question = PERSONALIZATION_QUESTIONS[step - QUESTION_START_STEP];
@@ -299,11 +297,9 @@ export default function OnboardingScreen({ cfg, onDone }) {
     ? PERSONALIZATION_QUESTIONS[step - QUESTION_START_STEP]
     : null;
   const activeAnswer = activeQuestion ? personalization[activeQuestion.id] : null;
-  const canAdvance = step === WELCOME_STEP
-    ? languageConfirmed
-    : activeQuestion
-      ? (activeQuestion.multiple ? selectedValues(activeAnswer).length > 0 : Boolean(activeAnswer))
-      : true;
+  const canAdvance = activeQuestion
+    ? (activeQuestion.multiple ? selectedValues(activeAnswer).length > 0 : Boolean(activeAnswer))
+    : true;
   return (
     <View style={[s.screen, { backgroundColor: th.bg }]}>
       <View style={[s.topBar, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
@@ -312,10 +308,13 @@ export default function OnboardingScreen({ cfg, onDone }) {
             <View key={index} style={[s.dot, { width: index === step ? 22 : 7, backgroundColor: index === step ? th.primary : th.cardHigh }]} />
           ))}
         </View>
-        <View style={[s.brandWrap, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-          <Text style={[s.brand, { color: th.text }]}>MYFI</Text>
-          <View style={[s.brandMark, { backgroundColor: th.primary }]}>
-            <Ionicons name="wallet" size={14} color={th.onPrimary} />
+        <View style={[s.topActions, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+          {step === WELCOME_STEP ? <LanguagePicker th={th} selected={lang} onSelect={setLang} /> : null}
+          <View style={[s.brandWrap, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+            <Text style={[s.brand, { color: th.text }]}>MYFI</Text>
+            <View style={[s.brandMark, { backgroundColor: th.primary }]}>
+              <Ionicons name="wallet" size={14} color={th.onPrimary} />
+            </View>
           </View>
         </View>
       </View>
@@ -392,44 +391,34 @@ export default function OnboardingScreen({ cfg, onDone }) {
   );
 }
 
-function LanguagePicker({ th, selected, confirmed, onSelect }) {
-  const options = [
-    { key: 'ar', title: 'العربية', subtitle: 'Arabic', icon: 'text-outline' },
-    { key: 'en', title: 'English', subtitle: 'English', icon: 'language-outline' },
-  ];
+// Small, unobtrusive pill toggle: top-side of Welcome only, not its own step.
+function LanguagePicker({ th, selected, onSelect }) {
+  const options = ['ar', 'en'];
   return (
-    <View style={[s.languagePicker, { backgroundColor: th.card, borderColor: th.border }]}>
-      <Text style={[s.languagePickerTitle, { color: th.sub }]}>اختر اللغة / Choose language</Text>
-      <View style={s.languageOptions}>
-        {options.map(option => {
-          const isSelected = confirmed && selected === option.key;
-          return (
+    <View style={[s.languagePicker, { borderColor: th.border, backgroundColor: th.cardHigh }]}>
+      {options.map((key, index) => {
+        const active = selected === key;
+        return (
+          <React.Fragment key={key}>
+            {index > 0 ? <View style={[s.languageSeparator, { backgroundColor: th.border }]} /> : null}
             <TouchableOpacity
-              key={option.key}
-              onPress={() => onSelect(option.key)}
+              onPress={() => onSelect(key)}
               accessibilityRole="radio"
-              accessibilityState={{ selected: isSelected }}
-              style={[
-                s.languageOption,
-                { backgroundColor: isSelected ? th.primSoft : th.cardHigh, borderColor: isSelected ? th.primary : th.border },
-              ]}
+              accessibilityState={{ checked: active, selected: active }}
+              accessibilityLabel={key === 'ar' ? 'AR العربية' : 'EN English'}
+              style={[s.languageOption, { backgroundColor: active ? th.primSoft : 'transparent' }]}
             >
-              <Text style={[s.languageCode, { color: isSelected ? th.primary : th.text }]}>{option.key.toUpperCase()}</Text>
-              <Text style={[s.languageName, { color: th.sub }]}>{option.title}</Text>
-              {isSelected ? (
-                <View style={[s.languageCheck, { backgroundColor: th.primary }]}>
-                  <Ionicons name="checkmark" size={12} color={th.onPrimary} />
-                </View>
-              ) : null}
+              <Text style={[s.languageCode, { color: active ? th.primary : th.sub }]}>{key.toUpperCase()}</Text>
+              {active ? <Ionicons name="checkmark-circle" size={12} color={th.primary} /> : null}
             </TouchableOpacity>
-          );
-        })}
-      </View>
+          </React.Fragment>
+        );
+      })}
     </View>
   );
 }
 
-function WelcomeSlide({ th, isAr, T, selectedLanguage, languageConfirmed, onSelectLanguage }) {
+function WelcomeSlide({ th, isAr, T }) {
   const cards = [
     { key: 'expenses', label: T.expenses, icon: 'bar-chart-outline' },
     { key: 'planning', label: T.planning, icon: 'calendar-outline' },
@@ -441,7 +430,6 @@ function WelcomeSlide({ th, isAr, T, selectedLanguage, languageConfirmed, onSele
         <Text style={[s.heroTitle, { color: th.text }]}>{T.welcomeTitle}</Text>
         <Text style={[s.heroBody, { color: th.sub }]}>{T.welcomeBody}</Text>
       </View>
-      <LanguagePicker th={th} selected={selectedLanguage} confirmed={languageConfirmed} onSelect={onSelectLanguage} />
       <View style={[s.welcomeCards, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
         {cards.map(card => (
           <View key={card.key} style={[s.welcomeCard, { backgroundColor: th.card, borderColor: th.border }]}>
@@ -545,10 +533,6 @@ function EssentialsSlide({
         />
       </View>
       <Text style={[s.hintText, { color: th.faint, textAlign: 'center' }]}>{T.walletCurrencyRule}</Text>
-      <View style={[s.privacyStrip, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-        <View style={[s.privacyStripIcon, { backgroundColor: th.primSoft }]}><Ionicons name="shield-checkmark-outline" size={17} color={th.primary} /></View>
-        <Text style={[s.privacyStripText, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.customizeNotice}</Text>
-      </View>
     </View>
   );
 }
@@ -571,6 +555,7 @@ const s = StyleSheet.create({
   topBar: { height: 40, alignItems: 'center', justifyContent: 'space-between' },
   dotsRow: { alignItems: 'center', gap: 6 },
   dot: { height: 6, borderRadius: 3 },
+  topActions: { alignItems: 'center', gap: 8 },
   brandWrap: { alignItems: 'center', gap: 8 },
   brandMark: { width: 26, height: 26, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   brand: { fontSize: 15, lineHeight: 21, ...weight('900'), letterSpacing: 1 },
@@ -588,13 +573,10 @@ const s = StyleSheet.create({
   welcomeCardLabel: { fontSize: 11, ...weight('900') },
   trustBadge: { marginTop: 16, borderRadius: 14, borderWidth: 1, paddingVertical: 10, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', gap: 7 },
   trustBadgeText: { fontSize: 11, ...weight('800') },
-  languagePicker: { borderRadius: 16, borderWidth: 1, padding: 10, marginBottom: 12 },
-  languagePickerTitle: { fontSize: 10, lineHeight: 16, textAlign: 'center', ...weight('800'), marginBottom: 8 },
-  languageOptions: { flexDirection: 'row', gap: 8 },
-  languageOption: { flex: 1, minHeight: 62, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', position: 'relative', paddingHorizontal: 8 },
-  languageCode: { fontSize: 16, lineHeight: 20, ...weight('900') },
-  languageName: { fontSize: 10, lineHeight: 15, ...weight('700'), marginTop: 2 },
-  languageCheck: { width: 19, height: 19, borderRadius: 10, alignItems: 'center', justifyContent: 'center', position: 'absolute', top: 6, right: 6 },
+  languagePicker: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, borderWidth: 1, padding: 3 },
+  languageOption: { minWidth: 36, height: 28, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, paddingHorizontal: 8 },
+  languageCode: { fontSize: 10, lineHeight: 14, ...weight('900'), letterSpacing: 0.6 },
+  languageSeparator: { width: 1, height: 14, marginHorizontal: 2 },
   priorityRow: { minHeight: 52, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14 },
   priorityLabel: { flex: 1, fontSize: 13, ...weight('800') },
   priorityCheck: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
@@ -610,9 +592,6 @@ const s = StyleSheet.create({
   quickIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   quickLabel: { fontSize: 9, lineHeight: 14, ...weight('800') },
   quickValue: { fontSize: 12, lineHeight: 18, ...weight('900'), marginTop: 1 },
-  privacyStrip: { marginTop: 12, borderRadius: 16, borderWidth: 1, padding: 12, alignItems: 'center', gap: 10 },
-  privacyStripIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  privacyStripText: { flex: 1, fontSize: 10, lineHeight: 16, ...weight('700') },
   walletIconWrap: { alignSelf: 'center', width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
   walletInputCard: { borderRadius: 16, borderWidth: 1, padding: 14, gap: 8 },
   walletInputHead: { alignItems: 'center', gap: 10 },

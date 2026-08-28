@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Alert, Pressable, StyleSheet, Image, Modal } from 'react-native';
+import { View, Text, ScrollView, Alert, Pressable, StyleSheet, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useStore } from '../store/useStore';
@@ -7,7 +7,7 @@ import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
 import { CURRENCIES, getSymbol } from '../lib/constants';
 import { formatMoneyNumber } from '../lib/money';
-import { buildFinancialSnapshot, getUpcomingRecurring, homePeriodPills, pct, today } from '../utils/calc';
+import { buildFinancialSnapshot, getUpcomingRecurring, pct, today } from '../utils/calc';
 import AddTransModal from '../components/AddTransModal';
 import { filterByActiveScope, filterFeatureEntities, filterTransactionsByEnabledFeatures, getActiveScope, getModules, getTransactionDisplayAmount } from '../lib/modules';
 import { getDefaultWalletId, getWalletAvailableBalances, getWalletBaseAvailableTotal, getWalletLabel, normalizeWallets } from '../lib/wallets';
@@ -24,19 +24,19 @@ import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components
 import { getTransactionTagMeta } from '../lib/transactionTags';
 import { getSemanticTypeLabel, getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
-import WalletBalanceCard from '../components/WalletBalanceCard';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatMonthLabel } from '../lib/months';
 import { deriveDisplayName } from '../lib/accountIdentity';
 import { getMonthTransactionsByKey, getRecentTransactions, getTransactionIndex } from '../lib/transactionIndex';
 import { averageGoalProgress, summarizeCommitmentCurrencies, summarizeGoalCurrencies } from '../lib/entityCurrencySummary';
+import { getLedgerNamespace, queryLedgerSummary, queryLedgerTransactions, queryLedgerWalletPositions } from '../lib/activeLedgerRepository';
 const noop = () => {};
 
 const copy = (lang) => {
   const ar = lang === 'ar';
   return {
     overview: ar ? 'نظرة عامة' : 'Overview',
-    allTransactions: ar ? 'كل المعاملات' : 'All transactions',
+    allTransactions: ar ? 'عرض كل الحركات' : 'View all transactions',
     currentMoney: ar ? 'المتبقي بعد الصرف' : 'Left after spending',
     thisMonth: ar ? 'هذا الشهر' : 'This month',
     periodDay: ar ? 'اليوم' : 'Today',
@@ -101,8 +101,8 @@ const copy = (lang) => {
     showDetails: ar ? 'إظهار' : 'Show',
     netMonth: ar ? 'صافي الشهر' : 'Month net',
     dueSoon: ar ? 'مستحقات' : 'Due',
-    monthSummary: ar ? '\u0645\u0644\u062e\u0635 \u0627\u0644\u0634\u0647\u0631' : 'Month summary',
-    netWord: ar ? '\u0627\u0644\u0635\u0627\u0641\u064a' : 'Net',
+    monthSummary: ar ? 'ملخص الشهر' : 'Month summary',
+    netWord: ar ? 'الصافي' : 'Net',
     showBalance: ar ? 'إظهار' : 'Show',
     hideBalance: ar ? 'إخفاء' : 'Hide',
     hiddenAmount: '****',
@@ -150,7 +150,7 @@ export default function HomeScreen({
   const align = textAlignFor(cfg.lang);
   const rowDir = rowDirFor(cfg.lang);
   const modules = getModules(cfg);
-  const accountName = deriveDisplayName({ user, cfg }) || (isAr ? '\u062d\u0633\u0627\u0628 \u0645\u062d\u0644\u064a' : 'Local account');
+  const accountName = deriveDisplayName({ user, cfg }) || (isAr ? 'حساب محلي' : 'Local account');
   const accountInitial = (accountName || 'M').trim().charAt(0).toUpperCase();
   const scopedTransAll = useMemo(
     () => filterByActiveScope(trans, cfg),
@@ -172,10 +172,10 @@ export default function HomeScreen({
   const homeSectionsCfg = Array.isArray(cfg.homeSections) ? cfg.homeSections : [];
   const recentLimit = 3;
 
-  const [showWalletDetails, setShowWalletDetails] = useState(false);
   const [walletStripPage, setWalletStripPage] = useState(0);
   const [attentionExpanded, setAttentionExpanded] = useState(false);
   const [savingsExpanded, setSavingsExpanded] = useState(false);
+  const [recentExpanded, setRecentExpanded] = useState(false);
   const [editing,    setEditing]    = useState(null);
   const [details, setDetails] = useState(null);
   const [expandedRecentId, setExpandedRecentId] = useState(null);
@@ -204,12 +204,6 @@ export default function HomeScreen({
   );
   const [sqlHome, setSqlHome] = useState(null);
   const currentMonthKey = today().slice(0, 7);
-  // REF-01 period pills. calcStats(trans) is the existing function used for
-  // 'this month' in buildFinancialSnapshot above — no new financial math,
-  // only the date-range slicing behind it is new. scopedTrans matches what
-  // snapshot.month/currentMonthRows already use.
-  const [activePeriod, setActivePeriod] = useState('month');
-  const periodPills = useMemo(() => homePeriodPills(scopedTrans), [scopedTrans]);
   useEffect(() => {
     let cancelled = false;
     if (!financialLedgerV7Cutover) {
@@ -584,7 +578,7 @@ export default function HomeScreen({
                 buttonStyle={{ backgroundColor: th.cardHigh, width: 32, height: 32, borderRadius: 10 }}
                 items={[
                   !protectedOpening ? { label: C.select, icon: 'checkmark-circle-outline', color: th.primary, onPress: () => recentSelection.toggle(t.id) } : null,
-                  { label: cfg.lang === 'ar' ? '\u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644' : 'Details', icon: 'reader-outline', color: th.primary, onPress: () => setDetails(t) },
+                  { label: cfg.lang === 'ar' ? 'التفاصيل' : 'Details', icon: 'reader-outline', color: th.primary, onPress: () => setDetails(t) },
                   editable ? { label: L.editTrans, icon: 'create-outline', color: th.primary, onPress: () => setEditing(t) } : null,
                   !protectedOpening ? { label: L.delete, icon: 'trash-outline', color: th.exp, danger: true, onPress: () => confirmDeleteRow(t) } : null,
                 ]}
@@ -720,7 +714,7 @@ export default function HomeScreen({
   const dueTextFor = (item) => {
     if (item.attentionType === 'commitment') {
       if (item.isDeferred && !item.actionable) {
-        return `${cfg.lang === 'ar' ? '\u0645\u0624\u062c\u0644 \u0625\u0644\u0649' : 'Deferred to'} ${formatCommitmentDate(item.dueISO, cfg.lang)}`;
+        return `${cfg.lang === 'ar' ? 'مؤجل إلى' : 'Deferred to'} ${formatCommitmentDate(item.dueISO, cfg.lang)}`;
       }
       const label = formatCommitmentMonth(item.dueISO, cfg.lang);
       if (item.monthsUntil < 0) return `${C.overdue} - ${label}`;
@@ -1015,12 +1009,8 @@ export default function HomeScreen({
     );
   };
 
-  // REF-01: an always-visible horizontal wallet strip belongs directly under
-  // the hero — the existing renderWalletPanel() below is a DIFFERENT feature
-  // (a "choose default wallet" modal, reachable from the hero's own
-  // "X wallets · Show details" row) and stays untouched. This just displays
-  // walletRows, already computed above for the hero's wallet-summary count;
-  // no new balance calculation happens here.
+  // Wallet cards are a direct default-wallet picker: the star shows the
+  // current default and tapping another real card updates it immediately.
   const WALLET_CARD_WIDTH = 112;
   const renderWalletStrip = () => {
     // Deliberately NOT gated on modules.wallets (a business-profile-only flag
@@ -1031,7 +1021,66 @@ export default function HomeScreen({
     // a fresh personal account). Gating on the business flag hid this section
     // from every personal-profile user, which is most of them.
     if (!isHomeSectionVisible('wallets') || walletRows.length === 0) return null;
-    const pageCount = Math.max(1, Math.ceil(walletRows.length / 3));
+    const walletCount = walletRows.length;
+    const pageCount = Math.max(1, Math.ceil(walletCount / 3));
+    const renderWalletCard = (wallet, layout = 'strip') => {
+      const currencyMeta = CURRENCIES.find((item) => item.code === (wallet.currency || cfg.currency));
+      const currencyName = currencyMeta ? (isAr ? currencyMeta.name : currencyMeta.nameEn) : (wallet.currency || cfg.currency);
+      const balanceText = hidden ? '••••••' : `${formatMoneyNumber(wallet.availableBalance, wallet.currency || cfg.currency, cfg.lang)} ${wallet.currency || cfg.currency}`;
+      const iconName = wallet.id === defaultWalletId ? 'star' : 'wallet-outline';
+      if (layout === 'solo') {
+        return (
+          <TouchableOpacity
+            key={wallet.id}
+            onPress={() => setCfg({ defaultWalletId: wallet.id })}
+            accessibilityRole="button"
+            accessibilityState={{ selected: wallet.id === defaultWalletId }}
+            accessibilityLabel={`${getWalletLabel(wallet, cfg.lang)}${wallet.id === defaultWalletId ? (isAr ? '، المحفظة الافتراضية' : ', default wallet') : (isAr ? '، اختيار كمحفظة افتراضية' : ', set as default wallet')}`}
+            style={[s.walletStripCard, s.walletStripSoloCard, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}
+          >
+            <View style={[s.walletStripSoloIdentity, { flexDirection: rowDir }]}>
+              <View style={[s.walletStripSoloIcon, { backgroundColor: th.primSoft }]}>
+                <Ionicons name={iconName} size={18} color={th.primary} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: align }} numberOfLines={1}>
+                  {getWalletLabel(wallet, cfg.lang)}
+                </Text>
+                <Text style={{ color: th.faint, fontSize: 10, ...weight('700'), textAlign: align, marginTop: 3 }} numberOfLines={1}>
+                  {currencyName}
+                </Text>
+              </View>
+            </View>
+            <Text style={{ color: th.text, fontSize: 16, ...weight('900'), textAlign: isAr ? 'left' : 'right', writingDirection: 'ltr' }} numberOfLines={1} adjustsFontSizeToFit>
+              {balanceText}
+            </Text>
+          </TouchableOpacity>
+        );
+      }
+      return (
+        <TouchableOpacity
+          key={wallet.id}
+          onPress={() => setCfg({ defaultWalletId: wallet.id })}
+          accessibilityRole="button"
+          accessibilityState={{ selected: wallet.id === defaultWalletId }}
+          accessibilityLabel={`${getWalletLabel(wallet, cfg.lang)}${wallet.id === defaultWalletId ? (isAr ? '، المحفظة الافتراضية' : ', default wallet') : (isAr ? '، اختيار كمحفظة افتراضية' : ', set as default wallet')}`}
+          style={[s.walletStripCard, layout === 'grid' ? s.walletStripGridCard : { width: WALLET_CARD_WIDTH }, { backgroundColor: th.card, borderColor: th.border }]}
+        >
+          <Text style={{ color: th.text, fontSize: 12, ...weight('800'), textAlign: align }} numberOfLines={1}>
+            {getWalletLabel(wallet, cfg.lang)}
+          </Text>
+          <View style={[s.walletStripIcon, { backgroundColor: th.primSoft }]}>
+            <Ionicons name={iconName} size={16} color={th.primary} />
+          </View>
+          <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: align, writingDirection: 'ltr' }} numberOfLines={1} adjustsFontSizeToFit>
+            {balanceText}
+          </Text>
+          <Text style={{ color: th.faint, fontSize: 10, ...weight('700'), textAlign: align }} numberOfLines={1}>
+            {currencyName}
+          </Text>
+        </TouchableOpacity>
+      );
+    };
     return (
       <View style={s.walletStripBlock}>
         <View style={[s.walletStripHead, { flexDirection: rowDir }]}>
@@ -1044,42 +1093,27 @@ export default function HomeScreen({
             </Text>
           </TouchableOpacity>
         </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          onScroll={(e) => {
-            const page = Math.round(e.nativeEvent.contentOffset.x / (WALLET_CARD_WIDTH * 3));
-            setWalletStripPage(page);
-          }}
-          scrollEventThrottle={32}
-          contentContainerStyle={{ gap: 8, paddingRight: isRTL(cfg.lang) ? 0 : 4, paddingLeft: isRTL(cfg.lang) ? 4 : 0 }}
-        >
-          {walletRows.map((wallet) => {
-            const currencyMeta = CURRENCIES.find((item) => item.code === (wallet.currency || cfg.currency));
-            const currencyName = currencyMeta ? (isAr ? currencyMeta.name : currencyMeta.nameEn) : (wallet.currency || cfg.currency);
-            return (
-              <TouchableOpacity
-                key={wallet.id}
-                onPress={() => setShowWalletDetails(true)}
-                style={[s.walletStripCard, { width: WALLET_CARD_WIDTH, backgroundColor: th.card, borderColor: th.border }]}
-              >
-                <Text style={{ color: th.text, fontSize: 12, ...weight('800'), textAlign: align }} numberOfLines={1}>
-                  {getWalletLabel(wallet, cfg.lang)}
-                </Text>
-                <View style={[s.walletStripIcon, { backgroundColor: th.primSoft }]}>
-                  <Ionicons name={wallet.id === defaultWalletId ? 'star' : 'wallet-outline'} size={16} color={th.primary} />
-                </View>
-                <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: align, writingDirection: 'ltr' }} numberOfLines={1} adjustsFontSizeToFit>
-                  {hidden ? '••••••' : `${formatMoneyNumber(wallet.availableBalance, wallet.currency || cfg.currency, cfg.lang)} ${wallet.currency || cfg.currency}`}
-                </Text>
-                <Text style={{ color: th.faint, fontSize: 10, ...weight('700'), textAlign: align }} numberOfLines={1}>
-                  {currencyName}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-        {pageCount > 1 ? (
+        {walletCount === 1 ? renderWalletCard(walletRows[0], 'solo') : null}
+        {walletCount === 2 ? (
+          <View style={[s.walletStripGrid, { flexDirection: rowDir }]}>
+            {walletRows.map(wallet => renderWalletCard(wallet, 'grid'))}
+          </View>
+        ) : null}
+        {walletCount > 2 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            onScroll={(e) => {
+              const page = Math.round(e.nativeEvent.contentOffset.x / (WALLET_CARD_WIDTH * 3));
+              setWalletStripPage(page);
+            }}
+            scrollEventThrottle={32}
+            contentContainerStyle={{ gap: 8, paddingRight: isRTL(cfg.lang) ? 0 : 4, paddingLeft: isRTL(cfg.lang) ? 4 : 0 }}
+          >
+            {walletRows.map(wallet => renderWalletCard(wallet))}
+          </ScrollView>
+        ) : null}
+        {walletCount > 2 && pageCount > 1 ? (
           <View style={[s.walletStripDots, { flexDirection: rowDir }]}>
             {Array.from({ length: pageCount }).map((_, index) => (
               <View
@@ -1096,79 +1130,117 @@ export default function HomeScreen({
     );
   };
 
-  const renderWalletPanel = () => (
-    walletRows.length > 0 ? (
-      <Modal visible={showWalletDetails} transparent animationType="fade" onRequestClose={() => setShowWalletDetails(false)}>
-        <View style={[s.walletPopupOverlay, { backgroundColor: th.overlay }]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowWalletDetails(false)} />
-          <View style={[s.walletPopup, { backgroundColor: th.card, borderColor: th.border }]}>
-            <View style={[s.walletPopupHead, { flexDirection: rowDir }]}>
-              <Text style={[s.walletPopupTitle, { color: th.text, textAlign: align }]}>{cfg.lang === 'ar' ? 'المحافظ والأرصدة' : 'Wallets & balances'}</Text>
-              <TouchableOpacity onPress={() => setShowWalletDetails(false)} style={[s.headerIconBtn, { backgroundColor: th.cardHigh }]}>
-                <Ionicons name="chevron-down" size={18} color={th.sub} />
-              </TouchableOpacity>
-            </View>
-            <WalletBalanceCard
-              wallets={wallets}
-              transactions={scopedTransAll}
-              cfg={cfg}
-              showWallets
-              onSelectWallet={(id) => { setCfg({ defaultWalletId: id }); }}
-              title={cfg.lang === 'ar' ? 'اختيار المحفظة الافتراضية' : 'Choose default wallet'}
-              style={{ marginBottom: 0 }}
-            />
+  // Collapsible like Needs Attention / Savings — same header-toggle pattern,
+  // defaulting to closed. `recent` is already capped to recentLimit (3)
+  // upstream; this section never fetches or renders more than that inline —
+  // "View all transactions" below routes to the existing History screen.
+  const renderRecentSection = () => (
+    <View style={[s.recentPanel, { backgroundColor: th.card, borderColor: th.border }]}>
+      <TouchableOpacity
+        onPress={() => {
+          if (recentExpanded && recentSelection.selecting) recentSelection.cancel();
+          setRecentExpanded(value => !value);
+        }}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: recentExpanded }}
+        accessibilityLabel={`${recentExpanded ? C.hideDetails : C.showDetails} ${L.recent}`}
+        style={[s.recentHead, { flexDirection: rowDir, marginBottom: recentExpanded ? 7 : 0 }]}
+      >
+        <View style={[s.recentHeadTitle, { flexDirection: rowDir }]}>
+          <View style={[s.recentHeadIcon, { backgroundColor: th.cardHigh }]}>
+            <Ionicons name="receipt-outline" size={17} color={th.primary} />
           </View>
+          <Text style={[s.recentTitle, { color: th.text, textAlign: align }]}>{L.recent}</Text>
         </View>
-      </Modal>
-    ) : null
+        {recent.length ? (
+          <View style={[s.recentCount, { backgroundColor: th.cardHigh }]}>
+            <Text style={{ color: th.primary, fontSize: 10, ...weight('900') }}>{recent.length}</Text>
+          </View>
+        ) : null}
+        <Ionicons name={recentExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={th.primary} />
+      </TouchableOpacity>
+
+      {recentExpanded ? (
+        <>
+          <MultiSelectBar
+            th={th}
+            lang={cfg.lang}
+            active={recentSelection.selecting}
+            count={recentSelection.selectedCount}
+            total={recent.length}
+            allSelected={recentSelection.allSelected}
+            onStart={recentSelection.start}
+            onToggleAll={recentSelection.toggleAll}
+            onDelete={confirmDeleteRecent}
+            onCancel={recentSelection.cancel}
+          />
+          {recent.length === 0 ? (
+            <View style={[s.empty, { borderColor: th.border }]}>
+              <Ionicons name="receipt-outline" size={34} color={th.faint} />
+              <Text style={{ color: th.text, ...weight('900'), fontSize: 15, marginTop: 10, textAlign: 'center' }}>
+                {C.emptyTitle}
+              </Text>
+              <Text style={{ color: th.sub, fontSize: 12, textAlign: 'center', marginTop: 6 }}>
+                {C.emptyBody}
+              </Text>
+              <View style={[s.emptyActions, { flexDirection: rowDir }]}>
+                <TouchableOpacity onPress={onAddIncome} style={[s.emptyAction, { backgroundColor: th.incBg, borderColor: `${th.inc}44` }]}>
+                  <FinancialDirectionMark kind="income" color={th.inc} size={17} lang={cfg.lang} />
+                  <Text style={{ color: th.inc, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة دخل' : 'Add income'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={onAddExpense} style={[s.emptyAction, { backgroundColor: th.expBg, borderColor: `${th.exp}44` }]}>
+                  <FinancialDirectionMark kind="expense" color={th.exp} size={17} lang={cfg.lang} />
+                  <Text style={{ color: th.exp, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة مصروف' : 'Add expense'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <>
+              <View style={[s.recentList, { backgroundColor: th.cardHigh, borderColor: th.border }]}>
+                {recent.map(renderRow)}
+              </View>
+              <TouchableOpacity
+                onPress={() => onOpenTab('history')}
+                accessibilityRole="button"
+                style={[s.recentAllLink, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}
+              >
+                <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.allTransactions}</Text>
+                <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={15} color={th.primary} />
+              </TouchableOpacity>
+            </>
+          )}
+        </>
+      ) : null}
+    </View>
   );
 
-  const renderRecentSection = () => (
-    <View>
-      <View style={[s.recentHead, { flexDirection: rowDir }]}>
-        <Text style={[s.recentTitle, { color: th.text, textAlign: align }]}>{L.recent}</Text>
-        <TouchableOpacity onPress={() => onOpenTab('history')} style={s.recentAllLink}>
-          <Text style={{ color: th.primary, fontSize: 12, ...weight('900') }}>{C.allTransactions}</Text>
-        </TouchableOpacity>
-      </View>
-      <MultiSelectBar
-        th={th}
-        lang={cfg.lang}
-        active={recentSelection.selecting}
-        count={recentSelection.selectedCount}
-        total={recent.length}
-        allSelected={recentSelection.allSelected}
-        onStart={recentSelection.start}
-        onToggleAll={recentSelection.toggleAll}
-        onDelete={confirmDeleteRecent}
-        onCancel={recentSelection.cancel}
-      />
-      {recent.length === 0 ? (
-        <View style={[s.empty, { borderColor: th.border }]}>
-          <Ionicons name="receipt-outline" size={34} color={th.faint} />
-          <Text style={{ color: th.text, ...weight('900'), fontSize: 15, marginTop: 10, textAlign: 'center' }}>
-            {C.emptyTitle}
-          </Text>
-          <Text style={{ color: th.sub, fontSize: 12, textAlign: 'center', marginTop: 6 }}>
-            {C.emptyBody}
-          </Text>
-          <View style={[s.emptyActions, { flexDirection: rowDir }]}>
-            <TouchableOpacity onPress={onAddIncome} style={[s.emptyAction, { backgroundColor: th.incBg, borderColor: `${th.inc}44` }]}>
-              <FinancialDirectionMark kind="income" color={th.inc} size={17} lang={cfg.lang} />
-              <Text style={{ color: th.inc, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة دخل' : 'Add income'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={onAddExpense} style={[s.emptyAction, { backgroundColor: th.expBg, borderColor: `${th.exp}44` }]}>
-              <FinancialDirectionMark kind="expense" color={th.exp} size={17} lang={cfg.lang} />
-              <Text style={{ color: th.exp, fontSize: 11, ...weight('900') }}>{isAr ? 'إضافة مصروف' : 'Add expense'}</Text>
-            </TouchableOpacity>
+  const renderQuickEntry = () => (
+    cfg.entryMode === 'quick' ? (
+      <View style={s.quickEntry}>
+        <View style={[s.quickEntryHead, { flexDirection: rowDir }]}>
+          <Text style={[s.quickEntryTitle, { color: th.text, textAlign: align }]}>{C.quickActions}</Text>
+          <View style={[s.quickEntryHeadIcon, { backgroundColor: th.primSoft }]}>
+            <Ionicons name="add" size={18} color={th.primary} />
           </View>
         </View>
-      ) : (
-        <View style={[s.recentList, { backgroundColor: th.card, borderColor: th.border }]}>
-          {recent.map(renderRow)}
+        <View style={[s.quickEntrySurface, { backgroundColor: th.card, borderColor: th.border }]}>
+          <View style={[s.quickEntryRow, { flexDirection: rowDir }]}>
+            {orderedQuickEntryActions.map(action => (
+              <TouchableOpacity key={action.key} onPress={action.onPress} style={s.quickEntryAction}>
+                <View style={[s.quickEntryIcon, { backgroundColor: `${action.color}18`, borderColor: `${action.color}44` }]}>
+                  {action.direction
+                    ? <FinancialDirectionMark kind={action.direction} color={action.color} size={20} lang={cfg.lang} />
+                    : <Ionicons name={action.icon} size={18} color={action.color} />}
+                </View>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={[s.quickEntryLabel, { color: th.text }]}>
+                  {action.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-      )}
-    </View>
+      </View>
+    ) : null
   );
 
   const renderHomeSection = (item) => {
@@ -1211,7 +1283,7 @@ export default function HomeScreen({
             onPress={() => setCenterMode('profile')}
             style={[s.profileButton, { backgroundColor: th.card, borderColor: th.border }]}
             accessibilityRole="button"
-            accessibilityLabel={isAr ? '\u0641\u062a\u062d \u0627\u0644\u062d\u0633\u0627\u0628' : 'Open account'}
+            accessibilityLabel={isAr ? 'فتح الحساب' : 'Open account'}
           >
             <View style={[s.profileAvatar, { backgroundColor: th.primSoft }]}>
               {cfg.avatarUri ? <Image source={{ uri: cfg.avatarUri }} style={s.profileAvatarImage} /> : <Text style={{ color: th.primary, fontSize: 13, ...weight('900') }}>{accountInitial}</Text>}
@@ -1220,17 +1292,21 @@ export default function HomeScreen({
           </TouchableOpacity>
         </View>
 
-        {/* REF-01: the hero card is solid brand green in both light and dark, not
-            the pale/dark "container" tint th.primaryContainer resolves to
-            (#DCEFE5 light / #15382A dark) — using th.primary here is what the
-            image actually shows, and it's also why the period-pill overlays
-            below were low-contrast against the old pale background. */}
+        <View style={s.homeGreeting}>
+          <Text style={[s.homeGreetingTitle, { color: th.text, textAlign: align }]} numberOfLines={1}>
+            {isAr ? `مرحباً، ${accountName}` : `Hello, ${accountName}`}
+          </Text>
+          <Text style={[s.homeGreetingBody, { color: th.sub, textAlign: align }]}>
+            {isAr ? 'نظرة سريعة على أموالك اليوم' : 'A quick view of your money today'}
+          </Text>
+        </View>
+
         {isHomeSectionVisible('hero') ? (
-        <View style={[s.hero, { backgroundColor: th.primary, borderColor: `${th.primary}55` }]}>
+        <View style={[s.hero, { backgroundColor: th.card, borderColor: th.border }]}>
           <View style={[s.heroTop, { flexDirection: rowDir }]}>
             <View style={{ flex: 1 }}>
               <View style={[s.heroLabelRow, { flexDirection: rowDir }]}>
-                <Text style={[s.heroLabel, { color: 'rgba(255,255,255,0.82)', textAlign: align }]}>{isAr ? 'الرصيد المتاح' : 'Available balance'}</Text>
+                <Text style={[s.heroLabel, { color: th.sub, textAlign: align }]}>{isAr ? 'الرصيد المتاح' : 'Available balance'}</Text>
                 <TouchableOpacity
                   onPress={() => setCfg({ homeBalancesHidden: !hidden })}
                   style={s.heroVisibilityBtn}
@@ -1238,64 +1314,34 @@ export default function HomeScreen({
                   accessibilityRole="button"
                   accessibilityLabel={hidden ? C.showBalance : C.hideBalance}
                 >
-                  <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={14} color="rgba(255,255,255,0.82)" />
+                  <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={14} color={th.sub} />
                 </TouchableOpacity>
               </View>
-              <Text style={[s.heroAmount, { color: th.onPrimary, textAlign: align, writingDirection: 'ltr' }]} numberOfLines={1} adjustsFontSizeToFit>
+              <Text style={[s.heroAmount, { color: th.text, textAlign: align, writingDirection: 'ltr' }]} numberOfLines={1} adjustsFontSizeToFit>
                 {moneyText(heroBalanceText)}
               </Text>
             </View>
-            <View style={[s.heroTools, { flexDirection: rowDir }]}>
-              <TouchableOpacity
-                onPress={() => onOpenTab('wallets')}
-                style={[s.heroIconBtn, { backgroundColor: 'rgba(255,255,255,0.14)', borderColor: 'rgba(255,255,255,0.20)' }]}
-                accessibilityRole="button"
-                accessibilityLabel={isAr ? 'فتح المحافظ' : 'Open wallets'}
-              >
-                <Ionicons name="wallet-outline" size={20} color={th.onPrimary} />
-              </TouchableOpacity>
-            </View>
           </View>
-          {/* REF-01 period pills. All four always show their own net delta;
-              tapping one only changes which is highlighted (activePeriod) —
-              it does not change heroBalance, which stays the point-in-time
-              available balance regardless of period (a "balance for today"
-              alone would not be a different figure from the total). */}
-          <View style={[s.periodPillRow, { flexDirection: rowDir }]}>
-            {periodPills.filter(pillItem => pillItem.key !== 'year').map(pillItem => {
-              const active = activePeriod === pillItem.key;
-              const pillLabel = pillItem.key === 'day' ? C.periodDay
-                : pillItem.key === 'week' ? C.periodWeek
-                : C.periodMonth;
-              return (
-                <TouchableOpacity
-                  key={pillItem.key}
-                  onPress={() => setActivePeriod(pillItem.key)}
-                  style={[
-                    s.periodPill,
-                    { backgroundColor: active ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.10)', borderColor: active ? 'rgba(255,255,255,0.4)' : 'transparent' },
-                  ]}
-                >
-                  <View style={[s.periodPillLabelRow, { flexDirection: rowDir }]}>
-                    {pillItem.net === 0
-                      ? <Ionicons name="remove" size={12} color="rgba(255,255,255,0.72)" />
-                      : <FinancialDirectionMark kind={pillItem.net > 0 ? 'income' : 'expense'} color="rgba(255,255,255,0.84)" size={12} lang={cfg.lang} />}
-                    <Text style={{ color: 'rgba(255,255,255,0.82)', fontSize: 10, ...weight('800'), textAlign: 'center' }} numberOfLines={1}>
-                      {pillLabel}
-                    </Text>
-                  </View>
-                  <Text style={{ color: th.onPrimary, fontSize: 11, ...weight('900'), textAlign: 'center', writingDirection: 'ltr', opacity: active ? 1 : 0.84 }} numberOfLines={1}>
-                    {moneyText(`${pillItem.net > 0 ? '+' : pillItem.net < 0 ? '-' : ''}${fmt(Math.abs(pillItem.net))}`)}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <View style={[s.heroRule, { backgroundColor: th.primary }]} />
+          <Text style={[s.heroMeta, { color: th.sub, textAlign: align }]}>
+            {walletRows.length > 1
+              ? `${C.walletSummary} ${walletRows.length} ${C.walletsWord}`
+              : (isAr ? 'متاح للاستخدام الآن' : 'Available to use now')}
+          </Text>
+          <TouchableOpacity
+            onPress={() => onOpenTab('wallets')}
+            style={[s.heroWalletLink, { flexDirection: rowDir }]}
+            accessibilityRole="button"
+            accessibilityLabel={isAr ? 'فتح المحافظ' : 'Open wallets'}
+          >
+            <Ionicons name="wallet-outline" size={15} color={th.primary} />
+            <Text style={[s.heroWalletLinkText, { color: th.primary }]}>{C.walletsTitle}</Text>
+            <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={15} color={th.primary} />
+          </TouchableOpacity>
         </View>
         ) : null}
 
-        {renderWalletStrip()}
-        {renderWalletPanel()}
+        {renderQuickEntry()}
 
         {visibleHomeCards.length > 0 ? (
         <View style={s.monthMetricsBlock}>
@@ -1333,31 +1379,7 @@ export default function HomeScreen({
           </View>
         </View>
         ) : null}
-        {cfg.entryMode === 'quick' ? (
-          <View style={[s.quickEntry, s.quickEntrySurface, { backgroundColor: th.card, borderColor: th.border }]}>
-            <View style={[s.quickEntryHead, { flexDirection: rowDir }]}>
-              <View style={[s.quickEntryHeadIcon, { backgroundColor: th.primSoft }]}>
-                <Ionicons name="add" size={18} color={th.primary} />
-              </View>
-              <Text style={[s.quickEntryTitle, { color: th.text, textAlign: align }]}>{C.quickActions}</Text>
-            </View>
-            <View style={[s.quickEntryRow, { flexDirection: rowDir }]}>
-              {orderedQuickEntryActions.map(action => (
-                <TouchableOpacity key={action.key} onPress={action.onPress} style={s.quickEntryAction}>
-                  <View style={[s.quickEntryIcon, { backgroundColor: `${action.color}18`, borderColor: `${action.color}44` }]}>
-                    {action.direction
-                      ? <FinancialDirectionMark kind={action.direction} color={action.color} size={20} lang={cfg.lang} />
-                      : <Ionicons name={action.icon} size={18} color={action.color} />}
-                  </View>
-                  <Text numberOfLines={1} adjustsFontSizeToFit style={[s.quickEntryLabel, { color: th.text }]}>
-                    {action.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        ) : null}
-
+        {renderWalletStrip()}
         {orderedHomeSections.map(renderHomeSection)}
       </ScrollView>
 
@@ -1399,35 +1421,32 @@ const s = StyleSheet.create({
   notifyBadge:  { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, position: 'absolute', top: -4, right: -4 },
   brandLockup:  { flexDirection: 'row', alignItems: 'center' },
 
-  headerIconBtn: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   profileButton: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   profileAvatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' },
   profileAvatarImage: { width: '100%', height: '100%', borderRadius: 16 },
-  walletPopupOverlay: { flex: 1, justifyContent: 'flex-end' },
-  walletPopup: { maxHeight: '78%', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, padding: 16, paddingBottom: 24 },
-  walletPopupHead: { alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10 },
-  walletPopupTitle: { flex: 1, fontSize: 16, lineHeight: 22, ...weight('900') },
   profileStatus: { width: 9, height: 9, borderRadius: 5, borderWidth: 2, position: 'absolute', bottom: -1, right: -1 },
 
 
 
   brandTitle:   { fontSize: 23, lineHeight: 28, ...weight('900'), letterSpacing: 0 },
-  hero:         { borderRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 14, marginBottom: 12, ...SHADOW.card },
+  homeGreeting: { marginBottom: 14, paddingHorizontal: 2 },
+  homeGreetingTitle: { fontSize: 23, lineHeight: 30, ...weight('900') },
+  homeGreetingBody: { fontSize: 12, lineHeight: 18, ...weight('700'), marginTop: 3 },
+  hero:         { borderRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 14, paddingTop: 14, paddingBottom: 12, marginBottom: 12, ...SHADOW.card },
   heroTop:      { alignItems: 'flex-start', gap: 8 },
   heroLabelRow: { alignItems: 'center', gap: 7 },
   heroLabel:    { fontSize: TYPE.meta, lineHeight: 17, ...weight('900') },
   heroVisibilityBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  heroAmount:   { fontSize: 29, lineHeight: 36, ...weight('900'), marginTop: 3 },
-  heroTools:    { alignItems: 'center', gap: 6 },
-  heroIconBtn:  { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  periodPillRow: { flexDirection: 'row', gap: 6, marginTop: 12 },
-  periodPill:   { flex: 1, minHeight: 48, borderRadius: RADIUS.pill, borderWidth: 1, paddingVertical: 6, paddingHorizontal: 4, justifyContent: 'center', gap: 1 },
-  periodPillLabelRow:{ alignItems: 'center', justifyContent: 'center', gap: 4 },
+  heroAmount:   { fontSize: 30, lineHeight: 38, ...weight('900'), marginTop: 3 },
+  heroRule:     { height: 4, borderRadius: 2, marginTop: 14 },
+  heroMeta:     { fontSize: 10, lineHeight: 15, ...weight('800'), marginTop: 8 },
+  heroWalletLink: { alignSelf: 'flex-start', minHeight: 34, alignItems: 'center', gap: 5, marginTop: 5, paddingVertical: 4 },
+  heroWalletLinkText: { fontSize: 11, lineHeight: 16, ...weight('900') },
   heroFact:     { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 54, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   factDivider:  { width: 1, height: 30 },
   quickEntry:   { marginBottom: 14 },
   quickEntrySurface:{ borderWidth: 1, borderRadius: RADIUS.lg, padding: 10 },
-  quickEntryHead:{ minHeight: 32, alignItems: 'center', gap: 8, marginBottom: 7 },
+  quickEntryHead:{ minHeight: 40, alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6, paddingHorizontal: 2 },
   quickEntryHeadIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   quickEntryTitle:{ flex: 1, fontSize: 14, lineHeight: 19, ...weight('900') },
   quickEntryRow: { alignItems: 'stretch', justifyContent: 'space-between', gap: 7 },
@@ -1439,6 +1458,11 @@ const s = StyleSheet.create({
   walletStripHead: { minHeight: 40, alignItems: 'center', marginBottom: 6 },
   walletStripLink: { minHeight: 40, minWidth: 64, alignItems: 'center', justifyContent: 'center' },
   walletStripCard: { minHeight: 112, borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 9, paddingVertical: 9, justifyContent: 'space-between', gap: 3 },
+  walletStripGrid: { gap: 8 },
+  walletStripGridCard: { flex: 1, flexBasis: 0, minWidth: 0 },
+  walletStripSoloCard: { minHeight: 78, alignItems: 'center', justifyContent: 'space-between', gap: 14, paddingHorizontal: 13, paddingVertical: 11 },
+  walletStripSoloIdentity: { flex: 1, minWidth: 0, alignItems: 'center', gap: 9 },
+  walletStripSoloIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   walletStripIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginVertical: 1 },
   walletStripDots: { alignItems: 'center', justifyContent: 'center', gap: 5, marginTop: 8 },
   walletStripDot: { width: 6, height: 6, borderRadius: 3 },
@@ -1497,9 +1521,13 @@ const s = StyleSheet.create({
   savingEmpty:{ minHeight: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   sectionTitle: { fontSize: 12, ...weight('900'), marginBottom: 8, marginTop: 4 },
   row:          { minHeight: 58, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: RADIUS.lg, borderWidth: 1, marginBottom: 6, gap: 8 },
-  recentHead:   { minHeight: 44, alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  recentPanel:  { borderRadius: RADIUS.lg, borderWidth: 1, padding: 11, marginTop: 4, marginBottom: 10 },
+  recentHead:   { minHeight: 32, alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  recentHeadTitle:{ flex: 1, alignItems: 'center', gap: 8, minWidth: 0 },
+  recentHeadIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   recentTitle:  { flex: 1, fontSize: 14, lineHeight: 20, ...weight('900') },
-  recentAllLink:{ minHeight: 40, minWidth: 92, alignItems: 'center', justifyContent: 'center' },
+  recentCount:  { minWidth: 25, height: 25, borderRadius: 13, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  recentAllLink:{ minHeight: 42, borderRadius: RADIUS.md, borderWidth: 1, marginTop: 8, marginBottom: 2, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12 },
   recentList:   { borderRadius: RADIUS.lg, borderWidth: 1, overflow: 'hidden' },
   recentRow:    { borderWidth: 0, borderRadius: 0, marginBottom: 0, paddingVertical: 9 },
   rowShell:     { width: '100%', alignItems: 'center', gap: 8 },

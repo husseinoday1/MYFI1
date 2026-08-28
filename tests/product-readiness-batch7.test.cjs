@@ -25,7 +25,9 @@ assert.equal(history.includes('historyEyebrow'), false, 'History must not show a
 // Privacy is visible in Essentials, not an extra blocking screen.
 assert(onboarding.includes('LanguagePicker') && onboarding.includes('WelcomeSlide') && onboarding.includes('PERSONALIZATION_QUESTIONS') && onboarding.includes('PersonalizationSlide') && onboarding.includes('EssentialsSlide'), 'Onboarding must implement the language choice inside welcome, three personalization questions, and financial essentials');
 assert(onboarding.includes('const WELCOME_STEP = 0;') && onboarding.includes('const QUESTION_START_STEP = 1;') && onboarding.includes('const STEP_COUNT = ESSENTIALS_STEP + 1;') && onboarding.includes('step >= QUESTION_START_STEP && step < ESSENTIALS_STEP'), 'Onboarding must expose exactly three questionnaire steps inside the five-step flow after welcome');
-assert(onboarding.includes('languageConfirmed') && onboarding.includes("langMode: 'manual'"), 'The welcome language selection must require confirmation and persist as a whole-app preference');
+assert(!onboarding.includes('languageConfirmed'), 'The welcome language toggle must not require an early confirmation gate');
+assert(onboarding.includes("langMode: 'manual'") && /finish = async[\s\S]*?langMode: 'manual'/.test(onboarding), 'The welcome language selection must persist as a whole-app preference when onboarding finishes');
+assert(onboarding.includes('accessibilityRole="radio"'), 'The welcome language toggle must keep radio accessibility semantics');
 assert(onboarding.includes('modulesForPersonalization') && onboarding.includes('onboardingPersonalization: answers'), 'Onboarding answers must configure supported modules instead of acting as decorative profile labels');
 assert(onboarding.includes("multiple: true") && onboarding.includes("accessibilityRole={question.multiple ? 'checkbox' : 'radio'}") && onboarding.includes('onboardingPriorities: focusPriorities'), 'The complementary goals question must allow one or more selections and persist every selected priority');
 assert.equal(onboarding.includes("id: 'detail'"), false, 'Onboarding must not ask the ambiguous detail-level question');

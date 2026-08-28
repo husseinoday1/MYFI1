@@ -1,160 +1,146 @@
-import React, { useMemo } from 'react';
-import { Text, View } from 'react-native';
+import React from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useStore } from '../store/useStore';
 import { useTheme } from '../lib/useTheme';
-import { formatMoneyNumber } from '../lib/money';
-import { filterByActiveScope } from '../lib/modules';
-import {
-  getDefaultWalletId,
-  getWalletAvailableBalances,
-  getWalletBaseAvailableTotal,
-} from '../lib/wallets';
-import { getBudgetRows, getBudgetSummary } from '../lib/budgets';
-import { CAT_COLORS } from '../lib/constants';
-import { ScreenScroll, PageIntro, SectionTitle, Touchable, rowDirection } from '../components/AppPrimitives';
-import { GatewayCard } from '../components/GatewayCard';
+import { ScreenScroll, SectionTitle, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
+import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 
-// Gateway 3/4 accent tones aren't covered by any semantic financial token
-// (those are reserved for income/expense/transfer/warning/danger). Per
-// user direction (2026-08-26): prefer the app's existing/current colors
-// over importing new ones from the not-yet-applied token-catalog muted
-// palette. Reused here from CAT_COLORS — the same 12-hue category palette
-// already live throughout the app (Follow-ups, budgets, etc.) — rather
-// than the catalog's new "target" recommendations (#8D7CB8/#C99860), which
-// aren't used anywhere else in the app today.
-const BUDGET_TONE = CAT_COLORS[6]; // '#a78bfa' — existing purple, already used for a category
-const REPORTS_TONE = CAT_COLORS[2]; // '#f6ad55' — existing orange, already used for a category
-
-// My Money hub — a thin router. Per docs/design/07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md
-// "My Money": four numbered gateway cards, nothing else at this level. Each
-// card's live value is computed from data already surfaced elsewhere (Home's
-// wallet balances, the existing budgets lib, History/Reports screens) — this
-// screen adds no new financial calculation, only display.
+// My Money is a calm navigation hub. Wallet management remains available in
+// existing flows, but it is intentionally not promoted here until it has a
+// clearer job than the user's actual workflow (record, plan, understand).
 export default function MyMoneyScreen({
-  onOpenWallets,
   onOpenHistory,
   onOpenBudget,
   onOpenReports,
-  onTransfer,
   onAddTransaction,
 }) {
-  const { th, lang, cfg, isAr } = useTheme();
-  const { trans, wallets, cats } = useStore();
-
-  const walletsValue = useMemo(() => {
-    const scoped = filterByActiveScope(wallets, cfg);
-    const source = scoped.length ? scoped : wallets;
-    const defaultId = getDefaultWalletId(source, cfg.currency, cfg.defaultWalletId);
-    const rows = getWalletAvailableBalances(source, trans, cfg.currency, defaultId);
-    const total = getWalletBaseAvailableTotal(rows, cfg.currency);
-    return `${formatMoneyNumber(total, cfg.currency, cfg.lang)} ${cfg.currency}`;
-  }, [wallets, trans, cfg.activeScope, cfg.profileType, cfg.currency, cfg.defaultWalletId, cfg.lang]);
-
-  const walletsCount = useMemo(() => {
-    const scoped = filterByActiveScope(wallets, cfg);
-    return (scoped.length ? scoped : wallets).length;
-  }, [wallets, cfg.activeScope, cfg.profileType]);
-
-  const historyCount = useMemo(() => filterByActiveScope(trans, cfg).length, [trans, cfg.activeScope, cfg.profileType]);
-
-  const budgetSummary = useMemo(() => {
-    const now = new Date();
-    const scoped = filterByActiveScope(trans, cfg);
-    const rows = getBudgetRows(scoped, cats, cfg.categoryBudgetsByMonth || {}, now, cfg.categoryBudgets || {});
-    return getBudgetSummary(rows);
-  }, [trans, cats, cfg.categoryBudgetsByMonth, cfg.categoryBudgets, cfg.activeScope, cfg.profileType]);
-
-  const money = (v) => `${formatMoneyNumber(v, cfg.currency, cfg.lang)} ${cfg.currency}`;
+  const { th, lang, isAr } = useTheme();
+  const gateways = [
+    {
+      key: 'history',
+      icon: 'receipt-outline',
+      title: isAr ? 'الحركات والسجل' : 'Transactions & History',
+      description: isAr ? 'أضف، ابحث، وعدّل حركاتك' : 'Add, search, and edit your transactions',
+      onPress: onOpenHistory,
+    },
+    {
+      key: 'budget',
+      icon: 'calendar-outline',
+      title: isAr ? 'الخطة والميزانية' : 'Plan & Budget',
+      description: isAr ? 'ضع خطتك وتابع ما صُرف منها' : 'Set your plan and follow what you spend',
+      onPress: onOpenBudget,
+    },
+    {
+      key: 'reports',
+      icon: 'bar-chart-outline',
+      title: isAr ? 'التقارير' : 'Reports',
+      description: isAr ? 'افهم دخلك وصرفك واتخذ قرارك' : 'Understand your money and decide clearly',
+      onPress: onOpenReports,
+    },
+  ];
 
   return (
     <ScreenScroll th={th}>
-      <PageIntro
-        th={th}
-        lang={lang}
-        icon="wallet-outline"
-        title={isAr ? 'أموالي' : 'My Money'}
-        subtitle={isAr ? 'نظرة سريعة على وضعك المالي' : 'A quick look at your financial status'}
-      />
-
-      <SectionTitle th={th} lang={lang}>{isAr ? 'البوابات' : 'Gateways'}</SectionTitle>
-      <View style={{ gap: 10 }}>
-        <GatewayCard
-          th={th}
-          lang={lang}
-          index={1}
-          tone={th.transfer}
-          icon="wallet-outline"
-          title={isAr ? 'المحافظ والحسابات' : 'Wallets & Accounts'}
-          value={walletsValue}
-          meta={isAr ? 'إجمالي الأرصدة' : 'Total balance'}
-          linkLabel={isAr ? 'عرض المحافظ' : 'View wallets'}
-          onPress={onOpenWallets}
-        />
-        <GatewayCard
-          th={th}
-          lang={lang}
-          index={2}
-          tone={th.primary}
-          icon="swap-horizontal-outline"
-          title={isAr ? 'الحركات والسجل' : 'Transactions & History'}
-          value={isAr ? `${historyCount} حركة هذا الشهر` : `${historyCount} transactions`}
-          linkLabel={isAr ? 'عرض السجل' : 'View history'}
-          onPress={onOpenHistory}
-        />
-        <GatewayCard
-          th={th}
-          lang={lang}
-          index={3}
-          tone={BUDGET_TONE}
-          icon="pie-chart-outline"
-          title={isAr ? 'الخطة والميزانية' : 'Plan & Budget'}
-          value={budgetSummary.limit > 0 ? money(budgetSummary.remaining) : (isAr ? 'لا توجد ميزانية بعد' : 'No budget set yet')}
-          meta={budgetSummary.limit > 0
-            ? (isAr ? `الميزانية ${money(budgetSummary.limit)} · المصروف ${money(budgetSummary.spent)}` : `Budget ${money(budgetSummary.limit)} · Spent ${money(budgetSummary.spent)}`)
-            : null}
-          linkLabel={isAr ? 'فتح الخطة والميزانية' : 'Open Plan & Budget'}
-          onPress={onOpenBudget}
-        />
-        <GatewayCard
-          th={th}
-          lang={lang}
-          index={4}
-          tone={REPORTS_TONE}
-          icon="bar-chart-outline"
-          title={isAr ? 'التقارير والتحليلات' : 'Reports & Analytics'}
-          meta={isAr ? 'افهم أموالك عبر الوقت' : 'Understand your money over time'}
-          linkLabel={isAr ? 'عرض التقارير' : 'View reports'}
-          onPress={onOpenReports}
-        />
+      <View style={s.pageHeading}>
+        <Text style={[s.pageTitle, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'أموالي' : 'My Money'}</Text>
+        <Text style={[s.pageSubtitle, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'سجّل أموالك، نظّم خطتك، وافهمها بوضوح' : 'Record, plan, and understand your money clearly'}</Text>
       </View>
 
-      <SectionTitle th={th} lang={lang}>{isAr ? 'اختصارات سريعة' : 'Quick shortcuts'}</SectionTitle>
-      <View style={{ flexDirection: rowDirection(lang), gap: 8 }}>
-        <QuickShortcut th={th} icon="swap-horizontal-outline" tone={th.transfer} label={isAr ? 'تحويل' : 'Transfer'} onPress={onTransfer} />
-        <QuickShortcut th={th} icon="add-circle-outline" tone={th.primary} label={isAr ? 'إضافة حركة' : 'Add transaction'} onPress={onAddTransaction} />
-        <QuickShortcut th={th} icon="calendar-outline" tone={BUDGET_TONE} label={isAr ? 'ميزانية جديدة' : 'New budget'} onPress={onOpenBudget} />
-        <QuickShortcut th={th} icon="stats-chart-outline" tone={REPORTS_TONE} label={isAr ? 'تقرير سريع' : 'Quick report'} onPress={onOpenReports} />
+      <View style={s.gatewayList}>
+        {gateways.map((gateway) => (
+          <MoneyGateway key={gateway.key} th={th} lang={lang} {...gateway} />
+        ))}
+      </View>
+
+      <SectionTitle th={th} lang={lang}>{isAr ? 'اختصار سريع' : 'Quick shortcut'}</SectionTitle>
+      <View style={[s.shortcuts, { flexDirection: rowDirection(lang) }]}>
+        <QuickShortcut th={th} icon="add" label={isAr ? 'إضافة حركة' : 'Add transaction'} onPress={onAddTransaction} />
+        <QuickShortcut th={th} icon="calendar-outline" label={isAr ? 'الخطة والميزانية' : 'Plan & Budget'} onPress={onOpenBudget} />
       </View>
     </ScreenScroll>
   );
 }
 
-function QuickShortcut({ th, icon, tone, label, onPress }) {
+const s = StyleSheet.create({
+  pageHeading: { marginTop: 4, marginBottom: SPACE.xl },
+  pageTitle: { fontSize: 27, lineHeight: 34, ...weight('900') },
+  pageSubtitle: { fontSize: 13, lineHeight: 20, ...weight('700'), marginTop: 5 },
+  gatewayList: { gap: SPACE.md },
+  gateway: {
+    minHeight: 96,
+    borderRadius: RADIUS.xl,
+    borderWidth: 1,
+    padding: SPACE.lg,
+    alignItems: 'center',
+    gap: SPACE.md,
+    ...SHADOW.card,
+  },
+  gatewayIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: RADIUS.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gatewayText: { flex: 1, gap: 3 },
+  gatewayTitle: { fontSize: 16, lineHeight: 22, ...weight('900') },
+  gatewayDescription: { fontSize: 12, lineHeight: 18, ...weight('700') },
+  shortcuts: { gap: SPACE.md },
+  shortcut: {
+    flex: 1,
+    minHeight: 88,
+    borderRadius: RADIUS.xl,
+    borderWidth: 1,
+    padding: SPACE.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    ...SHADOW.card,
+  },
+  shortcutIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shortcutLabel: { fontSize: 12, lineHeight: 17, ...weight('900'), textAlign: 'center' },
+});
+
+function MoneyGateway({ th, lang, icon, title, description, onPress }) {
+  const isAr = lang === 'ar';
   return (
     <Touchable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityHint={description}
       onPress={onPress}
-      style={{
-        flex: 1,
-        alignItems: 'center',
-        gap: 6,
-        paddingVertical: 12,
-        borderRadius: 14,
-        backgroundColor: th.cardHigh,
-      }}
+      style={[s.gateway, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDirection(lang) }]}
     >
-      <Ionicons name={icon} size={20} color={tone} />
-      <Text style={{ color: th.text, fontSize: 10, fontWeight: '900', textAlign: 'center' }} numberOfLines={1}>{label}</Text>
+      <View style={[s.gatewayIcon, { backgroundColor: th.primSoft }]}>
+        <Ionicons name={icon} size={22} color={th.primary} />
+      </View>
+      <View style={s.gatewayText}>
+        <Text style={[s.gatewayTitle, { color: th.text, textAlign: textAlign(lang) }]}>{title}</Text>
+        <Text style={[s.gatewayDescription, { color: th.sub, textAlign: textAlign(lang) }]}>{description}</Text>
+      </View>
+      <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={20} color={th.faint} />
+    </Touchable>
+  );
+}
+
+function QuickShortcut({ th, icon, label, onPress }) {
+  return (
+    <Touchable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={[s.shortcut, { backgroundColor: th.card, borderColor: th.border }]}
+    >
+      <View style={[s.shortcutIcon, { backgroundColor: th.primSoft }]}>
+        <Ionicons name={icon} size={18} color={th.primary} />
+      </View>
+      <Text style={[s.shortcutLabel, { color: th.text }]} numberOfLines={1}>{label}</Text>
     </Touchable>
   );
 }
