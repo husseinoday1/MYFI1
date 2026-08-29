@@ -19,11 +19,11 @@ presentation/navigation/UX-contract only.
 - **Purpose / user question answered:** first-run setup; "what is this app
   and can I trust it with my money."
 - **Approved structure (revised 2026-08-28):** exact 5 steps — Welcome with
-  a compact AR/EN language choice directly below its copy → three
+  a compact AR/EN language toggle on the top side of the header → three
   personalization questions (the goals question is multi-select) → Essentials
   and start. The language selection changes onboarding copy and RTL/LTR
-  immediately, then persists as the app-wide preference. The privacy
-  note appears within Essentials and does not create a separate step.
+  immediately, then persists as the app-wide preference. A concise base-currency
+  rule appears within Essentials and does not create a separate step.
 - **Required sections:** per-step content defined in
   `14_MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md` (REF-02/03/03B/03D/03C/03E).
 - **Navigation entry/exit:** entry = first app launch (new install); exit =
@@ -108,32 +108,30 @@ presentation/navigation/UX-contract only.
 
 - **Purpose / user question answered:** "Give me a structured view into all
   of my money" — a hub, not a flat screen.
-- **Approved structure:** four numbered gateway cards — 1) Wallets &
-  Accounts, 2) Transactions & History, 3) Plan & Budget, 4) Reports &
-  Analytics — each with a live summary stat and a named link opening a full
-  destination; a "Quick shortcuts" row beneath (Transfer, Add transaction,
-  New budget, Quick report).
-- **Required sections:** the four gateway cards; nothing else at this
-  level — detail lives in each gateway's own destination (below).
+- **Approved structure (revised 2026-08-29 by Product Owner):** five
+  gateways — 1) Transactions & History, 2) Plan & Budget, 3) Income
+  allocation plan, 4) Reports, 5) MYFI Basira. Each opens one real
+  destination; Transfer stays a direct money action, not a sixth gateway.
+  Wallet management is intentionally in More, where it has the distinct job
+  of creating, editing, removing, and selecting money sources.
+- **Required sections:** the five gateway cards; nothing else at this
+  level — detail lives in each gateway's own destination.
 - **Navigation entry/exit:** primary tab; each card opens a full-screen
   secondary destination (per the View→Page navigation rule).
 - **Primary actions:** open a gateway.
-- **Secondary actions:** the quick-shortcuts row.
-- **Quick Add behavior:** the quick-shortcuts row includes "Add
-  transaction," using the same global Add Method setting as Home.
+- **Secondary actions:** none. Direct monetary actions retain their existing
+  contextual entry points rather than duplicating the five gateways.
 - **Empty/loading/error:** per `11_MYFI_SYSTEM_STATES_AND_FEEDBACK.md`;
   specifics **UNKNOWN** since this screen does not exist in code yet.
 - **Light/Dark:** only Light shown in the approved reference — Dark for
   this new screen is **UNKNOWN**, must follow the structural-parity rule.
 - **RTL:** must inherit `src/lib/layout.js`, not reinvent.
 - **Accessibility:** not evaluated (new screen).
-- **Reusable components:** new `GatewayCard` composite (no current
-  equivalent — see `05_MYFI_COMPONENT_ARCHITECTURE.md`).
-- **Reusable business logic:** wallet balances (currently on Home),
-  History/Reports screens as destinations.
-- **Known implementation gap:** this screen **does not exist** in code
-  today — it is a net-new build, though it substantially assembles existing
-  screens/data rather than inventing new logic.
+- **Reusable components:** `MoneyGateway` composite in `MyMoneyScreen.js`.
+- **Reusable business logic:** History/Reports screens and existing budget
+  data as destinations.
+- **Known implementation state:** `MyMoneyScreen.js` is a thin, vertical
+  drill-through hub. It does not calculate or introduce financial data.
 - **Expo/device validation items:** entire layout is unvalidated on device.
 - **Future/conditional items:** external bank/card-aggregation linkage is
   explicitly FUTURE/CONDITIONAL for the Wallets & Accounts gateway — the
@@ -141,25 +139,27 @@ presentation/navigation/UX-contract only.
 
 ---
 
-## Wallets & Accounts (My Money gateway 1)
+## Wallets & Accounts (More tool)
 
 - **Purpose:** "What do I have, and where?"
 - **Approved structure:** total balance; per-wallet list (name, icon,
   balance); a separate section for linked bank accounts **only if/when that
   capability is approved** — currently FUTURE/CONDITIONAL, not built.
-- **Navigation entry/exit:** from My Money card 1; full page.
-- **Primary actions:** view a wallet's detail (**UNKNOWN** exact target
-  screen — not confirmed to exist separately from this list view).
+- **Navigation entry/exit:** from More → My tools; a compact selection strip
+  remains below Home's Available balance.
+- **Primary actions:** add, edit, delete when safe, and choose the default
+  wallet. Deletion must refuse the final wallet and wallets with financial
+  history.
 - **Reusable components:** `WalletBalanceCard`.
 - **Reusable business logic:** wallet data already surfaced on Home today.
-- **Known implementation gap:** whole screen is new; wallet-detail drill-down
-  target is **UNKNOWN**.
+- **Known implementation state:** the management page uses the existing
+  management slice; it must never mutate a posted balance directly.
 - **Future/conditional items:** external bank/card linkage.
 - **Financial-data impact:** NONE (display of existing wallet balances only).
 
 ---
 
-## Transactions & History (My Money gateway 2)
+## Transactions & History (My Money gateway 1)
 
 - **Purpose:** "Show me everything that happened."
 - **Approved structure:** filter tabs (All/Transfer/Income/Expense), search,
@@ -176,7 +176,7 @@ presentation/navigation/UX-contract only.
 
 ---
 
-## Plan & Budget (My Money gateway 3)
+## Plan & Budget (My Money gateway 2)
 
 - **Purpose:** "Am I on track this month?"
 - **Approved structure:** month selector; donut chart (budget vs. spent vs.
@@ -197,12 +197,27 @@ presentation/navigation/UX-contract only.
 
 ---
 
+## Income allocation plan (My Money gateway 3)
+
+- **Purpose:** "How should I divide this month's income, and how did reality
+  compare?"
+- **Approved structure:** saved, editable allocation strategy with amounts
+  derived from the user's net income and a later plan-versus-actual reading.
+  It is not a decorative 50/30/20 calculator.
+- **Navigation entry/exit:** from My Money card 3; no duplicate More row.
+- **Financial-data impact:** a separate, saved plan contract is required
+  before an actual/plan result is shown.
+
+---
+
 ## Reports & Analytics (My Money gateway 4)
 
 - **Purpose:** "Help me understand my money over time."
-- **Approved structure:** full report taxonomy per
-  `10_MYFI_CHART_AND_FINANCIAL_VISUALIZATION_SYSTEM.md` — not reduced to a
-  summary card.
+- **Approved structure (revised 2026-08-28):** title → compact selected
+  period → overview/spending/income/dues tabs → headline summary → top
+  spending categories → optional additional details. The full report
+  taxonomy remains available through progressive disclosure; it is not
+  reduced to a summary card.
 - **Navigation entry/exit:** from My Money card 4; remains a full dedicated
   destination once opened.
 - **Reusable components/logic:** `ReportsScreen.js` (2,211 lines, active,
@@ -214,13 +229,27 @@ presentation/navigation/UX-contract only.
 
 ---
 
+## MYFI Basira (My Money gateway 5)
+
+- **Purpose:** "What changed in my money, why, and what should I inspect?"
+- **Approved structure:** advanced analytical space, initially powered by
+  deterministic local evidence. Any external AI use requires explicit consent
+  before financial data leaves the device, and every conclusion links to its
+  underlying movements.
+- **Navigation entry/exit:** from My Money card 5; no duplicate More row.
+- **Financial-data impact:** analysis only until an approved data/consent
+  contract exists.
+
+---
+
 ## Follow-ups
 
 - **Purpose:** "What do I need to act on or keep track of?"
-- **Approved structure:** summary strip (5 live counters); Quick Add row
-  (Debt/Receivable/Commitment/Goal); "Needs attention" list; quick-summary
-  4-stat grid; 6 main sections (Debts & Receivables, Commitments,
-  Installments, Subscriptions, Goals & Savings, **Payment History**).
+- **Approved structure:** one data-backed three-metric summary, an Add
+  follow-up action, five type gateways (Debts & Receivables, Commitments,
+  Installments, Subscriptions, Goals & Savings), then **Payment History**.
+  Important alerts appear only on Home and link back into their owning
+  follow-up type.
 - **Navigation entry/exit:** primary tab.
 - **Primary actions:** Quick Add (Debt/Receivable/Commitment/Goal per the
   global Add Method setting); open a section.

@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/useTheme';
-import { ScreenScroll, SectionTitle, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
+import { ScreenScroll, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
 import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 
 // My Money is a calm navigation hub. Wallet management remains available in
@@ -12,13 +12,15 @@ export default function MyMoneyScreen({
   onOpenHistory,
   onOpenBudget,
   onOpenReports,
-  onAddTransaction,
+  onOpenBasira,
+  onOpenIncomeAllocation,
 }) {
   const { th, lang, isAr } = useTheme();
   const gateways = [
     {
       key: 'history',
       icon: 'receipt-outline',
+      tone: th.primary,
       title: isAr ? 'الحركات والسجل' : 'Transactions & History',
       description: isAr ? 'أضف، ابحث، وعدّل حركاتك' : 'Add, search, and edit your transactions',
       onPress: onOpenHistory,
@@ -26,6 +28,7 @@ export default function MyMoneyScreen({
     {
       key: 'budget',
       icon: 'calendar-outline',
+      tone: th.warn,
       title: isAr ? 'الخطة والميزانية' : 'Plan & Budget',
       description: isAr ? 'ضع خطتك وتابع ما صُرف منها' : 'Set your plan and follow what you spend',
       onPress: onOpenBudget,
@@ -33,9 +36,26 @@ export default function MyMoneyScreen({
     {
       key: 'reports',
       icon: 'bar-chart-outline',
+      tone: th.inc,
       title: isAr ? 'التقارير' : 'Reports',
       description: isAr ? 'افهم دخلك وصرفك واتخذ قرارك' : 'Understand your money and decide clearly',
       onPress: onOpenReports,
+    },
+    {
+      key: 'basira',
+      icon: 'sparkles-outline',
+      tone: th.primary,
+      title: isAr ? 'بصيرة MYFI' : 'MYFI Basira',
+      description: isAr ? 'اكتشف ما تغيّر ولماذا من بياناتك الفعلية' : 'Discover what changed and why from your real data',
+      onPress: onOpenBasira,
+    },
+    {
+      key: 'allocation',
+      icon: 'pie-chart-outline',
+      tone: th.transfer,
+      title: isAr ? 'خطة توزيع الدخل' : 'Income allocation plan',
+      description: isAr ? 'حوّل نسبك إلى مبالغ وقارن الخطة بالواقع' : 'Turn percentages into amounts and compare plan with reality',
+      onPress: onOpenIncomeAllocation,
     },
   ];
 
@@ -46,16 +66,10 @@ export default function MyMoneyScreen({
         <Text style={[s.pageSubtitle, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'سجّل أموالك، نظّم خطتك، وافهمها بوضوح' : 'Record, plan, and understand your money clearly'}</Text>
       </View>
 
-      <View style={s.gatewayList}>
-        {gateways.map((gateway) => (
-          <MoneyGateway key={gateway.key} th={th} lang={lang} {...gateway} />
+      <View style={[s.gatewayList, { flexDirection: rowDirection(lang) }]}>
+        {gateways.map(({ key, ...gateway }) => (
+          <MoneyGateway key={key} th={th} lang={lang} {...gateway} />
         ))}
-      </View>
-
-      <SectionTitle th={th} lang={lang}>{isAr ? 'اختصار سريع' : 'Quick shortcut'}</SectionTitle>
-      <View style={[s.shortcuts, { flexDirection: rowDirection(lang) }]}>
-        <QuickShortcut th={th} icon="add" label={isAr ? 'إضافة حركة' : 'Add transaction'} onPress={onAddTransaction} />
-        <QuickShortcut th={th} icon="calendar-outline" label={isAr ? 'الخطة والميزانية' : 'Plan & Budget'} onPress={onOpenBudget} />
       </View>
     </ScreenScroll>
   );
@@ -65,14 +79,15 @@ const s = StyleSheet.create({
   pageHeading: { marginTop: 4, marginBottom: SPACE.xl },
   pageTitle: { fontSize: 27, lineHeight: 34, ...weight('900') },
   pageSubtitle: { fontSize: 13, lineHeight: 20, ...weight('700'), marginTop: 5 },
-  gatewayList: { gap: SPACE.md },
+  gatewayList: { gap: SPACE.md, flexWrap: 'wrap', alignItems: 'stretch' },
   gateway: {
-    minHeight: 96,
+    width: '47.8%',
+    minHeight: 148,
     borderRadius: RADIUS.xl,
     borderWidth: 1,
     padding: SPACE.lg,
-    alignItems: 'center',
-    gap: SPACE.md,
+    justifyContent: 'space-between',
+    gap: SPACE.sm,
     ...SHADOW.card,
   },
   gatewayIcon: {
@@ -83,31 +98,12 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   gatewayText: { flex: 1, gap: 3 },
-  gatewayTitle: { fontSize: 16, lineHeight: 22, ...weight('900') },
-  gatewayDescription: { fontSize: 12, lineHeight: 18, ...weight('700') },
-  shortcuts: { gap: SPACE.md },
-  shortcut: {
-    flex: 1,
-    minHeight: 88,
-    borderRadius: RADIUS.xl,
-    borderWidth: 1,
-    padding: SPACE.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    ...SHADOW.card,
-  },
-  shortcutIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: RADIUS.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shortcutLabel: { fontSize: 12, lineHeight: 17, ...weight('900'), textAlign: 'center' },
+  gatewayTop: { alignItems: 'center', justifyContent: 'space-between' },
+  gatewayTitle: { fontSize: 14, lineHeight: 20, ...weight('900') },
+  gatewayDescription: { fontSize: 10, lineHeight: 16, ...weight('700'), marginTop: 3 },
 });
 
-function MoneyGateway({ th, lang, icon, title, description, onPress }) {
+function MoneyGateway({ th, lang, icon, tone, title, description, onPress }) {
   const isAr = lang === 'ar';
   return (
     <Touchable
@@ -115,32 +111,18 @@ function MoneyGateway({ th, lang, icon, title, description, onPress }) {
       accessibilityLabel={title}
       accessibilityHint={description}
       onPress={onPress}
-      style={[s.gateway, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDirection(lang) }]}
+      style={[s.gateway, { backgroundColor: th.card, borderColor: th.border }]}
     >
-      <View style={[s.gatewayIcon, { backgroundColor: th.primSoft }]}>
-        <Ionicons name={icon} size={22} color={th.primary} />
+      <View style={[s.gatewayTop, { flexDirection: rowDirection(lang) }]}>
+        <View style={[s.gatewayIcon, { backgroundColor: `${tone}18` }]}>
+          <Ionicons name={icon} size={22} color={tone} />
+        </View>
+        <Ionicons name={isAr ? 'arrow-back' : 'arrow-forward'} size={18} color={tone} />
       </View>
       <View style={s.gatewayText}>
         <Text style={[s.gatewayTitle, { color: th.text, textAlign: textAlign(lang) }]}>{title}</Text>
-        <Text style={[s.gatewayDescription, { color: th.sub, textAlign: textAlign(lang) }]}>{description}</Text>
+        <Text style={[s.gatewayDescription, { color: th.sub, textAlign: textAlign(lang) }]} numberOfLines={3}>{description}</Text>
       </View>
-      <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={20} color={th.faint} />
-    </Touchable>
-  );
-}
-
-function QuickShortcut({ th, icon, label, onPress }) {
-  return (
-    <Touchable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={[s.shortcut, { backgroundColor: th.card, borderColor: th.border }]}
-    >
-      <View style={[s.shortcutIcon, { backgroundColor: th.primSoft }]}>
-        <Ionicons name={icon} size={18} color={th.primary} />
-      </View>
-      <Text style={[s.shortcutLabel, { color: th.text }]} numberOfLines={1}>{label}</Text>
     </Touchable>
   );
 }
