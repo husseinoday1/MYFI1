@@ -45,7 +45,7 @@ import {
   removeProfileAvatar,
 } from '../lib/accountIdentity';
 import { getModules } from '../lib/modules';
-import { RADIUS, weight } from '../lib/tokens';
+import { RADIUS, SHADOW, weight } from '../lib/tokens';
 import LegacySettingsScreen from './SettingsLegacyScreen';
 import { PERFORMANCE_TEST_TIERS } from '../dev/performanceTestConfig';
 import { PRODUCT_NAME } from '../lib/productIdentity';
@@ -307,7 +307,7 @@ const editableIdentityName = ({ user, cfg } = {}) => {
   return localName || cleanDisplayName(metadata.full_name || metadata.name || metadata.displayName) || '';
 };
 
-export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest = null }) {
+export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest = null, onExit = () => {} }) {
   const {
     cfg,
     setCfg,
@@ -1073,20 +1073,18 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
         keyboardDismissMode="on-drag"
         contentContainerStyle={s.scrollContent}
       >
+        <PageHeader
+          th={th}
+          isAr={isAr}
+          title={screenTitle}
+          onBack={root ? onExit : goBack}
+        />
         {root ? (
           <View style={s.rootHead}>
             <Text style={[s.brandEyebrow, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>MYFI</Text>
-            <Text style={[s.rootTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{screenTitle}</Text>
             <Text style={[s.rootSubtitle, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'عدّل ما يغيّر تجربتك فعلاً، والباقي يبقى هادئًا.' : 'Change what truly shapes your experience; leave the rest calm.'}</Text>
           </View>
-        ) : (
-          <PageHeader
-            th={th}
-            isAr={isAr}
-            title={screenTitle}
-            onBack={goBack}
-          />
-        )}
+        ) : null}
 
         {root ? (
           <RootSettings

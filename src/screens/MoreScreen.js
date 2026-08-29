@@ -9,8 +9,11 @@ import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 // no decorative settings, placeholder dialogs, or trust claims live here.
 export default function MoreScreen({
   onOpenSettingsPage,
-  onOpenIncomeAllocation,
   onOpenArchive,
+  onOpenWallets,
+  onOpenCategories,
+  onOpenSubscriptions,
+  onOpenBenefits,
 }) {
   const { th, lang, isAr } = useTheme();
   const groups = [
@@ -18,16 +21,42 @@ export default function MoreScreen({
       title: isAr ? 'أدواتي' : 'My tools',
       items: [
         {
-          key: 'income-allocation', icon: 'pie-chart-outline', tone: th.primary,
-          title: isAr ? 'توزيع الدخل' : 'Income allocation',
-          description: isAr ? 'ضع نسبك واحفظ خطة الشهر التي تناسبك' : 'Set your percentages and save the monthly plan that fits you',
-          onPress: onOpenIncomeAllocation,
+          key: 'wallets', icon: 'wallet-outline', tone: th.primary,
+          title: isAr ? 'المحافظ والحسابات' : 'Wallets & accounts',
+          description: isAr ? 'الأرصدة، العملات، والمحفظة الافتراضية' : 'Balances, currencies, and your default wallet',
+          onPress: onOpenWallets,
+        },
+        {
+          key: 'categories', icon: 'pricetags-outline', tone: th.exp,
+          title: isAr ? 'التصنيفات' : 'Categories',
+          description: isAr ? 'نظّم تصنيفات الدخل والمصروف وأضف تصنيفك' : 'Organize income and expense categories and add your own',
+          onPress: onOpenCategories,
         },
         {
           key: 'archive', icon: 'archive-outline', tone: th.sub,
           title: isAr ? 'الأرشيف' : 'Archive',
           description: isAr ? 'الحسابات والفئات والمتابعات المؤرشفة' : 'Archived accounts, categories, and follow-ups',
           onPress: onOpenArchive,
+        },
+      ],
+    },
+    {
+      title: isAr ? 'الوصول السريع' : 'Quick access',
+      items: [{
+        key: 'subscriptions', icon: 'repeat-outline', tone: th.transfer,
+        title: isAr ? 'الاشتراكات' : 'Subscriptions',
+        description: isAr ? 'ما سيتجدد، موعده، وكلفته المتكررة' : 'What renews, when it is due, and its recurring cost',
+        onPress: onOpenSubscriptions,
+      }],
+    },
+    {
+      title: isAr ? 'المزايا' : 'Benefits',
+      items: [
+        {
+          key: 'benefits', icon: 'gift-outline', tone: th.warn,
+          title: isAr ? 'الهدايا والمكافآت' : 'Gifts & rewards',
+          description: isAr ? 'حالة المكافآت والمزايا المتاحة ودعوة الأصدقاء' : 'Reward status, available benefits, and inviting friends',
+          onPress: onOpenBenefits,
         },
       ],
     },
@@ -70,7 +99,7 @@ export default function MoreScreen({
         <View key={group.title}>
           <SectionTitle th={th} lang={lang}>{group.title}</SectionTitle>
           <View style={[s.group, { backgroundColor: th.card, borderColor: th.border }]}>
-            {group.items.map((item, index) => <MoreRow key={item.key} th={th} lang={lang} last={index === group.items.length - 1} {...item} />)}
+            {group.items.map(({ key, ...item }, index) => <MoreRow key={key} th={th} lang={lang} last={index === group.items.length - 1} {...item} />)}
           </View>
         </View>
       ))}

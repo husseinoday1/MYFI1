@@ -35,6 +35,8 @@ import PaymentHistoryScreen from './src/screens/PaymentHistoryScreen';
 import PlanBudgetScreen from './src/screens/PlanBudgetScreen';
 import IncomeAllocationScreen from './src/screens/IncomeAllocationScreen';
 import BasiraScreen from './src/screens/BasiraScreen';
+import CategoriesScreen from './src/screens/CategoriesScreen';
+import BenefitsScreen from './src/screens/BenefitsScreen';
 import AddTransModal from './src/components/AddTransModal';
 import NewItemModal from './src/components/NewItemModal';
 import DraggableFab from './src/components/DraggableFab';
@@ -82,6 +84,7 @@ const SECONDARY_SCREEN_KEYS = [
   'history', 'reports', 'settings', 'wallets', 'budget', 'paymentHistory',
   'incomeAllocation',
   'basira',
+  'categories', 'benefits',
   'followupsAll', 'followupsDebts', 'followupsCommitments', 'followupsInstallments', 'followupsSubscriptions', 'followupsGoals',
 ];
 
@@ -1041,25 +1044,29 @@ function AppRoot() {
     ),
     paymentHistory: <PaymentHistoryScreen />,
     reports: <ReportsScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} onOpenBasira={() => setTab('basira')} onOpenIncomeAllocation={() => setTab('incomeAllocation')} />,
-    settings: <SettingsScreen tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} />,
+    settings: <SettingsScreen tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} onExit={() => setTab(lastHubTab)} />,
     mymoney: (
       <MyMoneyScreen
-        onOpenWallets={() => setTab('wallets')}
         onOpenHistory={() => setTab('history')}
         onOpenBudget={() => setTab('budget')}
         onOpenReports={() => setTab('reports')}
-        onTransfer={openTransfer}
-        onAddTransaction={() => openAddExp(true)}
+        onOpenBasira={() => setTab('basira')}
+        onOpenIncomeAllocation={() => setTab('incomeAllocation')}
       />
     ),
     more: (
       <MoreScreen
         onOpenSettingsPage={openSettingsPage}
-        onOpenIncomeAllocation={() => setTab('incomeAllocation')}
         onOpenArchive={() => setArchiveOpen(true)}
+        onOpenWallets={() => setTab('wallets')}
+        onOpenCategories={() => setTab('categories')}
+        onOpenSubscriptions={() => setTab('followupsSubscriptions')}
+        onOpenBenefits={() => setTab('benefits')}
       />
     ),
     wallets: <WalletsAccountsScreen />,
+    categories: <CategoriesScreen />,
+    benefits: <BenefitsScreen onOpenBasira={() => setTab('basira')} />,
     budget: <PlanBudgetScreen />,
     incomeAllocation: <IncomeAllocationScreen />,
     basira: <BasiraScreen onOpenHistory={() => setTab('history')} onOpenFollowUps={() => setTab('trackers')} />,
@@ -1111,7 +1118,7 @@ function AppRoot() {
             </Text>
           </View>
         ) : null}
-        {isSecondaryScreen ? (
+        {isSecondaryScreen && tab !== 'settings' ? (
           <Pressable
             onPress={() => setTab(lastHubTab)}
             style={[s.backToHubBar, { flexDirection: isRtl ? 'row-reverse' : 'row', borderBottomColor: th.border }]}
