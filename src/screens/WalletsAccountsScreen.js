@@ -1,146 +1,58 @@
-import React, { useState } from 'react';
-import { Alert, Modal, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
 import { useTheme } from '../lib/useTheme';
-import { AppButton, PageIntro, ScreenScroll, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
-import WalletBalanceCard from '../components/WalletBalanceCard';
+import { AppButton, IconContainer, PageIntro, ScreenScroll, SurfaceCard, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
+import { CURRENCIES, getSymbol } from '../lib/constants';
+import { formatMoneyNumber } from '../lib/money';
+import { parseMoneyInput, preserveNumberInputDraft } from '../lib/numberInput';
+import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel, sortWalletsByDefault, walletAmountToBase } from '../lib/wallets';
+import { buildBalanceReconciliationPreview } from '../lib/transactionSemantics';
 import { RADIUS, SPACE, weight } from '../lib/tokens';
 
-// Home only chooses the default source. This page owns wallet management so
-// the same money source is never presented as two competing dashboards.
+const copyFor = ar => ar ? {
+  title:'المحافظ والحسابات', sub:'مصادر أموالك وقيمتها التقريبية وتسوية الرصيد.', add:'إضافة محفظة', name:'اسم المحفظة', currency:'عملة المحفظة', opening:'الرصيد الافتتاحي', default:'الافتراضية', available:'المتاح', estimated:'قيمة تقديرية', rate:'سعر التقييم', update:'تحديث السعر', reconcile:'تسوية الرصيد', actual:'الرصيد الحقيقي الآن', recorded:'الرصيد المسجل', difference:'الفرق', historical:'سعر تاريخي ثابت', note:'ملاحظة اختيارية', review:'مراجعة الفرق', confirm:'تأكيد التسوية', save:'حفظ', cancel:'إلغاء', delete:'حذف المحفظة', invalid:'تحقق من الاسم والمبلغ وسعر الصرف.', rateHint:'سعر التقييم للإجمالي التقريبي فقط؛ لا يغير الحركات الماضية.', historicalHint:'سعر التسوية يثبت مع هذه الحركة لحماية التاريخ، وهو مستقل عن سعر التقييم الحالي.', foreignHint:'هذه المحفظة تبقى بعملتها. كل حركة أجنبية تحفظ سعرها التاريخي الخاص.', deleteHint:'لا يمكن حذف آخر محفظة أو محفظة لها سجل مالي.', currencyHint:'لا يمكن تغيير عملة محفظة لها سجل؛ أنشئ محفظة جديدة بالعملة الأخرى.'
+} : {
+  title:'Wallets & Accounts', sub:'Money sources, estimated value, and balance reconciliation.', add:'Add wallet', name:'Wallet name', currency:'Wallet currency', opening:'Opening balance', default:'Default', available:'Available', estimated:'Estimated value', rate:'Valuation rate', update:'Update rate', reconcile:'Reconcile balance', actual:'Actual balance now', recorded:'Recorded balance', difference:'Difference', historical:'Frozen historical rate', note:'Optional note', review:'Review difference', confirm:'Confirm reconciliation', save:'Save', cancel:'Cancel', delete:'Delete wallet', invalid:'Check the name, amount, and exchange rate.', rateHint:'The valuation rate is for estimated totals only; it never changes past entries.', historicalHint:'This reconciliation rate is frozen with this entry to protect history and is separate from the current valuation rate.', foreignHint:'This wallet stays in its currency. Every foreign entry keeps its own historical rate.', deleteHint:'The last wallet or one with history cannot be deleted.', currencyHint:'A wallet with history cannot change currency; create a new wallet instead.'
+};
+const dateText = (value, lang) => value ? new Intl.DateTimeFormat(lang === 'ar' ? 'ar-IQ' : 'en', { dateStyle:'medium' }).format(new Date(value)) : (lang === 'ar' ? 'لم يُحدّث بعد' : 'Not updated yet');
+
 export default function WalletsAccountsScreen() {
   const { th, lang, cfg, isAr } = useTheme();
-  const { trans, wallets, setCfg, addWallet, editWallet, deleteWallet } = useStore();
-  const [draft, setDraft] = useState(null);
-  const [saving, setSaving] = useState(false);
-
-  const openCreate = () => setDraft({ id: null, name: '', currency: cfg.currency });
-  const openEdit = wallet => setDraft({ id: wallet.id, name: wallet.name || '', currency: wallet.currency || cfg.currency });
-  const closeEditor = () => !saving && setDraft(null);
-  const save = async () => {
-    const name = String(draft?.name || '').trim();
-    if (!name) {
-      Alert.alert(isAr ? 'اكتب اسم المحفظة' : 'Add a wallet name');
-      return;
-    }
+  const { trans, wallets, setCfg, addWallet, editWallet, deleteWallet, reconcileWalletBalance } = useStore();
+  const t = copyFor(isAr), base = String(cfg.currency || 'IQD').toUpperCase();
+  const [editor, setEditor] = useState(null), [rateEdit, setRateEdit] = useState(null), [reconcile, setReconcile] = useState(null), [saving, setSaving] = useState(false);
+  const defaultId = getDefaultWalletId(wallets, base, cfg.defaultWalletId);
+  const rows = useMemo(() => sortWalletsByDefault(getWalletAvailableBalances(wallets, trans, base, defaultId), base, defaultId), [wallets, trans, base, defaultId]);
+  const amount = (value, currency, allowNegative = true) => parseMoneyInput(value, { format:cfg.numberInputFormat, currency, allowNegative });
+  const rate = value => parseMoneyInput(value, { format:cfg.numberInputFormat, fractionDigits:8, allowNegative:false });
+  const create = () => setEditor({ id:null, name:'', currency:base, opening:'', rate:'' });
+  const edit = wallet => setEditor({ id:wallet.id, name:wallet.name || '', currency:wallet.currency, opening:'', rate:String(wallet.valuationRate || '') });
+  const saveWallet = async () => {
+    const name = editor?.name.trim(), foreign = editor.currency !== base;
+    const opening = editor.id ? { ok:true, value:0 } : amount(editor.opening || '0', editor.currency);
+    const valuation = foreign ? rate(editor.rate) : { ok:true, value:1 };
+    if (!name || !opening.ok || !valuation.ok || !(valuation.value > 0)) return Alert.alert('', t.invalid);
     setSaving(true);
-    const result = draft.id
-      ? await editWallet(draft.id, { name, nameEn: name, currency: draft.currency })
-      : await addWallet({ name, nameEn: name, currency: draft.currency });
+    const done = editor.id ? await editWallet(editor.id, { name, nameEn:name, currency:editor.currency, ...(foreign ? { valuationRate:valuation.value } : {}) }) : await addWallet({ name, nameEn:name, currency:editor.currency, openingBalance:opening.value, valuationRate:valuation.value });
     setSaving(false);
-    if (!result) {
-      Alert.alert(
-        isAr ? 'تعذر حفظ المحفظة' : 'Could not save wallet',
-        isAr ? 'لا يمكن تغيير عملة محفظة لها حركات. أنشئ محفظة جديدة للعملة الأخرى.' : 'A wallet with transactions cannot change currency. Create a new wallet for the other currency.',
-      );
-      return;
-    }
-    if (!draft.id && result?.id) await setCfg({ defaultWalletId: result.id });
-    setDraft(null);
+    if (!done) return Alert.alert('', editor.id ? t.currencyHint : t.invalid);
+    if (!editor.id) await setCfg({ defaultWalletId:done.id });
+    setEditor(null);
   };
-  const requestDelete = () => {
-    if (!draft?.id) return;
-    Alert.alert(
-      isAr ? 'حذف المحفظة؟' : 'Delete wallet?',
-      isAr ? 'لا يمكن حذف آخر محفظة أو محفظة مرتبطة بحركات سابقة.' : 'The last wallet or a wallet with transaction history cannot be deleted.',
-      [
-        { text: isAr ? 'إلغاء' : 'Cancel', style: 'cancel' },
-        {
-          text: isAr ? 'حذف' : 'Delete', style: 'destructive', onPress: async () => {
-            const removed = await deleteWallet(draft.id);
-            if (!removed) {
-              Alert.alert(isAr ? 'تعذر الحذف' : 'Could not delete', isAr ? 'احتفظ التطبيق بالمحفظة لحماية السجل المالي.' : 'The wallet was kept to protect financial history.');
-              return;
-            }
-            setDraft(null);
-          },
-        },
-      ],
-    );
-  };
-
-  return (
-    <ScreenScroll th={th}>
-      <PageIntro
-        th={th}
-        lang={lang}
-        icon="wallet-outline"
-        title={isAr ? 'المحافظ والحسابات' : 'Wallets & Accounts'}
-        subtitle={isAr ? 'أنشئ مصادر أموالك ونظّمها واختر الافتراضية' : 'Create and organize your money sources, then choose the default'}
-      />
-      <AppButton th={th} lang={lang} icon="add" label={isAr ? 'إضافة محفظة' : 'Add wallet'} onPress={openCreate} />
-      <Text style={[s.hint, { color: th.sub, textAlign: textAlign(lang) }]}>
-        {isAr ? 'اضغط بطاقة المحفظة لتعيينها افتراضية، وأيقونة القلم للتعديل أو الحذف.' : 'Tap a wallet to make it default; use the pencil to edit or delete it.'}
-      </Text>
-      <WalletBalanceCard
-        wallets={wallets}
-        transactions={trans}
-        cfg={cfg}
-        showWallets
-        onSelectWallet={(walletId) => setCfg({ defaultWalletId: walletId })}
-        onEditWallet={openEdit}
-        title={isAr ? 'كل المحافظ' : 'All wallets'}
-      />
-      <WalletEditor
-        draft={draft}
-        saving={saving}
-        th={th}
-        lang={lang}
-        isAr={isAr}
-        baseCurrency={cfg.currency}
-        onChange={setDraft}
-        onClose={closeEditor}
-        onSave={save}
-        onDelete={requestDelete}
-      />
-    </ScreenScroll>
-  );
+  const saveRate = async () => { const value = rate(rateEdit?.value); if (!value.ok || !(value.value > 0) || !await editWallet(rateEdit.wallet.id, { valuationRate:value.value })) return Alert.alert('', t.invalid); setRateEdit(null); };
+  const review = () => { const actual = amount(reconcile?.actual, reconcile?.wallet.currency); if (!actual.ok) return Alert.alert('', t.invalid); const preview = buildBalanceReconciliationPreview({ recordedBalance:reconcile.wallet.balance, actualBalance:actual.value, currency:reconcile.wallet.currency }); if (!preview.valid) return Alert.alert('', t.invalid); if (preview.status === 'matched') return Alert.alert('', isAr ? 'الرصيد مطابق؛ لا تحتاج تسوية.' : 'Balances match; no reconciliation is needed.'); setReconcile(x => ({ ...x, preview, reviewed:true })); };
+  const apply = async () => { const actual = amount(reconcile?.actual, reconcile?.wallet.currency), historical = reconcile.wallet.currency === base ? { ok:true,value:1 } : rate(reconcile?.historical); if (!actual.ok || !historical.ok || !(historical.value > 0)) return Alert.alert('', t.invalid); const done = await reconcileWalletBalance(reconcile.wallet.id, actual.value, undefined, reconcile.note, historical.value, { confirmedUnresolved:true, reason:'unresolved_after_user_review', reviewedAt:new Date().toISOString() }); if (!done?.ok) return Alert.alert('', done?.reason === 'historical_fx_required' ? t.historicalHint : t.invalid); setReconcile(null); };
+  const remove = wallet => Alert.alert(t.delete, t.deleteHint, [{ text:t.cancel, style:'cancel' }, { text:t.delete, style:'destructive', onPress:async () => { if (!await deleteWallet(wallet.id)) Alert.alert('', t.deleteHint); } }]);
+  return <ScreenScroll th={th}><PageIntro th={th} lang={lang} icon="wallet-outline" title={t.title} subtitle={t.sub}/><AppButton th={th} lang={lang} icon="add" label={t.add} onPress={create}/><View style={{ gap:12, marginTop:14 }}>{rows.map(wallet => <WalletCard key={wallet.id} wallet={wallet} base={base} cfg={cfg} th={th} lang={lang} t={t} isDefault={wallet.id===defaultId} onDefault={() => setCfg({ defaultWalletId:wallet.id })} onEdit={() => edit(wallet)} onRate={() => setRateEdit({ wallet, value:String(wallet.valuationRate || '') })} onReconcile={() => setReconcile({ wallet, actual:String(wallet.balance || ''), historical:'', note:'', reviewed:false, preview:null })}/>)}</View><WalletSheet state={editor} th={th} lang={lang} t={t} base={base} saving={saving} onClose={() => !saving && setEditor(null)} onChange={setEditor} onSave={saveWallet} onDelete={() => remove(rows.find(x => x.id===editor?.id))}/><RateSheet state={rateEdit} th={th} lang={lang} t={t} base={base} onClose={() => setRateEdit(null)} onChange={value => setRateEdit(x => ({ ...x, value }))} onSave={saveRate}/><ReconcileSheet state={reconcile} th={th} lang={lang} t={t} base={base} onClose={() => setReconcile(null)} onChange={patch => setReconcile(x => ({ ...x, ...patch, reviewed:false, preview:null }))} onReview={review} onSave={apply}/></ScreenScroll>;
 }
 
-function WalletEditor({ draft, saving, th, lang, isAr, baseCurrency, onChange, onClose, onSave, onDelete }) {
-  if (!draft) return null;
-  return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={s.backdrop}>
-        <View style={[s.sheet, { backgroundColor: th.bg, borderColor: th.border }]}>
-          <View style={[s.sheetHead, { flexDirection: rowDirection(lang) }]}>
-            <Text style={[s.sheetTitle, { color: th.text, textAlign: textAlign(lang) }]}>{draft.id ? (isAr ? 'تعديل المحفظة' : 'Edit wallet') : (isAr ? 'محفظة جديدة' : 'New wallet')}</Text>
-            <Touchable onPress={onClose} accessibilityLabel={isAr ? 'إغلاق' : 'Close'} style={[s.dismiss, { backgroundColor: th.card }]}><Ionicons name="chevron-down" size={19} color={th.text} /></Touchable>
-          </View>
-          <Text style={[s.label, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'اسم المحفظة' : 'Wallet name'}</Text>
-          <TextInput
-            value={draft.name}
-            onChangeText={name => onChange({ ...draft, name })}
-            placeholder={isAr ? 'مثال: نقدي أو بطاقة الراتب' : 'e.g. Cash or salary card'}
-            placeholderTextColor={th.faint}
-            autoFocus
-            style={[s.input, { backgroundColor: th.card, borderColor: th.border, color: th.text, textAlign: textAlign(lang) }]}
-          />
-          <View style={[s.currencyNote, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDirection(lang) }]}>
-            <Ionicons name="cash-outline" size={16} color={th.primary} />
-            <Text style={[s.currencyText, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? `عملة هذه المحفظة: ${draft.currency || baseCurrency}` : `This wallet's currency: ${draft.currency || baseCurrency}`}</Text>
-          </View>
-          <Text style={[s.note, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'للحفاظ على دقة الأرصدة، تُنشأ المحافظ الجديدة بعملة البرنامج. دعم محافظ متعددة العملات سيُضاف مع تسعير تحويل موثّق.' : 'To keep balances accurate, new wallets use the app currency. Multi-currency wallets will arrive with verified exchange-rate handling.'}</Text>
-          <AppButton th={th} lang={lang} label={saving ? (isAr ? 'جارٍ الحفظ…' : 'Saving…') : (isAr ? 'حفظ المحفظة' : 'Save wallet')} icon="checkmark" onPress={onSave} disabled={saving} style={{ marginTop: SPACE.lg }} />
-          {draft.id ? <Touchable onPress={onDelete} style={s.deleteButton}><Text style={{ color: th.exp, ...weight('900'), fontSize: 12 }}>{isAr ? 'حذف المحفظة' : 'Delete wallet'}</Text></Touchable> : null}
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-const s = StyleSheet.create({
-  hint: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 10, marginBottom: 12 },
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.48)' },
-  sheet: { borderTopWidth: 1, borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, padding: SPACE.lg, gap: 8 },
-  sheetHead: { alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 },
-  sheetTitle: { fontSize: 18, lineHeight: 25, ...weight('900'), flex: 1 },
-  dismiss: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  label: { fontSize: 11, lineHeight: 16, ...weight('900'), marginTop: 4 },
-  input: { minHeight: 48, borderWidth: 1, borderRadius: RADIUS.md, paddingHorizontal: 13, fontSize: 14, ...weight('800') },
-  currencyNote: { minHeight: 42, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 12, alignItems: 'center', gap: 8, marginTop: 4 },
-  currencyText: { flex: 1, minWidth: 0, fontSize: 11, lineHeight: 16, ...weight('800') },
-  note: { fontSize: 10, lineHeight: 15, ...weight('800'), marginTop: 4 },
-  deleteButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
-});
+function WalletCard({ wallet, base, cfg, th, lang, t, isDefault, onDefault, onEdit, onRate, onReconcile }) { const foreign=wallet.currency!==base, estimated=walletAmountToBase(wallet,wallet.availableBalance,base); return <SurfaceCard th={th} style={{ padding:14,gap:10 }}><View style={{ flexDirection:rowDirection(lang),alignItems:'center',gap:9 }}><IconContainer th={th} icon={foreign?'globe-outline':'wallet-outline'} tone={foreign?th.transfer:th.primary}/><Touchable onPress={onDefault} style={{ flex:1 }}><Text style={{ color:th.text,fontSize:16,...weight('900'),textAlign:textAlign(lang) }}>{getWalletLabel(wallet,lang)}</Text><Text style={{ color:th.sub,fontSize:11,...weight('800'),textAlign:textAlign(lang) }}>{wallet.currency}{isDefault?` · ${t.default}`:''}</Text></Touchable><Touchable onPress={onEdit} style={[s.icon,{backgroundColor:th.cardHigh}]}><Ionicons name="pencil-outline" size={16} color={th.text}/></Touchable></View><View style={[s.balance,{backgroundColor:th.cardHigh,flexDirection:rowDirection(lang)}]}><View style={{flex:1}}><Text style={[s.eyebrow,{color:th.sub,textAlign:textAlign(lang)}]}>{t.available}</Text><Text style={{color:th.text,fontSize:22,...weight('900'),textAlign:textAlign(lang)}}>{formatMoneyNumber(wallet.availableBalance,wallet.currency,cfg.lang)} {getSymbol(wallet.currency)}</Text></View>{foreign?<View style={{flex:1}}><Text style={[s.eyebrow,{color:th.sub,textAlign:textAlign(lang)}]}>{t.estimated}</Text><Text style={{color:th.transfer,fontSize:14,...weight('900'),textAlign:textAlign(lang)}}>≈ {formatMoneyNumber(estimated,base,cfg.lang)} {getSymbol(base)}</Text></View>:null}</View>{foreign?<View style={[s.fx,{backgroundColor:th.primSoft,borderColor:`${th.primary}35`}]}><View style={{flexDirection:rowDirection(lang),alignItems:'center',gap:8}}><Ionicons name="swap-horizontal-outline" size={17} color={th.primary}/><View style={{flex:1}}><Text style={[s.eyebrow,{color:th.primary,textAlign:textAlign(lang)}]}>{t.rate}</Text><Text style={{color:th.text,...weight('900'),fontSize:13,textAlign:textAlign(lang)}}>1 {wallet.currency} = {formatMoneyNumber(wallet.valuationRate,base,cfg.lang)} {base}</Text><Text style={{color:th.sub,fontSize:10,textAlign:textAlign(lang)}}>{dateText(wallet.valuationUpdatedAt,lang)}</Text></View><Touchable onPress={onRate} style={[s.small,{backgroundColor:th.bg}]}><Text style={{color:th.primary,...weight('900'),fontSize:11}}>{t.update}</Text></Touchable></View><Text style={[s.note,{color:th.sub,textAlign:textAlign(lang)}]}>{t.rateHint}</Text></View>:null}<Touchable onPress={onReconcile} style={[s.reconcile,{borderColor:th.border,flexDirection:rowDirection(lang)}]}><Ionicons name="checkmark-done-outline" size={17} color={th.warn}/><Text style={{flex:1,color:th.text,...weight('900'),fontSize:12,textAlign:textAlign(lang)}}>{t.reconcile}</Text><Ionicons name={lang==='ar'?'chevron-back':'chevron-forward'} size={16} color={th.sub}/></Touchable></SurfaceCard>; }
+function Sheet({children,th,onClose}) { return <Modal visible transparent animationType="slide" onRequestClose={onClose}><View style={s.backdrop}><View style={[s.sheet,{backgroundColor:th.bg,borderColor:th.border}]}>{children}</View></View></Modal>; }
+function Input({label,value,onChange,th,lang,keyboardType='default',placeholder=''}) { return <View><Text style={[s.label,{color:th.sub,textAlign:textAlign(lang)}]}>{label}</Text><TextInput value={value} onChangeText={onChange} keyboardType={keyboardType} placeholder={placeholder} placeholderTextColor={th.faint} style={[s.input,{backgroundColor:th.card,borderColor:th.border,color:th.text,textAlign:textAlign(lang)}]}/></View>; }
+function WalletSheet({state,th,lang,t,base,saving,onClose,onChange,onSave,onDelete}) { if(!state)return null; const foreign=state.currency!==base, currency=CURRENCIES.find(x=>x.code===state.currency)||CURRENCIES[0], est=Number(state.opening)*Number(state.rate); return <Sheet th={th} onClose={onClose}><Header title={state.id?(lang==='ar'?'تعديل المحفظة':'Edit wallet'):(lang==='ar'?'محفظة جديدة':'New wallet')} th={th} lang={lang} onClose={onClose}/><Input label={t.name} value={state.name} onChange={name=>onChange({...state,name})} th={th} lang={lang}/><Text style={[s.label,{color:th.sub,textAlign:textAlign(lang)}]}>{t.currency}</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:7}}><Touchable onPress={()=>onChange({...state,currency:base,rate:''})} style={[s.chip,{backgroundColor:state.currency===base?th.primary:th.cardHigh}]}><Text style={{color:state.currency===base?th.onPrimary:th.text,...weight('900')}}>{base}</Text></Touchable>{CURRENCIES.filter(x=>x.code!==base).map(x=><Touchable key={x.code} onPress={()=>!state.id&&onChange({...state,currency:x.code})} style={[s.chip,{backgroundColor:state.currency===x.code?th.primary:th.cardHigh,opacity:state.id ? .65 : 1}]}><Text style={{color:state.currency===x.code?th.onPrimary:th.text,...weight('900')}}>{x.code}</Text></Touchable>)}</ScrollView><Text style={[s.note,{color:th.sub,textAlign:textAlign(lang)}]}>{currency.sym} · {lang==='ar'?currency.name:currency.nameEn}{state.id?` · ${t.currencyHint}`:''}</Text>{!state.id?<Input label={`${t.opening} (${state.currency})`} value={state.opening} onChange={opening=>onChange({...state,opening:preserveNumberInputDraft(opening)})} th={th} lang={lang} keyboardType="decimal-pad" placeholder="0"/>:null}{foreign?<View style={[s.fx,{backgroundColor:th.primSoft,borderColor:`${th.primary}35`}]}><Input label={`1 ${state.currency} = ? ${base}`} value={state.rate} onChange={rate=>onChange({...state,rate:preserveNumberInputDraft(rate)})} th={th} lang={lang} keyboardType="decimal-pad" placeholder="0"/><Text style={[s.note,{color:th.primary,textAlign:textAlign(lang)}]}>≈ {Number.isFinite(est)?formatMoneyNumber(est,base,lang):'—'} {getSymbol(base)}</Text><Text style={[s.note,{color:th.sub,textAlign:textAlign(lang)}]}>{t.foreignHint}</Text></View>:null}<AppButton th={th} lang={lang} icon="checkmark" label={saving?'…':t.save} disabled={saving} onPress={onSave}/>{state.id?<Touchable onPress={onDelete} style={s.delete}><Text style={{color:th.exp,...weight('900')}}>{t.delete}</Text></Touchable>:null}</Sheet>; }
+function Header({title,th,lang,onClose}) { return <View style={[s.head,{flexDirection:rowDirection(lang)}]}><Text style={{color:th.text,fontSize:18,...weight('900'),flex:1,textAlign:textAlign(lang)}}>{title}</Text><Touchable onPress={onClose} style={[s.icon,{backgroundColor:th.card}]}><Ionicons name="chevron-down" size={18} color={th.text}/></Touchable></View>; }
+function RateSheet({state,th,lang,t,base,onClose,onChange,onSave}) { if(!state)return null; return <Sheet th={th} onClose={onClose}><Header title={t.update} th={th} lang={lang} onClose={onClose}/><Text style={[s.note,{color:th.sub,textAlign:textAlign(lang)}]}>1 {state.wallet.currency} = ? {base}</Text><Input label={t.rate} value={state.value} onChange={x=>onChange(preserveNumberInputDraft(x))} th={th} lang={lang} keyboardType="decimal-pad"/><Text style={[s.note,{color:th.primary,textAlign:textAlign(lang)}]}>{t.rateHint}</Text><AppButton th={th} lang={lang} icon="checkmark" label={t.update} onPress={onSave}/></Sheet>; }
+function ReconcileSheet({state,th,lang,t,base,onClose,onChange,onReview,onSave}) { if(!state)return null; const foreign=state.wallet.currency!==base,p=state.preview; return <Sheet th={th} onClose={onClose}><Header title={t.reconcile} th={th} lang={lang} onClose={onClose}/><Input label={t.actual} value={state.actual} onChange={actual=>onChange({actual:preserveNumberInputDraft(actual)})} th={th} lang={lang} keyboardType="decimal-pad"/>{foreign?<View style={[s.fx,{backgroundColor:th.warnBg,borderColor:`${th.warn}35`}]}><Input label={`${t.historical} · 1 ${state.wallet.currency} = ? ${base}`} value={state.historical} onChange={historical=>onChange({historical:preserveNumberInputDraft(historical)})} th={th} lang={lang} keyboardType="decimal-pad"/><Text style={[s.note,{color:th.sub,textAlign:textAlign(lang)}]}>{t.historicalHint}</Text></View>:null}<Input label={t.note} value={state.note} onChange={note=>onChange({note})} th={th} lang={lang}/>{p?<View style={[s.preview,{backgroundColor:th.cardHigh}]}><Text style={{color:th.sub}}>{t.recorded}: {formatMoneyNumber(p.recordedBalance,state.wallet.currency,lang)}</Text><Text style={{color:th.sub}}>{t.actual}: {formatMoneyNumber(p.actualBalance,state.wallet.currency,lang)}</Text><Text style={{color:th.warn,...weight('900')}}>{t.difference}: {formatMoneyNumber(p.difference,state.wallet.currency,lang)}</Text></View>:null}<AppButton th={th} lang={lang} icon={state.reviewed?'checkmark':'search-outline'} label={state.reviewed?t.confirm:t.review} onPress={state.reviewed?onSave:onReview}/></Sheet>; }
+const s=StyleSheet.create({backdrop:{flex:1,justifyContent:'flex-end',backgroundColor:'rgba(0,0,0,.48)'},sheet:{borderTopWidth:1,borderTopLeftRadius:RADIUS.xl,borderTopRightRadius:RADIUS.xl,padding:SPACE.lg,gap:10,maxHeight:'92%'},head:{alignItems:'center',gap:10},icon:{width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center'},eyebrow:{fontSize:10,...weight('900')},balance:{borderRadius:RADIUS.md,padding:11,gap:8},fx:{borderWidth:1,borderRadius:RADIUS.md,padding:10,gap:7},small:{minHeight:34,paddingHorizontal:9,borderRadius:10,alignItems:'center',justifyContent:'center'},reconcile:{minHeight:44,borderWidth:1,borderRadius:RADIUS.md,paddingHorizontal:11,alignItems:'center',gap:8},label:{fontSize:11,...weight('900')},input:{minHeight:48,borderWidth:1,borderRadius:RADIUS.md,paddingHorizontal:13,fontSize:14,...weight('800'),marginTop:5},note:{fontSize:10,lineHeight:16,...weight('700')},chip:{minHeight:36,borderRadius:10,paddingHorizontal:11,alignItems:'center',justifyContent:'center'},delete:{minHeight:40,alignItems:'center',justifyContent:'center'},preview:{borderRadius:RADIUS.md,padding:10,gap:5}});

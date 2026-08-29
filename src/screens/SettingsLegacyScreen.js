@@ -388,6 +388,11 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
   const isAr = cfg.lang === 'ar';
+  // Wallet creation, exchange-rate updates, and reconciliation now have one
+  // operational home: WalletsAccountsScreen. Keep this legacy finance page
+  // from exposing a competing path while its retired rendering is removed in
+  // the next legacy-screen consolidation.
+  const legacyWalletManagementEnabled = false;
   const parseAmount = (value, currency = cfg.currency) => parseNumberInput(value, {
     format: cfg.numberInputFormat,
     currency,
@@ -1926,7 +1931,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
         />
       </Section>) : null}
 
-      {showFinancial('wallets') && modules.wallets ? (
+      {legacyWalletManagementEnabled && showFinancial('wallets') && modules.wallets ? (
         <Section id="wallets" title={T.walletsSection}>
 <MultiSelectBar
             th={th}
@@ -2906,7 +2911,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
         </View>
       </View>
     </Modal>
-    <Modal visible={walletModalOpen} transparent animationType="slide" onRequestClose={() => setWalletModalOpen(false)}>
+    <Modal visible={legacyWalletManagementEnabled && walletModalOpen} transparent animationType="slide" onRequestClose={() => setWalletModalOpen(false)}>
       <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setWalletModalOpen(false)} />
         <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>
@@ -2984,7 +2989,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
       </View>
     </Modal>
 
-    <Modal visible={!!rateWallet} transparent animationType="slide" onRequestClose={() => setRateWallet(null)}>
+    <Modal visible={legacyWalletManagementEnabled && !!rateWallet} transparent animationType="slide" onRequestClose={() => setRateWallet(null)}>
       <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setRateWallet(null)} />
         <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>
@@ -3015,7 +3020,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
         </View>
       </View>
     </Modal>
-    <Modal visible={!!reconcileWallet} transparent animationType="slide" onRequestClose={() => setReconcileWallet(null)}>
+    <Modal visible={legacyWalletManagementEnabled && !!reconcileWallet} transparent animationType="slide" onRequestClose={() => setReconcileWallet(null)}>
       <View style={[s.modalOverlay, { backgroundColor: th.overlay }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setReconcileWallet(null)} />
         <View style={[s.sheet, { backgroundColor: th.card, borderColor: th.border }]}>

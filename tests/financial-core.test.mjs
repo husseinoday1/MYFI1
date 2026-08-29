@@ -781,6 +781,44 @@ const runLinkedStoreAssertions = async () => {
   assert.equal(await useStore.getState().editTrans(crossScopeTransfer.id, { toWalletId: 'savings' }), true);
   assert.equal(useStore.getState().trans.find(item => item.id === crossScopeTransfer.id).toWalletId, 'savings', 'transfer edits must accept another wallet scope');
 
+  // Wallet exchange-rate flow: these are real store/ledger actions, not
+  // source-text contracts. The UI must remain a thin layer over them.
+  assert.equal(
+    await useStore.getState().addWallet({ name: 'USD missing rate', currency: 'USD', openingBalance: 1 }),
+    false,
+    'a foreign wallet must be rejected without a valuation rate',
+  );
+  const usdWallet = await useStore.getState().addWallet({ name: 'USD wallet', currency: 'USD', openingBalance: 10, valuationRate: 1400 });
+  assert.equal(usdWallet.currency, 'USD', 'a foreign wallet must keep its native currency');
+  assert.equal(usdWallet.valuationRate, 1400, 'a foreign wallet must persist its valuation rate');
+  assert.ok(usdWallet.valuationUpdatedAt, 'a foreign wallet must record when its valuation was updated');
+  const firstRateUpdate = usdWallet.valuationUpdatedAt;
+  assert.equal(await useStore.getState().editWallet(usdWallet.id, { valuationRate: 1450 }), true, 'a valuation rate must be editable without changing wallet currency');
+  const updatedUsdWallet = useStore.getState().wallets.find(item => item.id === usdWallet.id);
+  assert.equal(updatedUsdWallet.valuationRate, 1450, 'the updated valuation rate must persist');
+  assert.ok(updatedUsdWallet.valuationUpdatedAt >= firstRateUpdate, 'editing a valuation rate must refresh its timestamp');
+  const missingHistoricalRate = await useStore.getState().reconcileWalletBalance(usdWallet.id, 12, '2026-07-04', '', null, { confirmedUnresolved: true });
+  assert.equal(missingHistoricalRate.reason, 'historical_fx_required', 'foreign reconciliation must require a frozen historical rate');
+  const reconciled = await useStore.getState().reconcileWalletBalance(usdWallet.id, 12, '2026-07-04', 'bank statement', 1425, { confirmedUnresolved: true });
+  assert.equal(reconciled.ok, true, 'foreign reconciliation must record with an explicit historical rate');
+  const reconciliationTx = useStore.getState().trans.find(item => item.id === reconciled.transactionId);
+  assert.equal(reconciliationTx?.exchangeRate, 1425, 'the reconciliation transaction must freeze its historical rate');
+  assert.equal(reconciliationTx?.rateSource, 'user_entered_reconciliation', 'the reconciliation must not use the mutable wallet valuation rate');
+  const eurWallet = await useStore.getState().addWallet({ name: 'EUR wallet', currency: 'EUR', openingBalance: 20, valuationRate: 1600 });
+  assert.equal(
+    await useStore.getState().addTransfer({ fromWalletId: usdWallet.id, toWalletId: eurWallet.id, amount: 2, toAmount: 1.75 }),
+    false,
+    'foreign-to-foreign transfers must reject missing historical base bridge rates',
+  );
+  assert.equal(
+    await useStore.getState().addTransfer({ fromWalletId: usdWallet.id, toWalletId: eurWallet.id, amount: 2, toAmount: 1.75, fromBaseRate: 1450, toBaseRate: 1600 }),
+    true,
+    'foreign-to-foreign transfers must keep working when both historical base rates are supplied',
+  );
+  const foreignTransfer = useStore.getState().trans.find(item => item.kind === 'transfer' && item.fromWalletId === usdWallet.id && item.toWalletId === eurWallet.id);
+  assert.equal(foreignTransfer?.fromBaseRate, 1450, 'foreign transfer must freeze the source base rate');
+  assert.equal(foreignTransfer?.toBaseRate, 1600, 'foreign transfer must freeze the target base rate');
+
   useStore.setState({
     trans: [
       { id: 'recurring-income-june', title: 'Side income', amt: 100, cat: 'salary', walletId: 'cash', dateISO: '2026-06-10', recurring: true, recurringGroupId: 'side-income-series', flowType: FLOW_TYPES.INCOME },
