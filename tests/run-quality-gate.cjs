@@ -42,6 +42,7 @@ const staticContracts = [
   'r04-1-critical-ux-build.test.cjs',
   'r04-1-account-lifecycle.test.cjs',
   'lifecycle-reset-wallet-search.test.cjs',
+  'locale-config.test.cjs',
   'onboarding-preview.test.cjs',
   'onboarding-runtime-regressions.test.cjs',
   'performance-data-lab-v51.test.cjs',
