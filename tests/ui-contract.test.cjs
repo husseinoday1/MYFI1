@@ -145,6 +145,9 @@ const constants = fs.readFileSync(path.join(srcRoot, 'lib', 'constants.js'), 'ut
 const trackers = fs.readFileSync(path.join(srcRoot, 'screens', 'TrackersLabScreen.js'), 'utf8');
 const home = fs.readFileSync(path.join(srcRoot, 'screens', 'HomeScreen.js'), 'utf8');
 const myMoney = fs.readFileSync(path.join(srcRoot, 'screens', 'MyMoneyScreen.js'), 'utf8');
+const more = fs.readFileSync(path.join(srcRoot, 'screens', 'MoreScreen.js'), 'utf8');
+const followUpsHub = fs.readFileSync(path.join(srcRoot, 'screens', 'FollowUpsHubScreen.js'), 'utf8');
+const paymentHistory = fs.readFileSync(path.join(srcRoot, 'screens', 'PaymentHistoryScreen.js'), 'utf8');
 const onboarding = fs.readFileSync(path.join(srcRoot, 'screens', 'OnboardingScreen.js'), 'utf8');
 
 /* MYFI_ONBOARDING_DELEGATED_CURRENT_CONTRACT */
@@ -187,21 +190,28 @@ assert(walletBalanceCard.includes('defaultPill'), 'Wallet list must identify the
 assert(notificationCenter.includes('selectionBar') && notificationCenter.includes('deleteSelectedButton'), 'Notifications must expose a clear select/delete-selected workflow');
 assert.equal(notificationCenter.includes('>{L.tap}</Text>'), false, 'Notification cards must not repeat an obvious tap-to-open instruction');
 assert(home.includes("quickEntryAction:{ flex: 1, flexBasis: 0"), 'Home quick actions must share equal width regardless of action count');
-assert(home.includes('walletRows.length <= 1') && home.includes('renderWalletSelector'), 'A single wallet must not repeat its balance below the Home balance card');
-assert(home.includes("accessibilityRole=\"radio\"") && home.includes('walletSelectorChip'), 'Multiple wallets must act as a compact default-wallet selector, not repeated balance cards');
+assert(home.includes('walletRows.length === 0') && home.includes('renderWalletStrip'), 'Home must show one or more wallets and hide the section only when none exist');
+assert(home.includes("accessibilityRole=\"radio\"") && home.includes('walletStripBalance'), 'Wallet cards must expose balances while selecting the default wallet directly');
 assert.equal(home.includes('s.heroFacts'), false, 'Home hero must stay focused on Available balance only');
 assert(home.includes('s.homeGreeting') && home.includes('A quick view of your money today'), 'Home must lead with a compact greeting before the financial summary');
 assert.equal(home.includes('homePeriodPills'), false, 'Home must not show period controls that do not change the available balance');
-const homePrimaryOrder = home.slice(home.indexOf('{renderQuickEntry()}'));
-assert(homePrimaryOrder.indexOf('{renderQuickEntry()}') < homePrimaryOrder.indexOf('s.monthMetricsBlock') && homePrimaryOrder.indexOf('s.monthMetricsBlock') < homePrimaryOrder.indexOf('{renderWalletSelector()}'), 'Home must keep quick add before the month summary and compact wallet selector');
-assert(myMoney.includes("key: 'history'") && myMoney.includes("key: 'budget'") && myMoney.includes("key: 'reports'"), 'My Money must expose only its three real navigation gateways');
+assert(home.indexOf('{renderWalletStrip()}') < home.indexOf('s.monthMetricsBlock') && home.indexOf('s.monthMetricsBlock') < home.indexOf('{renderQuickEntry()}'), 'Home must keep adaptive wallets near Available balance, before the month summary and quick add');
+['history', 'budget', 'reports', 'basira', 'allocation'].forEach(key => assert(myMoney.includes(`key: '${key}'`), `My Money must expose the real ${key} gateway`));
+assert.equal(myMoney.includes("key: 'transfer'"), false, 'Transfer is a direct action, not a sixth My Money gateway');
 assert.equal(myMoney.includes('GatewayCard'), false, 'My Money must not turn navigation into dense financial summary cards');
 assert.equal(myMoney.includes('onOpenWallets'), false, 'Wallet management must not be duplicated as a primary My Money gateway');
-assert(myMoney.includes('onAddTransaction') && myMoney.includes('onOpenBudget'), 'My Money shortcuts must lead to real transaction and budget actions');
-assert.equal(myMoney.includes('خطة توزيع الدخل'), false, 'Income allocation must stay hidden until its real phase-five path exists');
+assert.equal(myMoney.includes('QuickShortcut'), false, 'My Money must not repeat its gateways in a separate shortcut strip');
+assert(myMoney.includes('خطة توزيع الدخل') && myMoney.includes('onOpenIncomeAllocation'), 'Income allocation must remain a real My Money destination');
+['onOpenWallets', 'onOpenCategories', 'onOpenSubscriptions', 'onOpenBenefits'].forEach(callback => assert(more.includes(callback), `More must preserve ${callback} discoverability`));
+assert.equal(more.includes('onOpenBasira'), false, 'Basira belongs to My Money and must not be duplicated in More');
+assert(followUpsHub.includes('ملخص المتابعات') && followUpsHub.includes('paymentsThisMonth'), 'Follow-ups must expose a data-backed quick summary');
+assert.equal(followUpsHub.includes('يحتاج انتباهك'), false, 'Needs attention must live only on Home, not duplicate Follow-ups');
+assert(paymentHistory.includes('التسلسل الزمني') && paymentHistory.includes('monthEntries'), 'Payment history must expose a visible summary and timeline');
 assert(homeCenter.includes('identityText') && homeCenter.includes('accountState'), 'Account center must use a compact identity card with explicit connection state');
 assert(legacySettings.includes('monthNameStyle') && legacySettings.includes('monthStyleLabel'), 'Advanced settings must preserve the global month display preference');
 assert(constants.includes("monthNameStyle: 'system'"), 'Month display preference must follow the phone by default');
+assert(constants.includes("history: 'mymoney'") && constants.includes("reports: 'mymoney'") && constants.includes("settings: 'more'"), 'Legacy start tabs must migrate into the four-root navigation');
+assert(constants.includes("['home', 'mymoney', 'trackers', 'more']"), 'Default start tab must accept only the four current root destinations');
 assert(home.includes('formatMonthLabel') && home.includes('cfg.monthNameStyle'), 'Home month labels must follow the global month display preference');
 assert(trackers.includes('const paidThisMonth ='), 'Commitment cards must derive whether the current month was paid');
 assert(trackers.includes("if (status === 'paidMonth') return T.paidMonth;") && !trackers.includes('style={[s.paidNotice,'), 'Commitment cards must show paid-this-month once through the status label without a duplicate notice');
@@ -348,7 +358,7 @@ assert(walletBalanceCard.includes("'الكلي' : 'Total'") && walletBalanceCard
 assert(constants.includes("{ key: 'saving', visible: true }") && constants.includes("{ key: 'net', visible: true }"), 'Home month summary must include Savings and Net by default');
 assert(constants.includes('HOME_LAYOUT_VERSION = 3'), 'Home layout must migrate existing profiles to the restored four-card summary');
 assert(home.includes("item.key === 'saving'") && home.includes('monthSavingTotal'), 'Home must calculate and render actual current-month goal savings');
-assert(home.indexOf('{renderQuickEntry()}') < home.indexOf('{visibleHomeCards.length > 0 ? (') && home.indexOf('{visibleHomeCards.length > 0 ? (') < home.indexOf('{renderWalletSelector()}'), 'Direct actions must appear immediately after the Available balance; the compact wallet source selector follows the month summary');
+assert(home.indexOf('{renderWalletStrip()}') < home.indexOf('{visibleHomeCards.length > 0 ? (') && home.indexOf('{visibleHomeCards.length > 0 ? (') < home.indexOf('{renderQuickEntry()}'), 'Home must render compact wallets below the balance, then month summary and quick add');
 assert(walletBalanceCard.includes('lock-closed-outline') && walletBalanceCard.includes('محجوز للتوفير'), 'Reserved savings must use a clear compact locked-savings treatment in the wallet list');
 assert(walletBalanceCard.includes(".sort((a, b) => (a.id === defaultId ? -1"), 'The selected default wallet must sort to the first position');
 assert(home.includes("onPress={() => setCfg({ defaultWalletId: wallet.id })}") && !home.includes('renderWalletPanel'), 'Tapping a Home wallet must set it as default directly without opening the old wallet list');
