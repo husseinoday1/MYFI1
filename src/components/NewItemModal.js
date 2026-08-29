@@ -12,13 +12,12 @@ import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel, sortWal
 import { Touchable as TouchableOpacity } from './AppPrimitives';
 import { weight } from '../lib/tokens';
 import DateField from './DateField';
-import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
+import { parseNumberInput, preserveNumberInputDraft } from '../lib/numberInput';
 import { filterByActiveScope, getModules, getTrackerKinds } from '../lib/modules';
 import { suggestCategoryForText } from '../lib/localIntelligence';
 import { CATEGORY_FLOWS, getCategoriesForFlow } from '../lib/categories';
 import { MAX_TOTAL_INSTALLMENTS } from '../lib/commitments';
 
-const cleanNumber = parseNumberInput;
 const modalCopy = (lang = 'ar') => {
   const ar = lang === 'ar';
   return {
@@ -316,6 +315,14 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     color: th.primary,
   }));
   const selectedEntityCurrency = String(entityCurrency || cfg.currency || 'IQD').toUpperCase();
+  const cleanNumber = (value, currency = selectedEntityCurrency) => parseNumberInput(value, {
+    format: cfg.numberInputFormat,
+    currency,
+  });
+  const cleanRate = (value) => parseNumberInput(value, {
+    format: cfg.numberInputFormat,
+    fractionDigits: 8,
+  });
   const entitySym = getSymbol(selectedEntityCurrency);
   const selectedPaymentWallet = walletList.find(wallet => wallet.id === planWalletId) || walletList[0] || null;
   const selectedPaymentCurrency = String(selectedPaymentWallet?.currency || cfg.currency || 'IQD').toUpperCase();
@@ -423,11 +430,11 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
       );
       return;
     }
-    if (needsEntityOriginRate && !(cleanNumber(entityBaseRate) > 0)) {
+    if (needsEntityOriginRate && !(cleanRate(entityBaseRate) > 0)) {
       Alert.alert('', isAr ? 'أدخل سعر الصرف التاريخي لعملة الدين.' : 'Enter the debt historical exchange rate.');
       return;
     }
-    if (needsWalletOriginRate && !(cleanNumber(walletBaseRate) > 0)) {
+    if (needsWalletOriginRate && !(cleanRate(walletBaseRate) > 0)) {
       Alert.alert('', isAr ? 'أدخل سعر الصرف التاريخي لمحفظة التأثير.' : 'Enter the payment wallet historical exchange rate.');
       return;
     }
@@ -460,8 +467,8 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
         originMode,
         walletId: planWalletId,
         currencyCode: selectedEntityCurrency,
-        entityBaseRate: cleanNumber(entityBaseRate) || undefined,
-        walletBaseRate: cleanNumber(walletBaseRate) || undefined,
+        entityBaseRate: cleanRate(entityBaseRate) || undefined,
+        walletBaseRate: cleanRate(walletBaseRate) || undefined,
       });
     } else {
       created = await addGoal({
@@ -559,7 +566,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
               {renderTextField({
                 label: `${amountLabel} (${entitySym})`,
                 value: amt,
-                onChangeText: (value) => setAmt(formatNumberInput(value)),
+                onChangeText: (value) => setAmt(preserveNumberInputDraft(value)),
                 keyboardType: 'numeric',
                 placeholder: `0 ${entitySym}`,
                 tone: activeColor,
@@ -618,14 +625,14 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
               {needsEntityOriginRate ? renderTextField({
                 label: `${T.entityBaseRate} · 1 ${selectedEntityCurrency} = ? ${cfg.currency}`,
                 value: entityBaseRate,
-                onChangeText: value => setEntityBaseRate(formatNumberInput(value)),
+                onChangeText: value => setEntityBaseRate(preserveNumberInputDraft(value)),
                 keyboardType: 'decimal-pad',
                 placeholder: '0',
               }) : null}
               {needsWalletOriginRate ? renderTextField({
                 label: `${T.walletBaseRate} · 1 ${selectedPaymentCurrency} = ? ${cfg.currency}`,
                 value: walletBaseRate,
-                onChangeText: value => setWalletBaseRate(formatNumberInput(value)),
+                onChangeText: value => setWalletBaseRate(preserveNumberInputDraft(value)),
                 keyboardType: 'decimal-pad',
                 placeholder: '0',
               }) : null}
@@ -770,7 +777,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
                   {renderTextField({
                     label: `${T.planAmount} (${entitySym})`,
                     value: planAmount,
-                    onChangeText: (value) => setPlanAmount(formatNumberInput(value)),
+                    onChangeText: (value) => setPlanAmount(preserveNumberInputDraft(value)),
                     keyboardType: 'numeric',
                     placeholder: `0 ${entitySym}`,
                     tone: th.warn,

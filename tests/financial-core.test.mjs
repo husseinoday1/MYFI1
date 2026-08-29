@@ -9,7 +9,7 @@ import { normalizeCfg, normalizeHomeCards } from '../src/lib/constants.js';
 import { buildChartData, buildFinancialReport, buildFinancialSnapshot, byMonth, calcCashFlow, calcStats, catSpend, getUpcomingRecurring, monthlyForecast, pct } from '../src/utils/calc.js';
 import { auditFinancialData } from '../src/lib/financialIntegrity.js';
 import { useStore } from '../src/store/useStore.js';
-import { formatNumberInput, normalizeNumberInput, parseNumberInput } from '../src/lib/numberInput.js';
+import { formatNumberInput, normalizeNumberInput, parseMoneyInput, parseNumberInput } from '../src/lib/numberInput.js';
 import {
   FLOW_TYPES,
   filterByActiveScope,
@@ -735,7 +735,20 @@ const runLinkedStoreAssertions = async () => {
     user: null,
   });
   await useStore.getState().addTrans({ amt: 250, cat: 'salary', walletId: 'cash', dateISO: '2026-07-02' });
+  const iqDecimal = parseMoneyInput('1.500', { format: 'dotDecimal', currency: 'IQD', allowNegative: false });
+  assert.equal(iqDecimal.ok, true, 'IQD decimal input must be accepted before a ledger mutation');
+  assert.equal(iqDecimal.value, 1.5, 'IQD 1.500 must remain one and a half, never one thousand five hundred');
+  assert.equal(
+    await useStore.getState().addTrans({ amt: iqDecimal.value, cat: 'salary', walletId: 'cash', dateISO: '2026-07-02' }),
+    true,
+    'the parsed amount must be accepted by the real transaction/ledger command path',
+  );
   let state = useStore.getState();
+  assert.equal(
+    state.trans.find(item => item.amt === 1.5 && item.cat === 'salary')?.amt,
+    1.5,
+    'the transaction path must retain the parsed IQD decimal amount exactly',
+  );
   const addedTx = state.trans.find(item => item.amt === 250 && item.cat === 'salary');
   assert.ok(addedTx, 'transaction slice must add a normal transaction');
   assert.equal(addedTx.flowType, FLOW_TYPES.INCOME);

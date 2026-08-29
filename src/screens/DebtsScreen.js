@@ -11,9 +11,7 @@ import { isISODate, pct } from '../utils/calc';
 import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 import DateField from '../components/DateField';
 import ActionMenu from '../components/ActionMenu';
-import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
-
-const cleanNumber = parseNumberInput;
+import { parseNumberInput, preserveNumberInputDraft } from '../lib/numberInput';
 
 const text = (lang, receivable) => {
   const ar = lang === 'ar';
@@ -52,6 +50,10 @@ export default function DebtsScreen({ direction = 'owed', onQuickPay }) {
   const isReceivable = direction === 'receivable';
   const T = text(cfg.lang, isReceivable);
   const accent = isReceivable ? th.inc : th.exp;
+  const parseAmount = (value) => parseNumberInput(value, {
+    format: cfg.numberInputFormat,
+    currency: cfg.currency,
+  });
 
   const [openId, setOpenId] = useState(null);
   const [editingDebt, setEditingDebt] = useState(null);
@@ -90,8 +92,11 @@ export default function DebtsScreen({ direction = 'owed', onQuickPay }) {
   };
 
   const saveDebtEdit = async () => {
-    const total = cleanNumber(editingDebt?.total);
-    if (!editingDebt?.name?.trim() || !total) return;
+    const total = parseAmount(editingDebt?.total);
+    if (!editingDebt?.name?.trim() || !(total > 0)) {
+      Alert.alert('', cfg.lang === 'ar' ? 'اكتب مبلغًا صحيحًا أكبر من صفر.' : 'Enter a valid amount greater than zero.');
+      return;
+    }
     if (editingDebt.createdAt && !isISODate(editingDebt.createdAt)) return;
     const current = debts.find(d => d.id === editingDebt.id);
     const paid = Number(current?.paid || 0);
@@ -118,8 +123,11 @@ export default function DebtsScreen({ direction = 'owed', onQuickPay }) {
   };
 
   const savePaymentEdit = async () => {
-    const amt = cleanNumber(editingPayment?.amt);
-    if (!amt) return;
+    const amt = parseAmount(editingPayment?.amt);
+    if (!(amt > 0)) {
+      Alert.alert('', cfg.lang === 'ar' ? 'اكتب مبلغًا صحيحًا أكبر من صفر.' : 'Enter a valid amount greater than zero.');
+      return;
+    }
     if (editingPayment.date && !isISODate(editingPayment.date)) return;
     const debt = debts.find(d => d.id === editingPayment.debtId);
     const currentPayment = debt?.payments?.find(p => p.id === editingPayment.id);
@@ -148,7 +156,7 @@ export default function DebtsScreen({ direction = 'owed', onQuickPay }) {
         <View key={payment.id} style={[s.histEditRow, { borderTopColor: th.border }]}>
           <TextInput
             value={editingPayment.amt}
-            onChangeText={(amt) => setEditingPayment(prev => ({ ...prev, amt: formatNumberInput(amt) }))}
+            onChangeText={(amt) => setEditingPayment(prev => ({ ...prev, amt: preserveNumberInputDraft(amt) }))}
             keyboardType="numeric"
             placeholder={L.amount}
             placeholderTextColor={th.sub}
@@ -231,7 +239,7 @@ export default function DebtsScreen({ direction = 'owed', onQuickPay }) {
                 />
                 <TextInput
                   value={editingDebt.total}
-                  onChangeText={(value) => setEditingDebt(prev => ({ ...prev, total: formatNumberInput(value) }))}
+                  onChangeText={(value) => setEditingDebt(prev => ({ ...prev, total: preserveNumberInputDraft(value) }))}
                   keyboardType="numeric"
                   placeholder={`${L.debtTotalAmount} (${sym})`}
                   placeholderTextColor={th.sub}

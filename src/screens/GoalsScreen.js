@@ -11,9 +11,7 @@ import { isISODate, pct } from '../utils/calc';
 import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 import DateField from '../components/DateField';
 import ActionMenu from '../components/ActionMenu';
-import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
-
-const cleanNumber = parseNumberInput;
+import { parseNumberInput, preserveNumberInputDraft } from '../lib/numberInput';
 
 const copy = (lang) => {
   const ar = lang === 'ar';
@@ -46,6 +44,10 @@ export default function GoalsScreen({ onQuickSave }) {
   const isRtl = cfg.lang === 'ar';
   const align = isRtl ? 'right' : 'left';
   const rowDir = isRtl ? 'row-reverse' : 'row';
+  const parseAmount = (value) => parseNumberInput(value, {
+    format: cfg.numberInputFormat,
+    currency: cfg.currency,
+  });
 
   const [openId, setOpenId] = useState(null);
   const [editingGoal, setEditingGoal] = useState(null);
@@ -83,8 +85,11 @@ export default function GoalsScreen({ onQuickSave }) {
   };
 
   const saveGoalEdit = async () => {
-    const target = cleanNumber(editingGoal?.target);
-    if (!editingGoal?.name?.trim() || !target) return;
+    const target = parseAmount(editingGoal?.target);
+    if (!editingGoal?.name?.trim() || !(target > 0)) {
+      Alert.alert('', cfg.lang === 'ar' ? 'اكتب مبلغًا صحيحًا أكبر من صفر.' : 'Enter a valid amount greater than zero.');
+      return;
+    }
     if (editingGoal.createdAt && !isISODate(editingGoal.createdAt)) return;
     const current = goals.find(g => g.id === editingGoal.id);
     const saved = Number(current?.cur || 0);
@@ -111,8 +116,11 @@ export default function GoalsScreen({ onQuickSave }) {
   };
 
   const saveSavingEdit = async () => {
-    const amt = cleanNumber(editingSaving?.amt);
-    if (!amt) return;
+    const amt = parseAmount(editingSaving?.amt);
+    if (!(amt > 0)) {
+      Alert.alert('', cfg.lang === 'ar' ? 'اكتب مبلغًا صحيحًا أكبر من صفر.' : 'Enter a valid amount greater than zero.');
+      return;
+    }
     if (editingSaving.date && !isISODate(editingSaving.date)) return;
     const goal = goals.find(g => g.id === editingSaving.goalId);
     const currentSaving = goal?.savings?.find(sv => sv.id === editingSaving.id);
@@ -141,7 +149,7 @@ export default function GoalsScreen({ onQuickSave }) {
         <View key={saving.id} style={[s.histEditRow, { borderTopColor: th.border }]}>
           <TextInput
             value={editingSaving.amt}
-            onChangeText={(amt) => setEditingSaving(prev => ({ ...prev, amt: formatNumberInput(amt) }))}
+            onChangeText={(amt) => setEditingSaving(prev => ({ ...prev, amt: preserveNumberInputDraft(amt) }))}
             keyboardType="numeric"
             placeholder={L.amount}
             placeholderTextColor={th.sub}
@@ -224,7 +232,7 @@ export default function GoalsScreen({ onQuickSave }) {
                 />
                 <TextInput
                   value={editingGoal.target}
-                  onChangeText={(value) => setEditingGoal(prev => ({ ...prev, target: formatNumberInput(value) }))}
+                  onChangeText={(value) => setEditingGoal(prev => ({ ...prev, target: preserveNumberInputDraft(value) }))}
                   keyboardType="numeric"
                   placeholder={`${L.goalTargetAmount} (${sym})`}
                   placeholderTextColor={th.sub}

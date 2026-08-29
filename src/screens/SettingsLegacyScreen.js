@@ -18,7 +18,7 @@ import { getDefaultWalletId, getWalletAvailableBalances, getWalletLabel } from '
 import { RADIUS, SHADOW, TYPE, weight } from '../lib/tokens';
 import ActionMenu from '../components/ActionMenu';
 import DateField from '../components/DateField';
-import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
+import { parseMoneyInput, parseNumberInput, preserveNumberInputDraft } from '../lib/numberInput';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
 import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
 import { PRODUCT_NAME } from '../lib/productIdentity';
@@ -388,6 +388,14 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
   const isAr = cfg.lang === 'ar';
+  const parseAmount = (value, currency = cfg.currency) => parseNumberInput(value, {
+    format: cfg.numberInputFormat,
+    currency,
+  });
+  const parseRate = (value) => parseNumberInput(value, {
+    format: cfg.numberInputFormat,
+    fractionDigits: 8,
+  });
   const [budgetDate, setBudgetDate] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 15); });
   const deviceDateSample = useMemo(() => {
     try {
@@ -593,6 +601,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
   const [reconcileNote, setReconcileNote] = useState('');
   const [reconcileRate, setReconcileRate] = useState('');
   const [reconcileReviewed, setReconcileReviewed] = useState(false);
+  const [lowBalanceDraft, setLowBalanceDraft] = useState(() => String(notif.low?.value ?? ''));
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [settingsSheet, setSettingsSheet] = useState(null);
   const [countryQuery, setCountryQuery] = useState('');
@@ -1034,7 +1043,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
 
   const createWallet = async () => {
     if (!newWalletName.trim()) return;
-    const rate = newWalletCurrency === cfg.currency ? 1 : parseNumberInput(newWalletRate);
+    const rate = newWalletCurrency === cfg.currency ? 1 : parseRate(newWalletRate);
     if (newWalletCurrency !== cfg.currency && !(rate > 0)) {
       Alert.alert('', isAr ? 'اكتب سعر تحويل صالح إلى العملة الأساسية.' : 'Enter a valid conversion rate to the base currency.');
       return;
@@ -1044,7 +1053,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
       nameEn: newWalletName.trim(),
       currency: newWalletCurrency,
       valuationRate: rate,
-      openingBalance: parseNumberInput(newWalletOpening),
+      openingBalance: parseAmount(newWalletOpening, newWalletCurrency),
     });
     setNewWalletName('');
     setNewWalletOpening('');
@@ -1055,7 +1064,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
 
   const openReconcileWallet = (wallet) => {
     setReconcileWallet(wallet);
-    setReconcileBalance(formatNumberInput(String(wallet?.balance ?? 0)));
+    setReconcileBalance(String(wallet?.balance ?? 0));
     setReconcileNote('');
     setReconcileRate('');
     setReconcileReviewed(false);
@@ -1063,7 +1072,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
 
   const reconciliationPreview = buildBalanceReconciliationPreview({
     recordedBalance: reconcileWallet?.balance,
-    actualBalance: parseNumberInput(reconcileBalance),
+    actualBalance: parseAmount(reconcileBalance, reconcileWallet?.currency || cfg.currency),
     currency: reconcileWallet?.currency || cfg.currency,
   });
 
@@ -1081,12 +1090,12 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
 
   const applyWalletReconciliation = async () => {
     if (!reconcileWallet) return;
-    const actual = parseNumberInput(reconcileBalance);
+    const actual = parseAmount(reconcileBalance, reconcileWallet?.currency || cfg.currency);
     if (!Number.isFinite(actual)) {
       Alert.alert('', isAr ? 'اكتب رصيداً صحيحاً.' : 'Enter a valid balance.');
       return;
     }
-    const explicitRate = reconcileWallet.currency === cfg.currency ? 1 : parseNumberInput(reconcileRate);
+    const explicitRate = reconcileWallet.currency === cfg.currency ? 1 : parseRate(reconcileRate);
     if (reconcileWallet.currency !== cfg.currency && !(explicitRate > 0)) {
       Alert.alert('', isAr
         ? `اكتب السعر التاريخي لهذه التسوية: 1 ${reconcileWallet.currency} = ؟ ${cfg.currency}`
@@ -1135,7 +1144,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
 
   const saveWalletRate = async () => {
     if (!rateWallet) return;
-    const rate = parseNumberInput(rateDraft);
+    const rate = parseRate(rateDraft);
     if (!(rate > 0)) {
       Alert.alert('', isAr ? 'اكتب سعر تقييم صالح.' : 'Enter a valid valuation rate.');
       return;
@@ -2109,6 +2118,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
                       initialValue={budgetMap?.[cat.id] || ''}
                       onCommit={(value) => setCategoryBudget(cat.id, value, budgetDate)}
                       th={th}
+                      cfg={cfg}
                       style={[s.input, { width: 112, marginBottom: 0, backgroundColor: th.input, color: th.text, borderColor: th.border, textAlign: 'center' }]}
                     />
                   </View>
@@ -2368,15 +2378,26 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
         >
           <Switch
             value={!!notif.low.on}
-            onValueChange={(on) => setNotif({ low: { ...notif.low, on } })}
+            onValueChange={(on) => {
+              if (on) setLowBalanceDraft(String(notif.low?.value ?? ''));
+              setNotif({ low: { ...notif.low, on } });
+            }}
             trackColor={{ true: th.primary, false: th.cardHigh }}
           />
         </Row>
         {notif.low.on ? (
           <Expanded>
             <TextInput
-              value={formatNumberInput(String(notif.low.value || ''))}
-              onChangeText={(value) => setNotif({ low: { ...notif.low, value: parseNumberInput(formatNumberInput(value)) } })}
+              value={lowBalanceDraft}
+              onChangeText={(value) => setLowBalanceDraft(preserveNumberInputDraft(value))}
+              onEndEditing={() => {
+                const parsed = parseMoneyInput(lowBalanceDraft, { format: cfg.numberInputFormat, currency: cfg.currency, allowNegative: false });
+                if (!parsed.ok) {
+                  Alert.alert('', isAr ? 'اكتب حد رصيد صحيحًا.' : 'Enter a valid balance threshold.');
+                  return;
+                }
+                setNotif({ low: { ...notif.low, value: parsed.value } });
+              }}
               keyboardType="numeric"
               placeholder={T.lowBelow}
               placeholderTextColor={th.sub}
@@ -2940,7 +2961,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
               </Text>
               <TextInput
                 value={newWalletRate}
-                onChangeText={(value) => setNewWalletRate(formatNumberInput(value))}
+                onChangeText={(value) => setNewWalletRate(preserveNumberInputDraft(value))}
                 keyboardType="decimal-pad"
                 placeholder={isAr ? `السعر الحالي · 1 ${newWalletCurrency} = ؟ ${cfg.currency}` : `Current rate · 1 ${newWalletCurrency} = ? ${cfg.currency}`}
                 placeholderTextColor={th.sub}
@@ -2950,7 +2971,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
           ) : null}
           <TextInput
             value={newWalletOpening}
-            onChangeText={(value) => setNewWalletOpening(formatNumberInput(value))}
+            onChangeText={(value) => setNewWalletOpening(preserveNumberInputDraft(value))}
             keyboardType="numeric"
             placeholder={`${T.openingBalance} (${newWalletCurrency})`}
             placeholderTextColor={th.sub}
@@ -2982,7 +3003,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
           </Text>
           <TextInput
             value={rateDraft}
-            onChangeText={(value) => setRateDraft(formatNumberInput(value))}
+            onChangeText={(value) => setRateDraft(preserveNumberInputDraft(value))}
             keyboardType="decimal-pad"
             placeholder={isAr ? 'اكتب السعر الحالي' : 'Enter current rate'}
             placeholderTextColor={th.sub}
@@ -3008,7 +3029,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
           </Text>
           <TextInput
             value={reconcileBalance}
-            onChangeText={(value) => { setReconcileBalance(formatNumberInput(value)); setReconcileReviewed(false); }}
+            onChangeText={(value) => { setReconcileBalance(preserveNumberInputDraft(value)); setReconcileReviewed(false); }}
             keyboardType="decimal-pad"
             placeholder={isAr ? 'الرصيد الحقيقي الآن' : 'Actual balance now'}
             placeholderTextColor={th.sub}
@@ -3017,7 +3038,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
           {reconcileWallet && reconcileWallet.currency !== cfg.currency ? (
             <TextInput
               value={reconcileRate}
-              onChangeText={(value) => { setReconcileRate(formatNumberInput(value)); setReconcileReviewed(false); }}
+              onChangeText={(value) => { setReconcileRate(preserveNumberInputDraft(value)); setReconcileReviewed(false); }}
               keyboardType="decimal-pad"
               placeholder={isAr ? `السعر التاريخي · 1 ${reconcileWallet.currency} = ؟ ${cfg.currency}` : `Historical rate · 1 ${reconcileWallet.currency} = ? ${cfg.currency}`}
               placeholderTextColor={th.sub}
@@ -3071,18 +3092,25 @@ function PreviewStat({ th, label, value }) {
   );
 }
 
-function FormattedNumberField({ initialValue, onCommit, th, style }) {
-  const [value, setValue] = useState(() => formatNumberInput(String(initialValue || '')));
+function FormattedNumberField({ initialValue, onCommit, th, style, cfg }) {
+  const [value, setValue] = useState(() => String(initialValue || ''));
 
   useEffect(() => {
-    setValue(formatNumberInput(String(initialValue || '')));
+    setValue(String(initialValue || ''));
   }, [initialValue]);
 
   return (
     <TextInput
       value={value}
-      onChangeText={(next) => setValue(formatNumberInput(next))}
-      onEndEditing={() => onCommit?.(parseNumberInput(value))}
+      onChangeText={(next) => setValue(preserveNumberInputDraft(next))}
+      onEndEditing={() => {
+        const parsed = parseMoneyInput(value, { format: cfg?.numberInputFormat, currency: cfg?.currency, allowNegative: false });
+        if (!parsed.ok) {
+          Alert.alert('', cfg?.lang === 'ar' ? 'اكتب مبلغ ميزانية صحيحًا.' : 'Enter a valid budget amount.');
+          return;
+        }
+        onCommit?.(parsed.value);
+      }}
       keyboardType="numeric"
       placeholder="0"
       placeholderTextColor={th.sub}

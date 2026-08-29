@@ -13,13 +13,12 @@ import DateField from '../components/DateField';
 import ActionMenu from '../components/ActionMenu';
 import { isRTL, rowDirFor, textAlignFor } from '../lib/layout';
 import { filterByActiveScope, getModules } from '../lib/modules';
-import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
+import { parseNumberInput, preserveNumberInputDraft } from '../lib/numberInput';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
 import { isSafelyArchivableTracker, isTrackerPastGracePeriod, latestMovementDate } from '../lib/trackerLifecycle';
 import { remainingInstallments } from '../store/domain';
 
 const money = (value) => Math.round(Math.abs(Number(value) || 0)).toLocaleString();
-const cleanNumber = parseNumberInput;
 const monthStartISO = (value = today()) => `${String(value).slice(0, 7)}-01`;
 
 const specializedScreen = (variant, isAr) => {
@@ -190,6 +189,10 @@ export default function TrackersLabScreen({
   const rowDir = rowDirFor(cfg.lang);
   const specialized = specializedScreen(screenVariant, isAr);
   const modules = getModules(cfg);
+  const cleanNumber = (value, currency = cfg.currency) => parseNumberInput(value, {
+    format: cfg.numberInputFormat,
+    currency,
+  });
   const movementLabels = (kind) => {
     if (kind === 'receivable') {
       return { history: T.collectionHistory, empty: T.noCollections, edit: T.editCollection, delete: T.deleteCollection };
@@ -525,6 +528,7 @@ export default function TrackersLabScreen({
       sourceId: item.sourceId,
       name: item.title,
       amount: String(Math.round(Math.abs(item.total || 0))),
+      currencyCode: item.currencyCode || cfg.currency,
       date: item.kind === 'monthly'
         ? (item.source?.firstDueISO || item.date || today())
         : (item.source?.createdAt || item.date || today()),
@@ -537,7 +541,7 @@ export default function TrackersLabScreen({
   const saveTrackerEdit = async () => {
     const draft = editTrackerDraft;
     if (!draft) return;
-    const amount = Math.abs(cleanNumber(draft.amount));
+    const amount = Math.abs(cleanNumber(draft.amount, draft.currencyCode));
     const name = String(draft.name || '').trim();
     if (!name || !amount) {
       Alert.alert('', T.invalidAmount);
@@ -606,6 +610,7 @@ export default function TrackersLabScreen({
       sourceId: item.sourceId,
       paymentId: payment.id,
       amount: String(Math.round(Math.abs(payment.amt || 0))),
+      currencyCode: item.currencyCode || cfg.currency,
       date: payment.date || today(),
     });
   };
@@ -613,7 +618,7 @@ export default function TrackersLabScreen({
   const savePaymentEdit = async () => {
     const draft = editPaymentDraft;
     if (!draft) return;
-    const amount = Math.abs(cleanNumber(draft.amount));
+    const amount = Math.abs(cleanNumber(draft.amount, draft.currencyCode));
     if (!amount) {
       Alert.alert('', T.invalidAmount);
       return;
@@ -1400,7 +1405,7 @@ export default function TrackersLabScreen({
           />
           <TextInput
             value={editTrackerDraft?.amount || ''}
-            onChangeText={(amount) => setEditTrackerDraft(draft => draft ? { ...draft, amount: formatNumberInput(amount) } : draft)}
+            onChangeText={(amount) => setEditTrackerDraft(draft => draft ? { ...draft, amount: preserveNumberInputDraft(amount) } : draft)}
             keyboardType="numeric"
             placeholder={T.amount}
             placeholderTextColor={th.sub}
@@ -1441,7 +1446,7 @@ export default function TrackersLabScreen({
           </View>
           <TextInput
             value={editPaymentDraft?.amount || ''}
-            onChangeText={(amount) => setEditPaymentDraft(draft => draft ? { ...draft, amount: formatNumberInput(amount) } : draft)}
+            onChangeText={(amount) => setEditPaymentDraft(draft => draft ? { ...draft, amount: preserveNumberInputDraft(amount) } : draft)}
             keyboardType="numeric"
             placeholder={T.amount}
             placeholderTextColor={th.sub}

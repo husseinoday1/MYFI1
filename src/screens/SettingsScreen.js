@@ -53,6 +53,7 @@ import { collectP19LocalSqliteDiagnostics } from '../dev/p19LocalSqliteDiagnosti
 import { P19_RESTORE_EPOCH_DEVICE_GATE_ENABLED, runP19RestoreEpochDeviceGate } from '../dev/p19RestoreEpochDeviceGate';
 import { PHASE10_RESTORE_BENCHMARK_ENABLED, runPhase10RestoreBenchmarkHarness } from '../dev/phase10RestoreBenchmarkHarness';
 import { readStartupTiming } from '../lib/startupTiming';
+import { resolveSystemNumberInputFormat } from '../lib/numberInput';
 
 const pageCopy = (lang = 'ar') => {
   const ar = lang === 'ar';
@@ -516,8 +517,22 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
         },
       };
     }
+    if (choice === 'numberInputFormat') {
+      const systemFormat = resolveSystemNumberInputFormat();
+      return {
+        title: isAr ? 'صيغة إدخال الأرقام' : 'Number input format',
+        value: cfg.numberInputFormat || 'system',
+        options: [
+          { value: 'system', label: isAr ? 'تلقائي حسب الجهاز' : 'Follow device', detail: systemFormat === 'arabicNative' ? '١٬٢٣٤٫٥٦' : systemFormat === 'commaDecimal' ? '1.234,56' : '1,234.56', icon: 'phone-portrait-outline' },
+          { value: 'dotDecimal', label: '1,234.56', detail: isAr ? 'نقطة عشرية وفاصلة آلاف' : 'Dot decimal, comma grouping' },
+          { value: 'commaDecimal', label: '1.234,56', detail: isAr ? 'فاصلة عشرية ونقطة آلاف' : 'Comma decimal, dot grouping' },
+          { value: 'arabicNative', label: '١٬٢٣٤٫٥٦', detail: isAr ? 'فواصل وأرقام عربية' : 'Arabic separators and digits' },
+        ],
+        onSelect: value => setCfg({ numberInputFormat: value }),
+      };
+    }
     return null;
-  }, [choice, T, cfg.langMode, cfg.lang, cfg.themeMode, cfg.theme, cfg.orientationMode, deviceTheme, selectedCountry, selectedCurrency, isAr, setCfg]);
+  }, [choice, T, cfg.langMode, cfg.lang, cfg.themeMode, cfg.theme, cfg.orientationMode, cfg.numberInputFormat, deviceTheme, selectedCountry, selectedCurrency, isAr, setCfg]);
 
   const pickAvatar = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -1372,6 +1387,13 @@ function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accou
     ? T.useDeviceSetting
     : cfg.orientationMode === 'auto' ? T.autoRotate : T.fixedPortrait;
   const rotationNote = cfg.orientationMode === 'system' ? T.followsDevice : null;
+  const inputFormatValue = cfg.numberInputFormat === 'arabicNative'
+    ? '١٬٢٣٤٫٥٦'
+    : cfg.numberInputFormat === 'commaDecimal'
+      ? '1.234,56'
+      : cfg.numberInputFormat === 'dotDecimal'
+        ? '1,234.56'
+        : (isAr ? 'تلقائي' : 'System');
   return (
     <>
       <SectionLabel th={th} isAr={isAr} text={isAr ? 'الحساب والمزامنة' : 'Account & Sync'} />
@@ -1403,6 +1425,7 @@ function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accou
       <MenuGroup th={th}>
         <MenuRow th={th} isAr={isAr} icon="flag-outline" iconColor={th.transfer} title={T.country} value={`${selectedCountry.flag} ${isAr ? selectedCountry.name : selectedCountry.nameEn}`} onPress={() => onChoice('country')} />
         <MenuRow th={th} isAr={isAr} icon="cash-outline" iconColor={th.inc} title={T.currency} value={`${selectedCurrency.code} · ${selectedCurrency.sym}`} onPress={() => onChoice('currency')} />
+        <MenuRow th={th} isAr={isAr} icon="keypad-outline" iconColor={th.warn} title={isAr ? 'صيغة إدخال الأرقام' : 'Number input format'} subtitle={isAr ? 'تغيّر معنى الفواصل عند كتابة المبلغ' : 'Changes how typed amount separators are read'} value={inputFormatValue} onPress={() => onChoice('numberInputFormat')} />
         <MenuRow th={th} isAr={isAr} icon="wallet-outline" title={T.financial} subtitle={T.financialSub} onPress={onAdvanced} last />
       </MenuGroup>
 

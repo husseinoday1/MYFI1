@@ -234,6 +234,7 @@ export const DEF_CFG = {
   theme: 'dark', themeMode: 'system', lang: detectSystemLang(), langMode: 'system', currency: 'IQD',
   orientationMode: 'system',
   monthNameStyle: 'system',
+  numberInputFormat: 'system',
   displayName: '', username: '', phone: '', avatarUri: '', avatarPath: '', accountConsentAccepted: false,
   country: 'IQ', name: '', avatar: '🌿',
   profileType: 'personal',
@@ -340,6 +341,9 @@ export const normalizeCfg = (cfg = {}) => {
     lang: langMode === 'system' ? detectSystemLang() : manualLang,
     orientationMode: ['system', 'auto', 'portrait', 'landscape'].includes(cfg.orientationMode) ? cfg.orientationMode : 'system',
     monthNameStyle: normalizeMonthNameStyle(cfg.monthNameStyle),
+    numberInputFormat: ['system', 'dotDecimal', 'commaDecimal', 'arabicNative'].includes(cfg.numberInputFormat)
+      ? cfg.numberInputFormat
+      : DEF_CFG.numberInputFormat,
     themeMode: cfg.themeMode === 'system' ? 'system' : 'manual',
     theme: cfg.theme === 'light' ? 'light' : 'dark',
     categoryBudgets: Object.fromEntries(Object.entries(cfg.categoryBudgets || {}).filter(([, value]) => Number(value) > 0)),

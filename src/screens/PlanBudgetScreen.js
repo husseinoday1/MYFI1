@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
 import { useTheme } from '../lib/useTheme';
 import { formatMoneyNumber } from '../lib/money';
-import { formatNumberInput, parseNumberInput } from '../lib/numberInput';
+import { parseMoneyInput, preserveNumberInputDraft } from '../lib/numberInput';
 import { filterByActiveScope } from '../lib/modules';
 import { CATEGORY_FLOWS, getCategoriesForFlow } from '../lib/categories';
 import {
@@ -130,6 +130,7 @@ export default function PlanBudgetScreen() {
                   initialValue={budgetMap?.[cat.id] || ''}
                   onCommit={(value) => setCategoryBudget(cat.id, value, budgetDate)}
                   th={th}
+                  cfg={cfg}
                 />
               </View>
               {row ? (
@@ -195,18 +196,25 @@ export default function PlanBudgetScreen() {
 // call the same shared src/lib/numberInput functions; consolidating these
 // two into one shared component is Step 4/consolidation cleanup, not this
 // change.
-function BudgetAmountField({ initialValue, onCommit, th }) {
-  const [value, setValue] = useState(() => formatNumberInput(String(initialValue || '')));
+function BudgetAmountField({ initialValue, onCommit, th, cfg }) {
+  const [value, setValue] = useState(() => String(initialValue || ''));
 
   useEffect(() => {
-    setValue(formatNumberInput(String(initialValue || '')));
+    setValue(String(initialValue || ''));
   }, [initialValue]);
 
   return (
     <TextInput
       value={value}
-      onChangeText={(next) => setValue(formatNumberInput(next))}
-      onEndEditing={() => onCommit?.(parseNumberInput(value))}
+      onChangeText={(next) => setValue(preserveNumberInputDraft(next))}
+      onEndEditing={() => {
+        const parsed = parseMoneyInput(value, { format: cfg.numberInputFormat, currency: cfg.currency, allowNegative: false });
+        if (!parsed.ok) {
+          Alert.alert('', cfg.lang === 'ar' ? 'اكتب مبلغ ميزانية صحيحًا.' : 'Enter a valid budget amount.');
+          return;
+        }
+        onCommit?.(parsed.value);
+      }}
       keyboardType="numeric"
       placeholder="0"
       placeholderTextColor={th.sub}
