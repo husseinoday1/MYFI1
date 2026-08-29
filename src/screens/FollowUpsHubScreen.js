@@ -6,7 +6,7 @@ import { useTheme } from '../lib/useTheme';
 import { formatMoneyNumber } from '../lib/money';
 import { filterByActiveScope } from '../lib/modules';
 import { debtSummary, goalSummary } from '../utils/calc';
-import { getUpcomingCommitments, formatCommitmentDate } from '../lib/commitments';
+import { getUpcomingCommitments } from '../lib/commitments';
 import { AppButton, ScreenScroll, SectionTitle, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
 import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 
@@ -24,22 +24,31 @@ export default function FollowUpsHubScreen({
   onNewTracker,
 }) {
   const { th, lang, isAr, cfg } = useTheme();
-  const { debts, goals, commitments } = useStore();
+  const { debts, goals, commitments, trans } = useStore();
 
   const scopedDebts = useMemo(() => filterByActiveScope(debts, cfg), [debts, cfg.activeScope, cfg.profileType]);
   const scopedGoals = useMemo(() => filterByActiveScope(goals, cfg), [goals, cfg.activeScope, cfg.profileType]);
   const scopedCommitments = useMemo(() => filterByActiveScope(commitments, cfg), [commitments, cfg.activeScope, cfg.profileType]);
-  const debtsSummary = useMemo(() => debtSummary(scopedDebts, 'owed'), [scopedDebts]);
+  const owedSummary = useMemo(() => debtSummary(scopedDebts, 'owed'), [scopedDebts]);
+  const receivableSummary = useMemo(() => debtSummary(scopedDebts, 'receivable'), [scopedDebts]);
+  const debtsSummary = useMemo(() => ({
+    count: owedSummary.count + receivableSummary.count,
+    remaining: owedSummary.remaining + receivableSummary.remaining,
+  }), [owedSummary, receivableSummary]);
   const savingsSummary = useMemo(() => goalSummary(scopedGoals), [scopedGoals]);
   const upcoming = useMemo(() => getUpcomingCommitments(scopedCommitments), [scopedCommitments]);
-  const dueSoon = useMemo(
-    () => upcoming.filter(item => item.daysUntil <= 7 && item.daysUntil >= -31).slice(0, 3),
+  const scopedTrans = useMemo(() => filterByActiveScope(trans, cfg), [trans, cfg.activeScope, cfg.profileType]);
+  const upcomingThisWeek = useMemo(
+    () => upcoming.filter(item => item.daysUntil >= 0 && item.daysUntil <= 7).length,
     [upcoming],
   );
 
   const commitmentsCount = upcoming.filter(item => item.subType !== 'installment' && item.subType !== 'subscription').length;
   const installmentsCount = upcoming.filter(item => item.subType === 'installment').length;
   const subscriptionsCount = upcoming.filter(item => item.subType === 'subscription').length;
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const paymentsThisMonth = scopedTrans.filter(item => (item.isDebtPayment || item.isCommitmentPayment || item.commitmentId) && String(item.dateISO || item.date || '').slice(0, 7) === currentMonth).length;
+  const activeFollowUps = debtsSummary.count + savingsSummary.count + upcoming.length;
   const money = (value) => `${formatMoneyNumber(value, cfg.currency, cfg.lang)} ${cfg.currency}`;
   const gateways = [
     {
@@ -81,29 +90,20 @@ export default function FollowUpsHubScreen({
         <Text style={[s.subtitle, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'رتّب ما يحتاج قرارًا أو موعدًا أو تقدّمًا' : 'Keep the things that need action, a date, or progress in order'}</Text>
       </View>
 
-      {dueSoon.length ? (
-        <>
-          <SectionTitle th={th} lang={lang}>{isAr ? 'يحتاج انتباهك' : 'Needs attention'}</SectionTitle>
-          <View style={s.attentionList}>
-            {dueSoon.map(item => {
-              const overdue = item.daysUntil < 0;
-              const tone = overdue ? th.exp : th.warn;
-              return (
-                <View key={item.id} style={[s.attentionRow, { backgroundColor: overdue ? th.expBg : th.warnBg, borderColor: `${tone}42`, flexDirection: rowDirection(lang) }]}>
-                  <View style={[s.attentionIcon, { backgroundColor: `${tone}22` }]}><Ionicons name={overdue ? 'alert-circle-outline' : 'time-outline'} size={18} color={tone} /></View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={[s.attentionTitle, { color: th.text, textAlign: textAlign(lang) }]} numberOfLines={1}>{item.name}</Text>
-                    <Text style={[s.attentionMeta, { color: th.sub, textAlign: textAlign(lang) }]} numberOfLines={1}>
-                      {formatCommitmentDate(item.dueISO, lang)} · {money(item.amt)}
-                    </Text>
-                  </View>
-                  <Text style={[s.attentionState, { color: tone }]}>{overdue ? (isAr ? 'متأخر' : 'Overdue') : (isAr ? 'قريب' : 'Soon')}</Text>
-                </View>
-              );
-            })}
+      <View style={[s.summaryCard, { backgroundColor: th.card, borderColor: th.border }]}>
+        <View style={[s.summaryHead, { flexDirection: rowDirection(lang) }]}>
+          <View style={[s.summaryIcon, { backgroundColor: th.primSoft }]}><Ionicons name="pulse-outline" size={19} color={th.primary} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.summaryTitle, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'ملخص المتابعات' : 'Follow-ups summary'}</Text>
+            <Text style={[s.summaryHint, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'قراءة سريعة مرتبطة ببياناتك الحالية' : 'A quick reading linked to your current data'}</Text>
           </View>
-        </>
-      ) : null}
+        </View>
+        <View style={[s.summaryGrid, { flexDirection: rowDirection(lang), borderColor: th.border }]}>
+          <SummaryMetric value={activeFollowUps} label={isAr ? 'نشطة' : 'Active'} color={th.primary} th={th} />
+          <SummaryMetric value={upcomingThisWeek} label={isAr ? 'هذا الأسبوع' : 'This week'} color={upcomingThisWeek ? th.warn : th.inc} bordered th={th} />
+          <SummaryMetric value={paymentsThisMonth} label={isAr ? 'دفعات الشهر' : 'Payments'} color={th.inc} th={th} />
+        </View>
+      </View>
 
       <SectionTitle th={th} lang={lang}>{isAr ? 'اختر ما تريد متابعته' : 'Choose what to follow'}</SectionTitle>
       <View style={s.gatewayList}>
@@ -118,12 +118,24 @@ export default function FollowUpsHubScreen({
         onPress={() => onNewTracker?.({})}
         style={{ marginTop: SPACE.xl }}
       />
-      <Touchable onPress={onOpenPaymentHistory} style={[s.historyLink, { backgroundColor: th.cardHigh, flexDirection: rowDirection(lang) }]}>
-        <Ionicons name="receipt-outline" size={18} color={th.sub} />
-        <Text style={[s.historyText, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'سجل الدفعات' : 'Payment history'}</Text>
-        <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={17} color={th.faint} />
+      <Touchable onPress={onOpenPaymentHistory} style={[s.historyLink, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDirection(lang) }]}>
+        <View style={[s.historyIcon, { backgroundColor: `${th.inc}18` }]}><Ionicons name="receipt-outline" size={20} color={th.inc} /></View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[s.historyText, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'سجل الدفعات' : 'Payment history'}</Text>
+          <Text style={[s.historyHint, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? `${paymentsThisMonth} دفعة مسجلة هذا الشهر` : `${paymentsThisMonth} payments recorded this month`}</Text>
+        </View>
+        <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={19} color={th.primary} />
       </Touchable>
     </ScreenScroll>
+  );
+}
+
+function SummaryMetric({ value, label, color, bordered, th }) {
+  return (
+    <View style={[s.summaryMetric, bordered ? { borderLeftWidth: 1, borderRightWidth: 1, borderColor: th.border } : null]}>
+      <Text style={[s.summaryValue, { color }]}>{value}</Text>
+      <Text style={[s.summaryLabel, { color: th?.sub || color }]}>{label}</Text>
+    </View>
   );
 }
 
@@ -151,17 +163,22 @@ const s = StyleSheet.create({
   heading: { marginTop: 4, marginBottom: SPACE.xl },
   title: { fontSize: 27, lineHeight: 34, ...weight('900') },
   subtitle: { fontSize: 13, lineHeight: 20, ...weight('700'), marginTop: 5 },
-  attentionList: { gap: SPACE.sm },
-  attentionRow: { minHeight: 68, borderRadius: RADIUS.xl, borderWidth: 1, padding: SPACE.md, alignItems: 'center', gap: SPACE.sm },
-  attentionIcon: { width: 36, height: 36, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center' },
-  attentionTitle: { fontSize: 13, lineHeight: 18, ...weight('900') },
-  attentionMeta: { fontSize: 11, lineHeight: 16, ...weight('700'), marginTop: 2 },
-  attentionState: { fontSize: 11, lineHeight: 16, ...weight('900') },
+  summaryCard: { borderRadius: RADIUS.xl, borderWidth: 1, padding: SPACE.md, marginBottom: SPACE.lg, ...SHADOW.card },
+  summaryHead: { alignItems: 'center', gap: SPACE.sm, marginBottom: SPACE.md },
+  summaryIcon: { width: 38, height: 38, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center' },
+  summaryTitle: { fontSize: 14, lineHeight: 19, ...weight('900') },
+  summaryHint: { fontSize: 10, lineHeight: 15, ...weight('700'), marginTop: 2 },
+  summaryGrid: { borderTopWidth: 1, paddingTop: SPACE.md },
+  summaryMetric: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  summaryValue: { fontSize: 19, lineHeight: 24, ...weight('900') },
+  summaryLabel: { fontSize: 9, lineHeight: 14, ...weight('800'), marginTop: 2, textAlign: 'center' },
   gatewayList: { gap: SPACE.md },
   gateway: { minHeight: 88, borderRadius: RADIUS.xl, borderWidth: 1, padding: SPACE.lg, alignItems: 'center', gap: SPACE.md, ...SHADOW.card },
   gatewayIcon: { width: 44, height: 44, borderRadius: RADIUS.lg, alignItems: 'center', justifyContent: 'center' },
   gatewayTitle: { fontSize: 16, lineHeight: 22, ...weight('900') },
   gatewayDescription: { fontSize: 11, lineHeight: 17, ...weight('700'), marginTop: 2 },
-  historyLink: { minHeight: 48, borderRadius: RADIUS.lg, marginTop: SPACE.md, paddingHorizontal: SPACE.md, alignItems: 'center', gap: SPACE.sm },
-  historyText: { flex: 1, fontSize: 12, lineHeight: 17, ...weight('900') },
+  historyLink: { minHeight: 74, borderRadius: RADIUS.xl, borderWidth: 1, marginTop: SPACE.lg, paddingHorizontal: SPACE.md, alignItems: 'center', gap: SPACE.md, ...SHADOW.card },
+  historyIcon: { width: 40, height: 40, borderRadius: RADIUS.lg, alignItems: 'center', justifyContent: 'center' },
+  historyText: { fontSize: 13, lineHeight: 18, ...weight('900') },
+  historyHint: { fontSize: 10, lineHeight: 15, ...weight('700'), marginTop: 2 },
 });
