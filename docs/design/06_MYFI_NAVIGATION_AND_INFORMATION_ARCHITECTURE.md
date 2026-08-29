@@ -88,11 +88,12 @@ clear, search may be omitted without reopening this document.
 
 ## 7. Onboarding flow — LOCKED (revised 2026-08-28)
 
-1. Welcome with an explicit AR/EN language choice directly beneath the welcome
-copy → 2–4. Three short personalization questions → 5. Essentials (country,
-currency, appearance, first-wallet name) and start. Language changes the
-onboarding copy and RTL/LTR direction immediately, then is stored as the
-app-wide manual language preference.
+1. Welcome with a compact AR/EN language toggle in the top side of the screen
+header → 2–4. Three short personalization questions → 5. Essentials (app
+language, country, currency, appearance, first-wallet name) and start. The
+Welcome control previews onboarding copy and RTL/LTR immediately; the
+language row in Essentials is the explicit app-wide preference stored on
+completion.
 
 The three questions cover usage context, first financial goal, and current
 money organization. The goal question allows one or more selections because

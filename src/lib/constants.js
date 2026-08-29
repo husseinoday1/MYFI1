@@ -50,6 +50,7 @@ export const CURRENCIES = [
   { code:'BHD', sym:'د.ب', name:'الدينار البحريني', nameEn:'Bahraini dinar', digits:3 },
   { code:'OMR', sym:'ر.ع', name:'الريال العماني', nameEn:'Omani rial', digits:3 },
   { code:'JOD', sym:'د.أ', name:'الدينار الأردني', nameEn:'Jordanian dinar', digits:3 },
+  { code:'ILS', sym:'₪', name:'الشيكل الجديد', nameEn:'New shekel', digits:2 },
   { code:'EGP', sym:'ج.م', name:'الجنيه المصري', nameEn:'Egyptian pound', digits:2 },
   { code:'MAD', sym:'د.م', name:'الدرهم المغربي', nameEn:'Moroccan dirham', digits:2 },
   { code:'DZD', sym:'د.ج', name:'الدينار الجزائري', nameEn:'Algerian dinar', digits:2 },
@@ -59,7 +60,6 @@ export const CURRENCIES = [
   { code:'LBP', sym:'ل.ل', name:'الليرة اللبنانية', nameEn:'Lebanese pound', digits:2 },
   { code:'SYP', sym:'ل.س', name:'الليرة السورية', nameEn:'Syrian pound', digits:2 },
   { code:'YER', sym:'ر.ي', name:'الريال اليمني', nameEn:'Yemeni rial', digits:2 },
-  { code:'ILS', sym:'₪', name:'الشيكل', nameEn:'Israeli shekel', digits:2 },
   { code:'TRY', sym:'₺', name:'الليرة التركية', nameEn:'Turkish lira', digits:2 },
   { code:'IRR', sym:'﷼', name:'الريال الإيراني', nameEn:'Iranian rial', digits:2 },
   { code:'USD', sym:'$', name:'الدولار الأمريكي', nameEn:'US dollar', digits:2 },
@@ -108,7 +108,7 @@ export const COUNTRIES = [
   { code:'LB', name:'لبنان', nameEn:'Lebanon', flag:'🇱🇧', currency:'LBP', lang:'ar' },
   { code:'SY', name:'سوريا', nameEn:'Syria', flag:'🇸🇾', currency:'SYP', lang:'ar' },
   { code:'YE', name:'اليمن', nameEn:'Yemen', flag:'🇾🇪', currency:'YER', lang:'ar' },
-  { code:'PS', name:'فلسطين', nameEn:'Palestine', flag:'🇵🇸', currency:'ILS', lang:'ar' },
+  { code:'PS', name:'فلسطين', nameEn:'Palestine', flag:'🇵🇸', currency:'JOD', lang:'ar' },
   { code:'TR', name:'تركيا', nameEn:'Turkey', flag:'🇹🇷', currency:'TRY', lang:'tr' },
   { code:'IR', name:'إيران', nameEn:'Iran', flag:'🇮🇷', currency:'IRR', lang:'fa' },
   { code:'US', name:'الولايات المتحدة', nameEn:'United States', flag:'🇺🇸', currency:'USD', lang:'en' },
@@ -285,8 +285,14 @@ export const normalizeCfg = (cfg = {}) => {
   const hasLang = Object.prototype.hasOwnProperty.call(cfg, 'lang');
   const langMode = hasLangMode ? cfg.langMode : hasLang ? 'manual' : DEF_CFG.langMode;
   const manualLang = cfg.lang === 'ar' ? 'ar' : 'en';
-  const nextStartTab = ['home', 'history', 'trackers', 'reports', 'settings'].includes(cfg.startTab)
-    ? cfg.startTab
+  const legacyStartTabMap = {
+    history: 'mymoney',
+    reports: 'mymoney',
+    settings: 'more',
+  };
+  const requestedStartTab = legacyStartTabMap[cfg.startTab] || cfg.startTab;
+  const nextStartTab = ['home', 'mymoney', 'trackers', 'more'].includes(requestedStartTab)
+    ? requestedStartTab
     : DEF_START_TAB;
   const country = COUNTRIES.some(item => item.code === cfg.country) ? cfg.country : DEF_CFG.country;
   const currency = CURRENCIES.some(item => item.code === cfg.currency) ? cfg.currency : DEF_CFG.currency;

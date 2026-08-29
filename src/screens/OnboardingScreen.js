@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TH } from '../lib/theme';
@@ -129,9 +129,11 @@ const copy = lang => {
     country: ar ? 'البلد' : 'Country',
     baseCurrency: ar ? 'العملة' : 'Currency',
     appearance: ar ? 'المظهر' : 'Appearance',
+    language: ar ? 'لغة التطبيق' : 'App language',
     chooseCountry: ar ? 'اختر البلد' : 'Choose country',
     chooseCurrency: ar ? 'اختر العملة' : 'Choose currency',
     chooseAppearance: ar ? 'اختر المظهر' : 'Choose appearance',
+    chooseLanguage: ar ? 'اختر لغة التطبيق' : 'Choose app language',
     arabic: ar ? 'العربية' : 'Arabic',
     english: ar ? 'English' : 'English',
     light: ar ? 'فاتح' : 'Light',
@@ -187,8 +189,14 @@ const STEP_COUNT = ESSENTIALS_STEP + 1;
 export default function OnboardingScreen({ cfg, onDone }) {
   const { setCfg, editWallet } = useStore();
   const [step, setStep] = useState(0);
-  // `lang` previews onboarding copy/direction immediately, then becomes the
-  // app language once the user finishes the flow.
+  // `lang` drives onboarding's own reading direction/copy across all five
+  // steps from the moment it's picked on Welcome, including the default
+  // wallet name and placeholder (both use T/lang, never a separately-saved
+  // language) - it is a live preview only while onboarding is in progress;
+  // it becomes the app's real language (cfg.lang/langMode) only once, at
+  // the end, when Essentials' own Language row is confirmed and the user
+  // presses Start (see finish()). Changing it again on Essentials updates
+  // the preview for the rest of onboarding too, same as Welcome's toggle.
   const [lang, setLang] = useState(detectSystemLang());
   const isAr = lang === 'ar';
   // Preview the appearance choice immediately. Before this, the screen kept
@@ -197,14 +205,9 @@ export default function OnboardingScreen({ cfg, onDone }) {
   const [themeChoice, setThemeChoice] = useState(cfg.theme === 'light' ? 'light' : 'dark');
   const th = TH[themeChoice] || TH[cfg.theme] || TH.dark;
   const T = copy(lang);
-  const localeCountry = useMemo(() => {
-    try {
-      const locale = String(Intl?.DateTimeFormat?.().resolvedOptions?.().locale || '');
-      const region = locale.match(/[-_]([A-Za-z]{2})(?:$|[-_])/i)?.[1]?.toUpperCase() || null;
-      return COUNTRIES.find(item => item.code === region)?.code || null;
-    } catch { return null; }
-  }, []);
-  const initialCountry = localeCountry || null;
+  // Product default is Iraq. Existing valid saved choices are respected, but
+  // a phone region must not silently replace the onboarding default.
+  const initialCountry = COUNTRIES.some(item => item.code === cfg.country) ? cfg.country : 'IQ';
   const initialSuggestedCurrency = COUNTRIES.find(item => item.code === initialCountry)?.currency || '';
   const [personalization, setPersonalization] = useState({});
   const [countryCode, setCountryCode] = useState(initialCountry);
@@ -218,6 +221,9 @@ export default function OnboardingScreen({ cfg, onDone }) {
     || CURRENCIES.find(item => item.code === cfg.currency)
     || CURRENCIES.find(item => item.code === 'IQD')
     || CURRENCIES[0];
+  // The default wallet name follows the same live language as everything
+  // else on screen (T/lang) — finish() commits this same `lang` value as
+  // the new app language, so the name and the app language always match.
   const effectiveWalletName = walletName.trim() || T.walletDefaultName;
 
   const goNext = () => setStep(s => Math.min(STEP_COUNT - 1, s + 1));
@@ -236,6 +242,8 @@ export default function OnboardingScreen({ cfg, onDone }) {
       .map(key => ({ spending: 'expenses', planning: 'planning', obligations: 'debts', saving: 'goals' }[key]))
       .filter(Boolean);
     await setCfg({
+      langMode: 'manual',
+      lang,
       country: countryCode,
       currency: currencyCode,
       baseCurrencyConfirmedAt: new Date().toISOString(),
@@ -243,8 +251,6 @@ export default function OnboardingScreen({ cfg, onDone }) {
       activeScope: profileType === 'personal_business' ? 'all' : walletScope,
       enabledModules: modulesForPersonalization(answers, profileType),
       demoMode: false,
-      langMode: 'manual',
-      lang,
       themeMode: 'manual',
       theme: themeChoice,
       onboardingPriorities: focusPriorities,
@@ -261,7 +267,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
 
   const stepBody = () => {
     if (step === WELCOME_STEP) {
-      return <WelcomeSlide th={th} isAr={isAr} T={T} />;
+      return <WelcomeSlide th={th} isAr={isAr} T={T} selectedLanguage={lang} onSelectLanguage={setLang} />;
     }
     if (step >= QUESTION_START_STEP && step < ESSENTIALS_STEP) {
       const question = PERSONALIZATION_QUESTIONS[step - QUESTION_START_STEP];
@@ -281,12 +287,13 @@ export default function OnboardingScreen({ cfg, onDone }) {
         <EssentialsSlide
           th={th} isAr={isAr} T={T}
           country={selectedCountry} currency={selectedCurrency}
-          themeChoice={themeChoice}
+          themeChoice={themeChoice} language={lang}
           walletName={walletName} onChangeWalletName={setWalletName}
           placeholder={T.walletDefaultName}
           onCountry={() => setChoice('country')}
           onCurrency={() => setChoice('currency')}
           onAppearance={() => setChoice('appearance')}
+          onLanguage={() => setChoice('language')}
         />
       );
     }
@@ -387,11 +394,28 @@ export default function OnboardingScreen({ cfg, onDone }) {
         th={th}
         lang={lang}
       />
+      <ChoiceSheet
+        visible={choice === 'language'}
+        title={T.chooseLanguage}
+        value={lang}
+        options={[
+          { value: 'ar', label: T.arabic, icon: 'language-outline' },
+          { value: 'en', label: T.english, icon: 'language-outline' },
+        ]}
+        onSelect={(value) => setLang(value)}
+        onClose={() => setChoice(null)}
+        th={th}
+        lang={lang}
+      />
     </View>
   );
 }
 
-// Small, unobtrusive pill toggle: top-side of Welcome only, not its own step.
+// Small, unobtrusive pill toggle — top-right of Welcome only, not its own
+// step, not a card grid, not titled "choose language". Switches onboarding
+// reading language/direction immediately for every step; only becomes the
+// app's real language when finish() runs (see the Language row on
+// Essentials, which reads/writes this same value).
 function LanguagePicker({ th, selected, onSelect }) {
   const options = ['ar', 'en'];
   return (
@@ -418,7 +442,7 @@ function LanguagePicker({ th, selected, onSelect }) {
   );
 }
 
-function WelcomeSlide({ th, isAr, T }) {
+function WelcomeSlide({ th, isAr, T, selectedLanguage, onSelectLanguage }) {
   const cards = [
     { key: 'expenses', label: T.expenses, icon: 'bar-chart-outline' },
     { key: 'planning', label: T.planning, icon: 'calendar-outline' },
@@ -426,6 +450,7 @@ function WelcomeSlide({ th, isAr, T }) {
   ];
   return (
     <View style={s.slide}>
+      <LanguagePicker th={th} selected={selectedLanguage} onSelect={onSelectLanguage} />
       <View style={s.heroCopy}>
         <Text style={[s.heroTitle, { color: th.text }]}>{T.welcomeTitle}</Text>
         <Text style={[s.heroBody, { color: th.sub }]}>{T.welcomeBody}</Text>
@@ -501,9 +526,9 @@ function PersonalizationSlide({ th, isAr, T, question, value, onSelect }) {
 }
 
 function EssentialsSlide({
-  th, isAr, T, country, currency, themeChoice,
+  th, isAr, T, country, currency, themeChoice, language,
   walletName, onChangeWalletName, placeholder,
-  onCountry, onCurrency, onAppearance,
+  onCountry, onCurrency, onAppearance, onLanguage,
 }) {
   return (
     <View style={s.slide}>
@@ -512,6 +537,7 @@ function EssentialsSlide({
         <Text style={[s.heroBody, { color: th.sub }]}>{T.customizeBody}</Text>
       </View>
       <View style={[s.setupCard, { backgroundColor: th.card, borderColor: th.border }]}>
+        <SetupRow th={th} isAr={isAr} icon="language-outline" label={T.language} value={language === 'ar' ? T.arabic : T.english} onPress={onLanguage} />
         <SetupRow th={th} isAr={isAr} icon="location-outline" label={T.country} value={country ? `${country.flag} ${isAr ? country.name : country.nameEn}` : T.chooseCountry} onPress={onCountry} />
         <SetupRow th={th} isAr={isAr} icon="cash-outline" label={T.baseCurrency} value={currency ? `${currency.code} · ${currency.sym}` : T.chooseCurrency} onPress={onCurrency} />
         <SetupRow th={th} isAr={isAr} icon={themeChoice === 'dark' ? 'moon-outline' : 'sunny-outline'} label={T.appearance} value={themeChoice === 'dark' ? T.dark : T.light} onPress={onAppearance} last />
@@ -573,8 +599,8 @@ const s = StyleSheet.create({
   welcomeCardLabel: { fontSize: 11, ...weight('900') },
   trustBadge: { marginTop: 16, borderRadius: 14, borderWidth: 1, paddingVertical: 10, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', gap: 7 },
   trustBadgeText: { fontSize: 11, ...weight('800') },
-  languagePicker: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, borderWidth: 1, padding: 3 },
-  languageOption: { minWidth: 36, height: 28, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, paddingHorizontal: 8 },
+  languagePicker: { alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', borderRadius: 999, borderWidth: 1, padding: 3, marginBottom: 14 },
+  languageOption: { minWidth: 36, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   languageCode: { fontSize: 10, lineHeight: 14, ...weight('900'), letterSpacing: 0.6 },
   languageSeparator: { width: 1, height: 14, marginHorizontal: 2 },
   priorityRow: { minHeight: 52, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14 },
