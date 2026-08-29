@@ -21,6 +21,7 @@ export default function WalletBalanceCard({
   summary = null,
   showWallets = false,
   onSelectWallet = null,
+  onEditWallet = null,
   compact = false,
   style = null,
 }) {
@@ -186,11 +187,12 @@ export default function WalletBalanceCard({
             const available = n(wallet.availableBalance);
             const reserved = n(wallet.reservedBalance);
             const selectable = typeof onSelectWallet === 'function';
+            const editable = typeof onEditWallet === 'function';
 
             return (
               <TouchableOpacity
                 key={wallet.id}
-                disabled={!selectable}
+                disabled={!selectable && !editable}
                 onPress={() => selectable && onSelectWallet(wallet.id)}
                 activeOpacity={0.72}
                 style={[
@@ -265,9 +267,16 @@ export default function WalletBalanceCard({
                     </Text>
                   </View>
 
-                  {selectable ? (
-                    <Ionicons name={ar ? 'chevron-back' : 'chevron-forward'} size={15} color={th.faint} />
-                  ) : null}
+                  {editable ? (
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={ar ? `تعديل ${getWalletLabel(wallet, cfg.lang)}` : `Edit ${getWalletLabel(wallet, cfg.lang)}`}
+                      onPress={() => onEditWallet(wallet)}
+                      style={[s.walletEditButton, { backgroundColor: th.card }]}
+                    >
+                      <Ionicons name="pencil-outline" size={15} color={th.primary} />
+                    </TouchableOpacity>
+                  ) : selectable ? <Ionicons name={ar ? 'chevron-back' : 'chevron-forward'} size={15} color={th.faint} /> : null}
                 </View>
                 {available < 0 ? (
                   <View style={[s.walletWarning, { backgroundColor: th.expBg, flexDirection: rowDir }]}>
@@ -378,6 +387,7 @@ const s = StyleSheet.create({
   walletAvailableBlock: { width: 96, maxWidth: '32%', alignItems: 'flex-end', flexShrink: 0 },
   walletAvailableLabel: { fontSize: 9, lineHeight: 13, ...weight('800') },
   walletAvailableValue: { fontSize: 14, lineHeight: 19, ...weight('900'), marginTop: 1 },
+  walletEditButton: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
 
   walletWarning: { borderRadius: 9, alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 5, marginTop: 5 },
   walletWarningText: { flex: 1, fontSize: 9, lineHeight: 13, ...weight('900') },
