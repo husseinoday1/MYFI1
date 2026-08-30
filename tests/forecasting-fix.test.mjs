@@ -131,6 +131,37 @@ const separatePayeeCandidates = detectRecurringCandidates([
 ]);
 assert.equal(separatePayeeCandidates.some(item => item.count >= 4), false, 'same-category payees must not merge into one recurring candidate');
 
+const recurringEvidence = detectRecurringCandidates([
+  { id: 'net-1', title: 'Netflix', titleSource: 'user', cat: 'entertain', flowType: 'expense', amt: -10_000, dateISO: '2026-01-08' },
+  { id: 'net-2', title: 'Netflix', titleSource: 'user', cat: 'entertain', flowType: 'expense', amt: -10_500, dateISO: '2026-02-08' },
+  { id: 'net-3', title: 'Netflix', titleSource: 'user', cat: 'entertain', flowType: 'expense', amt: -9_900, dateISO: '2026-03-08' },
+  { id: 'annual-1', title: 'Domain renewal', titleSource: 'user', cat: 'other', flowType: 'expense', amt: -50_000, dateISO: '2025-08-01' },
+  { id: 'annual-2', title: 'Domain renewal', titleSource: 'user', cat: 'other', flowType: 'expense', amt: -50_500, dateISO: '2026-08-01' },
+  { id: 'generated-1', title: 'Expense', titleSource: 'generated', cat: 'other', flowType: 'expense', amt: -10_000, dateISO: '2026-01-01' },
+  { id: 'generated-2', title: 'Expense', titleSource: 'generated', cat: 'other', flowType: 'expense', amt: -10_000, dateISO: '2026-02-01' },
+  { id: 'generated-3', title: 'Expense', titleSource: 'generated', cat: 'other', flowType: 'expense', amt: -10_000, dateISO: '2026-03-01' },
+]);
+const monthlyNetflix = recurringEvidence.find(item => item.title === 'Netflix');
+const annualDomain = recurringEvidence.find(item => item.title === 'Domain renewal');
+assert.deepEqual(
+  { cadence: monthlyNetflix?.cadence, status: monthlyNetflix?.status, requiresUserConfirmation: monthlyNetflix?.requiresUserConfirmation },
+  { cadence: 'monthly', status: 'confirmed', requiresUserConfirmation: false },
+  'three consistent monthly user-titled movements may become a confirmed pattern',
+);
+assert.deepEqual(
+  { cadence: annualDomain?.cadence, status: annualDomain?.status, requiresUserConfirmation: annualDomain?.requiresUserConfirmation },
+  { cadence: 'annual', status: 'candidate', requiresUserConfirmation: true },
+  'two annual movements remain a user-confirmed candidate',
+);
+assert.equal(recurringEvidence.some(item => item.title === 'Expense'), false, 'generated titles must never form a recurring pattern');
+
+const inconsistentRecurrence = detectRecurringCandidates([
+  { id: 'bad-1', title: 'Gym', titleSource: 'user', cat: 'health', flowType: 'expense', amt: -10_000, dateISO: '2026-01-01' },
+  { id: 'bad-2', title: 'Gym', titleSource: 'user', cat: 'health', flowType: 'expense', amt: -13_000, dateISO: '2026-02-20' },
+  { id: 'bad-3', title: 'Gym', titleSource: 'user', cat: 'health', flowType: 'expense', amt: -10_000, dateISO: '2026-04-01' },
+]);
+assert.equal(inconsistentRecurrence.length, 0, 'movement dates or amounts outside ±10% cannot become a recurring pattern');
+
 // The two activation paths are distinct: a large absolute event and a meaningful relative change above its noise floor.
 assert.equal(shouldShowWhyChangedCard({ currentAmount: 185_000, referenceAmount: 100_000, historicalAvgTxn: 80_000, eligibleTransactionCount: 1 }).reason, 'absolute');
 assert.equal(shouldShowWhyChangedCard({ currentAmount: 120_000, referenceAmount: 100_000, historicalAvgTxn: 45_000, eligibleTransactionCount: 2 }).reason, 'relative');

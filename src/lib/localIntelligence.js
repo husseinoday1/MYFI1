@@ -10,7 +10,7 @@ import {
   outstandingExpenseCommitments,
 } from './financialForecast';
 
-const normalize = (value = '') =>
+export const normalize = (value = '') =>
   String(value)
     .trim()
     .toLowerCase()
@@ -202,10 +202,46 @@ export const suggestBudgetsFromHistory = (trans = [], cats = [], now = new Date(
     .filter(([, value]) => value > 0));
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RECURRENCE_TOLERANCE = 0.1;
+const recurrenceCadences = [
+  { id: 'monthly', days: 30.4375 },
+  { id: 'quarterly', days: 91.3125 },
+  { id: 'annual', days: 365.25 },
+];
+
+const median = (values = []) => {
+  const sorted = [...values].filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+};
+
+const dateToEpoch = (dateISO = '') => {
+  const value = new Date(`${String(dateISO)}T12:00:00`).getTime();
+  return Number.isFinite(value) ? value : null;
+};
+
+const withinTolerance = (value, target, tolerance = RECURRENCE_TOLERANCE) => (
+  Math.abs(Number(value) - Number(target)) <= Math.abs(Number(target)) * tolerance
+);
+
+const detectCadence = (intervals = []) => {
+  const observed = median(intervals);
+  if (!observed) return null;
+  return recurrenceCadences.find(cadence => withinTolerance(observed, cadence.days)) || null;
+};
+
 export const detectRecurringCandidates = (trans = []) => {
   const groups = new Map();
   trans
-    .filter(tx => (isExpenseFlow(tx) || isIncomeFlow(tx)) && tx.dateISO && Math.abs(Number(tx.amt || 0)) > 0)
+    .filter(tx => (
+      (isExpenseFlow(tx) || isIncomeFlow(tx))
+      && tx.dateISO
+      && tx.titleSource !== 'generated'
+      && normalize(tx.title)
+      && Math.abs(Number(tx.amt || 0)) > 0
+    ))
     .forEach(tx => {
       const key = `${normalize(tx.title)}|${tx.cat}|${Math.sign(Number(tx.amt || 0))}`;
       const row = groups.get(key) || [];
@@ -214,18 +250,33 @@ export const detectRecurringCandidates = (trans = []) => {
     });
 
   return [...groups.values()]
-    .filter(items => items.length >= 3)
+    .filter(items => items.length >= 2)
     .map(items => {
       const sorted = [...items].sort((a, b) => String(a.dateISO).localeCompare(String(b.dateISO)));
-      const amount = Math.round(sorted.reduce((sum, tx) => sum + Math.abs(Number(tx.amt || 0)), 0) / sorted.length);
+      const epochs = sorted.map(tx => dateToEpoch(tx.dateISO));
+      if (epochs.some(value => value === null)) return null;
+      const intervals = epochs.slice(1).map((value, index) => (value - epochs[index]) / DAY_MS);
+      const cadence = detectCadence(intervals);
+      const amounts = sorted.map(tx => Math.abs(Number(tx.amt || 0)));
+      const amount = Math.round(amounts.reduce((sum, value) => sum + value, 0) / amounts.length);
+      const amountConsistent = amounts.every(value => withinTolerance(value, amount));
+      const timingConsistent = Boolean(cadence) && intervals.every(value => withinTolerance(value, cadence.days));
+      if (!cadence || !amountConsistent || !timingConsistent) return null;
+      const confirmed = cadence.id === 'monthly' && sorted.length >= 3;
       return {
         title: sorted[0].title,
         cat: sorted[0].cat,
         count: sorted.length,
         amount,
+        cadence: cadence.id,
+        status: confirmed ? 'confirmed' : 'candidate',
+        requiresUserConfirmation: !confirmed,
+        normalizedTitle: normalize(sorted[0].title),
+        firstDateISO: sorted[0].dateISO,
         lastDateISO: sorted[sorted.length - 1].dateISO,
       };
     })
+    .filter(Boolean)
     .sort((a, b) => b.count - a.count)
     .slice(0, 3);
 };
