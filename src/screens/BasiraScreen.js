@@ -6,6 +6,7 @@ import { useTheme } from '../lib/useTheme';
 import { formatMoneyNumber } from '../lib/money';
 import { filterByActiveScope } from '../lib/modules';
 import { buildLeakInsights } from '../lib/localIntelligence';
+import { forecastConfidenceLevel } from '../lib/financialForecast';
 import { calcStats, monthlyForecast } from '../utils/calc';
 import { formatMonthLabel } from '../lib/months';
 import { AppButton, ScreenScroll, SectionTitle, SurfaceCard, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
@@ -41,6 +42,7 @@ export default function BasiraScreen({ onOpenHistory, onOpenFollowUps }) {
   const { trans, cats, commitments } = useStore();
   const now = new Date();
   const currentMonth = isoMonth(now);
+  const currentDateISO = now.toISOString().slice(0, 10);
   const previousMonth = isoMonth(new Date(now.getFullYear(), now.getMonth() - 1, 15));
   const [periods, setPeriods] = useState(() => [
     makePeriod('month', currentMonth, ...Object.values(monthBounds(currentMonth))),
@@ -83,7 +85,22 @@ export default function BasiraScreen({ onOpenHistory, onOpenFollowUps }) {
   const removePeriod = (id) => setPeriods(current => current.filter(item => item.id !== id));
   const money = (value) => `${formatMoneyNumber(value, cfg.currency, lang)} ${cfg.currency}`;
   const current = series[series.length - 1]?.stats || { inc: 0, exp: 0, bal: 0 };
-  const change = insights.topLeak;
+  const change = insights.whyChanged?.[0] || null;
+  const forecastConfidence = forecastConfidenceLevel(forecast.baselineMonthCount);
+  const forecastCopy = {
+    none: isAr
+      ? 'نحتاج شهرًا سابقًا واحدًا فيه حركات مصروف متغير كافية قبل أن نعرض توقعًا.'
+      : 'Add enough variable spending in one previous month before we show a forecast.',
+    initial: isAr
+      ? 'تقدير أولي — مبني على شهر واحد بعدد كافٍ من الحركات.'
+      : 'Initial estimate — based on one month with enough activity.',
+    supported: isAr
+      ? 'تقدير أوثق — مبني على شهرين مؤهلين للتحليل.'
+      : 'More grounded estimate — based on two eligible months.',
+    reading_trend: isAr
+      ? `اتجاه للقراءة والمقارنة، لا استنتاج إحصائي — مبني على ${forecast.baselineMonthCount} أشهر مؤهلة.`
+      : `A reading and comparison trend, not a statistical conclusion — based on ${forecast.baselineMonthCount} eligible months.`,
+  };
 
   return (
     <ScreenScroll th={th} bottom={104}>
@@ -141,16 +158,37 @@ export default function BasiraScreen({ onOpenHistory, onOpenFollowUps }) {
         {change ? (
           <>
             <View style={[s.evidenceHead, { flexDirection: rowDirection(lang) }]}>
-              <View style={[s.evidenceIcon, { backgroundColor: th.expBg }]}><Ionicons name="trending-up-outline" size={19} color={th.exp} /></View>
-              <Text style={[s.evidenceTitle, { color: th.text, textAlign: textAlign(lang), flex: 1 }]}>{isAr ? 'ارتفاع يمكن تفسيره' : 'An explainable increase'}</Text>
+              <View style={[s.evidenceIcon, { backgroundColor: change.actualVariableDelta >= 0 ? th.expBg : th.incBg }]}><Ionicons name={change.actualVariableDelta >= 0 ? 'trending-up-outline' : 'trending-down-outline'} size={19} color={change.actualVariableDelta >= 0 ? th.exp : th.inc} /></View>
+              <Text style={[s.evidenceTitle, { color: th.text, textAlign: textAlign(lang), flex: 1 }]}>{isAr ? 'تغيّر يمكن التحقق منه' : 'A change you can verify'}</Text>
             </View>
             <Text style={[s.evidenceText, { color: th.sub, textAlign: textAlign(lang) }]}>
-              {isAr ? `فئة ${change.label || 'غير مصنفة'} أعلى من متوسط سجلّك بمقدار ${money(change.delta)}.` : `${change.labelEn || change.label || 'A category'} is ${money(change.delta)} above your usual average.`}
+              {isAr
+                ? `مصروف ${change.label || 'غير مصنف'} ${change.actualVariableDelta >= 0 ? 'أعلى' : 'أقل'} من متوسطه بمقدار ${money(Math.abs(change.actualVariableDelta))}.`
+                : `${change.labelEn || change.label || 'A category'} is ${change.actualVariableDelta >= 0 ? 'above' : 'below'} its usual spending by ${money(Math.abs(change.actualVariableDelta))}.`}
             </Text>
             <Text style={[s.evidenceSource, { color: th.faint, textAlign: textAlign(lang) }]}>
-              {isAr ? `الدليل: مقارنة نشاط الفترة بمتوسط ${insights.history?.baselineMonthCount || 0} أشهر سابقة.` : `Evidence: this period compared with your previous ${insights.history?.baselineMonthCount || 0} months.`}
+              {isAr
+                ? (change.whyChanged.wording === 'single_event'
+                  ? 'السبب: حركة واحدة كبيرة، لا نمط متكرر.'
+                  : `السبب: ${change.eligibleVariableTransactionCount} حركات مصروف متغير في هذه الفترة، مقارنة بمتوسط ${change.historicalEligibleMonthCount} أشهر.`)
+                : (change.whyChanged.wording === 'single_event'
+                  ? 'Reason: one large movement, not a recurring pattern.'
+                  : `Reason: ${change.eligibleVariableTransactionCount} variable spending movements this period, compared with ${change.historicalEligibleMonthCount} months.`)}
             </Text>
-            <AppButton th={th} lang={lang} tone="soft" icon="receipt-outline" label={isAr ? 'افتح الحركات' : 'Open activity'} onPress={onOpenHistory} style={{ marginTop: SPACE.md }} />
+            <AppButton
+              th={th}
+              lang={lang}
+              tone="soft"
+              icon="receipt-outline"
+              label={isAr ? 'افتح الحركات' : 'Open activity'}
+              onPress={() => onOpenHistory({
+                categoryId: change.id,
+                type: 'exp',
+                fromDate: `${currentMonth}-01`,
+                toDate: currentDateISO,
+              })}
+              style={{ marginTop: SPACE.md }}
+            />
           </>
         ) : (
           <Text style={[s.evidenceText, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'نحتاج تاريخًا أطول قليلًا لنشرح التغيّر بثقة. لا نعرض استنتاجًا عندما لا يكفي الدليل.' : 'A little more history is needed before we explain a change confidently. We do not invent conclusions without evidence.'}</Text>
@@ -159,14 +197,27 @@ export default function BasiraScreen({ onOpenHistory, onOpenFollowUps }) {
 
       <SectionTitle th={th} lang={lang}>{isAr ? 'توقع نهاية الشهر' : 'Month-end forecast'}</SectionTitle>
       <SurfaceCard th={th} style={s.forecastCard}>
-        <View style={[s.forecastHead, { flexDirection: rowDirection(lang) }]}>
-          <View style={[s.forecastIcon, { backgroundColor: forecast.status === 'danger' ? th.expBg : th.primSoft }]}><Ionicons name="analytics-outline" size={19} color={forecast.status === 'danger' ? th.exp : th.primary} /></View>
-          <View style={{ flex: 1 }}>
-            <Text style={[s.forecastTitle, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'المصروف المتوقع' : 'Projected expense'}</Text>
-            <Text style={[s.forecastValue, { color: forecast.status === 'danger' ? th.exp : th.primary, textAlign: textAlign(lang) }]}>{money(forecast.projected)}</Text>
-          </View>
-        </View>
-        <Text style={[s.forecastBody, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? `يتضمن ${money(forecast.remainingCommitments)} من الالتزامات المتبقية، ويستند إلى نمط الصرف المسجل.` : `Includes ${money(forecast.remainingCommitments)} in remaining commitments and your recorded spending pattern.`}</Text>
+        {forecastConfidence === 'none' ? (
+          <>
+            <View style={[s.forecastHead, { flexDirection: rowDirection(lang) }]}>
+              <View style={[s.forecastIcon, { backgroundColor: th.warnBg }]}><Ionicons name="information-circle-outline" size={19} color={th.warn} /></View>
+              <Text style={[s.forecastTitle, { color: th.text, textAlign: textAlign(lang), flex: 1 }]}>{isAr ? 'توقع نهاية الشهر غير جاهز' : 'Month-end forecast is not ready'}</Text>
+            </View>
+            <Text style={[s.forecastBody, { color: th.sub, textAlign: textAlign(lang) }]}>{forecastCopy.none}</Text>
+          </>
+        ) : (
+          <>
+            <View style={[s.forecastHead, { flexDirection: rowDirection(lang) }]}>
+              <View style={[s.forecastIcon, { backgroundColor: forecast.status === 'danger' ? th.expBg : th.primSoft }]}><Ionicons name="analytics-outline" size={19} color={forecast.status === 'danger' ? th.exp : th.primary} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.forecastTitle, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'المصروف المتوقع' : 'Projected expense'}</Text>
+                <Text style={[s.forecastValue, { color: forecast.status === 'danger' ? th.exp : th.primary, textAlign: textAlign(lang) }]}>{money(forecast.projected)}</Text>
+              </View>
+            </View>
+            <Text style={[s.forecastBody, { color: th.sub, textAlign: textAlign(lang) }]}>{forecastCopy[forecastConfidence]}</Text>
+            <Text style={[s.forecastBody, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? `يتضمن ${money(forecast.remainingCommitments)} من الالتزامات المجدولة المتبقية.` : `Includes ${money(forecast.remainingCommitments)} in remaining scheduled commitments.`}</Text>
+          </>
+        )}
         <Text style={[s.disclaimer, { color: th.faint, textAlign: textAlign(lang) }]}>{isAr ? 'تقدير مشروط بالنمط الحالي، وليس وعدًا أو نصيحة مالية.' : 'An estimate based on the current pattern, not a promise or financial advice.'}</Text>
       </SurfaceCard>
 

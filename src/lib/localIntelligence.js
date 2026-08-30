@@ -341,12 +341,12 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date(), comm
     });
     const projectedSpent = fixedSpent + remainingFixed + variableForecast.projected;
     const historical = getCategoryHistoricalAverageTransaction(relevant, analysisDate, commitments, id, { limit: 6 });
-    const eligibleTransactionCount = current.filter(tx => isEligibleVariableSpendTransaction(tx, commitments, id)).length;
+    const eligibleVariableTransactionCount = current.filter(tx => isEligibleVariableSpendTransaction(tx, commitments, id)).length;
     const whyChanged = shouldShowWhyChangedCard({
-      currentAmount: projectedSpent,
-      referenceAmount: previousSpent,
+      currentAmount: variableSpent,
+      referenceAmount: historicalVariable,
       historicalAvgTxn: historical.average,
-      eligibleTransactionCount,
+      eligibleTransactionCount: eligibleVariableTransactionCount,
     });
     return {
       ...source,
@@ -361,8 +361,10 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date(), comm
       previousSpent,
       baselineSpent: previousSpent,
       delta: projectedSpent - previousSpent,
+      actualVariableDelta: variableSpent - historicalVariable,
       historicalAvgTxn: historical.average,
       historicalEligibleMonthCount: historical.eligibleMonthCount,
+      eligibleVariableTransactionCount,
       whyChanged,
     };
   });
@@ -382,6 +384,9 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date(), comm
     ? categoryMovement.filter(cat => cat.delta < 0 && cat.previousSpent > 0).sort((a, b) => a.delta - b.delta)
     : [];
   const topSpend = categoryMovement.filter(cat => cat.spent > 0).sort((a, b) => b.spent - a.spent)[0] || null;
+  const whyChanged = categoryMovement
+    .filter(item => item.whyChanged?.show && Math.abs(Number(item.actualVariableDelta || 0)) > 0)
+    .sort((a, b) => Math.abs(Number(b.actualVariableDelta || 0)) - Math.abs(Number(a.actualVariableDelta || 0)));
   const currentDays = spendByDay(current, commitments, { variableOnly: true }).filter(day => day.spent > 0);
   const historicalDays = spendByDay(
     relevant.filter(tx => String(tx.dateISO).slice(0, 7) !== currentKey),
@@ -409,6 +414,7 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date(), comm
     } : null,
     unusualDays,
     recurring: detectRecurringCandidates(relevant),
+    whyChanged,
     stats,
     previousStats,
     history: {

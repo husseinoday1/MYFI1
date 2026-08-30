@@ -240,3 +240,11 @@ export const adaptiveVariableProjection = ({
     basis: 'capped_run_rate',
   };
 };
+
+export const forecastConfidenceLevel = (eligibleMonthCount = 0) => {
+  const count = Math.max(0, Number(eligibleMonthCount) || 0);
+  if (count === 0) return 'none';
+  if (count === 1) return 'initial';
+  if (count === 2) return 'supported';
+  return 'reading_trend';
+};

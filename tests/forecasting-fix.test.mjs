@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { monthlyForecast } from '../src/utils/calc.js';
 import { buildLeakInsights, detectRecurringCandidates, shouldShowWhyChangedCard, suggestCategoryForText } from '../src/lib/localIntelligence.js';
-import { isMonthEligibleForForecast } from '../src/lib/financialForecast.js';
+import { forecastConfidenceLevel, isMonthEligibleForForecast } from '../src/lib/financialForecast.js';
 
 const cats = [
   { id: 'food', label: 'طعام', labelEn: 'Food' },
@@ -134,5 +134,26 @@ assert.equal(separatePayeeCandidates.some(item => item.count >= 4), false, 'same
 // The two activation paths are distinct: a large absolute event and a meaningful relative change above its noise floor.
 assert.equal(shouldShowWhyChangedCard({ currentAmount: 185_000, referenceAmount: 100_000, historicalAvgTxn: 80_000, eligibleTransactionCount: 1 }).reason, 'absolute');
 assert.equal(shouldShowWhyChangedCard({ currentAmount: 120_000, referenceAmount: 100_000, historicalAvgTxn: 45_000, eligibleTransactionCount: 2 }).reason, 'relative');
+
+assert.deepEqual(
+  [0, 1, 2, 3].map(forecastConfidenceLevel),
+  ['none', 'initial', 'supported', 'reading_trend'],
+  'forecast confidence must be derived only from eligible historical months',
+);
+
+const whyChangedHistory = [...eligibleHistory];
+for (let item = 0; item < 3; item += 1) {
+  whyChangedHistory.push({
+    id: `current-food-${item}`,
+    amt: -200_000,
+    flowType: 'expense',
+    cat: 'food',
+    title: 'Food',
+    dateISO: `2026-08-${String(5 + item).padStart(2, '0')}`,
+  });
+}
+const explainableInsights = buildLeakInsights(whyChangedHistory, cats, new Date('2026-08-15T12:00:00'), []);
+assert.equal(explainableInsights.whyChanged[0]?.id, 'food', 'a significant category change must keep its source category');
+assert.equal(explainableInsights.whyChanged[0]?.whyChanged.show, true, 'why-changed output must be evidence-gated before UI rendering');
 
 console.log('forecasting-fix tests passed');
