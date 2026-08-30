@@ -10,6 +10,7 @@ const app = read('App.js');
 const home = read('src/screens/HomeScreen.js');
 const history = read('src/screens/HistoryScreen.js');
 const reports = read('src/screens/ReportsScreen.js');
+const basira = read('src/screens/BasiraScreen.js');
 const sync = read('src/store/slices/useSyncSlice.js');
 
 // Settings navigation is shallow: no settings-wide navigator and no Financial -> submenu -> page chain.
@@ -60,9 +61,9 @@ assert(settings.includes("const [openGuide, setOpenGuide] = useState('start');")
 // Previously completed Home / History / Reports behavior stays intact.
 assert(home.includes('const hasLedgerEntries =') && home.includes('const visibleHomeCards = hasLedgerEntries'), 'Home progressive disclosure must use the current ledger-based visibility contract');
 assert(history.includes('hasEntries={scopedTrans.length > 0}'), 'History empty-state progressive disclosure regressed');
-assert(reports.includes('const comparisonPeriodSummary = useMemo(() => {'), 'Compact report comparison-period summary regressed');
-assert(reports.includes('{comparisonPeriodSummary.primary}'));
-assert(reports.includes('{comparisonPeriodSummary.secondary}'));
+assert.equal(reports.includes("display: 'none'"), true, 'Reports may still hide empty report content, but must not render a hidden comparison studio');
+assert.equal(reports.includes('<View style={[s.reportInsightList'), false, 'Reports must not keep the retired hidden comparison/detail block');
+assert(basira.includes("const [periods, setPeriods]") && basira.includes("'Comparison studio'"), 'Basira must own the open comparison studio');
 
 // Sync core hardening stays present and untouched in behavior.
 assert(sync.includes("sync_race_retry_required"), 'Sync race retry guard missing');

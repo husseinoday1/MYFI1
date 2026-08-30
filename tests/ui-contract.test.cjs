@@ -384,7 +384,8 @@ assert(history.includes('typeRail') && history.includes('typeChip') && history.i
 assert.equal(history.includes("renderFilterPicker({ id: 'type'"), false, 'History transaction type must not be duplicated inside the advanced filter sheet');
 
 
-assert(reports.includes('netSummaryCard') && reports.includes("ar ? 'تفاصيل الفترة' : 'Period details'"), 'Reports must use the new net-only summary and compact period detail list');
+assert(reports.includes('netSummaryCard') && reports.includes('basiraGateway'), 'Reports must keep the net-only summary and route advanced analysis into Basira');
+assert.equal(reports.includes('<View style={[s.reportInsightList'), false, 'Reports must not retain a hidden period-detail/comparison block after the Basira migration');
 assert(settings.includes('profileHero') && settings.includes('AccountPage') && settings.includes('AuthModal'), 'Account must use a dedicated professional profile screen with optional cloud connection');
 
 
@@ -452,8 +453,8 @@ assert.equal(settings.includes("cfg.themeMode === 'system' ? T.system"), false, 
 assert(legacySettings.includes("MONTH_NAME_STYLES.filter(style => style !== 'system')"), 'Advanced date display choices must preserve the existing month style behavior');
 assert(legacySettings.includes('INTERNAL_DEMO_ENABLED ? (') && legacySettings.includes('بيانات اختبار داخلية'), 'Demo data must remain available only as an internal advanced test tool');
 
-assert(reports.includes('const reportRows = [') && reports.includes("key: 'comparison'"), 'Comparison must be part of the same report row model as other reports');
-assert(reports.includes('visibleReportRows.map((item, index) =>') && reports.includes('reportInlineDetail'), 'Each report detail must expand directly below the selected report row');
+assert(reports.includes('basiraGateway') && reports.includes('onOpenBasira'), 'Reports must route advanced comparison into Basira');
+assert.equal(reports.includes('visibleReportRows.map((item, index) =>'), false, 'Reports must not retain the retired hidden report-detail renderer');
 assert.equal(reports.includes('s.reportCompareRow'), false, 'Comparison must not use a visually different top-level row');
 assert.equal(reports.includes('reportCompareText'), false, 'Legacy comparison-row styling must be removed');
 

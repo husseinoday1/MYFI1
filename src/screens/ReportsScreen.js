@@ -77,6 +77,8 @@ const copy = (lang) => {
     net: ar ? 'صافي الدخل' : 'Net income',
     reportsTitle: ar ? 'التقارير والتحليلات' : 'Reports & Analytics',
     reportsSubtitle: ar ? 'اقرأ وضعك المالي بوضوح' : 'Understand your financial picture clearly',
+    openBasira: ar ? 'افتح بصيرة MYFI' : 'Open MYFI Insight',
+    openBasiraHint: ar ? 'قارن أي فترات وافهم الاتجاهات والأسباب بعمق.' : 'Compare any periods and explore trends and reasons in depth.',
     overview: ar ? 'نظرة عامة' : 'Overview',
     moreDetails: ar ? 'تفاصيل إضافية' : 'More details',
     hideDetails: ar ? 'إخفاء التفاصيل الإضافية' : 'Hide extra details',
@@ -156,7 +158,7 @@ const copy = (lang) => {
   };
 };
 
-export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = () => {}, onOpenBasira = () => {}, onOpenIncomeAllocation = () => {} }) {
+export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = () => {}, onOpenIncomeAllocation = () => {}, onOpenHistory = () => {}, onOpenBasira = () => {} }) {
   const { trans, debts, goals, wallets, commitments, cats, cfg, financialLedgerV7Cutover, workspaceNamespace } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const C = copy(cfg.lang);
@@ -862,6 +864,20 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
               <SummaryMetric label={C.expense} value={stats.exp} color={th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
               <SummaryMetric label={C.net} value={stats.bal} color={stats.bal >= 0 ? th.inc : th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
             </View>
+            {modules.wallets ? (
+              /* MYFI_REPORT_WALLET_INLINE */
+              <WalletBalanceCard
+                cfg={cfg}
+                compact
+                summary={{
+                  physical: Number(snapshot?.cashBalance || 0),
+                  available: Number(snapshot?.availableCash || 0),
+                  reserved: Number(snapshot?.reservedSavings || 0),
+                }}
+                title={ar ? 'رصيد المحافظ بنهاية الفترة' : 'Wallet balance at period end'}
+                style={{ marginBottom: 10 }}
+              />
+            ) : null}
             <View style={[s.topCategoriesCard, { backgroundColor: th.card, borderColor: th.border }]}>
               <View style={[s.topCategoriesHead, { flexDirection: rowDir }]}>
                 <View style={[s.reportInsightHeadIcon, { backgroundColor: th.expBg }]}>
@@ -870,7 +886,19 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
                 <Text style={[s.reportInsightHeadTitle, { color: th.text, textAlign: align, flex: 1 }]}>{C.topCategories}</Text>
               </View>
               {categories.length ? categories.slice(0, 3).map(item => (
-                <CategoryRow key={item.id} item={item} th={th} lang={cfg.lang} sym={sym} />
+                <CategoryRow
+                  key={item.id}
+                  item={item}
+                  th={th}
+                  lang={cfg.lang}
+                  sym={sym}
+                  onPress={() => onOpenHistory({
+                    categoryId: item.id,
+                    fromDate: periodDateBounds.from,
+                    toDate: periodDateBounds.to,
+                    type: 'exp',
+                  })}
+                />
               )) : <Empty th={th} text={C.noData} />}
             </View>
 
@@ -915,344 +943,18 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity onPress={onOpenBasira} style={[s.basiraGateway, { backgroundColor: th.primSoft, borderColor: `${th.primary}44`, flexDirection: rowDir }]}>
-              <View style={[s.basiraGatewayIcon, { backgroundColor: th.primary }]}><Ionicons name="sparkles-outline" size={19} color={th.onPrimary} /></View>
-              <View style={{ flex: 1, minWidth: 0 }}><Text style={[s.basiraGatewayTitle, { color: th.primary, textAlign: align }]}>{ar ? 'افتح بصيرة MYFI' : 'Open MYFI Insight'}</Text><Text style={[s.basiraGatewayHint, { color: th.sub, textAlign: align }]}>{ar ? 'قارن أي فترات، وافهم التغير مع دليله.' : 'Compare any periods and see the evidence behind change.'}</Text></View>
+            <TouchableOpacity onPress={onOpenBasira} style={[s.basiraGateway, { backgroundColor: th.primSoft, borderColor: `${th.primary}52`, flexDirection: rowDir }]}>
+              <View style={[s.basiraGatewayIcon, { backgroundColor: th.card }]}><Ionicons name="sparkles-outline" size={18} color={th.primary} /></View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[s.basiraGatewayTitle, { color: th.text, textAlign: align }]}>{C.openBasira}</Text>
+                <Text style={[s.basiraGatewayHint, { color: th.sub, textAlign: align }]}>{C.openBasiraHint}</Text>
+              </View>
               <Ionicons name={ar ? 'chevron-back' : 'chevron-forward'} size={18} color={th.primary} />
             </TouchableOpacity>
+
           </>
         ) : null}
 
-        <View style={[s.reportInsightList, { backgroundColor: th.card, borderColor: th.border, display: 'none' }]}>
-          <View style={[s.reportInsightHead, { flexDirection: rowDir }]}>
-            <View style={[s.reportInsightHeadIcon, { backgroundColor: th.primSoft }]}>
-              <Ionicons name="analytics-outline" size={17} color={th.primary} />
-            </View>
-            <Text style={[s.reportInsightHeadTitle, { color: th.text, textAlign: align, flex: 1 }]}>
-              {ar ? 'تفاصيل الفترة' : 'Period details'}
-            </Text>
-          </View>
-
-          {visibleReportRows.map((item, index) => {
-            const active = detailKey === item.key;
-            return (
-              <View key={item.key}>
-                <TouchableOpacity
-                  onPress={() => setDetailKey(current => current === item.key ? null : item.key)}
-                  style={[
-                    s.reportInsightRow,
-                    {
-                      backgroundColor: active ? th.primSoft : 'transparent',
-                      borderTopColor: th.border,
-                      flexDirection: rowDir,
-                    },
-                    index === 0 ? { borderTopWidth: 0 } : null,
-                  ]}
-                >
-                  <View style={[s.reportInsightIcon, { backgroundColor: `${item.color}16` }]}>
-                    <Ionicons name={item.icon} size={17} color={item.color} />
-                  </View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={[s.reportInsightTitle, { color: active ? th.primary : th.text, textAlign: align }]} numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                    <Text style={[s.reportInsightHint, { color: th.sub, textAlign: align }]} numberOfLines={1}>
-                      {item.hint}
-                    </Text>
-                  </View>
-                  <View style={s.reportInsightValueBlock}>
-                    <Text style={[s.reportInsightValue, { color: item.color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
-                      {item.value}
-                    </Text>
-                    <Ionicons name={active ? 'chevron-up' : (ar ? 'chevron-back' : 'chevron-forward')} size={14} color={active ? th.primary : th.faint} />
-                  </View>
-                </TouchableOpacity>
-
-                {active ? (
-                  <View style={[s.reportInlineDetail, { borderTopColor: th.border }]}>
-        {modules.wallets && detailKey === 'liquidity' ? (
-          <>
-          {/* MYFI_REPORT_WALLET_INLINE */}
-          <WalletBalanceCard
-            cfg={cfg}
-            compact
-            summary={{
-              physical: Number(snapshot?.cashBalance || 0),
-              available: Number(snapshot?.availableCash || 0),
-              reserved: Number(snapshot?.reservedSavings || 0),
-            }}
-            title={cfg.lang === 'ar' ? 'رصيد المحافظ بنهاية الفترة' : 'Wallet balance at period end'}
-          />
-            {walletFilter === 'all' ? (
-              <View style={[s.netPositionRow, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
-                <Text style={[s.netPositionLabel, { color: th.sub, textAlign: align }]}>{C.netPosition}</Text>
-                <Text style={[s.netPositionValue, { color: currentNetPositionReliable ? (snapshot.netWorth >= 0 ? th.inc : th.exp) : th.sub }]}>
-                  {currentNetPositionReliable
-                    ? `${money(snapshot.netWorth, cfg.lang, cfg.currency)} ${sym}`
-                    : C.netPositionUnavailable}
-                </Text>
-              </View>
-            ) : null}
-          </>
-        ) : null}
-
-        {detailKey === 'cashflow' ? (
-          <View style={s.reportInlineStack}>
-          <View style={[s.summaryGrid, { flexDirection: rowDir, marginBottom: 0 }]}>
-            <SummaryMetric label={C.cashIn} value={periodCashFlow.inflow} color={th.inc} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-            <SummaryMetric label={C.cashOut} value={periodCashFlow.outflow} color={th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-            <SummaryMetric label={C.cashNet} value={periodCashFlow.net} color={periodCashFlow.net >= 0 ? th.inc : th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
-          </View>
-          </View>
-        ) : null}
-
-
-        {detailKey === 'obligations' && walletFilter === 'all' && (modules.debtsOwed || modules.debtsReceivable || modules.commitments) ? (
-          <View style={s.reportInlineStack}>
-            <TrackerStateNotice th={th} align={align} title={C.currentTrackerState} text={C.currentTrackerStateHint} />
-            <View style={[s.summaryGrid, { flexDirection: rowDir, marginBottom: 0 }]}>
-              <CurrencyGroupMetric label={C.owedRemaining} groups={owedCurrencyGroups} field="remaining" color={th.exp} th={th} lang={cfg.lang} />
-              <CurrencyGroupMetric label={C.receivableRemaining} groups={receivableCurrencyGroups} field="remaining" color={th.inc} th={th} lang={cfg.lang} />
-              <CurrencyGroupMetric label={C.activeCommitments} groups={commitmentCurrencyGroups} field="amount" color={th.warn} th={th} lang={cfg.lang} />
-            </View>
-          </View>
-        ) : null}
-
-        {detailKey === 'savings' && walletFilter === 'all' && modules.goals ? (
-          <View style={s.reportInlineStack}>
-            <TrackerStateNotice th={th} align={align} title={C.currentTrackerState} text={C.currentTrackerStateHint} />
-            <View style={[s.summaryGrid, { flexDirection: rowDir, marginBottom: 0 }]}>
-              <CurrencyGroupMetric label={C.savedAmount} groups={goalCurrencyGroups} field="saved" color={th.primary} th={th} lang={cfg.lang} />
-              <CurrencyGroupMetric label={C.goalRemaining} groups={goalCurrencyGroups} field="remaining" color={th.warn} th={th} lang={cfg.lang} />
-              <CurrencyGroupMetric label={C.goalTarget} groups={goalCurrencyGroups} field="target" color={th.text} th={th} lang={cfg.lang} />
-            </View>
-          </View>
-        ) : null}
-
-        {detailKey === 'spending' ? (
-          <View style={s.reportInlineStack}>
-          {categories.length ? (
-            <View style={s.categoryList}>
-              {categories.slice(0, 5).map(item => (
-                <CategoryRow key={item.id} item={item} th={th} lang={cfg.lang} sym={sym} />
-              ))}
-            </View>
-          ) : <Empty th={th} text={C.noData} />}
-          </View>
-        ) : null}
-
-        {/* MYFI_COMPARISON_PRO_V3 */}
-        {detailKey === 'comparison' ? (
-          <View style={s.reportInlineStack}>
-          <View style={[s.proCompareModeBar, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
-            {[
-              { value: 'month', label: C.monthlyComparison, icon: 'calendar-outline' },
-              { value: 'year', label: C.annualComparison, icon: 'calendar-number-outline' },
-            ].map(option => {
-              const active = comparisonMode === option.value;
-              return (
-                <TouchableOpacity
-                  key={option.value}
-                  onPress={() => changeComparisonMode(option.value)}
-                  style={[
-                    s.proCompareModeBtn,
-                    {
-                      backgroundColor: active ? th.card : 'transparent',
-                      borderColor: active ? th.border : 'transparent',
-                      flexDirection: rowDir,
-                    },
-                  ]}
-                >
-                  <Ionicons name={option.icon} size={16} color={active ? th.primary : th.sub} />
-                  <Text style={[s.proCompareModeText, { color: active ? th.primary : th.sub }]}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {comparisonMode === 'none' ? (
-            <TouchableOpacity
-              onPress={() => changeComparisonMode('month')}
-              style={[s.proCompareEmpty, { backgroundColor: th.cardHigh, borderColor: th.border }]}
-            >
-              <View style={[s.proCompareHeroIcon, { backgroundColor: th.primSoft }]}>
-                <Ionicons name="git-compare-outline" size={23} color={th.primary} />
-              </View>
-              <Text style={[s.proCompareEmptyTitle, { color: th.text }]}>
-                {C.addComparison}
-              </Text>
-              <Text style={[s.proCompareEmptyHint, { color: th.sub }]}>
-                {C.startComparisonHint}
-              </Text>
-            </TouchableOpacity>
-          ) : (
-            <>
-              <TouchableOpacity
-                onPress={() => setSheet('comparisonPeriods')}
-                style={[
-                  s.proComparePicker,
-                  {
-                    backgroundColor: th.cardHigh,
-                    borderColor: th.border,
-                    flexDirection: rowDir,
-                  },
-                ]}
-              >
-                <View style={[s.proComparePickerIcon, { backgroundColor: th.primSoft }]}>
-                  <Ionicons name="calendar-clear-outline" size={18} color={th.primary} />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={[s.proComparePickerLabel, { color: th.sub, textAlign: align }]}>
-                    {C.selectedPeriodsLabel}
-                  </Text>
-                  <Text style={[s.proComparePickerValue, { color: th.text, textAlign: align }]} numberOfLines={2}>
-                    {comparisonPeriodSummary.primary}
-                  </Text>
-                  <Text style={[s.proComparePickerHint, { color: th.faint, textAlign: align }]} numberOfLines={1}>
-                    {comparisonPeriodSummary.secondary}
-                  </Text>
-                </View>
-                <View style={s.proComparePickerActions}>
-                  {comparisonPeriodSummary.count > 0 ? (
-                    <View style={[s.proCompareCountBadge, { backgroundColor: th.primSoft }]}>
-                      <Text style={[s.proCompareCountText, { color: th.primary }]}>{comparisonPeriodSummary.count}</Text>
-                    </View>
-                  ) : null}
-                  <View style={[s.proCompareEditPill, { backgroundColor: th.primSoft }]}>
-                    <Text style={[s.proCompareEditText, { color: th.primary }]}>{C.editPeriods}</Text>
-                    <Ionicons name="chevron-down" size={14} color={th.primary} />
-                  </View>
-                </View>
-              </TouchableOpacity>
-
-              <View style={[s.proCompareViewBar, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}>
-                {[
-                  { value: 'chart', label: C.chartView, icon: 'analytics-outline' },
-                  { value: 'details', label: C.detailsView, icon: 'list-outline' },
-                ].map(option => {
-                  const active = comparisonView === option.value;
-                  return (
-                    <TouchableOpacity
-                      key={option.value}
-                      onPress={() => setComparisonView(option.value)}
-                      style={[
-                        s.proCompareViewBtn,
-                        {
-                          backgroundColor: active ? th.primary : 'transparent',
-                          flexDirection: rowDir,
-                        },
-                      ]}
-                    >
-                      <Ionicons name={option.icon} size={15} color={active ? th.onPrimary : th.sub} />
-                      <Text style={[s.proCompareViewText, { color: active ? th.onPrimary : th.sub }]}>
-                        {option.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {comparisonSeries.length ? (
-                comparisonView === 'chart' ? (
-                  <View style={[s.proCompareResultBox, { borderColor: th.border }]}>
-                    <TouchableOpacity
-                      onPress={() => setComparisonExpanded(true)}
-                      style={[s.proCompareExpandBtn, { backgroundColor: th.cardHigh, flexDirection: rowDir }]}
-                    >
-                      <Ionicons name="expand-outline" size={15} color={th.primary} />
-                      <Text style={[s.proCompareExpandText, { color: th.primary }]}>{C.expandChart}</Text>
-                    </TouchableOpacity>
-                    <TrendChart data={comparisonSeries} th={th} lang={cfg.lang} />
-                    <View style={[s.legend, { flexDirection: rowDir }]}>
-                      <Legend color={th.inc} label={C.income} th={th} />
-                      <Legend color={th.exp} label={C.expense} th={th} />
-                    </View>
-                  </View>
-                ) : (
-                  <View style={s.proCompareDetails}>
-                    {comparisonSeries.map((item, index) => (
-                      <View
-                        key={item.key}
-                        style={[
-                          s.proComparePeriodCard,
-                          {
-                            backgroundColor: th.cardHigh,
-                            borderColor: index === comparisonSeries.length - 1 ? `${th.primary}55` : th.border,
-                          },
-                        ]}
-                      >
-                        <View style={[s.proComparePeriodHead, { flexDirection: rowDir }]}>
-                          <View style={[s.proComparePeriodMark, { backgroundColor: th.primSoft }]}>
-                            <Ionicons
-                              name={comparisonMode === 'month' ? 'calendar-outline' : 'calendar-number-outline'}
-                              size={16}
-                              color={th.primary}
-                            />
-                          </View>
-                          <Text style={[s.proComparePeriodTitle, { color: th.text, textAlign: align }]}>
-                            {item.label}
-                          </Text>
-                          {index === comparisonSeries.length - 1 ? (
-                            <View style={[s.proCompareLatest, { backgroundColor: th.primSoft }]}>
-                              <Text style={[s.proCompareLatestText, { color: th.primary }]}>
-                                {ar ? 'الأحدث' : 'Latest'}
-                              </Text>
-                            </View>
-                          ) : null}
-                        </View>
-
-                        <View style={[s.proCompareMetrics, { flexDirection: rowDir }]}>
-                          <View style={[s.proCompareMetric, { borderColor: th.border }]}>
-                            <Text style={[s.proCompareMetricLabel, { color: th.sub }]}>{C.income}</Text>
-                            <Text style={[s.proCompareMetricValue, { color: th.inc }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                              {money(item.inc, cfg.lang, cfg.currency)} {sym}
-                            </Text>
-                          </View>
-                          <View style={[s.proCompareMetric, { borderColor: th.border }]}>
-                            <Text style={[s.proCompareMetricLabel, { color: th.sub }]}>{C.expense}</Text>
-                            <Text style={[s.proCompareMetricValue, { color: th.exp }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                              {money(item.exp, cfg.lang, cfg.currency)} {sym}
-                            </Text>
-                          </View>
-                          <View style={[s.proCompareMetric, { borderColor: th.border }]}>
-                            <Text style={[s.proCompareMetricLabel, { color: th.sub }]}>
-                              {ar ? 'صافي الدخل' : 'Net income'}
-                            </Text>
-                            <Text
-                              style={[s.proCompareMetricValue, { color: item.bal >= 0 ? th.inc : th.exp }]}
-                              numberOfLines={1}
-                              adjustsFontSizeToFit
-                              minimumFontScale={0.7}
-                            >
-                              {money(item.bal, cfg.lang, cfg.currency)} {sym}
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-                )
-              ) : <Empty th={th} text={C.noComparison} />}
-
-              <TouchableOpacity
-                onPress={() => changeComparisonMode('none')}
-                style={[s.proCompareRemove, { borderColor: th.border, flexDirection: rowDir }]}
-              >
-                <Ionicons name="close-circle-outline" size={16} color={th.sub} />
-                <Text style={[s.proCompareRemoveText, { color: th.sub }]}>{C.removeComparison}</Text>
-              </TouchableOpacity>
-            </>
-          )}
-          </View>
-        ) : null}
-                  </View>
-                ) : null}
-              </View>
-            );
-          })}
-        </View>
 
 
       </ScrollView>
@@ -2069,11 +1771,16 @@ function Legend({ color, label, th }) {
   );
 }
 
-function CategoryRow({ item, th, lang, sym }) {
+function CategoryRow({ item, th, lang, sym, onPress }) {
   const ar = lang === 'ar';
   const label = (ar ? item.label : item.labelEn) || item.label || item.labelEn;
   return (
-    <View style={s.categoryRow}>
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={ar ? `فتح حركات ${label}` : `Open ${label} transactions`}
+      onPress={onPress}
+      style={s.categoryRow}
+    >
       <View style={[s.categoryHead, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
         <View style={[s.categoryIdentity, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
           <View style={[s.categoryDot, { backgroundColor: item.color }]} />
@@ -2087,7 +1794,7 @@ function CategoryRow({ item, th, lang, sym }) {
       <View style={[s.track, { backgroundColor: th.cardHigh }]}>
         <View style={[s.fill, { backgroundColor: item.color, width: `${Math.min(100, item.percent)}%`, alignSelf: ar ? 'flex-end' : 'flex-start' }]} />
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
