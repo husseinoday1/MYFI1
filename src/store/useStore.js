@@ -12,6 +12,7 @@ import {
 import { createSyncSlice } from './slices/useSyncSlice';
 import { createTransactionSlice } from './slices/transactionsSlice';
 import { createTrackersSlice } from './slices/trackersSlice';
+import { createTrackerBuilderSlice } from './slices/trackerBuilderSlice';
 import { createManagementSlice } from './slices/managementSlice';
 import { createDataSlice } from './slices/dataSlice';
 
@@ -366,6 +367,7 @@ export const useStore = create((set, get) => {
     ...createSyncSlice(coreSet, get),
     ...createTransactionSlice(coreSet, get),
     ...createTrackersSlice(coreSet, get),
+    ...createTrackerBuilderSlice(coreSet, get),
     ...createManagementSlice(coreSet, get),
     ...createDataSlice(coreSet, get),
   };

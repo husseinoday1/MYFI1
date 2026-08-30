@@ -693,6 +693,7 @@ export const createManagementSlice = (set, get) => ({
     const normalized = normalizeWallets(get().wallets, get().cfg.currency);
     const currentWallet = normalized.find(wallet => wallet.id === id);
     if (normalized.length <= 1 || !currentWallet) return false;
+    if (get().getCustomTrackerReferenceImpact?.({ walletId: id })?.types?.length) return false;
     const hasHistory = get().trans.some(tx => tx.walletId === id || tx.fromWalletId === id || tx.toWalletId === id);
     if (hasHistory) return false;
     const fallback = normalized.find(wallet => wallet.id !== id && wallet.id === get().cfg.defaultWalletId)
@@ -761,6 +762,7 @@ export const createManagementSlice = (set, get) => ({
   deleteCategoriesMany: async (ids = []) => {
     const selected = new Set((Array.isArray(ids) ? ids : []).filter(id => id && id !== 'other'));
     if (!selected.size) return false;
+    if ([...selected].some(id => get().getCustomTrackerReferenceImpact?.({ categoryId: id })?.types?.length)) return false;
     const archivedAt = new Date().toISOString();
     const cats = get().cats.map(cat => selected.has(cat.id) ? { ...cat, archivedAt, status: 'archived' } : cat);
     const commitments = get().commitments.map(item => selected.has(item.cat) ? { ...item, categoryArchived: true } : item);
