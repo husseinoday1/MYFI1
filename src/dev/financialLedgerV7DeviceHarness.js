@@ -1,13 +1,26 @@
 import { Platform } from 'react-native';
 import { getLedgerDb } from '../lib/ledgerDatabase';
 import { readLedgerSchemaMigrationStatus } from '../lib/financialLedgerSchemaMigrations';
+import { createCanonicalBackupV11 } from '../lib/financialBackupV11';
+import { decodeCanonicalBackupV11 } from '../lib/financialBackupV11Decoder';
+import {
+  createCanonicalRestoreStageNamespace,
+  discardCanonicalRestoreStageV11,
+  readCanonicalRestoreStageV11,
+  stageCanonicalRestoreV11,
+} from '../lib/financialRestoreStageV11';
+import { canonicalizeFinancialLedgerV2, semanticHashCanonicalV2 } from '../lib/financialSemanticProjection';
 import {
   clearFinancialWorkspaceV7,
+  commitEntityChangesV7,
   commitFinancialTransactionV7,
   ensureFinancialLedgerV7,
+  ensureLedgerSyncIdentityV8,
+  FINANCIAL_SQLITE_SCHEMA_VERSION,
   readFinancialProjectionV7,
   readPendingLedgerMutationsV7,
   proveFinancialLedgerInvariantsV7,
+  setFinancialWorkspaceStateV7,
 } from '../lib/financialLedgerV7Repository';
 
 const assertHarness = (condition, code) => {
@@ -138,13 +151,65 @@ export async function runFinancialLedgerV7DeviceHarness() {
     assertHarness(String(pragmaValue(journalMode) || '').toLowerCase() === 'wal', 'wal_not_enabled');
     assertHarness(Number(pragmaValue(busyTimeout)) >= 5000, 'busy_timeout_too_low');
     assertHarness(String(pragmaValue(quickCheck) || '').toLowerCase() === 'ok', 'quick_check_failed');
-    assertHarness(Number(migrationStatus?.currentVersion) === 7, 'schema_version_mismatch');
+    assertHarness(
+      Number(migrationStatus?.currentVersion) === FINANCIAL_SQLITE_SCHEMA_VERSION,
+      `schema_version_mismatch:${String(migrationStatus?.currentVersion ?? 'missing')}`,
+    );
     assertHarness(
       migrationStatus?.migrations?.some(item => item.migration_id === '0007_financial_ledger_v7_baseline' && item.status === 'completed'),
       'schema_migration_journal_incomplete',
     );
     assertHarness(invariantReport?.ok && invariantReport?.level === 'HEALTHY', 'financial_invariant_proof_failed');
     assertHarness(invariantReport?.walletBalances?.length === 2, 'wallet_balance_proof_missing');
+
+    // Phase 12 device evidence: use a disposable namespace to prove the real
+    // Android SQLite path can build, decode, stage, and read back a V11 backup
+    // without changing the user's active workspace.
+    const trackerTypeId = `${runId}:tracker-type`;
+    const trackerItemId = `${runId}:tracker-item`;
+    const trackerWrite = await commitEntityChangesV7({
+      namespace,
+      database: db,
+      changes: [
+        { entityType: 'wallet', id: usdWallet.id, payload: usdWallet, createdAt: now, updatedAt: now },
+        { entityType: 'wallet', id: iqdWallet.id, payload: iqdWallet, createdAt: now, updatedAt: now },
+        { entityType: 'tracker_type', id: trackerTypeId, payload: { id: trackerTypeId, name: 'Device installments', source: { kind: 'wallets', walletIds: [iqdWallet.id] } }, createdAt: now, updatedAt: now },
+        { entityType: 'tracker_item', id: trackerItemId, payload: { id: trackerItemId, typeId: trackerTypeId, name: 'Device phone', targetAmount: 100000, currentAmount: 0 }, createdAt: now, updatedAt: now },
+      ],
+    });
+    assertHarness(trackerWrite?.ok && trackerWrite.changed === 4, 'canonical_entity_write_failed');
+    const identity = await ensureLedgerSyncIdentityV8({ namespace, database: db });
+    assertHarness(!!identity?.ledgerId, 'canonical_backup_identity_missing');
+    const workspaceSaved = await setFinancialWorkspaceStateV7({
+      namespace,
+      sourceMode: 'sqlite',
+      cutoverAt: now,
+      payload: { localPreferences: { cfg: { currency: 'IQD' } } },
+      database: db,
+    });
+    assertHarness(workspaceSaved, 'canonical_backup_workspace_not_ready');
+    const canonicalBackup = await createCanonicalBackupV11({ namespace });
+    assertHarness(canonicalBackup?.ok && canonicalBackup?.backup, 'canonical_backup_build_failed');
+    const decodedBackup = decodeCanonicalBackupV11(canonicalBackup.backup);
+    assertHarness(
+      decodedBackup?.ok,
+      `canonical_backup_decode_failed:${String(decodedBackup?.reason || 'unknown')}:${(decodedBackup?.errorCodes || []).join(',')}`,
+    );
+    const stageNamespace = createCanonicalRestoreStageNamespace(namespace);
+    const staged = await stageCanonicalRestoreV11({ namespace, stageNamespace, decoded: decodedBackup, database: db });
+    assertHarness(staged?.ok, `canonical_restore_stage_failed:${String(staged?.reason || 'unknown')}`);
+    const stagedReadback = await readCanonicalRestoreStageV11({
+      namespace, stageNamespace, ledgerId: identity.ledgerId, database: db,
+    });
+    assertHarness(stagedReadback?.ok, 'canonical_restore_stage_readback_failed');
+    const stageHash = semanticHashCanonicalV2(canonicalizeFinancialLedgerV2(stagedReadback));
+    assertHarness(stageHash === canonicalBackup.semanticHash, 'canonical_restore_stage_hash_mismatch');
+    assertHarness(
+      stagedReadback.entities?.some(item => item.entityType === 'tracker_type' && item.id === trackerTypeId)
+        && stagedReadback.entities?.some(item => item.entityType === 'tracker_item' && item.id === trackerItemId),
+      'canonical_restore_stage_custom_tracker_missing',
+    );
+    assertHarness(await discardCanonicalRestoreStageV11({ namespace, stageNamespace, database: db }), 'canonical_restore_stage_cleanup_failed');
 
     await clearFinancialWorkspaceV7({ namespace, database: db });
     const remaining = await db.getFirstAsync(
@@ -169,6 +234,7 @@ export async function runFinancialLedgerV7DeviceHarness() {
       quickCheck: String(pragmaValue(quickCheck) || '').toLowerCase(),
       invariantLevel: invariantReport.level,
       walletBalanceProofCount: invariantReport.walletBalances.length,
+      canonicalRoundTrip: true,
       cleaned,
       durationMs: Date.now() - startedAt,
     };
