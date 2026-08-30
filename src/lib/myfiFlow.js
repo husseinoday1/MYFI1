@@ -23,6 +23,7 @@ const normalizedPercentages = (allocations = {}) => {
 const normalizedBindings = (bindings = {}, validCategoryIds = null) => {
   const source = bindings && typeof bindings === 'object' ? bindings : {};
   const allowed = validCategoryIds instanceof Set ? validCategoryIds : null;
+  const assigned = new Set();
   return Object.fromEntries(MYFI_FLOW_BUCKETS.map(bucket => {
     const seen = new Set();
     const rows = (Array.isArray(source[bucket]) ? source[bucket] : [])
@@ -30,7 +31,12 @@ const normalizedBindings = (bindings = {}, validCategoryIds = null) => {
         categoryId: String(row?.categoryId || '').trim(),
         weight: finitePositive(row?.weight),
       }))
-      .filter(row => row.categoryId && (!allowed || allowed.has(row.categoryId)) && !seen.has(row.categoryId) && seen.add(row.categoryId));
+      .filter(row => row.categoryId
+        && (!allowed || allowed.has(row.categoryId))
+        && !seen.has(row.categoryId)
+        && !assigned.has(row.categoryId)
+        && seen.add(row.categoryId)
+        && assigned.add(row.categoryId));
     const totalWeight = rows.reduce((sum, row) => sum + row.weight, 0);
     return [bucket, totalWeight > 0
       ? rows.map(row => ({ ...row, weight: row.weight / totalWeight }))

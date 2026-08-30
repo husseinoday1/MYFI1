@@ -205,10 +205,13 @@ const HOME_LAYOUT_VERSION = 3;
 
 export const INCOME_ALLOCATION_BUCKETS = ['needs', 'wants', 'savings', 'debt', 'investment'];
 export const DEF_INCOME_ALLOCATION_PLAN = {
-  version: 1,
+  version: 2,
   strategy: 'balanced',
   income: 0,
   allocations: { needs: 50, wants: 30, savings: 20, debt: 0, investment: 0 },
+  categoryBindings: {},
+  period: null,
+  status: 'active',
   updatedAt: null,
 };
 
@@ -221,11 +224,24 @@ export const normalizeIncomeAllocationPlan = (plan = {}) => {
   }), {});
   const total = INCOME_ALLOCATION_BUCKETS.reduce((sum, key) => sum + allocations[key], 0);
   const valid = total === 100;
+  const rawBindings = source.categoryBindings && typeof source.categoryBindings === 'object' ? source.categoryBindings : {};
+  const categoryBindings = INCOME_ALLOCATION_BUCKETS.reduce((next, bucket) => {
+    const seen = new Set();
+    const rows = (Array.isArray(rawBindings[bucket]) ? rawBindings[bucket] : [])
+      .map(item => ({ categoryId: String(item?.categoryId || '').trim(), weight: Math.max(0, Number(item?.weight) || 0) }))
+      .filter(item => item.categoryId && item.weight > 0 && !seen.has(item.categoryId) && seen.add(item.categoryId));
+    const totalWeight = rows.reduce((sum, item) => sum + item.weight, 0);
+    next[bucket] = totalWeight > 0 ? rows.map(item => ({ ...item, weight: item.weight / totalWeight })) : [];
+    return next;
+  }, {});
   return {
-    version: 1,
+    version: 2,
     strategy: ['balanced', 'debtFirst', 'saveFirst', 'custom'].includes(source.strategy) ? source.strategy : 'custom',
     income: Math.max(0, Number(source.income) || 0),
     allocations: valid ? allocations : { ...DEF_INCOME_ALLOCATION_PLAN.allocations },
+    categoryBindings,
+    period: /^\d{4}-\d{2}$/.test(String(source.period || '')) ? source.period : null,
+    status: source.status === 'draft' ? 'draft' : 'active',
     updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : null,
   };
 };

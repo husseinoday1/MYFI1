@@ -39,4 +39,10 @@ assert.equal(saved.categoryBindings.needs.length, 1, 'unknown category reference
 assert.equal(saved.categoryBindings.needs[0].weight, 1, 'remaining bindings are renormalized without changing the user plan');
 assert.equal(normalizeMyfiFlowPlan(saved, { categoryIds: ['food'] }).period, '2026-08');
 
+const duplicateBindingPlan = normalizeMyfiFlowPlan({
+  allocations,
+  categoryBindings: { needs: [{ categoryId: 'food', weight: 1 }], wants: [{ categoryId: 'food', weight: 1 }] },
+}, { categoryIds: ['food'] });
+assert.deepEqual(duplicateBindingPlan.categoryBindings.wants, [], 'one category cannot receive two Flow allocations silently');
+
 console.log('MYFI Flow tests passed');
