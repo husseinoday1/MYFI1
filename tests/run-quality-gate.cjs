@@ -103,6 +103,7 @@ const runtimeTests = [
   ['SCHEMA_MIGRATION_RUNTIME', 'financial_schema_migration_recovery', 'financial-ledger-migration-runtime.test.cjs'],
   ['UNIT_RUNTIME', 'forecasting', 'run-forecasting-fix.cjs'],
   ['UNIT_RUNTIME', 'myfi_flow', 'run-myfi-flow.cjs'],
+  ['UNIT_RUNTIME', 'tracker_builder_contract', 'run-tracker-builder.cjs'],
   ['UNIT_RUNTIME', 'sync_scenarios', 'run-sync-scenarios.cjs'],
   ['UNIT_RUNTIME', 'sync_core', 'sync-core-v4.test.cjs'],
   ['UNIT_RUNTIME', 'p19_002_sync_paging', 'run-p19-002-sync-paging.cjs'],
