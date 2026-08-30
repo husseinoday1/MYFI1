@@ -181,7 +181,7 @@ const namespace = 'account:disposable';
 const stageOne = `${namespace}::restore-stage::one`;
 const hashOne = 'a'.repeat(64);
 const counts = Object.freeze({
-  accounts: 1, transactions: 1, postings: 1, links: 0, exchangeRates: 0, entities: 0,
+  accounts: 1, transactions: 1, postings: 1, links: 0, exchangeRates: 0, entities: 2,
   coldArchiveBundles: 1, coldArchiveRecords: 1,
 });
 const operationIds = Object.freeze({
@@ -210,6 +210,14 @@ const seedLedgerRows = async (target, label) => {
   await run(`INSERT INTO ledger_postings_v7
     (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
     VALUES (?,?,?,?,?,?,?,?,?,?)`, target, `posting-${label}`, `tx-${label}`, `wallet-${label}`, 'physical', 'expense', -100, 'IQD', null, now);
+  await run(`INSERT INTO ledger_entities_v7
+    (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?)`, target, 'tracker_type', `tracker-type-${label}`, 1, null,
+  JSON.stringify({ id: `tracker-type-${label}`, name: `Installments ${label}` }), now, now);
+  await run(`INSERT INTO ledger_entities_v7
+    (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?)`, target, 'tracker_item', `tracker-item-${label}`, 1, null,
+  JSON.stringify({ id: `tracker-item-${label}`, typeId: `tracker-type-${label}`, name: `Phone ${label}` }), now, now);
 };
 
 const seedArchive = async (target, label, year) => {
@@ -360,6 +368,11 @@ const snapshot = async () => {
   assert.equal(promoted.ok, true);
   assert.deepEqual(visited, boundaries, 'success must cross every tested promotion boundary');
   assert.deepEqual((await all(`SELECT id FROM ledger_financial_transactions_v7 WHERE namespace=? ORDER BY id`, namespace)).map(row => row.id), ['tx-new']);
+  assert.deepEqual(
+    (await all(`SELECT entity_type,id,payload_json FROM ledger_entities_v7 WHERE namespace=? ORDER BY entity_type,id`, namespace)).map(row => [row.entity_type, row.id, JSON.parse(row.payload_json).typeId || null]),
+    [['tracker_item', 'tracker-item-new', 'tracker-type-new'], ['tracker_type', 'tracker-type-new', null]],
+    'promotion must replace the live custom tracker graph atomically with the staged graph',
+  );
   assert.deepEqual((await all(`SELECT year FROM cold_archive_years WHERE namespace=? ORDER BY year`, namespace)).map(row => Number(row.year)), [2032]);
   assert.deepEqual(
     (await all(`SELECT id FROM cold_archive_transactions WHERE namespace=? ORDER BY id`, namespace)).map(row => row.id),

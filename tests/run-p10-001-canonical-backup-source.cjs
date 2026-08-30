@@ -35,6 +35,8 @@ const projectionRow = {
     { entityType: 'wallet', id: 'w1', revision: 1, deletedAt: null, payload: {} },
     { entityType: 'wallet', id: 'w2', revision: 1, deletedAt: null, payload: {} },
     { entityType: 'debt', id: 'd1', revision: 1, deletedAt: null, payload: {} },
+    { entityType: 'tracker_type', id: 'tracker-type-1', revision: 1, deletedAt: null, payload: { name: 'Installments' } },
+    { entityType: 'tracker_item', id: 'tracker-item-1', revision: 1, deletedAt: null, payload: { typeId: 'tracker-type-1', name: 'Phone' } },
     { entityType: 'workspace', id: 'ws', revision: 1, deletedAt: null, payload: { cfg: {} } },
   ],
   postings: [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }, { id: 'p4' }],
@@ -111,6 +113,9 @@ const { readCanonicalBackupSource, CANONICAL_BACKUP_SOURCE_VERSION } = compiled.
   }
   assert.ok(model.entities.wallet && model.entities.debt && model.entities.workspace,
     'entities must be grouped by type and include the workspace entity');
+  assert.deepEqual(model.entities.tracker_type.map(item => item.id), ['tracker-type-1']);
+  assert.deepEqual(model.entities.tracker_item.map(item => item.id), ['tracker-item-1']);
+  assert.equal(model.entities.tracker_item[0].payload.typeId, 'tracker-type-1');
   console.log('[PASS] every canonical section is present');
 
   // --- counts distinguish active, archived and tombstoned ------------------

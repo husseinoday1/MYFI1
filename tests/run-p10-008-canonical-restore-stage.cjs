@@ -67,7 +67,10 @@ const projection = {
     storage: { kind: 'expense', status: 'posted', scope: 'personal', dateISO: '2026-01-01', occurredAt: '2026-01-01T00:00:00.000Z', categoryId: null, title: 'Direct', note: null, sourceType: 'manual', sourceId: null, idempotencyKey: 'expense:tx-1', deviceId: 'device-1', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
   }],
   postings: [{ id: 'post-1', transactionId: 'tx-1', accountId: 'account-1', bucket: 'physical', role: 'expense', amountMinor: -1000, currencyCode: 'IQD', exchangeRateId: null, createdAt: '2026-01-01T00:00:00.000Z' }],
-  links: [], entities: [],
+  links: [], entities: [
+    { entityType: 'tracker_type', id: 'tracker-type-1', revision: 1, deletedAt: null, payload: { name: 'Installments' }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+    { entityType: 'tracker_item', id: 'tracker-item-1', revision: 1, deletedAt: null, payload: { typeId: 'tracker-type-1', name: 'Phone' }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+  ],
 };
 const db = {
   async runAsync(sql, ...args) { calls.push({ sql: String(sql), args }); return { changes: 1 }; },
@@ -124,6 +127,11 @@ const decoded = {
   assert.equal(transactionWrite.args[1], 'tx-1');
   assert.equal(transactionWrite.args[12], 'expense:tx-1', 'stored idempotency key must be written directly');
   assert.equal(transactionWrite.args[13], 'device-1', 'stored device provenance must be written directly');
+  const entityWrites = calls.filter(call => call.sql.includes('INSERT INTO ledger_entities_v7'));
+  assert.deepEqual(entityWrites.map(call => [call.args[1], call.args[2]]), [
+    ['tracker_type', 'tracker-type-1'],
+    ['tracker_item', 'tracker-item-1'],
+  ], 'a canonical restore stage must retain custom tracker definitions and their items');
   const readinessWrite = calls.find(call => call.sql.includes('INSERT OR REPLACE INTO ledger_v7_meta')
     && String(call.args[0] || '').startsWith('canonical_restore_stage_v11:'));
   assert.ok(readinessWrite, 'a proved stage must leave a local READY marker for P10-010');
