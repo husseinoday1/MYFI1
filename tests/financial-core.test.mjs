@@ -147,8 +147,14 @@ assert.equal(resolveSystemTheme('light'), 'light', 'system light mode must stay 
 assert.equal(resolveSystemTheme(null, 'light'), 'light', 'unknown system mode must preserve the current theme');
 const historicalInsights = buildLeakInsights([
   { id: 'history-jan', amt: -100, flowType: 'expense', cat: 'food', title: 'Food', dateISO: '2026-01-10' },
+  { id: 'history-jan-2', amt: -100, flowType: 'expense', cat: 'food', title: 'Food', dateISO: '2026-01-15' },
+  { id: 'history-jan-3', amt: -100, flowType: 'expense', cat: 'food', title: 'Food', dateISO: '2026-01-20' },
   { id: 'history-feb', amt: -100, flowType: 'expense', cat: 'food', title: 'Food', dateISO: '2026-02-10' },
-  { id: 'history-mar', amt: -100, flowType: 'expense', cat: 'food', title: 'Food', dateISO: '2026-03-10' },
+  { id: 'history-feb-2', amt: -100, flowType: 'expense', cat: 'food', title: 'Food', dateISO: '2026-02-15' },
+  { id: 'history-feb-3', amt: -100, flowType: 'expense', cat: 'food', title: 'Food', dateISO: '2026-02-20' },
+  { id: 'history-mar', amt: -150, flowType: 'expense', cat: 'food', title: 'Food', dateISO: '2026-03-10' },
+  { id: 'history-mar-2', amt: -150, flowType: 'expense', cat: 'food', title: 'Food', dateISO: '2026-03-15' },
+  { id: 'history-mar-3', amt: -150, flowType: 'expense', cat: 'food', title: 'Food', dateISO: '2026-03-20' },
 ], [{ id: 'food', label: 'Food', labelEn: 'Food' }], new Date('2026-03-15T12:00:00'));
 assert.equal(historicalInsights.history.baselineMonthCount, 2, 'insights must use all earlier recorded months as a baseline');
 assert.equal(historicalInsights.history.monthCount, 3, 'insights must retain the full recorded history');

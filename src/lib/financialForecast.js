@@ -100,13 +100,65 @@ export const fixedExpenseSpent = (rows = [], commitments = [], categoryId = null
 
 export const variableExpenseSpent = (rows = [], commitments = [], categoryId = null) => (
   (Array.isArray(rows) ? rows : [])
-    .filter(tx => (
-      (!categoryId || tx?.cat === categoryId)
-      && isExpenseFlow(tx)
-      && !isFixedExpenseTransaction(tx, commitments)
-    ))
+    .filter(tx => isEligibleVariableSpendTransaction(tx, commitments, categoryId))
     .reduce((sum, tx) => sum + asAmount(tx?.amt), 0)
 );
+
+export const isEligibleVariableSpendTransaction = (tx = {}, commitments = [], categoryId = null) => (
+  (!categoryId || tx?.cat === categoryId)
+  && isExpenseFlow(tx)
+  && !isFixedExpenseTransaction(tx, commitments)
+);
+
+export const eligibleVariableSpendCount = (rows = [], commitments = [], categoryId = null) => (
+  (Array.isArray(rows) ? rows : [])
+    .filter(tx => isEligibleVariableSpendTransaction(tx, commitments, categoryId))
+    .length
+);
+
+export const isMonthEligibleForForecast = (rows = [], commitments = [], { minTransactions = 3 } = {}) => (
+  eligibleVariableSpendCount(rows, commitments) >= Math.max(1, Number(minTransactions) || 3)
+);
+
+export const getEligibleHistoricalVariableSpendMonths = (
+  trans = [],
+  date = new Date(),
+  commitments = [],
+  { limit = 6, minTransactions = 3 } = {},
+) => {
+  const currentKey = monthKeyForDate(date);
+  const index = getTransactionIndex(trans);
+  return index.monthKeys
+    .filter(key => key < currentKey)
+    .map(key => [key, index.byMonth.get(key) || []])
+    .filter(([, rows]) => isMonthEligibleForForecast(rows, commitments, { minTransactions }))
+    .slice(-Math.max(1, Number(limit) || 6));
+};
+
+export const getCategoryHistoricalAverageTransaction = (
+  trans = [],
+  date = new Date(),
+  commitments = [],
+  categoryId = null,
+  { limit = 6, minEligibleMonths = 3 } = {},
+) => {
+  if (!categoryId) return { average: null, eligibleMonthCount: 0, transactionCount: 0 };
+  const months = getEligibleHistoricalVariableSpendMonths(trans, date, commitments, { limit });
+  const categoryMonths = months.filter(([, rows]) => eligibleVariableSpendCount(rows, commitments, categoryId) > 0);
+  const rows = categoryMonths.flatMap(([, monthRows]) => (
+    monthRows.filter(tx => isEligibleVariableSpendTransaction(tx, commitments, categoryId))
+  ));
+  const transactionCount = rows.length;
+  const eligibleMonthCount = categoryMonths.length;
+  if (eligibleMonthCount < Math.max(1, Number(minEligibleMonths) || 3) || transactionCount === 0) {
+    return { average: null, eligibleMonthCount, transactionCount };
+  }
+  return {
+    average: rows.reduce((sum, tx) => sum + asAmount(tx?.amt), 0) / transactionCount,
+    eligibleMonthCount,
+    transactionCount,
+  };
+};
 
 export const outstandingExpenseCommitments = (
   commitments = [],
@@ -133,12 +185,7 @@ export const weightedHistoricalVariableSpend = (
   commitments = [],
   { categoryId = null, limit = 6, decay = 0.7 } = {},
 ) => {
-  const currentKey = monthKeyForDate(date);
-  const index = getTransactionIndex(trans);
-  const baselineMonths = index.monthKeys
-    .filter(key => key < currentKey)
-    .slice(-Math.max(1, limit))
-    .map(key => [key, index.byMonth.get(key) || []]);
+  const baselineMonths = getEligibleHistoricalVariableSpendMonths(trans, date, commitments, { limit });
 
   const count = baselineMonths.length;
   let weighted = 0;

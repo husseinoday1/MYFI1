@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { monthlyForecast } from '../src/utils/calc.js';
-import { buildLeakInsights, suggestCategoryForText } from '../src/lib/localIntelligence.js';
+import { buildLeakInsights, detectRecurringCandidates, shouldShowWhyChangedCard, suggestCategoryForText } from '../src/lib/localIntelligence.js';
+import { isMonthEligibleForForecast } from '../src/lib/financialForecast.js';
 
 const cats = [
   { id: 'food', label: 'طعام', labelEn: 'Food' },
@@ -87,6 +88,51 @@ for (let month = 2; month <= 8; month += 1) {
   });
 }
 const confidenceInsights = buildLeakInsights(sixMonthHistory, cats, new Date('2026-08-15T12:00:00'), []);
-assert.equal(confidenceInsights.history.baselineMonthCount, 6, 'insights must retain up to six historical months so high confidence is reachable');
+assert.equal(confidenceInsights.history.baselineMonthCount, 0, 'months with one variable expense must not be promoted into an analytical baseline');
+
+const eligibleHistory = [];
+for (let month = 2; month <= 7; month += 1) {
+  for (let item = 0; item < 3; item += 1) {
+    eligibleHistory.push({
+      id: `eligible-food-${month}-${item}`,
+      amt: -(90_000 + item * 10_000),
+      flowType: 'expense',
+      cat: 'food',
+      title: 'Food',
+      dateISO: `2026-${String(month).padStart(2, '0')}-${String(8 + item).padStart(2, '0')}`,
+    });
+  }
+}
+const eligibleInsights = buildLeakInsights(eligibleHistory, cats, new Date('2026-08-15T12:00:00'), []);
+assert.equal(eligibleInsights.history.baselineMonthCount, 6, 'six months with three variable expenses each must remain eligible for the analytical baseline');
+
+// Negative contract #1: transfers, debt payments, and reconciliations never make a month eligible.
+assert.equal(isMonthEligibleForForecast([
+  { kind: 'transfer', flowType: 'transfer', amt: 100, dateISO: '2026-07-02' },
+  { flowType: 'debt_payment', isDebtPayment: true, amt: -100, dateISO: '2026-07-03' },
+  { flowType: 'expense', isCommitmentPayment: true, amt: -100, dateISO: '2026-07-04' },
+], []), false, 'three non-variable financial movements must not increase forecast confidence');
+
+// Negative contract #2: a category without three eligible historical months cannot get an automatic explanation.
+const insufficientWhyChanged = shouldShowWhyChangedCard({
+  currentAmount: 185_000,
+  referenceAmount: 100_000,
+  historicalAvgTxn: null,
+  eligibleTransactionCount: 2,
+});
+assert.deepEqual(insufficientWhyChanged, { show: false, reason: 'insufficient_data', wording: null });
+
+// Negative contract #3: different payees in the same category must never be merged into one recurring pattern.
+const separatePayeeCandidates = detectRecurringCandidates([
+  { id: 'orig-1', title: 'مطعم الأصالة', titleSource: 'user', cat: 'food', flowType: 'expense', amt: -20_000, dateISO: '2026-05-10' },
+  { id: 'orig-2', title: 'مطعم الأصالة', titleSource: 'user', cat: 'food', flowType: 'expense', amt: -20_000, dateISO: '2026-06-10' },
+  { id: 'star-1', title: 'ستاربكس', titleSource: 'user', cat: 'food', flowType: 'expense', amt: -20_000, dateISO: '2026-05-12' },
+  { id: 'star-2', title: 'ستاربكس', titleSource: 'user', cat: 'food', flowType: 'expense', amt: -20_000, dateISO: '2026-06-12' },
+]);
+assert.equal(separatePayeeCandidates.some(item => item.count >= 4), false, 'same-category payees must not merge into one recurring candidate');
+
+// The two activation paths are distinct: a large absolute event and a meaningful relative change above its noise floor.
+assert.equal(shouldShowWhyChangedCard({ currentAmount: 185_000, referenceAmount: 100_000, historicalAvgTxn: 80_000, eligibleTransactionCount: 1 }).reason, 'absolute');
+assert.equal(shouldShowWhyChangedCard({ currentAmount: 120_000, referenceAmount: 100_000, historicalAvgTxn: 45_000, eligibleTransactionCount: 2 }).reason, 'relative');
 
 console.log('forecasting-fix tests passed');

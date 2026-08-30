@@ -2,7 +2,10 @@ import { byMonth, calcStats, catSpend } from '../utils/calc';
 import { isExpenseFlow, isIncomeFlow } from './modules';
 import {
   adaptiveVariableProjection,
+  getEligibleHistoricalVariableSpendMonths,
+  getCategoryHistoricalAverageTransaction,
   isFixedExpenseTransaction,
+  isEligibleVariableSpendTransaction,
   monthKeyForDate,
   outstandingExpenseCommitments,
 } from './financialForecast';
@@ -18,6 +21,33 @@ const normalize = (value = '') =>
     .replace(/ة/g, 'ه')
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ');
+
+export const shouldShowWhyChangedCard = ({
+  currentAmount = 0,
+  referenceAmount = 0,
+  historicalAvgTxn = null,
+  eligibleTransactionCount = 0,
+  percentThreshold = 15,
+  noiseDivisor = 3,
+} = {}) => {
+  const average = Number(historicalAvgTxn);
+  if (!Number.isFinite(average) || average <= 0) {
+    return { show: false, reason: 'insufficient_data', wording: null };
+  }
+  const difference = Math.abs(Number(currentAmount || 0) - Number(referenceAmount || 0));
+  const percentChange = Math.abs(Number(referenceAmount || 0)) > 0
+    ? (difference / Math.abs(Number(referenceAmount))) * 100
+    : 0;
+  const absolute = difference >= average;
+  const relative = percentChange >= Number(percentThreshold || 15)
+    && difference >= average / Math.max(1, Number(noiseDivisor) || 3);
+  if (!absolute && !relative) return { show: false, reason: 'not_significant', wording: null };
+  return {
+    show: true,
+    reason: absolute ? 'absolute' : 'relative',
+    wording: Number(eligibleTransactionCount || 0) <= 1 ? 'single_event' : 'pattern',
+  };
+};
 
 const monthId = (date = new Date()) => {
   const d = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
@@ -253,10 +283,7 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date(), comm
     remainingFixedById.set(id, (remainingFixedById.get(id) || 0) + Math.abs(Number(commitment.amt || 0)));
   });
 
-  const baselineMonths = [...monthly.entries()]
-    .filter(([key]) => key !== currentKey)
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .slice(-6);
+  const baselineMonths = getEligibleHistoricalVariableSpendMonths(relevant, analysisDate, commitments, { limit: 6 });
   const baselineMonthCount = baselineMonths.length;
 
   const decay = 0.7;
@@ -313,6 +340,14 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date(), comm
       fallbackScaleCap: 2,
     });
     const projectedSpent = fixedSpent + remainingFixed + variableForecast.projected;
+    const historical = getCategoryHistoricalAverageTransaction(relevant, analysisDate, commitments, id, { limit: 6 });
+    const eligibleTransactionCount = current.filter(tx => isEligibleVariableSpendTransaction(tx, commitments, id)).length;
+    const whyChanged = shouldShowWhyChangedCard({
+      currentAmount: projectedSpent,
+      referenceAmount: previousSpent,
+      historicalAvgTxn: historical.average,
+      eligibleTransactionCount,
+    });
     return {
       ...source,
       spent,
@@ -326,6 +361,9 @@ export const buildLeakInsights = (trans = [], cats = [], date = new Date(), comm
       previousSpent,
       baselineSpent: previousSpent,
       delta: projectedSpent - previousSpent,
+      historicalAvgTxn: historical.average,
+      historicalEligibleMonthCount: historical.eligibleMonthCount,
+      whyChanged,
     };
   });
   const totalSpent = currentSpend.reduce((sum, cat) => sum + Number(cat.spent || 0), 0);
