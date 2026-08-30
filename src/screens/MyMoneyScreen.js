@@ -2,6 +2,8 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/useTheme';
+import { useStore } from '../store/useStore';
+import { getModules } from '../lib/modules';
 import { ScreenScroll, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
 import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 
@@ -16,6 +18,8 @@ export default function MyMoneyScreen({
   onOpenIncomeAllocation,
 }) {
   const { th, lang, isAr } = useTheme();
+  const cfg = useStore(state => state.cfg);
+  const modules = getModules(cfg);
   const gateways = [
     {
       key: 'history',
@@ -57,7 +61,7 @@ export default function MyMoneyScreen({
       description: isAr ? 'حوّل نسبك إلى مبالغ وقارن الخطة بالواقع' : 'Turn percentages into amounts and compare plan with reality',
       onPress: onOpenIncomeAllocation,
     },
-  ];
+  ].filter(item => item.key !== 'budget' || modules.budgets);
 
   return (
     <ScreenScroll th={th}>

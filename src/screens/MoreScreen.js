@@ -9,14 +9,25 @@ import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 // no decorative settings, placeholder dialogs, or trust claims live here.
 export default function MoreScreen({
   onOpenSettingsPage,
+  onOpenCustomize,
   onOpenArchive,
   onOpenWallets,
   onOpenCategories,
-  onOpenSubscriptions,
   onOpenBenefits,
 }) {
   const { th, lang, isAr } = useTheme();
   const groups = [
+    {
+      title: isAr ? 'تجربتي' : 'My experience',
+      items: [
+        {
+          key: 'customize', icon: 'options-outline', tone: th.primary,
+          title: isAr ? 'تخصيص MYFI' : 'Customize MYFI',
+          description: isAr ? 'اختر ما تتابعه وما يظهر في الرئيسية' : 'Choose what you follow and what appears on Home',
+          onPress: onOpenCustomize,
+        },
+      ],
+    },
     {
       title: isAr ? 'أدواتي' : 'My tools',
       items: [
@@ -39,15 +50,6 @@ export default function MoreScreen({
           onPress: onOpenArchive,
         },
       ],
-    },
-    {
-      title: isAr ? 'الوصول السريع' : 'Quick access',
-      items: [{
-        key: 'subscriptions', icon: 'repeat-outline', tone: th.transfer,
-        title: isAr ? 'الاشتراكات' : 'Subscriptions',
-        description: isAr ? 'ما سيتجدد، موعده، وكلفته المتكررة' : 'What renews, when it is due, and its recurring cost',
-        onPress: onOpenSubscriptions,
-      }],
     },
     {
       title: isAr ? 'المزايا' : 'Benefits',

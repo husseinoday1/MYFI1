@@ -149,6 +149,7 @@ const more = fs.readFileSync(path.join(srcRoot, 'screens', 'MoreScreen.js'), 'ut
 const followUpsHub = fs.readFileSync(path.join(srcRoot, 'screens', 'FollowUpsHubScreen.js'), 'utf8');
 const paymentHistory = fs.readFileSync(path.join(srcRoot, 'screens', 'PaymentHistoryScreen.js'), 'utf8');
 const onboarding = fs.readFileSync(path.join(srcRoot, 'screens', 'OnboardingScreen.js'), 'utf8');
+const customizeMyfi = fs.readFileSync(path.join(srcRoot, 'screens', 'CustomizeMyfiScreen.js'), 'utf8');
 
 /* MYFI_ONBOARDING_DELEGATED_CURRENT_CONTRACT */
 assert(
@@ -193,7 +194,9 @@ assert(home.includes("quickEntryAction:{ flex: 1, flexBasis: 0"), 'Home quick ac
 assert(home.includes('walletRows.length === 0') && home.includes('renderWalletStrip'), 'Home must show one or more wallets and hide the section only when none exist');
 assert(home.includes("accessibilityRole=\"radio\"") && home.includes('walletStripBalance'), 'Wallet cards must expose balances while selecting the default wallet directly');
 assert.equal(home.includes('s.heroFacts'), false, 'Home hero must stay focused on Available balance only');
-assert(home.includes('s.homeGreeting') && home.includes('A quick view of your money today'), 'Home must lead with a compact greeting before the financial summary');
+assert.equal(home.includes('s.homeGreeting'), false, 'Home must begin with financial context, not consume the first fold with a generic greeting');
+['smart', 'transfer', 'expense', 'income'].forEach(key => assert(home.includes(`key: '${key}'`), `Home quick add must keep the ${key} action visible`));
+assert(home.includes('backgroundColor: `${action.color}10`') && home.includes('borderColor: `${action.color}3e`'), 'Every quick action must receive its own clear color treatment, not only Smart entry');
 assert.equal(home.includes('homePeriodPills'), false, 'Home must not show period controls that do not change the available balance');
 assert(home.indexOf('{renderWalletStrip()}') < home.indexOf('s.monthMetricsBlock') && home.indexOf('s.monthMetricsBlock') < home.indexOf('{renderQuickEntry()}'), 'Home must keep adaptive wallets near Available balance, before the month summary and quick add');
 ['history', 'budget', 'reports', 'basira', 'allocation'].forEach(key => assert(myMoney.includes(`key: '${key}'`), `My Money must expose the real ${key} gateway`));
@@ -202,10 +205,20 @@ assert.equal(myMoney.includes('GatewayCard'), false, 'My Money must not turn nav
 assert.equal(myMoney.includes('onOpenWallets'), false, 'Wallet management must not be duplicated as a primary My Money gateway');
 assert.equal(myMoney.includes('QuickShortcut'), false, 'My Money must not repeat its gateways in a separate shortcut strip');
 assert(myMoney.includes('خطة توزيع الدخل') && myMoney.includes('onOpenIncomeAllocation'), 'Income allocation must remain a real My Money destination');
-['onOpenWallets', 'onOpenCategories', 'onOpenSubscriptions', 'onOpenBenefits'].forEach(callback => assert(more.includes(callback), `More must preserve ${callback} discoverability`));
+['onOpenWallets', 'onOpenCategories', 'onOpenBenefits'].forEach(callback => assert(more.includes(callback), `More must preserve ${callback} discoverability`));
+assert(more.includes('onOpenCustomize') && appRoot.includes("customize: <CustomizeMyfiScreen />"), 'More must route to the dedicated MYFI personalization screen');
+assert(customizeMyfi.includes('enabledModules') && customizeMyfi.includes('homeSections') && customizeMyfi.includes('Hiding never deletes your data'), 'MYFI customization must control real modules and Home visibility without deleting records');
+assert(myMoney.includes("item.key !== 'budget' || modules.budgets"), 'Hiding the budget module must actually remove its My Money gateway');
+assert.equal(more.includes('onOpenSubscriptions'), false, 'Subscriptions must not be duplicated in More');
 assert.equal(more.includes('onOpenBasira'), false, 'Basira belongs to My Money and must not be duplicated in More');
-assert(followUpsHub.includes('ملخص المتابعات') && followUpsHub.includes('paymentsThisMonth'), 'Follow-ups must expose a data-backed quick summary');
+assert(followUpsHub.includes('activeFollowUps') && followUpsHub.includes('paymentsThisMonth'), 'Follow-ups must expose a data-backed quick summary');
 assert.equal(followUpsHub.includes('يحتاج انتباهك'), false, 'Needs attention must live only on Home, not duplicate Follow-ups');
+assert(followUpsHub.includes('paymentHistoryAction') && followUpsHub.includes('onOpenPaymentHistory'), 'Follow-ups must expose one clear route to the linked payment history');
+assert.equal(followUpsHub.includes('FollowUpSchedule'), false, 'Follow-ups must stay compact and must not duplicate upcoming-payment lists inside the hub');
+assert.equal(followUpsHub.includes('LatestPayment'), false, 'Follow-ups must not use a second latest-payment card that expands the hub');
+assert(followUpsHub.includes("key: 'owed'") && followUpsHub.includes("key: 'receivable'"), 'Follow-ups must expose separate gateways for debt I owe and debt owed to me');
+assert.equal(followUpsHub.includes("key: 'installments'"), false, 'Installments must not occupy the compact Follow-ups hub');
+assert.equal(followUpsHub.includes("key: 'subscriptions'"), false, 'Subscriptions must not occupy the compact Follow-ups hub');
 assert(paymentHistory.includes('التسلسل الزمني') && paymentHistory.includes('monthEntries'), 'Payment history must expose a visible summary and timeline');
 assert(homeCenter.includes('identityText') && homeCenter.includes('accountState'), 'Account center must use a compact identity card with explicit connection state');
 assert(legacySettings.includes('monthNameStyle') && legacySettings.includes('monthStyleLabel'), 'Advanced settings must preserve the global month display preference');

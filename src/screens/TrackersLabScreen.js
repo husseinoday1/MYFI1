@@ -29,6 +29,18 @@ const specializedScreen = (variant, isAr) => {
       subtitle: isAr ? 'ما عليك وما لك، مع السداد والتحصيل في مكان واضح.' : 'What you owe and are owed, with clear repayment and collection.',
       addLabel: isAr ? 'إضافة دين أو مستحق' : 'Add debt or receivable',
     },
+    owed: {
+      filter: 'owed', icon: 'arrow-down-outline',
+      title: isAr ? 'دين عليّ' : 'Debt I owe',
+      subtitle: isAr ? 'ما عليك للآخرين، مع السداد وسجل دفعات واضح.' : 'What you owe others, with repayment and a clear payment history.',
+      addLabel: isAr ? 'إضافة دين عليّ' : 'Add debt I owe',
+    },
+    receivable: {
+      filter: 'receivable', icon: 'arrow-up-outline',
+      title: isAr ? 'دين لي' : 'Debt owed to me',
+      subtitle: isAr ? 'ما لك عند الآخرين، مع التحصيل وسجل دفعات واضح.' : 'What others owe you, with collection and a clear payment history.',
+      addLabel: isAr ? 'إضافة دين لي' : 'Add debt owed to me',
+    },
     commitments: {
       filter: 'monthly', icon: 'calendar-outline',
       title: isAr ? 'الالتزامات' : 'Commitments',
@@ -780,6 +792,14 @@ export default function TrackersLabScreen({
   };
 
   const openSpecializedAdd = () => {
+    if (screenVariant === 'owed') {
+      onNewTracker?.({ trackerType: 'owed' });
+      return;
+    }
+    if (screenVariant === 'receivable') {
+      onNewTracker?.({ trackerType: 'receivable' });
+      return;
+    }
     if (screenVariant === 'savings') {
       onNewTracker?.({ trackerType: 'goal' });
       return;

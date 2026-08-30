@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Alert, Pressable, StyleSheet, Image } from 'react-native';
+import { View, Text, ScrollView, Alert, Pressable, StyleSheet, Image, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useStore } from '../store/useStore';
@@ -30,8 +30,9 @@ import { deriveDisplayName } from '../lib/accountIdentity';
 import { getMonthTransactionsByKey, getRecentTransactions, getTransactionIndex } from '../lib/transactionIndex';
 import { averageGoalProgress, summarizeCommitmentCurrencies, summarizeGoalCurrencies } from '../lib/entityCurrencySummary';
 import { getLedgerNamespace, queryLedgerSummary, queryLedgerTransactions, queryLedgerWalletPositions } from '../lib/activeLedgerRepository';
+import { getLedgerDb, runLedgerReadTransaction } from '../lib/ledgerDatabase';
+import { getFinancialWorkspaceStateV7 } from '../lib/financialLedgerV7Repository';
 const noop = () => {};
-const WALLET_CARD_WIDTH = 112;
 
 const copy = (lang) => {
   const ar = lang === 'ar';
@@ -179,7 +180,7 @@ export default function HomeScreen({
   const [attentionExpanded, setAttentionExpanded] = useState(false);
   const [savingsExpanded, setSavingsExpanded] = useState(false);
   const [recentExpanded, setRecentExpanded] = useState(false);
-  const [walletStripPage, setWalletStripPage] = useState(0);
+  const [walletsExpanded, setWalletsExpanded] = useState(false);
   const [editing,    setEditing]    = useState(null);
   const [details, setDetails] = useState(null);
   const [expandedRecentId, setExpandedRecentId] = useState(null);
@@ -223,15 +224,39 @@ export default function HomeScreen({
       const scope = getActiveScope(cfg);
       const [year, month] = currentMonthKey.split('-').map(Number);
       const lastDay = new Date(year, month, 0).getDate();
-      const [summary, recentPage, positions] = await Promise.all([
-        queryLedgerSummary({ namespace, fromDate: `${currentMonthKey}-01`, toDate: `${currentMonthKey}-${String(lastDay).padStart(2, '0')}`, scope }),
-        queryLedgerTransactions({ namespace, limit: recentLimit, scope, archived: false }),
-        queryLedgerWalletPositions({ namespace, scope }),
-      ]);
-      if (summary?.supported !== true || recentPage?.supported !== true || positions?.supported !== true) {
-        throw new Error('home_ledger_read_unsupported');
+      const db = await getLedgerDb();
+      if (!db) throw new Error('home_ledger_database_unavailable');
+      // Make schema readiness and the source-of-truth check explicit before the
+      // queued snapshot. The query helpers intentionally fall back for screens
+      // that still support the legacy ledger; Home must never do that after a V7
+      // cutover because it would make a real balance silently stale.
+      const ledgerState = await getFinancialWorkspaceStateV7({ namespace, database: db });
+      if (ledgerState?.source_mode !== 'sqlite') {
+        throw new Error(`home_ledger_source_mismatch namespace=${namespace} source_mode=${ledgerState?.source_mode || 'missing'}`);
       }
-      return { summary, recent: recentPage?.rows || [], positions: positions?.rows || [] };
+      // Home asks three related questions of one SQLite connection.  They must
+      // be read as one queued snapshot: parallel implicit statements can race
+      // the sync/mirror writer and make an otherwise valid balance unavailable.
+      return runLedgerReadTransaction(db, async (txn) => {
+        const summary = await queryLedgerSummary({
+          namespace,
+          fromDate: `${currentMonthKey}-01`,
+          toDate: `${currentMonthKey}-${String(lastDay).padStart(2, '0')}`,
+          scope,
+          database: txn,
+        });
+        const recentPage = await queryLedgerTransactions({ namespace, limit: recentLimit, scope, archived: false, database: txn });
+        const positions = await queryLedgerWalletPositions({ namespace, scope, database: txn });
+        if (summary?.supported !== true || recentPage?.supported !== true || positions?.supported !== true) {
+          const describe = value => [
+            value?.supported === true ? 'ok' : 'unsupported',
+            value?.source || 'no_source',
+            value?.reason || 'no_reason',
+          ].join(':');
+          throw new Error(`home_ledger_read_unsupported summary=${describe(summary)} recent=${describe(recentPage)} wallets=${describe(positions)}`);
+        }
+        return { summary, recent: recentPage?.rows || [], positions: positions?.rows || [] };
+      });
     };
     void run()
       .then((result) => {
@@ -239,7 +264,8 @@ export default function HomeScreen({
         setSqlHome(result);
         setSqlHomeError(false);
       })
-      .catch(() => {
+      .catch((error) => {
+        console.warn('[MYFI:HOME_LEDGER_READ]', String(error?.message || error || 'home_ledger_read_failed'));
         if (cancelled) return;
         setSqlHome(null);
         setSqlHomeError(true);
@@ -297,6 +323,7 @@ export default function HomeScreen({
   const canTransfer = walletRows.length > 1;
   const heroBalance = getWalletBaseAvailableTotal(walletRows, cfg.currency);
   const heroBalanceText = ledgerReadFailed ? '—' : `${heroBalance < 0 ? '-' : ''}${cfg.currency} ${fmt(Math.abs(heroBalance))}`;
+  const walletCount = walletRows.length;
   const activeGoals = scopedGoals.filter(goal => goal.active !== false && Number(goal.target || 0) > 0);
   const goalCurrencyGroups = useMemo(
     () => summarizeGoalCurrencies(activeGoals, cfg.currency, { activeOnly: true }),
@@ -711,12 +738,30 @@ export default function HomeScreen({
     ? homeCards.filter(item => item.visible !== false)
     : [];
   const quickEntryActions = [
-    { key: 'income', label: isAr ? 'دخل' : 'Income', direction: 'income', color: th.inc, onPress: onAddIncome },
-    { key: 'expense', label: isAr ? 'مصروف' : 'Expense', direction: 'expense', color: th.exp, onPress: onAddExpense },
-    modules.wallets && canTransfer
-      ? { key: 'transfer', label: isAr ? 'تحويل' : 'Transfer', icon: 'swap-horizontal-outline', color: th.transfer, onPress: onTransfer }
-      : null,
-    { key: 'smart', label: C.smartEntry, icon: 'sparkles-outline', color: th.primary, onPress: onSmartEntry },
+    {
+      key: 'income', label: isAr ? 'دخل' : 'Income', hint: isAr ? 'سجّل الوارد' : 'Record incoming',
+      direction: 'income', color: th.inc, onPress: onAddIncome,
+    },
+    {
+      key: 'expense', label: isAr ? 'مصروف' : 'Expense', hint: isAr ? 'سجّل الصرف' : 'Record spending',
+      direction: 'expense', color: th.exp, onPress: onAddExpense,
+    },
+    {
+      key: 'transfer', label: isAr ? 'تحويل' : 'Transfer', hint: isAr ? 'بين المحافظ' : 'Between wallets',
+      icon: 'swap-horizontal-outline', color: th.transfer,
+      onPress: canTransfer ? onTransfer : () => Alert.alert(
+        isAr ? 'أضف محفظة ثانية أولاً' : 'Add a second wallet first',
+        isAr ? 'التحويل يحتاج محفظتين على الأقل. يمكنك إضافتها من إدارة المحافظ.' : 'A transfer needs at least two wallets. You can add one from wallet management.',
+        [
+          { text: isAr ? 'ليس الآن' : 'Not now', style: 'cancel' },
+          { text: isAr ? 'إدارة المحافظ' : 'Manage wallets', onPress: () => onOpenTab('wallets') },
+        ],
+      ),
+    },
+    {
+      key: 'smart', label: C.smartEntry, hint: isAr ? 'ساعدني أسجّلها' : 'Help me record it',
+      icon: 'sparkles-outline', color: th.warn, onPress: onSmartEntry,
+    },
   ].filter(Boolean);
   const orderedQuickEntryActions = isAr ? [...quickEntryActions].reverse() : quickEntryActions;
   const topGoalRows = [...activeGoals]
@@ -1029,19 +1074,17 @@ export default function HomeScreen({
     );
   };
 
-  // Wallets remain financial information, not an entry-source picker. The
-  // layout adapts to the count so one or two wallets never leave a dead rail.
-  // Tapping a card only changes the default wallet; management is a separate
-  // destination and the former wallet popup is never reopened here.
+  // Wallets are part of the balance context, but their detailed cards belong
+  // in a focused sheet so they never push the month summary below the fold.
   const renderWalletStrip = () => {
     if (walletRows.length === 0) return null;
-    const walletCount = walletRows.length;
-    const pageCount = Math.max(1, Math.ceil(walletCount / 3));
-    const renderWalletCard = (wallet, layout = 'strip') => {
+    const defaultWallet = walletRows.find(wallet => wallet.id === defaultWalletId) || walletRows[0];
+    const renderWalletCard = (wallet) => {
       const currencyCode = wallet.currency || cfg.currency;
       const currencyMeta = CURRENCIES.find(item => item.code === currencyCode);
       const currencyName = currencyMeta ? (isAr ? currencyMeta.name : currencyMeta.nameEn) : currencyCode;
       const selected = wallet.id === defaultWalletId;
+      const reserved = Number(wallet.reservedBalance || 0);
       const balanceText = hidden ? C.hiddenAmount : `${formatMoneyNumber(wallet.availableBalance, currencyCode, cfg.lang)} ${currencyCode}`;
       return (
         <TouchableOpacity
@@ -1051,49 +1094,56 @@ export default function HomeScreen({
           accessibilityState={{ checked: selected, selected }}
           accessibilityLabel={`${getWalletLabel(wallet, cfg.lang)}${selected ? (isAr ? '، المحفظة الافتراضية' : ', default wallet') : (isAr ? '، اختيار كمحفظة افتراضية' : ', set as default wallet')}`}
           style={[
-            s.walletStripCard,
-            layout === 'solo' ? s.walletStripSoloCard : null,
-            layout === 'grid' ? s.walletStripGridCard : null,
-            layout === 'strip' ? { width: WALLET_CARD_WIDTH } : null,
-            { backgroundColor: selected ? th.primSoft : th.card, borderColor: selected ? `${th.primary}66` : th.border },
+            s.walletSheetCard,
+            { backgroundColor: selected ? th.primSoft : th.card, borderColor: selected ? `${th.primary}88` : th.border },
           ]}
         >
-          <View style={[s.walletStripTop, { flexDirection: rowDir }]}>
-            <View style={[s.walletStripIcon, { backgroundColor: selected ? th.card : th.primSoft }]}>
-              <Ionicons name={selected ? 'star' : 'wallet-outline'} size={16} color={th.primary} />
+          <View style={[s.walletSheetCardTop, { flexDirection: rowDir }]}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <View style={[s.walletStripTop, { flexDirection: rowDir }]}>
+                <Text style={[s.walletStripName, { color: th.text, textAlign: align }]} numberOfLines={1}>{getWalletLabel(wallet, cfg.lang)}</Text>
+                {selected ? <View style={[s.walletDefaultPill, { backgroundColor: `${th.primary}22` }]}><Text style={{ color: th.primary, fontSize: 9, ...weight('900') }}>{isAr ? 'افتراضية' : 'Default'}</Text></View> : null}
+              </View>
+              <Text style={[s.walletSheetTotal, { color: th.sub, textAlign: align }]} numberOfLines={1}>{isAr ? 'الإجمالي' : 'Total'} · {hidden ? C.hiddenAmount : `${formatMoneyNumber(wallet.balance, currencyCode, cfg.lang)} ${currencyCode}`}</Text>
             </View>
-            <Text style={[s.walletStripName, { color: th.text, textAlign: align }]} numberOfLines={1}>{getWalletLabel(wallet, cfg.lang)}</Text>
+            <View style={[s.walletStripIcon, { backgroundColor: selected ? th.primary : th.cardHigh }]}>
+              <Ionicons name={selected ? 'star' : 'wallet-outline'} size={17} color={selected ? th.onPrimary : th.primary} />
+            </View>
           </View>
-          <Text style={[s.walletStripBalance, { color: th.text, textAlign: align }]} numberOfLines={1} adjustsFontSizeToFit>{balanceText}</Text>
+          <View style={[s.walletSheetAmountRow, { flexDirection: rowDir }]}>
+            <Text style={[s.walletSheetAvailableLabel, { color: th.sub, textAlign: align }]}>{isAr ? 'المتاح' : 'Available'}</Text>
+            <Text style={[s.walletSheetAmount, { color: selected ? th.primary : th.text, textAlign: align }]} numberOfLines={1} adjustsFontSizeToFit>{balanceText}</Text>
+          </View>
+          {reserved > 0 ? <View style={[s.walletReservedPill, { backgroundColor: `${th.warn}18` }]}><Ionicons name="lock-closed-outline" size={11} color={th.warn} /><Text style={{ color: th.warn, fontSize: 10, ...weight('900') }}>{isAr ? `محجوز ${formatMoneyNumber(reserved, currencyCode, cfg.lang)} ${currencyCode}` : `${formatMoneyNumber(reserved, currencyCode, cfg.lang)} ${currencyCode} reserved`}</Text></View> : null}
           <Text style={[s.walletStripCurrency, { color: th.faint, textAlign: align }]} numberOfLines={1}>{currencyName}</Text>
         </TouchableOpacity>
       );
     };
     return (
-      <View style={s.walletStripBlock}>
-        <View style={[s.walletStripHead, { flexDirection: rowDir }]}>
-          <View style={{ flex: 1 }}>
-            <Text style={[s.walletStripTitle, { color: th.text, textAlign: align }]}>{isAr ? 'المحافظ' : 'Wallets'}</Text>
+      <Modal visible={walletsExpanded} transparent animationType="slide" onRequestClose={() => setWalletsExpanded(false)}>
+        <View style={[s.walletSheetOverlay, { backgroundColor: th.overlay || 'rgba(0,0,0,.55)' }]}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setWalletsExpanded(false)} />
+          <View style={[s.walletSheet, { backgroundColor: th.bg, borderColor: th.border }]}>
+            <View style={[s.walletSheetHead, { flexDirection: rowDir }]}>
+              <TouchableOpacity onPress={() => setWalletsExpanded(false)} style={[s.walletSheetClose, { backgroundColor: th.cardHigh }]} accessibilityLabel={isAr ? 'إغلاق' : 'Close'}><Ionicons name="chevron-down" size={21} color={th.text} /></TouchableOpacity>
+              <Text style={[s.walletSheetTitle, { color: th.text, textAlign: align }]}>{isAr ? 'المحافظ والأرصدة' : 'Wallets & balances'}</Text>
+            </View>
+            <View style={[s.walletSheetIntro, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}>
+              <View style={[s.walletStripIcon, { backgroundColor: th.primSoft }]}><Ionicons name="wallet-outline" size={17} color={th.primary} /></View>
+              <Text style={[s.walletSheetIntroText, { color: th.text, textAlign: align }]}>{isAr ? 'اختيار المحفظة الافتراضية' : 'Choose the default wallet'}</Text>
+              <View style={[s.walletCountPill, { backgroundColor: th.cardHigh }]}><Text style={{ color: th.text, ...weight('900') }}>{walletCount}</Text></View>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.walletSheetList}>
+              {walletRows.map(renderWalletCard)}
+            </ScrollView>
+            <TouchableOpacity onPress={() => { setWalletsExpanded(false); onOpenTab('wallets'); }} style={[s.walletManage, { backgroundColor: th.card, borderColor: th.border, flexDirection: rowDir }]}>
+              <Ionicons name="settings-outline" size={17} color={th.primary} />
+              <Text style={[s.walletManageText, { color: th.primary }]}>{isAr ? 'إدارة المحافظ' : 'Manage wallets'}</Text>
+              <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={17} color={th.primary} />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={() => onOpenTab('wallets')} style={s.walletStripLink} accessibilityLabel={isAr ? 'عرض كل المحافظ' : 'View all wallets'}>
-            <Text style={{ color: th.primary, fontSize: 11, ...weight('900') }}>{isAr ? 'عرض الكل' : 'View all'}</Text>
-          </TouchableOpacity>
         </View>
-        {walletCount === 1 ? renderWalletCard(walletRows[0], 'solo') : null}
-        {walletCount === 2 ? <View style={[s.walletStripGrid, { flexDirection: rowDir }]}>{walletRows.map(wallet => renderWalletCard(wallet, 'grid'))}</View> : null}
-        {walletCount > 2 ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            onScroll={(event) => setWalletStripPage(Math.round(event.nativeEvent.contentOffset.x / (WALLET_CARD_WIDTH * 3)))}
-            scrollEventThrottle={32}
-            contentContainerStyle={[s.walletStripRail, { flexDirection: rowDir }]}
-          >
-            {walletRows.map(wallet => renderWalletCard(wallet))}
-          </ScrollView>
-        ) : null}
-        {walletCount > 2 && pageCount > 1 ? <View style={[s.walletStripDots, { flexDirection: rowDir }]}>{Array.from({ length: pageCount }).map((_, index) => <View key={index} style={[s.walletStripDot, { backgroundColor: index === walletStripPage ? th.primary : th.border }]} />)}</View> : null}
-      </View>
+      </Modal>
     );
   };
 
@@ -1186,14 +1236,23 @@ export default function HomeScreen({
       <View style={s.quickEntry}>
         <View style={[s.quickEntryHead, { flexDirection: rowDir }]}>
           <Text style={[s.quickEntryTitle, { color: th.text, textAlign: align }]}>{C.quickActions}</Text>
-          <View style={[s.quickEntryHeadIcon, { backgroundColor: th.primSoft }]}>
-            <Ionicons name="add" size={18} color={th.primary} />
-          </View>
+          <Text style={[s.quickEntryPrompt, { color: th.sub, textAlign: isAr ? 'left' : 'right' }]} numberOfLines={1}>
+            {isAr ? 'اختر الحركة' : 'Choose a transaction'}
+          </Text>
         </View>
         <View style={[s.quickEntrySurface, { backgroundColor: th.card, borderColor: th.border }]}>
           <View style={[s.quickEntryRow, { flexDirection: rowDir }]}>
             {orderedQuickEntryActions.map(action => (
-              <TouchableOpacity key={action.key} onPress={action.onPress} style={s.quickEntryAction}>
+              <TouchableOpacity
+                key={action.key}
+                onPress={action.onPress}
+                accessibilityRole="button"
+                accessibilityLabel={`${action.label}. ${action.hint}`}
+                style={[
+                  s.quickEntryAction,
+                  { backgroundColor: `${action.color}10`, borderColor: `${action.color}3e` },
+                ]}
+              >
                 <View style={[s.quickEntryIcon, { backgroundColor: `${action.color}18`, borderColor: `${action.color}44` }]}>
                   {action.direction
                     ? <FinancialDirectionMark kind={action.direction} color={action.color} size={20} lang={cfg.lang} />
@@ -1219,7 +1278,7 @@ export default function HomeScreen({
 
   return (
     <View style={{ flex: 1, backgroundColor: th.bg }}>
-      <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 12, paddingBottom: 128 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 8, paddingBottom: 112 }}>
         <View style={[s.topBar, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
           <TouchableOpacity
             onPress={openNotificationCenter}
@@ -1259,15 +1318,6 @@ export default function HomeScreen({
           </TouchableOpacity>
         </View>
 
-        <View style={s.homeGreeting}>
-          <Text style={[s.homeGreetingTitle, { color: th.text, textAlign: align }]} numberOfLines={1}>
-            {isAr ? `مرحباً، ${accountName}` : `Hello, ${accountName}`}
-          </Text>
-          <Text style={[s.homeGreetingBody, { color: th.sub, textAlign: align }]}>
-            {isAr ? 'نظرة سريعة على أموالك اليوم' : 'A quick view of your money today'}
-          </Text>
-        </View>
-
         {isHomeSectionVisible('hero') ? (
         <View style={[s.hero, { backgroundColor: th.card, borderColor: th.border }]}>
           <View style={[s.heroTop, { flexDirection: rowDir }]}>
@@ -1302,6 +1352,16 @@ export default function HomeScreen({
               </TouchableOpacity>
             </View>
           ) : <Text style={[s.heroMeta, { color: th.sub, textAlign: align }]}>{isAr ? 'المتاح للاستخدام الآن' : 'Ready to use now'}</Text>}
+          {walletCount > 0 ? <TouchableOpacity
+            onPress={() => setWalletsExpanded(true)}
+            accessibilityRole="button"
+            accessibilityLabel={isAr ? `فتح المحافظ والأرصدة، ${walletCount} محافظ` : `Open wallets and balances, ${walletCount} wallets`}
+            style={[s.heroWalletTrigger, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}
+          >
+            <View style={[s.walletStripIcon, { backgroundColor: th.primSoft }]}><Ionicons name="wallet-outline" size={16} color={th.primary} /></View>
+            <Text style={[s.heroWalletText, { color: th.text, textAlign: align }]}>{isAr ? `${walletCount} محافظ` : `${walletCount} wallets`}</Text>
+            <Text style={[s.heroWalletAction, { color: th.primary }]}>{isAr ? 'إظهار' : 'Show'}</Text>
+          </TouchableOpacity> : null}
         </View>
         ) : null}
 
@@ -1379,7 +1439,7 @@ export default function HomeScreen({
 }
 
 const s = StyleSheet.create({
-  topBar:       { alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  topBar:       { alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   topBarSpacer: { width: 44 },
   notifyBtn:    { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   notifyBadge:  { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, position: 'absolute', top: -4, right: -4 },
@@ -1393,36 +1453,39 @@ const s = StyleSheet.create({
 
 
   brandTitle:   { fontSize: 23, lineHeight: 28, ...weight('900'), letterSpacing: 0 },
-  homeGreeting: { marginBottom: 14, paddingHorizontal: 2 },
-  homeGreetingTitle: { fontSize: 23, lineHeight: 30, ...weight('900') },
-  homeGreetingBody: { fontSize: 12, lineHeight: 18, ...weight('700'), marginTop: 3 },
-  hero:         { borderRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 14, paddingTop: 14, paddingBottom: 12, marginBottom: 12, ...SHADOW.card },
+  hero:         { borderRadius: RADIUS.sheet, borderWidth: 1, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10, marginBottom: 10, ...SHADOW.card },
   heroTop:      { alignItems: 'flex-start', gap: 8 },
   heroLabelRow: { alignItems: 'center', gap: 7 },
   heroLabel:    { fontSize: TYPE.meta, lineHeight: 17, ...weight('900') },
   heroVisibilityBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  heroAmount:   { fontSize: 30, lineHeight: 38, ...weight('900'), marginTop: 3 },
-  heroRule:     { height: 4, borderRadius: 2, marginTop: 14 },
-  heroMeta:     { fontSize: 10, lineHeight: 15, ...weight('800'), marginTop: 8 },
+  heroAmount:   { fontSize: 29, lineHeight: 36, ...weight('900'), marginTop: 2 },
+  heroRule:     { height: 4, borderRadius: 2, marginTop: 9 },
+  heroMeta:     { fontSize: 10, lineHeight: 14, ...weight('800'), marginTop: 6 },
+  heroWalletTrigger: { minHeight: 44, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', gap: 8, paddingHorizontal: 10, marginTop: 8 },
+  heroWalletText: { flex: 1, minWidth: 0, fontSize: 13, lineHeight: 18, ...weight('900') },
+  heroWalletAction: { fontSize: 12, lineHeight: 17, ...weight('900') },
   ledgerReadError: { borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', gap: 8, padding: 9, marginTop: 9 },
   ledgerReadErrorTitle: { fontSize: 11, lineHeight: 16, ...weight('900') },
   ledgerReadErrorHint: { fontSize: 9, lineHeight: 14, ...weight('700'), marginTop: 1 },
   ledgerRetry: { width: 34, height: 34, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center' },
   heroFact:     { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 54, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   factDivider:  { width: 1, height: 30 },
-  quickEntry:   { marginBottom: 14 },
-  quickEntrySurface:{ borderWidth: 1, borderRadius: RADIUS.lg, padding: 10 },
-  quickEntryHead:{ minHeight: 40, alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6, paddingHorizontal: 2 },
-  quickEntryHeadIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  quickEntry:   { marginBottom: 10 },
+  quickEntrySurface:{ borderWidth: 1, borderRadius: RADIUS.lg, padding: 8 },
+  quickEntryHead:{ minHeight: 28, alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 5, paddingHorizontal: 2 },
   quickEntryTitle:{ flex: 1, fontSize: 14, lineHeight: 19, ...weight('900') },
-  quickEntryRow: { alignItems: 'stretch', justifyContent: 'space-between', gap: 7 },
-  quickEntryAction:{ flex: 1, flexBasis: 0, minWidth: 0, minHeight: 66, borderRadius: 13, alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 3 },
-  quickEntryIcon:{ width: 40, height: 40, borderRadius: 20, borderWidth: 0, alignItems: 'center', justifyContent: 'center' },
-  quickEntryLabel:{ fontSize: 11, lineHeight: 16, ...weight('900'), textAlign: 'center', maxWidth: '100%' },
+  quickEntryPrompt:{ maxWidth: '48%', fontSize: 10, lineHeight: 14, ...weight('800') },
+  quickEntryRow: { alignItems: 'stretch', justifyContent: 'space-between', gap: 5 },
+  quickEntryAction:{ flex: 1, flexBasis: 0, minWidth: 0, minHeight: 72, borderRadius: 12, borderWidth: 1, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 2 },
+  quickEntryIcon:{ width: 34, height: 34, borderRadius: 17, borderWidth: 0, alignItems: 'center', justifyContent: 'center' },
+  quickEntryLabel:{ fontSize: 10, lineHeight: 14, ...weight('900'), textAlign: 'center', maxWidth: '100%' },
   walletSummary:{ alignItems: 'center', gap: 8, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8, marginTop: 10 },
-  walletStripBlock: { marginBottom: 14 },
-  walletStripHead: { minHeight: 30, alignItems: 'center', gap: 8, paddingHorizontal: 2, marginBottom: 6 },
+  walletStripBlock: { marginBottom: 10 },
+  walletStripSummary: { minHeight: 54, borderRadius: RADIUS.lg, borderWidth: 1, alignItems: 'center', gap: 9, paddingHorizontal: 11, ...SHADOW.card },
+  walletStripHead: { minHeight: 30, alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingHorizontal: 2, marginTop: 7, marginBottom: 6 },
   walletStripTitle: { fontSize: 14, lineHeight: 19, ...weight('900') },
+  walletStripDefault: { fontSize: 10, lineHeight: 15, ...weight('800'), marginTop: 1 },
+  walletStripDetailTitle: { flex: 1, fontSize: 10, lineHeight: 15, ...weight('800') },
   walletStripLink: { minWidth: 58, minHeight: 30, alignItems: 'center', justifyContent: 'center' },
   walletStripRail: { gap: 8, paddingBottom: 2 },
   walletStripGrid: { gap: 8 },
@@ -1434,14 +1497,33 @@ const s = StyleSheet.create({
   walletStripName: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 17, ...weight('900') },
   walletStripBalance: { fontSize: 14, lineHeight: 20, ...weight('900'), writingDirection: 'ltr' },
   walletStripCurrency: { fontSize: 10, lineHeight: 14, ...weight('700') },
+  walletSheetOverlay: { flex: 1, justifyContent: 'flex-end' },
+  walletSheet: { borderTopLeftRadius: 30, borderTopRightRadius: 30, borderWidth: 1, padding: 16, paddingBottom: 24, maxHeight: '76%' },
+  walletSheetHead: { alignItems: 'center', gap: 12, marginBottom: 14 },
+  walletSheetClose: { width: 48, height: 48, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  walletSheetTitle: { flex: 1, fontSize: 21, lineHeight: 28, ...weight('900') },
+  walletSheetIntro: { minHeight: 58, borderWidth: 1, borderRadius: RADIUS.lg, alignItems: 'center', gap: 9, paddingHorizontal: 11, marginBottom: 10 },
+  walletSheetIntroText: { flex: 1, minWidth: 0, fontSize: 14, lineHeight: 20, ...weight('900') },
+  walletCountPill: { minWidth: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7 },
+  walletSheetList: { gap: 9, paddingBottom: 10 },
+  walletSheetCard: { borderRadius: RADIUS.xl, borderWidth: 1, padding: 13, gap: 7, ...SHADOW.card },
+  walletSheetCardTop: { alignItems: 'center', gap: 8 },
+  walletDefaultPill: { borderRadius: 9, paddingHorizontal: 7, paddingVertical: 3 },
+  walletSheetTotal: { fontSize: 10, lineHeight: 15, ...weight('800'), marginTop: 3 },
+  walletSheetAmountRow: { alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
+  walletSheetAvailableLabel: { fontSize: 10, lineHeight: 15, ...weight('800') },
+  walletSheetAmount: { flex: 1, minWidth: 0, fontSize: 20, lineHeight: 27, ...weight('900'), writingDirection: 'ltr' },
+  walletReservedPill: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 4 },
+  walletManage: { minHeight: 48, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 3, paddingHorizontal: 12 },
+  walletManageText: { flex: 1, fontSize: 12, lineHeight: 17, ...weight('900') },
   walletStripDots: { alignItems: 'center', justifyContent: 'center', gap: 5, marginTop: 8 },
   walletStripDot: { width: 6, height: 6, borderRadius: 3 },
-  monthMetricsBlock:{ marginBottom: 14 },
-  monthMetricsHead:{ alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 2, gap: 8 },
+  monthMetricsBlock:{ marginBottom: 10 },
+  monthMetricsHead:{ alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, paddingHorizontal: 2, gap: 8 },
   monthBadge:{ minHeight: 26, borderRadius: 13, paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center' },
   monthSummarySurface: { borderWidth: 1, borderRadius: RADIUS.lg, overflow: 'hidden' },
   monthMetricGrid: { flexWrap: 'wrap' },
-  monthMetric: { width: '50%', minHeight: 68, paddingHorizontal: 10, paddingVertical: 9, justifyContent: 'center' },
+  monthMetric: { width: '50%', minHeight: 61, paddingHorizontal: 10, paddingVertical: 7, justifyContent: 'center' },
   monthMetricLabelRow: { alignItems: 'center', gap: 6, marginBottom: 4 },
   monthMetricLabel: { flex: 1, minWidth: 0, fontSize: 11, lineHeight: 16, ...weight('800') },
   monthMetricValue: { fontSize: 14, lineHeight: 20, ...weight('900') },
@@ -1468,14 +1550,14 @@ const s = StyleSheet.create({
   stripDivider: { width: 1 },
   progressBg:   { height: 6, borderRadius: 6, overflow: 'hidden', marginTop: 10 },
   progressFg:   { height: 6, borderRadius: 6 },
-  attentionPanel:{ borderRadius: RADIUS.lg, borderWidth: 1, padding: 11, marginTop: 4, marginBottom: 10 },
-  attentionHeader:{ alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 9 },
+  attentionPanel:{ borderRadius: RADIUS.lg, borderWidth: 1, padding: 8, marginTop: 2, marginBottom: 6 },
+  attentionHeader:{ alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 },
   attentionHeaderTitle:{ flex: 1, alignItems: 'center', gap: 8 },
-  attentionHeaderIcon:{ width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  attentionCount:{ minWidth: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7 },
+  attentionHeaderIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  attentionCount:{ minWidth: 25, height: 25, borderRadius: 13, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
   clearPanel:   { minHeight: 48, borderRadius: RADIUS.md, borderWidth: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginBottom: 9 },
-  savingPanel:  { borderRadius: 16, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 11, marginTop: 4, marginBottom: 10 },
-  savingHeader: { minHeight: 32, alignItems: 'center', gap: 8, marginBottom: 7 },
+  savingPanel:  { borderRadius: 16, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 8, marginTop: 2, marginBottom: 6 },
+  savingHeader: { minHeight: 30, alignItems: 'center', gap: 8, marginBottom: 5 },
   savingHeaderIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   savingTitle:  { flex: 1, fontSize: 13, lineHeight: 18, ...weight('900') },
   savingCount:  { minWidth: 25, height: 25, borderRadius: 13, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
@@ -1491,8 +1573,8 @@ const s = StyleSheet.create({
   savingEmpty:{ minHeight: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   sectionTitle: { fontSize: 12, ...weight('900'), marginBottom: 8, marginTop: 4 },
   row:          { minHeight: 58, alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: RADIUS.lg, borderWidth: 1, marginBottom: 6, gap: 8 },
-  recentPanel:  { borderRadius: RADIUS.lg, borderWidth: 1, padding: 11, marginTop: 4, marginBottom: 10 },
-  recentHead:   { minHeight: 32, alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  recentPanel:  { borderRadius: RADIUS.lg, borderWidth: 1, padding: 8, marginTop: 2, marginBottom: 6 },
+  recentHead:   { minHeight: 30, alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   recentHeadTitle:{ flex: 1, alignItems: 'center', gap: 8, minWidth: 0 },
   recentHeadIcon:{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   recentTitle:  { flex: 1, fontSize: 14, lineHeight: 20, ...weight('900') },

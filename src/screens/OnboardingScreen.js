@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TH } from '../lib/theme';
 import { COUNTRIES, CURRENCIES, detectSystemLang } from '../lib/constants';
 import { useStore } from '../store/useStore';
-import { DEFAULT_WALLET_ID } from '../lib/wallets';
+import { ensureOnboardingWallet } from '../lib/onboardingCompletion';
 import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import { defaultScopeForProfile, profileModuleDefaults } from '../lib/modules';
 import { weight } from '../lib/tokens';
@@ -187,7 +187,7 @@ const ESSENTIALS_STEP = QUESTION_START_STEP + PERSONALIZATION_QUESTIONS.length;
 const STEP_COUNT = ESSENTIALS_STEP + 1;
 
 export default function OnboardingScreen({ cfg, onDone }) {
-  const { setCfg, editWallet } = useStore();
+  const { setCfg, editWallet, addWallet, wallets } = useStore();
   const [step, setStep] = useState(0);
   // `lang` drives onboarding's own reading direction/copy across all five
   // steps from the moment it's picked on Welcome, including the default
@@ -215,6 +215,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
   const [currencyTouched, setCurrencyTouched] = useState(false);
   const [walletName, setWalletName] = useState('');
   const [choice, setChoice] = useState(null);
+  const [finishing, setFinishing] = useState(false);
 
   const selectedCountry = COUNTRIES.find(item => item.code === countryCode) || null;
   const selectedCurrency = CURRENCIES.find(item => item.code === currencyCode)
@@ -230,39 +231,60 @@ export default function OnboardingScreen({ cfg, onDone }) {
   const goBack = () => setStep(s => Math.max(0, s - 1));
 
   const finish = async () => {
+    if (finishing) return;
     if (!countryCode || !currencyCode) {
       setStep(STEP_COUNT - 1);
       setChoice(!countryCode ? 'country' : 'currency');
       return;
     }
-    const answers = resolvedPersonalization(personalization);
-    const profileType = profileTypeForPersonalization(answers);
-    const walletScope = defaultScopeForProfile(profileType);
-    const focusPriorities = selectedValues(answers.focus)
-      .map(key => ({ spending: 'expenses', planning: 'planning', obligations: 'debts', saving: 'goals' }[key]))
-      .filter(Boolean);
-    await setCfg({
-      langMode: 'manual',
-      lang,
-      country: countryCode,
-      currency: currencyCode,
-      baseCurrencyConfirmedAt: new Date().toISOString(),
-      profileType,
-      activeScope: profileType === 'personal_business' ? 'all' : walletScope,
-      enabledModules: modulesForPersonalization(answers, profileType),
-      demoMode: false,
-      themeMode: 'manual',
-      theme: themeChoice,
-      onboardingPriorities: focusPriorities,
-      onboardingPersonalization: answers,
-    });
-    const walletUpdated = await editWallet(DEFAULT_WALLET_ID, {
-      currency: currencyCode,
-      scope: walletScope,
-      name: effectiveWalletName,
-    });
-    if (walletUpdated === false) return;
-    onDone();
+    setFinishing(true);
+    try {
+      const answers = resolvedPersonalization(personalization);
+      const profileType = profileTypeForPersonalization(answers);
+      const walletScope = defaultScopeForProfile(profileType);
+      const focusPriorities = selectedValues(answers.focus)
+        .map(key => ({ spending: 'expenses', planning: 'planning', obligations: 'debts', saving: 'goals' }[key]))
+        .filter(Boolean);
+      const configSaved = await setCfg({
+        langMode: 'manual',
+        lang,
+        country: countryCode,
+        currency: currencyCode,
+        baseCurrencyConfirmedAt: new Date().toISOString(),
+        profileType,
+        activeScope: profileType === 'personal_business' ? 'all' : walletScope,
+        enabledModules: modulesForPersonalization(answers, profileType),
+        demoMode: false,
+        themeMode: 'manual',
+        theme: themeChoice,
+        onboardingPriorities: focusPriorities,
+        onboardingPersonalization: answers,
+      });
+      if (configSaved?.ok === false) throw new Error(configSaved.reason || 'settings_not_saved');
+
+      // A newly restored/fresh workspace may not have materialized the seed
+      // wallet yet. The old flow returned silently in that case, trapping the
+      // user on this final screen forever. Update an existing wallet when it
+      // exists, otherwise create the promised first wallet and select it.
+      const walletResult = await ensureOnboardingWallet({
+        wallets,
+        currency: currencyCode,
+        scope: walletScope,
+        name: effectiveWalletName,
+        editWallet,
+        addWallet,
+        setCfg,
+      });
+      if (!walletResult.ok) throw new Error(walletResult.reason || 'wallet_not_saved');
+      await onDone();
+    } catch (error) {
+      Alert.alert(
+        '',
+        isAr ? 'تعذر إكمال الإعداد الآن. حاول مرة أخرى؛ لن نفقد اختياراتك.' : 'Setup could not be completed. Try again; your choices will stay here.',
+      );
+    } finally {
+      setFinishing(false);
+    }
   };
 
   const stepBody = () => {
@@ -340,15 +362,15 @@ export default function OnboardingScreen({ cfg, onDone }) {
 
       <View style={s.bottomArea}>
         <TouchableOpacity
-          disabled={!canAdvance}
+          disabled={!canAdvance || finishing}
           onPress={() => step < STEP_COUNT - 1 ? goNext() : finish()}
           activeOpacity={0.78}
-          style={[s.primaryButton, { backgroundColor: canAdvance ? th.primary : th.cardHigh }]}
+          style={[s.primaryButton, { backgroundColor: canAdvance && !finishing ? th.primary : th.cardHigh }]}
         >
-          <Text style={[s.primaryButtonText, { color: canAdvance ? th.onPrimary : th.faint }]}>
-            {step === STEP_COUNT - 1 ? T.start : (step === WELCOME_STEP ? T.begin : T.next)}
+          <Text style={[s.primaryButtonText, { color: canAdvance && !finishing ? th.onPrimary : th.faint }]}>
+            {finishing ? (isAr ? 'جارٍ الإعداد…' : 'Setting up…') : (step === STEP_COUNT - 1 ? T.start : (step === WELCOME_STEP ? T.begin : T.next))}
           </Text>
-          {step === STEP_COUNT - 1 ? null : <Ionicons name={isAr ? 'arrow-back' : 'arrow-forward'} size={18} color={canAdvance ? th.onPrimary : th.faint} />}
+          {step === STEP_COUNT - 1 ? null : <Ionicons name={isAr ? 'arrow-back' : 'arrow-forward'} size={18} color={canAdvance && !finishing ? th.onPrimary : th.faint} />}
         </TouchableOpacity>
         {step > 0 ? (
           <TouchableOpacity onPress={goBack} style={s.backButton}>

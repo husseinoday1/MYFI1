@@ -1,11 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useStore } from '../store/useStore';
 import { useTheme } from '../lib/useTheme';
 import { formatMoneyNumber } from '../lib/money';
 import { filterByActiveScope } from '../lib/modules';
 import { formatCommitmentDate } from '../lib/commitments';
-import { ScreenScroll, PageIntro, SectionTitle, SurfaceCard, IconContainer, EmptyState, rowDirection, textAlign } from '../components/AppPrimitives';
+import { ScreenScroll, PageIntro, SectionTitle, SurfaceCard, IconContainer, EmptyState, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
 import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 
 // Payment History — Follow-ups section named in
@@ -20,6 +20,7 @@ import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 export default function PaymentHistoryScreen() {
   const { th, lang, cfg, isAr } = useTheme();
   const { debts, commitments, trans } = useStore();
+  const [filter, setFilter] = useState('all');
 
   const entries = useMemo(() => {
     const scopedDebts = filterByActiveScope(debts, cfg);
@@ -52,7 +53,20 @@ export default function PaymentHistoryScreen() {
         kind: 'commitment',
       }));
 
-    return [...debtEntries, ...commitmentEntries].sort((a, b) => {
+    const savingsEntries = scopedTrans
+      .filter((t) => (t.goalId || t.isGoalSaving) && !t.commitmentId)
+      .map((t) => ({
+        id: `goal:${t.id}`,
+        dateISO: t.dateISO || '',
+        ts: t.ts || 0,
+        amt: Number(t.amt || 0),
+        currencyCode: t.currencyCode || cfg.currency,
+        label: t.title || (isAr ? 'إضافة للتوفير' : 'Savings contribution'),
+        kindLabel: isAr ? 'إضافة للتوفير' : 'Savings contribution',
+        kind: 'saving',
+      }));
+
+    return [...debtEntries, ...commitmentEntries, ...savingsEntries].sort((a, b) => {
       if (a.ts && b.ts) return b.ts - a.ts;
       return String(b.dateISO).localeCompare(String(a.dateISO));
     });
@@ -60,6 +74,14 @@ export default function PaymentHistoryScreen() {
   const monthKey = new Date().toISOString().slice(0, 7);
   const monthEntries = entries.filter(entry => String(entry.dateISO).slice(0, 7) === monthKey);
   const sources = new Set(entries.map(entry => entry.kind)).size;
+  const visibleEntries = filter === 'all' ? entries : entries.filter(entry => entry.kind === filter);
+  const filterOptions = [
+    { key: 'all', label: isAr ? 'الكل' : 'All' },
+    { key: 'debt', label: isAr ? 'ديون' : 'Debts' },
+    { key: 'collection', label: isAr ? 'تحصيل' : 'Collections' },
+    { key: 'commitment', label: isAr ? 'التزامات' : 'Commitments' },
+    { key: 'saving', label: isAr ? 'توفير' : 'Savings' },
+  ].filter(option => option.key === 'all' || entries.some(entry => entry.kind === option.key));
 
   return (
     <ScreenScroll th={th}>
@@ -76,7 +98,7 @@ export default function PaymentHistoryScreen() {
           <IconContainer th={th} icon="checkmark-done-outline" tone={th.inc} />
           <View style={{ flex: 1 }}>
             <Text style={[s.summaryTitle, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'دفعات موثّقة' : 'Recorded payments'}</Text>
-            <Text style={[s.summaryBody, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'السجل يُبنى تلقائيًا من الحركات المرتبطة' : 'Built automatically from linked financial activity'}</Text>
+            <Text style={[s.summaryBody, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'سجل حي مبني من الديون والالتزامات والتوفير' : 'A live record built from debt, commitment, and savings activity'}</Text>
           </View>
         </View>
         <View style={[s.metrics, { flexDirection: rowDirection(lang), borderTopColor: th.border }]}>
@@ -95,9 +117,25 @@ export default function PaymentHistoryScreen() {
         />
       ) : (
         <>
-        <SectionTitle th={th} lang={lang}>{isAr ? 'التسلسل الزمني' : 'Timeline'}</SectionTitle>
-        <SurfaceCard th={th} style={s.timeline}>
-          {entries.map((entry, index) => (
+          <SectionTitle th={th} lang={lang}>{isAr ? 'التسلسل الزمني' : 'Timeline'}</SectionTitle>
+          <View style={[s.filterRail, { flexDirection: rowDirection(lang) }]}>
+            {filterOptions.map(option => {
+              const active = filter === option.key;
+              return (
+                <Touchable
+                  key={option.key}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: active }}
+                  onPress={() => setFilter(option.key)}
+                  style={[s.filterChip, { backgroundColor: active ? th.primSoft : th.cardHigh, borderColor: active ? th.primary : th.border }]}
+                >
+                  <Text style={[s.filterText, { color: active ? th.primary : th.sub }]}>{option.label}</Text>
+                </Touchable>
+              );
+            })}
+          </View>
+          <SurfaceCard th={th} style={s.timeline}>
+          {visibleEntries.map((entry, index) => (
             <View
               key={entry.id}
               style={{
@@ -110,7 +148,7 @@ export default function PaymentHistoryScreen() {
                 borderBottomColor: th.border,
               }}
             >
-              <IconContainer th={th} icon={entry.kind === 'collection' ? 'arrow-down-outline' : entry.kind === 'debt' ? 'people-outline' : 'calendar-outline'} tone={entry.kind === 'collection' ? th.inc : entry.kind === 'debt' ? th.exp : th.warn} size="sm" />
+              <IconContainer th={th} icon={entry.kind === 'collection' ? 'arrow-down-outline' : entry.kind === 'debt' ? 'people-outline' : entry.kind === 'saving' ? 'flag-outline' : 'calendar-outline'} tone={entry.kind === 'collection' || entry.kind === 'saving' ? th.inc : entry.kind === 'debt' ? th.exp : th.warn} size="sm" />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ color: th.text, fontSize: 13, fontWeight: '900', textAlign: textAlign(lang) }} numberOfLines={1}>
                   {entry.label}
@@ -119,11 +157,18 @@ export default function PaymentHistoryScreen() {
                   {entry.kindLabel} · {entry.dateISO ? formatCommitmentDate(entry.dateISO, lang) : '—'}
                 </Text>
               </View>
-              <Text style={{ color: entry.kind === 'collection' ? th.inc : th.text, fontSize: 13, fontWeight: '900', writingDirection: 'ltr' }} numberOfLines={1}>
-                {formatMoneyNumber(Math.abs(entry.amt), entry.currencyCode, cfg.lang)} {entry.currencyCode}
+              <Text style={{ color: entry.kind === 'collection' || entry.kind === 'saving' ? th.inc : th.text, fontSize: 13, fontWeight: '900', writingDirection: 'ltr' }} numberOfLines={1}>
+                {entry.kind === 'collection' || entry.kind === 'saving' ? '+' : '-'}{formatMoneyNumber(Math.abs(entry.amt), entry.currencyCode, cfg.lang)} {entry.currencyCode}
               </Text>
             </View>
           ))}
+          {visibleEntries.length === 0 ? (
+            <View style={s.filteredEmpty}>
+              <Text style={{ color: th.sub, fontSize: 11, fontWeight: '800', textAlign: textAlign(lang) }}>
+                {isAr ? 'لا توجد دفعات بهذا النوع.' : 'No payments of this type yet.'}
+              </Text>
+            </View>
+          ) : null}
         </SurfaceCard>
         </>
       )}
@@ -149,5 +194,9 @@ const s = StyleSheet.create({
   metric: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   metricValue: { fontSize: 20, lineHeight: 25, ...weight('900') },
   metricLabel: { fontSize: 9, lineHeight: 14, ...weight('800'), textAlign: 'center', marginTop: 2 },
+  filterRail: { gap: 7, flexWrap: 'wrap', marginBottom: SPACE.sm },
+  filterChip: { minHeight: 34, borderRadius: RADIUS.md, borderWidth: 1, paddingHorizontal: 11, alignItems: 'center', justifyContent: 'center' },
+  filterText: { fontSize: 10, lineHeight: 14, ...weight('900') },
   timeline: { padding: 4, borderRadius: RADIUS.xl },
+  filteredEmpty: { minHeight: 72, justifyContent: 'center', paddingHorizontal: SPACE.md },
 });

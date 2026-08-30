@@ -159,7 +159,7 @@ const HistoryControls = ({
   </View>
 );
 
-export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = () => {} }) {
+export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = () => {}, openRequest = null }) {
   const { trans, debts, goals, commitments, wallets, cats, cfg, deleteTrans, deleteTransMany, undoLastTransactionDelete, ledgerReady, workspaceNamespace } = useStore();
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
@@ -191,6 +191,26 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerQueryOk, setLedgerQueryOk] = useState(false);
   const ledgerRequestRef = React.useRef(0);
+
+  // Other screens can take the user to the exact evidence behind a report
+  // insight. Applying the request here keeps History as the single source of
+  // filtering UI instead of maintaining a second, read-only transaction list.
+  React.useEffect(() => {
+    if (!openRequest?.nonce) return;
+    setSearch('');
+    setTypeF(openRequest.type || 'all');
+    setCatF(openRequest.categoryId || 'all');
+    setWalletF(openRequest.walletId || 'all');
+    if (openRequest.fromDate || openRequest.toDate) {
+      setPeriodF('custom');
+      setDateFrom(openRequest.fromDate || '');
+      setDateTo(openRequest.toDate || '');
+    } else {
+      setPeriodF('all');
+      setDateFrom('');
+      setDateTo('');
+    }
+  }, [openRequest?.nonce]);
 
   const walletRows = useMemo(() => {
     const viewWallets = scopedWallets.length ? scopedWallets : wallets;

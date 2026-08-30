@@ -30,6 +30,7 @@ import ArchiveScreen from './src/screens/ArchiveScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import MyMoneyScreen from './src/screens/MyMoneyScreen';
 import MoreScreen from './src/screens/MoreScreen';
+import CustomizeMyfiScreen from './src/screens/CustomizeMyfiScreen';
 import WalletsAccountsScreen from './src/screens/WalletsAccountsScreen';
 import PaymentHistoryScreen from './src/screens/PaymentHistoryScreen';
 import PlanBudgetScreen from './src/screens/PlanBudgetScreen';
@@ -84,8 +85,8 @@ const SECONDARY_SCREEN_KEYS = [
   'history', 'reports', 'settings', 'wallets', 'budget', 'paymentHistory',
   'incomeAllocation',
   'basira',
-  'categories', 'benefits',
-  'followupsAll', 'followupsDebts', 'followupsCommitments', 'followupsInstallments', 'followupsSubscriptions', 'followupsGoals',
+  'categories', 'benefits', 'customize',
+  'followupsAll', 'followupsDebts', 'followupsOwed', 'followupsReceivable', 'followupsCommitments', 'followupsInstallments', 'followupsSubscriptions', 'followupsGoals',
 ];
 
 const shellCopy = (lang) => (
@@ -161,6 +162,7 @@ function AppRoot() {
   } = useStore();
   const [tab, setTab] = useState('home');
   const [lastHubTab, setLastHubTab] = useState('home');
+  const [historyOpenRequest, setHistoryOpenRequest] = useState(null);
   const [settingsResetSignal, setSettingsResetSignal] = useState(0);
   const [settingsOpenRequest, setSettingsOpenRequest] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -663,9 +665,13 @@ function AppRoot() {
   }, []);
 
   useEffect(() => {
+    // MYFI mirrors its rows and text direction explicitly. Forcing the native
+    // RTL flag here asks React Native/Expo Go to restart the whole app when the
+    // onboarding language is saved. On some Expo Go builds that restart never
+    // stabilizes and becomes a reload loop. Allow RTL capability, but never
+    // force a process-level direction change from application state.
     I18nManager.allowRTL(true);
-    if (I18nManager.isRTL !== isRtl) I18nManager.forceRTL(isRtl);
-  }, [isRtl]);
+  }, []);
 
   useEffect(() => {
     if (fontsLoaded) applyGlobalFont();
@@ -869,6 +875,11 @@ function AppRoot() {
     setTab('settings');
   };
 
+  const openHistoryWithContext = (request = {}) => {
+    setHistoryOpenRequest({ ...request, nonce: Date.now() });
+    setTab('history');
+  };
+
   const handleFab = () => openAddExp(false);
   const classicEntry = cfg.entryMode === 'classic';
 
@@ -953,7 +964,7 @@ function AppRoot() {
     // was given one here — so the +/- buttons on their empty states were decorative.
     // A user with no transactions taps the one obvious call to action and nothing
     // happens. Same handlers HomeScreen already uses.
-    history: <HistoryScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} />,
+    history: <HistoryScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} openRequest={historyOpenRequest} />,
     // 'trackers' is the primary Follow-ups nav tab (BASE_TABS/HUB_TABS) and,
     // like 'mymoney', now renders a thin hub — REF-05. The full/unfiltered
     // TrackersLabScreen (needed for trackerFocus deep-links from
@@ -962,13 +973,11 @@ function AppRoot() {
     // that relied on that behavior was repointed to 'followupsAll'.
     trackers: (
       <FollowUpsHubScreen
-        onOpenDebts={() => setTab('followupsDebts')}
+        onOpenOwed={() => setTab('followupsOwed')}
+        onOpenReceivable={() => setTab('followupsReceivable')}
         onOpenCommitments={() => setTab('followupsCommitments')}
-        onOpenInstallments={() => setTab('followupsInstallments')}
-        onOpenSubscriptions={() => setTab('followupsSubscriptions')}
         onOpenGoals={() => setTab('followupsGoals')}
         onOpenPaymentHistory={() => setTab('paymentHistory')}
-        onNewTracker={openNewTracker}
       />
     ),
     followupsAll: (
@@ -986,6 +995,30 @@ function AppRoot() {
       <TrackersLabScreen
         initialFilter="debts"
         screenVariant="debts"
+        onQuickPay={openQuickPay}
+        onQuickSave={openQuickSave}
+        onQuickCommitment={openQuickCommitment}
+        onAddLinkedPlan={openLinkedPlan}
+        onNewTracker={openNewTracker}
+        onOpenPaymentHistory={() => setTab('paymentHistory')}
+      />
+    ),
+    followupsOwed: (
+      <TrackersLabScreen
+        initialFilter="owed"
+        screenVariant="owed"
+        onQuickPay={openQuickPay}
+        onQuickSave={openQuickSave}
+        onQuickCommitment={openQuickCommitment}
+        onAddLinkedPlan={openLinkedPlan}
+        onNewTracker={openNewTracker}
+        onOpenPaymentHistory={() => setTab('paymentHistory')}
+      />
+    ),
+    followupsReceivable: (
+      <TrackersLabScreen
+        initialFilter="receivable"
+        screenVariant="receivable"
         onQuickPay={openQuickPay}
         onQuickSave={openQuickSave}
         onQuickCommitment={openQuickCommitment}
@@ -1043,7 +1076,7 @@ function AppRoot() {
       />
     ),
     paymentHistory: <PaymentHistoryScreen />,
-    reports: <ReportsScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} onOpenBasira={() => setTab('basira')} onOpenIncomeAllocation={() => setTab('incomeAllocation')} />,
+    reports: <ReportsScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} onOpenIncomeAllocation={() => setTab('incomeAllocation')} onOpenHistory={openHistoryWithContext} onOpenBasira={() => setTab('basira')} />,
     settings: <SettingsScreen tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} onExit={() => setTab(lastHubTab)} />,
     mymoney: (
       <MyMoneyScreen
@@ -1057,19 +1090,20 @@ function AppRoot() {
     more: (
       <MoreScreen
         onOpenSettingsPage={openSettingsPage}
+        onOpenCustomize={() => setTab('customize')}
         onOpenArchive={() => setArchiveOpen(true)}
         onOpenWallets={() => setTab('wallets')}
         onOpenCategories={() => setTab('categories')}
-        onOpenSubscriptions={() => setTab('followupsSubscriptions')}
         onOpenBenefits={() => setTab('benefits')}
       />
     ),
     wallets: <WalletsAccountsScreen />,
+    customize: <CustomizeMyfiScreen />,
     categories: <CategoriesScreen />,
-    benefits: <BenefitsScreen onOpenBasira={() => setTab('basira')} />,
+    benefits: <BenefitsScreen />,
     budget: <PlanBudgetScreen />,
     incomeAllocation: <IncomeAllocationScreen />,
-    basira: <BasiraScreen onOpenHistory={() => setTab('history')} onOpenFollowUps={() => setTab('trackers')} />,
+    basira: <BasiraScreen onOpenHistory={openHistoryWithContext} onOpenFollowUps={() => setTab('trackers')} />,
   };
 
   return (
