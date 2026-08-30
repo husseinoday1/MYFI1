@@ -629,16 +629,16 @@ const v7SummaryFromRows = (rows, walletId = null, fallbackCurrency = 'IQD') => {
 export const queryLedgerTransactions = async ({
   namespace = 'guest', limit = 250, cursor = null, search = '', flowType = null,
   categoryId = null, walletId = null, scope = null, fromDate = null, toDate = null,
-  archived = false, year = null, transactionClass = null,
+  archived = false, year = null, transactionClass = null, database = null,
 } = {}) => {
-  const directDb = await getLedgerDb();
+  const directDb = database || await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
     return queryV7TransactionPage(directDb, {
       namespace, limit, cursor, search, flowType, categoryId, walletId, scope,
       fromDate, toDate, archived, year, transactionClass,
     });
   }
-  const db = await openDb();
+  const db = database || await openDb();
   if (!db) return { rows: [], nextCursor: null, supported: false };
   const clauses = ['namespace = ?', 'deleted_at IS NULL'];
   const params = [ns(namespace)];
@@ -682,8 +682,8 @@ export const queryLedgerTransactions = async ({
   };
 };
 
-export const queryLedgerSummary = async ({ namespace = 'guest', fromDate = null, toDate = null, scope = null, walletId = null, includeArchived = false } = {}) => {
-  const directDb = await getLedgerDb();
+export const queryLedgerSummary = async ({ namespace = 'guest', fromDate = null, toDate = null, scope = null, walletId = null, includeArchived = false, database = null } = {}) => {
+  const directDb = database || await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
     const clauses = ['t.namespace=?', 't.deleted_at IS NULL', "t.status='posted'", "COALESCE(json_extract(t.payload_json,'$.hiddenFromHistory'),0)<>1"];
     const params = [ns(namespace)];
@@ -833,8 +833,8 @@ export const queryLedgerCategorySpend = async ({
   };
 };
 
-export const queryLedgerWalletPositions = async ({ namespace = 'guest', scope = null } = {}) => {
-  const directDb = await getLedgerDb();
+export const queryLedgerWalletPositions = async ({ namespace = 'guest', scope = null, database = null } = {}) => {
+  const directDb = database || await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
     const params = [ns(namespace)];
     let scopeClause = '';
@@ -1137,13 +1137,18 @@ export const getLedgerDataHealth = async ({ namespace = 'guest', walletIds = [],
   return { ok: issues.length === 0, supported: true, issues };
 };
 
-export const drainLedgerOutbox = async (namespace = 'guest', limit = 200) => {
-  const db = await openDb();
+export const drainLedgerOutbox = async (namespace = 'guest', limit = 200, { database = null } = {}) => {
+  const db = database || await openDb();
   if (!db) return [];
-  return db.getAllAsync(
+  // Sync starts immediately after the startup migration/mirror path.  This
+  // read used to bypass the shared SQLite queue, so its implicit native
+  // statement could be finalized while a queued writer still owned the same
+  // connection (`database is locked`).  It is a small read, but must share
+  // the one-connection ownership rule just like every ledger write.
+  return enqueueWrite(() => db.getAllAsync(
     `SELECT * FROM ledger_outbox WHERE namespace = ? ORDER BY id ASC LIMIT ?`,
     ns(namespace), Math.max(1, Math.min(Number(limit) || 200, 1000)),
-  );
+  ));
 };
 
 export const acknowledgeLedgerOutbox = async (namespace = 'guest', throughId = null) => {

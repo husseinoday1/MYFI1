@@ -10,6 +10,7 @@ import {
   randomKey,
 } from './cryptoBox';
 import { createSecureUuidV4 } from './secureUuid';
+import { enqueueNativeKvOperation } from './nativeKvQueue';
 
 const VAULT_KEY_ID = 'MYFI_VAULT_MASTER_KEY_V1';
 const WEB_KEY_ID = 'MYFI_WEB_VAULT_MASTER_KEY_V1';
@@ -75,7 +76,7 @@ const hasFinancialData = (snapshot) => {
 
 const isSnapshotEmpty = (snapshot) => !hasFinancialData(snapshot);
 
-export const readVaultSnapshot = async (namespace = GUEST_NAMESPACE) => {
+const readVaultSnapshotUnsafe = async (namespace = GUEST_NAMESPACE) => {
   const key = vaultKey(namespace);
   const readBackup = async (backupKey, index) => {
     try {
@@ -106,7 +107,11 @@ export const readVaultSnapshot = async (namespace = GUEST_NAMESPACE) => {
   return { snapshot: null, recovered: false, hasRaw: false };
 };
 
-export const writeVaultSnapshot = async (namespace = GUEST_NAMESPACE, snapshot = {}, options = {}) => {
+export const readVaultSnapshot = (namespace = GUEST_NAMESPACE) => (
+  enqueueNativeKvOperation(() => readVaultSnapshotUnsafe(namespace))
+);
+
+const writeVaultSnapshotUnsafe = async (namespace = GUEST_NAMESPACE, snapshot = {}, options = {}) => {
   const key = vaultKey(namespace);
   const masterKey = await getOrCreateMasterKey();
   const current = await storage.getItem(key);
@@ -133,27 +138,41 @@ export const writeVaultSnapshot = async (namespace = GUEST_NAMESPACE, snapshot =
     await storage.setItem(`${key}${PREVIOUS_SUFFIX}:1`, current);
   }
   if (options.force && emptySnapshot) {
-    await Promise.all(BACKUP_SUFFIXES.map(suffix => storage.removeItem(`${key}${suffix}`)));
+    // sqlite/kv-store is a single native SQLite file. Keep its cleanup
+    // sequential even inside this already-serialised vault operation.
+    for (const suffix of BACKUP_SUFFIXES) {
+      await storage.removeItem(`${key}${suffix}`);
+    }
   }
   await storage.removeItem(`${key}${LEGACY_PREVIOUS_SUFFIX}`);
   await storage.setItem(key, envelope);
   return true;
 };
 
+export const writeVaultSnapshot = (namespace = GUEST_NAMESPACE, snapshot = {}, options = {}) => (
+  enqueueNativeKvOperation(() => writeVaultSnapshotUnsafe(namespace, snapshot, options))
+);
+
 export const hasVaultSnapshot = async (namespace = GUEST_NAMESPACE) => {
   const result = await readVaultSnapshot(namespace);
   return !!result.snapshot;
 };
 
-export const clearVaultSnapshot = async (namespace = GUEST_NAMESPACE) => {
+const clearVaultSnapshotUnsafe = async (namespace = GUEST_NAMESPACE) => {
   const key = vaultKey(namespace);
   const backupKeys = [...BACKUP_SUFFIXES.map(suffix => `${key}${suffix}`), `${key}${LEGACY_PREVIOUS_SUFFIX}`];
   if (typeof storage.multiRemove === 'function') {
     await storage.multiRemove([key, ...backupKeys]);
     return;
   }
-  await Promise.all([storage.removeItem(key), ...backupKeys.map(item => storage.removeItem(item))]);
+  for (const item of [key, ...backupKeys]) {
+    await storage.removeItem(item);
+  }
 };
+
+export const clearVaultSnapshot = (namespace = GUEST_NAMESPACE) => (
+  enqueueNativeKvOperation(() => clearVaultSnapshotUnsafe(namespace))
+);
 
 export const getOrCreateDeviceId = async ({ onCreate } = {}) => {
   const secure = await secureStoreAvailable();
@@ -177,34 +196,36 @@ const authStorageKey = key => `${AUTH_PREFIX}:${String(key || '')}`;
 
 export const secureAuthStorage = {
   getItem: async (key) => {
-    const encryptedKey = authStorageKey(key);
-    const raw = await storage.getItem(encryptedKey);
-    if (raw) {
-      try {
-        const masterKey = await getOrCreateMasterKey();
-        return decryptString(JSON.parse(raw), masterKey, encryptedKey);
-      } catch {
-        await storage.removeItem(encryptedKey);
+    return enqueueNativeKvOperation(async () => {
+      const encryptedKey = authStorageKey(key);
+      const raw = await storage.getItem(encryptedKey);
+      if (raw) {
+        try {
+          const masterKey = await getOrCreateMasterKey();
+          return decryptString(JSON.parse(raw), masterKey, encryptedKey);
+        } catch {
+          await storage.removeItem(encryptedKey);
+        }
       }
-    }
 
-    // One-time migration from the previous plaintext AsyncStorage auth session.
-    const legacy = await AsyncStorage.getItem(key);
-    if (!legacy) return null;
-    await secureAuthStorage.setItem(key, legacy);
-    await AsyncStorage.removeItem(key);
-    return legacy;
+      // One-time migration from the previous plaintext AsyncStorage auth session.
+      const legacy = await AsyncStorage.getItem(key);
+      if (!legacy) return null;
+      const masterKey = await getOrCreateMasterKey();
+      const envelope = encryptString(String(legacy), masterKey, encryptedKey);
+      await storage.setItem(encryptedKey, JSON.stringify(envelope));
+      await AsyncStorage.removeItem(key);
+      return legacy;
+    });
   },
-  setItem: async (key, value) => {
+  setItem: (key, value) => enqueueNativeKvOperation(async () => {
     const encryptedKey = authStorageKey(key);
     const masterKey = await getOrCreateMasterKey();
     const envelope = encryptString(String(value ?? ''), masterKey, encryptedKey);
     await storage.setItem(encryptedKey, JSON.stringify(envelope));
-  },
-  removeItem: async (key) => {
-    await Promise.all([
-      storage.removeItem(authStorageKey(key)),
-      AsyncStorage.removeItem(key),
-    ]);
-  },
+  }),
+  removeItem: key => enqueueNativeKvOperation(async () => {
+    await storage.removeItem(authStorageKey(key));
+    await AsyncStorage.removeItem(key);
+  }),
 };

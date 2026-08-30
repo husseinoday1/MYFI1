@@ -105,6 +105,8 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'myfi_flow', 'run-myfi-flow.cjs'],
   ['UNIT_RUNTIME', 'tracker_builder_contract', 'run-tracker-builder.cjs'],
   ['UNIT_RUNTIME', 'tracker_builder_store', 'run-tracker-builder-store.cjs'],
+  ['UNIT_RUNTIME', 'native_kv_queue', 'run-native-kv-queue.cjs'],
+  ['UNIT_RUNTIME', 'onboarding_completion', 'run-onboarding-completion.cjs'],
   ['UNIT_RUNTIME', 'sync_scenarios', 'run-sync-scenarios.cjs'],
   ['UNIT_RUNTIME', 'sync_core', 'sync-core-v4.test.cjs'],
   ['UNIT_RUNTIME', 'p19_002_sync_paging', 'run-p19-002-sync-paging.cjs'],

@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SQLiteStorage from 'expo-sqlite/kv-store';
 import { flushLedgerWrites } from '../../lib/ledgerDatabase';
+import { enqueueNativeKvOperation } from '../../lib/nativeKvQueue';
 import {
   getFinancialMaintenanceSnapshot,
   isFinancialMaintenanceBlocked,
@@ -241,7 +242,7 @@ const persistActiveLocalLedgerContext = async (storage, context = {}) => {
   return payload;
 };
 
-const readActiveLocalLedgerContext = async () => {
+const readActiveLocalLedgerContextUnsafe = async () => {
   let primaryRows = null;
   let primaryError = null;
   try {
@@ -280,7 +281,11 @@ const readActiveLocalLedgerContext = async () => {
   return { namespace: GUEST_NAMESPACE, linkedUserId: null, identity: {} };
 };
 
-const writeActiveLocalLedgerContext = async ({ namespace, linkedUserId = null, identity = {} } = {}) => {
+const readActiveLocalLedgerContext = () => (
+  enqueueNativeKvOperation(readActiveLocalLedgerContextUnsafe)
+);
+
+const writeActiveLocalLedgerContextUnsafe = async ({ namespace, linkedUserId = null, identity = {} } = {}) => {
   if (FRESH_TEST_MODE) return;
   const payload = await persistActiveLocalLedgerContext(activeLedgerIdentityStorage, {
     namespace,
@@ -294,6 +299,10 @@ const writeActiveLocalLedgerContext = async ({ namespace, linkedUserId = null, i
     try { await persistActiveLocalLedgerContext(AsyncStorage, payload); } catch {}
   }
 };
+
+const writeActiveLocalLedgerContext = (context = {}) => (
+  enqueueNativeKvOperation(() => writeActiveLocalLedgerContextUnsafe(context))
+);
 
 const readActiveLocalLedgerNamespace = async () => (await readActiveLocalLedgerContext()).namespace;
 const writeActiveLocalLedgerNamespace = async namespace => {
