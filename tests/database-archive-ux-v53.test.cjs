@@ -78,7 +78,7 @@ must(pdf.includes('PRODUCT_NAME'), 'PDF output is not centrally branded');
 must(files.includes('PRODUCT_FILE_PREFIX') && files.includes('PRODUCT_NAME'), 'Archive/backup output is not centrally branded');
 
 // Cold years are carried inside full backup/restore so archiving cannot create a backup data-loss gap.
-must(backup.includes('MYFI_BACKUP_DATA_VERSION = 10'), 'Logical backup schema was not advanced for V7 and cold archives');
+must(backup.includes('MYFI_BACKUP_DATA_VERSION = 11'), 'Logical backup schema was not advanced for custom tracker data');
 must(backup.includes('coldArchives'), 'Full backup schema does not include cold archives');
 must(data.includes('exportColdArchives') && data.includes('replaceColdArchives'), 'Backup/restore does not carry cold archive data');
 must(repo.includes('restore-stage'), 'Cold archive restore does not stage before replacing active archive data');

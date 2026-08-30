@@ -169,6 +169,8 @@ export const createDataSlice = (set, get) => ({
         goals: [],
         wallets,
         commitments: [],
+        trackerTypes: [],
+        trackerItems: [],
         cats: DEF_CATS,
         cfg: {
           ...realCfg,
@@ -258,6 +260,8 @@ export const createDataSlice = (set, get) => ({
       goals: [],
       wallets,
       commitments: [],
+      trackerTypes: [],
+      trackerItems: [],
       cats: DEF_CATS,
       cfg: resetCfg,
       syncConflict: null,
@@ -379,7 +383,7 @@ export const createDataSlice = (set, get) => ({
 
   exportBackup: async () => {
     const {
-      trans, debts, goals, wallets, commitments, cats, cfg, workspaceNamespace,
+      trans, debts, goals, wallets, commitments, cats, trackerTypes, trackerItems, cfg, workspaceNamespace,
       user, financialLedgerV7Cutover,
     } = get();
     if (user && financialLedgerV7Cutover) {
@@ -397,7 +401,7 @@ export const createDataSlice = (set, get) => ({
       getColdArchiveNamespace(workspaceNamespace || GUEST_NAMESPACE, cfg),
     );
     const backup = buildFinancialBackup({
-      trans, debts, goals, wallets, commitments, cats, coldArchives, cfg,
+      trans, debts, goals, wallets, commitments, cats, trackerTypes, trackerItems, coldArchives, cfg,
     });
 
     const positiveRate = value => {
@@ -795,6 +799,8 @@ export const createDataSlice = (set, get) => ({
         wallets: current.wallets,
         commitments: current.commitments,
         cats: current.cats,
+        trackerTypes: current.trackerTypes,
+        trackerItems: current.trackerItems,
         cfg: current.cfg,
         notif: current.notif,
         workspaceNamespace: current.workspaceNamespace,
@@ -828,6 +834,8 @@ export const createDataSlice = (set, get) => ({
         goals: normalizeGoalItems(restoredCollections.goals, defaultScopeForProfile(prepared.cfg.profileType)),
         wallets: prepared.wallets,
         commitments: prepared.commitments,
+        trackerTypes: restoredCollections.trackerTypes || [],
+        trackerItems: restoredCollections.trackerItems || [],
         cats: sanitizeBackupCategories(restoredCollections.cats, DEF_CATS),
         cfg: prepared.cfg,
         notif: current.notif,
@@ -887,6 +895,8 @@ export const createDataSlice = (set, get) => ({
           wallets: rollbackState.wallets,
           commitments: rollbackState.commitments,
           cats: rollbackState.cats,
+          trackerTypes: rollbackState.trackerTypes,
+          trackerItems: rollbackState.trackerItems,
           coldArchives: rollbackColdArchives,
           cfg: rollbackState.cfg,
         });

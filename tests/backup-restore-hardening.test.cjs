@@ -23,7 +23,7 @@ const {
   sanitizeBackupCategories,
 } = moduleObj.exports;
 
-assert.equal(MYFI_BACKUP_DATA_VERSION, 10);
+assert.equal(MYFI_BACKUP_DATA_VERSION, 11);
 assert.equal(MYFI_BACKUP_KIND, 'myfi_financial_backup');
 
 const sourceCfg = {
@@ -53,6 +53,8 @@ const base = buildFinancialBackup({
   debts: [],
   goals: [],
   commitments: [],
+  trackerTypes: [{ id: 'type-installments', name: 'Installments', template: 'installment' }],
+  trackerItems: [{ id: 'item-phone', typeId: 'type-installments', name: 'Phone', status: 'active' }],
 });
 
 assert.equal(base.kind, MYFI_BACKUP_KIND);
@@ -68,6 +70,10 @@ assert.equal(base.manifest.financialEngineVersion, 7);
 assert.ok(base.checksums.financialData);
 assert.ok(base.checksums.financialConfig);
 assert.deepEqual(base.budgets.current, sourceCfg.categoryBudgets);
+assert.equal(base.financialData.trackerTypes[0].id, 'type-installments');
+assert.equal(base.financialData.trackerItems[0].typeId, 'type-installments');
+assert.equal(base.manifest.collections.trackerTypes, 1);
+assert.equal(base.manifest.collections.trackerItems, 1);
 
 const tamperedFlatCollection = JSON.parse(JSON.stringify(base));
 tamperedFlatCollection.trans[0].amt = -999;

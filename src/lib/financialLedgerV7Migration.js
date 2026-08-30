@@ -112,6 +112,8 @@ const entityRowsFor = ({ namespace, workspace, wallets, now, archives }) => {
   add('debt', workspace?.debts);
   add('goal', workspace?.goals);
   add('commitment', workspace?.commitments);
+  add('tracker_type', workspace?.trackerTypes);
+  add('tracker_item', workspace?.trackerItems);
   const recurringRules = new Map();
   for (const transaction of Array.isArray(workspace?.trans) ? workspace.trans : []) {
     if (!transaction?.recurring || !transaction?.id) continue;

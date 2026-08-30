@@ -27,7 +27,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const SOURCE_PATH = path.resolve(__dirname, '../src/lib/backupData.js');
-const COLLECTION_KEYS = ['trans', 'debts', 'goals', 'wallets', 'commitments', 'cats'];
+const COLLECTION_KEYS = ['trans', 'debts', 'goals', 'wallets', 'commitments', 'cats', 'trackerTypes', 'trackerItems'];
 
 /**
  * Load the real src/lib/backupData.js without adding a transpiler dependency.
@@ -106,6 +106,8 @@ function baseInput() {
     ],
     commitments: [{ id: 'commitment-1', walletId: 'wallet-1', amount: 100 }],
     cats: [{ id: 'cat-1', name: 'General' }],
+    trackerTypes: [{ id: 'tracker-type-1', name: 'Installments', template: 'installment' }],
+    trackerItems: [{ id: 'tracker-item-1', typeId: 'tracker-type-1', name: 'Phone', status: 'active' }],
     coldArchives: [
       {
         year: 2024,

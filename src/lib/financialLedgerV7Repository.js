@@ -3286,7 +3286,7 @@ export const readFinancialWorkspaceV7 = async ({ namespace = 'guest', database =
     namespace,
   );
   const state = await getFinancialWorkspaceStateV7({ namespace, database: db });
-  const entities = { debt: [], goal: [], commitment: [], budget: [], recurring_rule: [], category: [], wallet: [], workspace: [] };
+  const entities = { debt: [], goal: [], commitment: [], budget: [], recurring_rule: [], category: [], wallet: [], workspace: [], tracker_type: [], tracker_item: [] };
   for (const row of entityRows) {
     if (row.deleted_at) continue;
     const payload = parseJson(row.payload_json, null);
@@ -3317,6 +3317,7 @@ export const readFinancialWorkspaceV7 = async ({ namespace = 'guest', database =
     trans: transactions,
     debts: entities.debt || [], goals: entities.goal || [], commitments: entities.commitment || [],
     budgets: entities.budget || [], recurringRules: entities.recurring_rule || [], cats: entities.category || [], wallets: entities.wallet || [],
+    trackerTypes: entities.tracker_type || [], trackerItems: entities.tracker_item || [],
     workspace: {
       ...syncedWorkspace,
       cfg: mergeCloudWorkspaceCfg(localPreferences.cfg, syncedWorkspace?.cfg),
@@ -4213,6 +4214,8 @@ export const reconcileFinancialWorkspaceV7 = async ({
   add('debt', workspace?.debts);
   add('goal', workspace?.goals);
   add('commitment', workspace?.commitments);
+  add('tracker_type', workspace?.trackerTypes);
+  add('tracker_item', workspace?.trackerItems);
   const recurringRules = new Map();
   for (const transaction of Array.isArray(workspace?.trans) ? workspace.trans : []) {
     if (!transaction?.recurring || !transaction?.id) continue;

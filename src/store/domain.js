@@ -365,6 +365,17 @@ const categoryKey = item => item?.id || [
   cleanTextKey(item?.type),
 ].join('|');
 
+const trackerTypeKey = item => stableEntityKey(item) || [
+  cleanTextKey(item?.name),
+  cleanTextKey(item?.template),
+].join('|');
+
+const trackerItemKey = item => stableEntityKey(item) || [
+  cleanTextKey(item?.trackerTypeId),
+  cleanTextKey(item?.name),
+  cleanTextKey(item?.status),
+].join('|');
+
 export const dedupeWorkspaceData = (state = {}) => {
   const { wallets, aliases: walletAliases } = dedupeWalletsWithAliases(state.wallets || []);
   const validWalletIds = new Set(wallets.map(wallet => wallet.id).filter(Boolean));
@@ -416,6 +427,8 @@ export const dedupeWorkspaceData = (state = {}) => {
     goals,
     wallets,
     commitments,
+    trackerTypes: keepLastUniqueBy(state.trackerTypes || [], trackerTypeKey),
+    trackerItems: keepLastUniqueBy(state.trackerItems || [], trackerItemKey),
     cats: keepLastUniqueBy(state.cats || [], categoryKey),
     cfg: {
       ...(state.cfg || DEF_CFG),
@@ -429,6 +442,8 @@ export const financialDataCount = (snapshot = {}) => (
   + (snapshot.debts || []).length
   + (snapshot.goals || []).length
   + (snapshot.commitments || []).length
+  + (snapshot.trackerTypes || []).length
+  + (snapshot.trackerItems || []).length
 );
 
 export const hasCurrencySensitiveFinancialData = (snapshot = {}) => {
@@ -453,6 +468,8 @@ export const snapshotFromState = (state = {}, overrides = {}) => {
       goals: clean.goals || [],
       wallets: clean.wallets || [],
       commitments: clean.commitments || [],
+      trackerTypes: clean.trackerTypes || [],
+      trackerItems: clean.trackerItems || [],
     },
     cats: clean.cats || DEF_CATS,
     cfg: clean.cfg || DEF_CFG,
@@ -479,6 +496,8 @@ export const stateFromSnapshot = (snapshot = {}, fallbackCfg = DEF_CFG) => {
     goals: normalizeGoalItems(data.goals, defaultScopeForProfile(prepared.cfg.profileType), prepared.cfg.currency),
     wallets: prepared.wallets,
     commitments: prepared.commitments,
+    trackerTypes: Array.isArray(data.trackerTypes) ? data.trackerTypes : [],
+    trackerItems: Array.isArray(data.trackerItems) ? data.trackerItems : [],
     cats: snapshot.cats || data.cats || DEF_CATS,
     cfg: prepared.cfg,
     notif: { ...DEF_NOTIF, ...(snapshot.notif || data.notif || {}) },

@@ -40,6 +40,8 @@ export const useStore = create((set, get) => {
     goals:   [],
     wallets: [],
     commitments: [],
+    trackerTypes: [],
+    trackerItems: [],
     cats:    DEF_CATS,
     cfg:     DEF_CFG,
     notif:   DEF_NOTIF,

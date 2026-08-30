@@ -1,8 +1,11 @@
-export const MYFI_BACKUP_DATA_VERSION = 10;
+// V11 adds user-defined tracker definitions and their items. They remain in
+// the financial backup so a restore cannot silently keep money movements but
+// lose the rule which gives a custom tracker its meaning.
+export const MYFI_BACKUP_DATA_VERSION = 11;
 export const MYFI_BACKUP_KIND = 'myfi_financial_backup';
 export const MYFI_BACKUP_FORMAT = 'MYFI_LOGICAL_BACKUP';
 
-const COLLECTION_KEYS = ['trans', 'debts', 'goals', 'wallets', 'commitments', 'cats'];
+const COLLECTION_KEYS = ['trans', 'debts', 'goals', 'wallets', 'commitments', 'cats', 'trackerTypes', 'trackerItems'];
 const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
 
 const duplicateIds = (items = []) => {
@@ -101,13 +104,15 @@ export const buildFinancialBackup = ({
   wallets = [],
   commitments = [],
   cats = [],
+  trackerTypes = [],
+  trackerItems = [],
   coldArchives = [],
   cfg = {},
 } = {}) => {
   const exportedAt = new Date().toISOString();
   const archives = Array.isArray(coldArchives) ? coldArchives : [];
   const financialConfig = pickFinancialBackupConfig(cfg);
-  const financialData = { trans, debts, goals, wallets, commitments, cats };
+  const financialData = { trans, debts, goals, wallets, commitments, cats, trackerTypes, trackerItems };
   const currencies = backupCurrencies({ trans: [...trans, ...archives.flatMap(item => item?.data?.trans || [])], wallets, cfg });
   const rates = backupRates([...trans, ...archives.flatMap(item => item?.data?.trans || [])]);
   const budgets = {
@@ -159,6 +164,8 @@ export const summarizeBackupData = (data = {}) => {
   const goals = Array.isArray(data.goals) ? data.goals : [];
   const wallets = Array.isArray(data.wallets) ? data.wallets : [];
   const commitments = Array.isArray(data.commitments) ? data.commitments : [];
+  const trackerTypes = Array.isArray(data.trackerTypes) ? data.trackerTypes : [];
+  const trackerItems = Array.isArray(data.trackerItems) ? data.trackerItems : [];
   const coldArchives = Array.isArray(data.coldArchives) ? data.coldArchives : [];
   const archivedEntries = coldArchives.reduce((sum, archive) => sum + (Array.isArray(archive?.data?.trans) ? archive.data.trans.length : 0), 0);
   const months = [...new Set(
@@ -178,6 +185,8 @@ export const summarizeBackupData = (data = {}) => {
     debts: debts.length,
     goals: goals.length,
     commitments: commitments.length,
+    customTrackerTypes: trackerTypes.length,
+    customTrackerItems: trackerItems.length,
     currency: financialConfig.currency || '',
     legacy: Number(data.v || 0) > 0 && Number(data.v || 0) < MYFI_BACKUP_DATA_VERSION,
   };
@@ -215,7 +224,7 @@ export const inspectBackupData = (data) => {
   }
 
   if (Number(data.v || 0) >= 10) {
-    if (data.manifest?.format !== MYFI_BACKUP_FORMAT || Number(data.manifest?.schemaVersion) !== 10) {
+    if (data.manifest?.format !== MYFI_BACKUP_FORMAT || Number(data.manifest?.schemaVersion) !== Number(data.v)) {
       errors.push('backup_manifest_invalid');
     }
     if (!isObject(data.financialData) || !isObject(data.checksums)) {
