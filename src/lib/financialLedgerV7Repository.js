@@ -4924,7 +4924,7 @@ export const clearFinancialNamespaceRowsInTransactionV7 = async (db, namespace) 
 };
 
 export const copyFinancialNamespaceFromStageInTransactionV7 = async ({
-  database, namespace, stageNamespace,
+  database, namespace, stageNamespace, includeWorkspaceState = false,
 } = {}) => {
   const target = String(namespace || '').trim();
   const stage = String(stageNamespace || '').trim();
@@ -4967,8 +4967,18 @@ export const copyFinancialNamespaceFromStageInTransactionV7 = async ({
     `INSERT INTO ledger_entities_v7
      (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
      SELECT ?,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at
-       FROM ledger_entities_v7 WHERE namespace=?`, target, stage,
+      FROM ledger_entities_v7 WHERE namespace=?`, target, stage,
   );
+  if (includeWorkspaceState) {
+    await database.runAsync(
+      `INSERT INTO ledger_workspace_state_v7
+       (namespace,source_mode,schema_version,shadow_checksum,shadow_verified_at,cutover_at,
+        last_reconciled_at,payload_json,updated_at)
+       SELECT ?,source_mode,schema_version,shadow_checksum,shadow_verified_at,cutover_at,
+              last_reconciled_at,payload_json,updated_at
+         FROM ledger_workspace_state_v7 WHERE namespace=?`, target, stage,
+    );
+  }
 };
 
 export const clearFinancialWorkspaceV7 = async ({ namespace = 'guest', database = null } = {}) => {
