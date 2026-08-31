@@ -3,7 +3,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(process.argv[2] || path.join(__dirname,'..'));
-const sql = fs.readFileSync(path.join(root,'supabase/migrations/202608170002_financial_mutation_sync_v2_shadow.sql'),'utf8');
+const migrationsDirectory = path.join(root, 'supabase/migrations');
+const migrationNames = fs.readdirSync(migrationsDirectory)
+  .filter(name => /^\d+_financial_mutation_sync_v2_shadow\.sql$/.test(name));
+assert.equal(migrationNames.length, 1, 'expected exactly one V2 shadow migration');
+const sql = fs.readFileSync(path.join(migrationsDirectory, migrationNames[0]), 'utf8');
 
 for (const token of [
   'financial_ledgers_v2',

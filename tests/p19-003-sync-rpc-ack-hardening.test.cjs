@@ -3,10 +3,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
-const migration = fs.readFileSync(
-  path.join(root, 'supabase/migrations/202608170001_financial_mutation_v1_ack_hardening.sql'),
-  'utf8',
-);
+const migrationsDirectory = path.join(root, 'supabase/migrations');
+const migrationNames = fs.readdirSync(migrationsDirectory)
+  .filter(name => /^\d+_financial_mutation_v1_ack_hardening\.sql$/.test(name));
+assert.equal(migrationNames.length, 1, 'expected exactly one V1 ACK hardening migration');
+const migration = fs.readFileSync(path.join(migrationsDirectory, migrationNames[0]), 'utf8');
 const e2e = fs.readFileSync(path.join(root, 'tests/run-financial-mutation-sync-e2e.cjs'), 'utf8');
 
 assert.match(migration, /mutation_id_conflict/);

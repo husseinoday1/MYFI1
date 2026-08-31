@@ -3,9 +3,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(process.argv[2] || path.join(__dirname,'..'));
-const migration = fs.readFileSync(
-  path.join(root,'supabase/migrations/202608170004_financial_bootstrap_v2.sql'),'utf8'
-);
+const migrationsDirectory = path.join(root, 'supabase/migrations');
+const migrationNames = fs.readdirSync(migrationsDirectory)
+  .filter(name => /^\d+_financial_bootstrap_v2\.sql$/.test(name));
+assert.equal(migrationNames.length, 1, 'expected exactly one Bootstrap V2 migration');
+const migration = fs.readFileSync(path.join(migrationsDirectory, migrationNames[0]), 'utf8');
 const repo = fs.readFileSync(path.join(root,'src/lib/financialLedgerV7Repository.js'),'utf8');
 const client = fs.readFileSync(path.join(root,'src/lib/financialBootstrapV2.js'),'utf8');
 const syncV2 = fs.readFileSync(path.join(root,'src/lib/financialMutationSyncV2.js'),'utf8');

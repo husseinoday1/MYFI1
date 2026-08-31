@@ -4,10 +4,11 @@ const path = require('node:path');
 
 const root = path.resolve(process.argv[2] || path.join(__dirname,'..'));
 const repository = fs.readFileSync(path.join(root,'src/lib/financialLedgerV7Repository.js'),'utf8');
-const sql = fs.readFileSync(
-  path.join(root,'supabase/migrations/202608170003_financial_restore_epoch_v2.sql'),
-  'utf8',
-);
+const migrationsDirectory = path.join(root, 'supabase/migrations');
+const migrationNames = fs.readdirSync(migrationsDirectory)
+  .filter(name => /^\d+_financial_restore_epoch_v2\.sql$/.test(name));
+assert.equal(migrationNames.length, 1, 'expected exactly one restore epoch migration');
+const sql = fs.readFileSync(path.join(migrationsDirectory, migrationNames[0]), 'utf8');
 
 for (const token of [
   'beginLedgerRestoreEpochV8',

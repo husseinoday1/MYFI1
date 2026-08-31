@@ -3,7 +3,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
-const migrationPath = path.join(root, 'supabase/migrations/20260831135538_financial_archive_recovery_v2.sql');
+const migrationsDirectory = path.join(root, 'supabase/migrations');
+const archiveMigrationNames = fs.readdirSync(migrationsDirectory)
+  .filter(name => /^\d+_financial_archive_recovery_v2\.sql$/.test(name));
+assert.equal(archiveMigrationNames.length, 1, 'expected exactly one archive recovery migration');
+const migrationPath = path.join(migrationsDirectory, archiveMigrationNames[0]);
 const migration = fs.readFileSync(migrationPath, 'utf8');
 const gate = fs.readFileSync(path.join(root, 'tests/run-quality-gate.cjs'), 'utf8');
 
