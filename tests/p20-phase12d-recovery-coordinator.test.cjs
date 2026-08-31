@@ -1,0 +1,13 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
+const source = fs.readFileSync(path.join(root, 'src/lib/financialBootstrapRecoveryCoordinatorV2.js'), 'utf8');
+assert.match(source, /recoverVerifiedBootstrapWithArchiveV2/);
+assert.match(source, /stageFinancialBootstrapRecoveryImportV2/);
+assert.match(source, /stageFinancialArchiveRecoveryImportV2/);
+assert.match(source, /financial_v2_bootstrap_recovery_source_changed/);
+assert.match(source, /financial_archive_recovery_source_changed/);
+assert.match(source, /promoteVerifiedBootstrapRecoveryV2/);
+assert.doesNotMatch(source, /useSyncSlice|set\(|navigation|Alert/);
+console.log('MYFI P20 PHASE 12-D RECOVERY COORDINATOR CONTRACT: PASSED');
