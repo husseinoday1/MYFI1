@@ -2,6 +2,7 @@ import * as Crypto from 'expo-crypto';
 import { buildFinancialBootstrapRowsV2, verifyFinancialBootstrapReadbackV2 } from './financialBootstrapV2';
 import {
   beginFinancialBootstrapRecoveryImportV9,
+  failFinancialBootstrapRecoveryImportV10,
   inspectFinancialBootstrapRecoveryStageV10,
   markFinancialBootstrapRecoveryImportReadyV9,
   writeFinancialBootstrapRecoveryStageRowV10,
@@ -50,6 +51,9 @@ export const stageFinancialBootstrapRecoveryImportV2 = async ({
       expectedRowCount: normalized.expectedRowCount,
       database,
     });
+    if (!session?.session_id) {
+      return { supported: true, ok: false, reason: 'financial_v2_bootstrap_recovery_session_invalid' };
+    }
     const readback = await verifyFinancialBootstrapReadbackV2({
       supabase,
       ledgerId: normalized.ledgerId,
@@ -61,7 +65,12 @@ export const stageFinancialBootstrapRecoveryImportV2 = async ({
         namespace, sessionId: session.session_id, row, database,
       }),
     });
-    if (!readback?.ok) return { supported: true, ok: false, reason: readback?.reason || 'financial_v2_bootstrap_readback_failed', session, readback };
+    if (!readback?.ok) {
+      await failFinancialBootstrapRecoveryImportV10({
+        namespace, sessionId: session.session_id, error: readback?.reason || 'financial_v2_bootstrap_readback_failed', database,
+      });
+      return { supported: true, ok: false, reason: readback?.reason || 'financial_v2_bootstrap_readback_failed', session, readback };
+    }
 
     const inspection = await inspectFinancialBootstrapRecoveryStageV10({
       namespace, sessionId: session.session_id, database,
@@ -101,6 +110,14 @@ export const stageFinancialBootstrapRecoveryImportV2 = async ({
       proofDigest,
     };
   } catch (error) {
+    if (session?.session_id) {
+      try {
+        await failFinancialBootstrapRecoveryImportV10({
+          namespace, sessionId: session.session_id,
+          error: String(error?.message || 'financial_v2_bootstrap_recovery_stage_failed'), database,
+        });
+      } catch {}
+    }
     return {
       supported: true,
       ok: false,

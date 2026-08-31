@@ -15,7 +15,7 @@ const source = {
   manifestHash: 'f'.repeat(64), expectedRowCount: 1,
 };
 
-const calls = { begin: 0, write: [], mark: 0 };
+const calls = { begin: 0, write: [], mark: 0, fail: 0 };
 const repoMock = {
   beginFinancialBootstrapRecoveryImportV9: async input => {
     calls.begin += 1;
@@ -37,6 +37,12 @@ const repoMock = {
     calls.mark += 1;
     assert.match(input.proofDigest, /^[0-9a-f]{64}$/);
     return { session_id: input.sessionId, status: 'ready' };
+  },
+  failFinancialBootstrapRecoveryImportV10: async input => {
+    calls.fail += 1;
+    assert.equal(input.sessionId, 'session-phase12c');
+    assert.equal(input.error, 'network_interrupted');
+    return { session_id: input.sessionId, status: 'failed' };
   },
 };
 const bootstrapMock = {
@@ -81,6 +87,13 @@ const { stageFinancialBootstrapRecoveryImportV2 } = compiled.exports;
   });
   assert.equal(bad.ok, false);
   assert.equal(bad.reason, 'financial_v2_bootstrap_recovery_account_missing');
+  bootstrapMock.verifyFinancialBootstrapReadbackV2 = async () => ({ ok: false, reason: 'network_interrupted' });
+  const interrupted = await stageFinancialBootstrapRecoveryImportV2({
+    supabase: { rpc: async () => ({}) }, namespace: 'user:phase12c', accountId: 'account-phase12c', source,
+  });
+  assert.equal(interrupted.ok, false);
+  assert.equal(interrupted.reason, 'network_interrupted');
+  assert.equal(calls.fail, 1, 'an interrupted partial read must clear its private stage before retry');
   console.log('MYFI P20 PHASE 12-C BOOTSTRAP RECOVERY PRIVATE STAGE: PASSED');
 })().catch(error => {
   console.error(error);

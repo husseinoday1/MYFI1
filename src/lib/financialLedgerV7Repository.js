@@ -1533,6 +1533,37 @@ export const markFinancialBootstrapRecoveryImportReadyV9 = async ({
   }));
 };
 
+// A partial verified download must restart from ordinal zero. Retaining its
+// receipts would poison the next readback, which deliberately begins at zero.
+// This operates only on the private recovery stage and never on live data.
+export const failFinancialBootstrapRecoveryImportV10 = async ({
+  namespace = 'guest', sessionId, error = 'financial_v2_bootstrap_recovery_download_failed', database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  const id = String(sessionId || '').trim();
+  if (!target || !id) throw new Error('financial_v2_bootstrap_recovery_failure_input_invalid');
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    const current = await txn.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`, target, id,
+    );
+    if (!current) throw new Error('financial_v2_bootstrap_recovery_session_missing');
+    if (String(current.status) === 'ready') throw new Error('financial_v2_bootstrap_recovery_ready_session_not_abortable');
+    await clearFinancialNamespaceRowsInTransactionV7(txn, String(current.stage_namespace));
+    await txn.runAsync(`DELETE FROM ledger_bootstrap_recovery_rows_v10 WHERE namespace=? AND session_id=?`, target, id);
+    const now = new Date().toISOString();
+    await txn.runAsync(
+      `UPDATE ledger_bootstrap_recovery_import_v9
+          SET status='failed',last_cloud_row_ordinal=0,proof_digest=NULL,verified_at=NULL,last_error=?,updated_at=?
+        WHERE namespace=? AND session_id=?`,
+      String(error || 'financial_v2_bootstrap_recovery_download_failed').slice(0, 500), now, target, id,
+    );
+    return txn.getFirstAsync(`SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`, target, id);
+  }));
+};
+
 const validateArchiveRecoverySourceV11 = ({
   accountId, sourceLedgerId, sourceRestoreEpoch, archivePresent,
   sourceArchiveGeneration = 0, sourceSnapshotId = '', sourceManifestHash = '', expectedRowCount = 0,
@@ -1820,6 +1851,36 @@ export const markFinancialArchiveRecoveryImportReadyV11 = async ({
     return txn.getFirstAsync(
       `SELECT * FROM ledger_archive_recovery_import_v11 WHERE namespace=? AND session_id=? LIMIT 1`, target, id,
     );
+  }));
+};
+
+// Archive recovery follows the same ordinal contract as Bootstrap recovery.
+// On failure erase the private partial stage atomically so a retry is clean.
+export const failFinancialArchiveRecoveryImportV12 = async ({
+  namespace = 'guest', sessionId, error = 'financial_archive_recovery_download_failed', database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  const id = String(sessionId || '').trim();
+  if (!target || !id) throw new Error('financial_archive_recovery_failure_input_invalid');
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    const current = await txn.getFirstAsync(
+      `SELECT * FROM ledger_archive_recovery_import_v11 WHERE namespace=? AND session_id=? LIMIT 1`, target, id,
+    );
+    if (!current) throw new Error('financial_archive_recovery_session_missing');
+    if (String(current.status) === 'ready') throw new Error('financial_archive_recovery_ready_session_not_abortable');
+    await clearColdArchiveNamespaceInTransaction(txn, String(current.stage_namespace));
+    await txn.runAsync(`DELETE FROM ledger_archive_recovery_rows_v12 WHERE namespace=? AND session_id=?`, target, id);
+    const now = new Date().toISOString();
+    await txn.runAsync(
+      `UPDATE ledger_archive_recovery_import_v11
+          SET status='failed',last_cloud_row_ordinal=0,proof_digest=NULL,verified_at=NULL,last_error=?,updated_at=?
+        WHERE namespace=? AND session_id=?`,
+      String(error || 'financial_archive_recovery_download_failed').slice(0, 500), now, target, id,
+    );
+    return txn.getFirstAsync(`SELECT * FROM ledger_archive_recovery_import_v11 WHERE namespace=? AND session_id=? LIMIT 1`, target, id);
   }));
 };
 

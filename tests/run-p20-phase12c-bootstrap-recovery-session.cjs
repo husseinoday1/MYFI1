@@ -63,6 +63,7 @@ source += `\nmodule.exports = {
   readFinancialBootstrapRecoveryImportV9,
   recordFinancialBootstrapRecoveryImportProgressV9,
   markFinancialBootstrapRecoveryImportReadyV9,
+  failFinancialBootstrapRecoveryImportV10,
   writeFinancialBootstrapRecoveryStageRowV10,
   inspectFinancialBootstrapRecoveryStageV10,
   beginFinancialArchiveRecoveryImportV11,
@@ -80,6 +81,7 @@ const {
   readFinancialBootstrapRecoveryImportV9,
   recordFinancialBootstrapRecoveryImportProgressV9,
   markFinancialBootstrapRecoveryImportReadyV9,
+  failFinancialBootstrapRecoveryImportV10,
   writeFinancialBootstrapRecoveryStageRowV10,
   inspectFinancialBootstrapRecoveryStageV10,
   beginFinancialArchiveRecoveryImportV11,
@@ -216,6 +218,59 @@ const sourceInput = {
     2,
   );
   assert.equal((await readFinancialBootstrapRecoveryImportV9({ namespace: NS, database: db })).session_id, first.session_id);
+
+  const retrySource = {
+    ...sourceInput,
+    namespace: 'user:phase12c-retry',
+    sourceBootstrapId: 'bootstrap-retry-after-interruption',
+    sourceManifestHash: 'd'.repeat(64),
+    expectedRowCount: 1,
+  };
+  const retryNamespace = retrySource.namespace;
+  const interrupted = await beginFinancialBootstrapRecoveryImportV9({ ...retrySource, database: db });
+  await writeFinancialBootstrapRecoveryStageRowV10({
+    namespace: retryNamespace,
+    sessionId: interrupted.session_id,
+    row: {
+      ordinal: 1,
+      rowType: 'account',
+      rowKey: 'wallet-retry',
+      rowHash: 'e'.repeat(64),
+      payloadText: '{"id":"wallet-retry","name":"Retry wallet","account_type":"cash","scope":"personal","currency_code":"IQD","status":"active","created_at":"2026-08-31T00:00:00.000Z","updated_at":"2026-08-31T00:00:00.000Z","archived_at":null}',
+    },
+    database: db,
+  });
+  const failed = await failFinancialBootstrapRecoveryImportV10({
+    namespace: retryNamespace, sessionId: interrupted.session_id, error: 'network_interrupted', database: db,
+  });
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.last_cloud_row_ordinal, 0);
+  assert.equal(
+    db.native.prepare('SELECT COUNT(*) AS n FROM ledger_bootstrap_recovery_rows_v10 WHERE namespace=? AND session_id=?').get(retryNamespace, interrupted.session_id).n,
+    0,
+    'failed retry stage must not retain receipt rows',
+  );
+  assert.equal(
+    db.native.prepare('SELECT COUNT(*) AS n FROM ledger_accounts_v7 WHERE namespace=?').get(interrupted.stage_namespace).n,
+    0,
+    'failed retry stage must not retain materialized financial rows',
+  );
+  const restarted = await beginFinancialBootstrapRecoveryImportV9({ ...retrySource, database: db });
+  assert.equal(restarted.session_id, interrupted.session_id);
+  assert.equal(restarted.status, 'downloading');
+  const restartedRow = await writeFinancialBootstrapRecoveryStageRowV10({
+    namespace: retryNamespace,
+    sessionId: restarted.session_id,
+    row: {
+      ordinal: 1,
+      rowType: 'account',
+      rowKey: 'wallet-retry',
+      rowHash: 'e'.repeat(64),
+      payloadText: '{"id":"wallet-retry","name":"Retry wallet","account_type":"cash","scope":"personal","currency_code":"IQD","status":"active","created_at":"2026-08-31T00:00:00.000Z","updated_at":"2026-08-31T00:00:00.000Z","archived_at":null}',
+    },
+    database: db,
+  });
+  assert.equal(restartedRow.last_cloud_row_ordinal, 1, 'retry must accept ordinal one again after an interrupted read');
 
   const blockedNs = 'user:phase12c-restore-active';
   db.native.prepare(

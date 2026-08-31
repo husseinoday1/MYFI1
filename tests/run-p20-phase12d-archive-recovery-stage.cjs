@@ -8,7 +8,7 @@ const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const target = path.join(root, 'src/lib/financialArchiveRecoveryImportV2.js');
 const sha = value => crypto.createHash('sha256').update(String(value)).digest('hex');
 const row = { ordinal: 1, rowType: 'archive_year', rowKey: '["personal",2025]', rowHash: 'a'.repeat(64), payloadText: '{"scope":"personal","year":2025,"summary":{},"metadata":{}}' };
-const calls = { begin: 0, write: 0, mark: 0 };
+const calls = { begin: 0, write: 0, mark: 0, fail: 0 };
 const archiveMock = {
   readFinancialArchiveHeadV2: async () => ({ ok: true, ledgerId: 'ledger-archive-stage', restoreEpoch: 5, archivePresent: true, archiveGeneration: 1, snapshotId: 'snapshot-archive-stage', manifestHash: 'f'.repeat(64), expectedRowCount: 1 }),
   verifyFinancialArchiveSnapshotReadbackV2: async input => { await input.onVerifiedRow(row); return { ok: true, readBackRowCount: 1 }; },
@@ -18,6 +18,7 @@ const repoMock = {
   writeFinancialArchiveRecoveryStageRowV12: async () => { calls.write += 1; },
   inspectFinancialArchiveRecoveryStageV12: async () => ({ ok: true, receipts: [{ ordinal: 1, row_hash: row.rowHash }] }),
   markFinancialArchiveRecoveryImportReadyV11: async input => { calls.mark += 1; assert.match(input.proofDigest, /^[0-9a-f]{64}$/); return { session_id: input.sessionId, status: 'ready' }; },
+  failFinancialArchiveRecoveryImportV12: async input => { calls.fail += 1; assert.equal(input.sessionId, 'archive-stage-session'); assert.equal(input.error, 'network_interrupted'); return { session_id: input.sessionId, status: 'failed' }; },
 };
 const cryptoMock = { CryptoDigestAlgorithm: { SHA256: 'SHA-256' }, digestStringAsync: async (_algorithm, value) => sha(value) };
 const originalLoad = Module._load;
@@ -35,7 +36,7 @@ const { stageFinancialArchiveRecoveryImportV2 } = compiled.exports;
 (async () => {
   const staged = await stageFinancialArchiveRecoveryImportV2({ supabase: { rpc: async () => ({}) }, namespace: 'user:archive-stage', accountId: 'account-1', bootstrapSource: { ledgerId: 'ledger-archive-stage', restoreEpoch: 5 } });
   assert.equal(staged.ok, true); assert.equal(staged.session.status, 'ready');
-  assert.deepEqual(calls, { begin: 1, write: 1, mark: 1 });
+  assert.deepEqual(calls, { begin: 1, write: 1, mark: 1, fail: 0 });
   const missing = await stageFinancialArchiveRecoveryImportV2({ supabase: { rpc: async () => ({}) }, namespace: 'user:archive-stage', accountId: '', bootstrapSource: { ledgerId: 'ledger-archive-stage', restoreEpoch: 5 } });
   assert.equal(missing.reason, 'financial_archive_recovery_account_missing');
   const absentCalls = { begin: 0, readback: 0 };
@@ -62,5 +63,9 @@ const { stageFinancialArchiveRecoveryImportV2 } = compiled.exports;
   const absent = await absentCompiled.exports.stageFinancialArchiveRecoveryImportV2({ supabase: { rpc: async () => ({}) }, namespace: 'user:archive-absent', accountId: 'account-1', bootstrapSource: { ledgerId: 'ledger-archive-stage', restoreEpoch: 5 } });
   assert.equal(absent.ok, true); assert.equal(absent.session.status, 'ready');
   assert.deepEqual(absentCalls, { begin: 1, readback: 0 });
+  archiveMock.verifyFinancialArchiveSnapshotReadbackV2 = async () => ({ ok: false, reason: 'network_interrupted' });
+  const interrupted = await stageFinancialArchiveRecoveryImportV2({ supabase: { rpc: async () => ({}) }, namespace: 'user:archive-stage', accountId: 'account-1', bootstrapSource: { ledgerId: 'ledger-archive-stage', restoreEpoch: 5 } });
+  assert.equal(interrupted.ok, false); assert.equal(interrupted.reason, 'network_interrupted');
+  assert.equal(calls.fail, 1, 'an interrupted archive read must clear its private stage before retry');
   console.log('MYFI P20 PHASE 12-D ARCHIVE RECOVERY PRIVATE STAGE: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

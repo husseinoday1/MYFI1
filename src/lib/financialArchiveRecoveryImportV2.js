@@ -5,6 +5,7 @@ import * as Crypto from 'expo-crypto';
 import { readFinancialArchiveHeadV2, verifyFinancialArchiveSnapshotReadbackV2 } from './financialArchiveSnapshotV2';
 import {
   beginFinancialArchiveRecoveryImportV11,
+  failFinancialArchiveRecoveryImportV12,
   inspectFinancialArchiveRecoveryStageV12,
   markFinancialArchiveRecoveryImportReadyV11,
   writeFinancialArchiveRecoveryStageRowV12,
@@ -38,6 +39,9 @@ export const stageFinancialArchiveRecoveryImportV2 = async ({
       sourceSnapshotId: head.snapshotId, sourceManifestHash: head.manifestHash,
       expectedRowCount: head.expectedRowCount, database,
     });
+    if (!session?.session_id) {
+      return { supported: true, ok: false, reason: 'financial_archive_recovery_session_invalid', source, head };
+    }
     if (!head.archivePresent) {
       return { supported: true, ok: true, source, head, session, proofDigest: String(session.proof_digest) };
     }
@@ -47,7 +51,12 @@ export const stageFinancialArchiveRecoveryImportV2 = async ({
       manifestHash: head.manifestHash, expectedRowCount: head.expectedRowCount,
       onVerifiedRow: row => writeFinancialArchiveRecoveryStageRowV12({ namespace, sessionId: session.session_id, row, database }),
     });
-    if (!readback?.ok) return { supported: true, ok: false, reason: readback?.reason || 'financial_archive_recovery_readback_failed', source, head, session, readback };
+    if (!readback?.ok) {
+      await failFinancialArchiveRecoveryImportV12({
+        namespace, sessionId: session.session_id, error: readback?.reason || 'financial_archive_recovery_readback_failed', database,
+      });
+      return { supported: true, ok: false, reason: readback?.reason || 'financial_archive_recovery_readback_failed', source, head, session, readback };
+    }
     const inspection = await inspectFinancialArchiveRecoveryStageV12({ namespace, sessionId: session.session_id, database });
     if (!inspection?.ok) return { supported: true, ok: false, reason: inspection?.reason || 'financial_archive_recovery_stage_invalid', source, head, session, readback, inspection };
     const proofDigest = String(await sha256Hex([
@@ -57,6 +66,14 @@ export const stageFinancialArchiveRecoveryImportV2 = async ({
     const ready = await markFinancialArchiveRecoveryImportReadyV11({ namespace, sessionId: session.session_id, proofDigest, database });
     return { supported: true, ok: true, source, head, session: ready, readback, proofDigest };
   } catch (error) {
+    if (session?.session_id && head?.archivePresent) {
+      try {
+        await failFinancialArchiveRecoveryImportV12({
+          namespace, sessionId: session.session_id,
+          error: String(error?.message || 'financial_archive_recovery_stage_failed'), database,
+        });
+      } catch {}
+    }
     return { supported: true, ok: false, reason: String(error?.message || 'financial_archive_recovery_stage_failed'), source: source || null, head: head || null, session: session || null };
   }
 };
