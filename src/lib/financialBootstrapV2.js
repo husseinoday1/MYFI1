@@ -117,9 +117,13 @@ export const verifyFinancialBootstrapReadbackV2 = async ({
   expectedRowCount,
   pageSize = 200,
   maxPages = 10000,
+  onVerifiedRow = null,
 } = {}) => {
   if (!supabase?.rpc) {
     return { supported: false, ok: false, reason: 'supabase_unavailable' };
+  }
+  if (onVerifiedRow != null && typeof onVerifiedRow !== 'function') {
+    return { supported: true, ok: false, reason: 'financial_v2_bootstrap_readback_callback_invalid' };
   }
 
   const expectedLedger = String(ledgerId || '').trim();
@@ -200,6 +204,13 @@ export const verifyFinancialBootstrapReadbackV2 = async ({
         ).toLowerCase();
         if (computedHash !== rowHash) {
           throw new Error('financial_v2_bootstrap_readback_row_hash_mismatch');
+        }
+
+        // The recovery importer receives a row only after the exact server text,
+        // ordinal, uniqueness and hash have all been verified. Its callback writes
+        // only to a private SQLite stage; a callback failure aborts this readback.
+        if (onVerifiedRow) {
+          await onVerifiedRow(Object.freeze({ ordinal, rowType, rowKey, rowHash, payloadText }));
         }
 
         rowHashes.push(rowHash);

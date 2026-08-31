@@ -69,6 +69,7 @@ const makeSupabase = rows => ({
 });
 
 (async () => {
+  const receivedRows = [];
   const verified = await verifyFinancialBootstrapReadbackV2({
     supabase:makeSupabase(baseRows),
     ledgerId:'ledger-1',
@@ -78,14 +79,17 @@ const makeSupabase = rows => ({
     expectedRowCount:3,
     pageSize:2,
     maxPages:5,
+    onVerifiedRow: row => { receivedRows.push(row); },
   });
   assert.equal(verified.ok,true);
   assert.equal(verified.pages,2);
   assert.equal(verified.readBackRowCount,3);
   assert.equal(verified.finalOrdinal,3);
+  assert.deepEqual(receivedRows.map(row => row.ordinal), [1,2,3]);
 
   const badRows = baseRows.map(row => ({...row}));
   badRows[1].rowHash = '0'.repeat(64);
+  const corruptedRows = [];
   const corrupted = await verifyFinancialBootstrapReadbackV2({
     supabase:makeSupabase(badRows),
     ledgerId:'ledger-1',
@@ -95,9 +99,11 @@ const makeSupabase = rows => ({
     expectedRowCount:3,
     pageSize:2,
     maxPages:5,
+    onVerifiedRow: row => { corruptedRows.push(row); },
   });
   assert.equal(corrupted.ok,false);
   assert.equal(corrupted.reason,'financial_v2_bootstrap_readback_row_hash_mismatch');
+  assert.equal(corruptedRows.length,1,'a corrupted row must never reach the recovery stage callback');
 
   console.log('MYFI P19-011R1 BOOTSTRAP READBACK RUNTIME: PASSED');
 })().catch(error => {
