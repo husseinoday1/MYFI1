@@ -69,6 +69,7 @@ const staticContracts = [
   'p19-015b0-ledger-identity-forensics.test.cjs',
   'p20-v2-client-closure.test.cjs',
   'p20-local-reset-v2-interlock.test.cjs',
+  'p20-phase12a-archive-channel.test.cjs',
   'dev-diagnostic-payload-privacy.test.cjs',
   'sync-error-classification.test.cjs',
   'automatic-sync-interaction-hold.test.cjs',
