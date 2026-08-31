@@ -117,6 +117,48 @@ const exactArchiveSession = (row, namespace, accountId, expected) => (
   && hash(row.proof_digest) && text(row.stage_namespace)
 );
 
+// READY is necessary but not sufficient: a damaged local database could retain
+// the receipt session while losing a materialized stage row. Re-count both
+// representations inside the same transaction immediately before live writes.
+const assertMaterializedStages = async (db, hotSession, coldSession) => {
+  const hotReceipts = await db.getAllAsync(
+    `SELECT row_type,COUNT(*) AS n FROM ledger_bootstrap_recovery_rows_v10
+      WHERE namespace=? AND session_id=? GROUP BY row_type`, hotSession.namespace, hotSession.session_id,
+  );
+  const hotExpected = Object.fromEntries(hotReceipts.map(row => [String(row.row_type), Number(row.n || 0)]));
+  const hotActual = {
+    account: await count(db, `SELECT COUNT(*) AS n FROM ledger_accounts_v7 WHERE namespace=?`, hotSession.stage_namespace),
+    exchange_rate: await count(db, `SELECT COUNT(*) AS n FROM ledger_exchange_rates_v7 WHERE namespace=?`, hotSession.stage_namespace),
+    financial_transaction: await count(db, `SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7 WHERE namespace=?`, hotSession.stage_namespace),
+    posting: await count(db, `SELECT COUNT(*) AS n FROM ledger_postings_v7 WHERE namespace=?`, hotSession.stage_namespace),
+    transaction_link: await count(db, `SELECT COUNT(*) AS n FROM ledger_transaction_links_v7 WHERE namespace=?`, hotSession.stage_namespace),
+    entity: await count(db, `SELECT COUNT(*) AS n FROM ledger_entities_v7 WHERE namespace=?`, hotSession.stage_namespace),
+    workspace_state: await count(db, `SELECT COUNT(*) AS n FROM ledger_workspace_state_v7 WHERE namespace=?`, hotSession.stage_namespace),
+  };
+  for (const [type, actual] of Object.entries(hotActual)) {
+    if (actual !== Number(hotExpected[type] || 0)) throw new Error('financial_v2_bootstrap_recovery_promotion_hot_stage_incomplete');
+  }
+  const hotReceiptCount = hotReceipts.reduce((total, row) => total + Number(row.n || 0), 0);
+  if (hotReceiptCount !== Number(hotSession.expected_row_count)) {
+    throw new Error('financial_v2_bootstrap_recovery_promotion_hot_receipt_incomplete');
+  }
+  const archiveReceipts = await db.getAllAsync(
+    `SELECT row_type,COUNT(*) AS n FROM ledger_archive_recovery_rows_v12
+      WHERE namespace=? AND session_id=? GROUP BY row_type`, coldSession.namespace, coldSession.session_id,
+  );
+  const archiveExpected = Object.fromEntries(archiveReceipts.map(row => [String(row.row_type), Number(row.n || 0)]));
+  const archiveYears = await count(db, `SELECT COUNT(*) AS n FROM cold_archive_years WHERE namespace=?`, coldSession.stage_namespace);
+  const archiveTransactions = await count(db, `SELECT COUNT(*) AS n FROM cold_archive_transactions WHERE namespace=?`, coldSession.stage_namespace);
+  if (archiveYears !== Number(archiveExpected.archive_year || 0)
+      || archiveTransactions !== Number(archiveExpected.archive_transaction || 0)) {
+    throw new Error('financial_archive_recovery_promotion_stage_incomplete');
+  }
+  const archiveReceiptCount = archiveReceipts.reduce((total, row) => total + Number(row.n || 0), 0);
+  if (archiveReceiptCount !== Number(coldSession.expected_row_count)) {
+    throw new Error('financial_archive_recovery_promotion_archive_receipt_incomplete');
+  }
+};
+
 /**
  * The caller refreshes both source heads immediately before calling this local
  * function, then passes those exact values. Network is intentionally outside
@@ -155,6 +197,7 @@ export const promoteVerifiedBootstrapRecoveryV2 = async ({
       }
       if (priorPromotion?.value) throw new Error('financial_v2_bootstrap_recovery_promotion_already_recorded');
       await assertSafeEmptyShell(db, target, identity);
+      await assertMaterializedStages(db, hotSession, coldSession);
 
       const now = new Date().toISOString();
       // All destructive edits begin only after every source, archive, identity,

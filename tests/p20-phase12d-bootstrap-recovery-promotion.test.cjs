@@ -9,6 +9,8 @@ const repository = fs.readFileSync(path.join(root, 'src/lib/financialLedgerV7Rep
 assert.match(promotion, /runFinancialRestorePromotionTransactionV8/);
 assert.match(promotion, /financial_v2_bootstrap_recovery_promotion_live_state_present/);
 assert.match(promotion, /financial_v2_bootstrap_recovery_promotion_stage_source_mismatch/);
+assert.match(promotion, /financial_v2_bootstrap_recovery_promotion_hot_stage_incomplete/);
+assert.match(promotion, /financial_archive_recovery_promotion_stage_incomplete/);
 assert.match(promotion, /financial_v2_bootstrap_recovery_promotion_identity_compare_and_swap_failed/);
 assert.match(promotion, /replaceColdArchiveNamespaceFromStage/);
 assert.match(promotion, /includeWorkspaceState: true/);

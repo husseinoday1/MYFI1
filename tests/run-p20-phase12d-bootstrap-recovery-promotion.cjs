@@ -47,8 +47,13 @@ const prepare = (db, namespace = 'user:phase12d', { badCopy = false } = {}) => {
   db.native.prepare('INSERT INTO ledger_currencies(code,minor_exponent,enabled) VALUES (?,?,?)').run('IQD', 3, 1);
   db.native.prepare('INSERT INTO ledger_accounts_v7(namespace,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at) VALUES (?,?,?,?,?,?,?,?,?,NULL)').run(hotStage, 'wallet-remote', 'Remote wallet', 'cash', 'personal', 'IQD', 'active', now, now);
   db.native.prepare('INSERT INTO ledger_workspace_state_v7(namespace,source_mode,schema_version,payload_json,updated_at) VALUES (?,?,?,?,?)').run(hotStage, 'shadow', 9, '{"remote":true}', now);
+  db.native.prepare('INSERT INTO ledger_bootstrap_recovery_rows_v10(namespace,session_id,ordinal,row_type,row_key,row_hash,payload_text,received_at) VALUES (?,?,?,?,?,?,?,?)').run(namespace, 'hot', 1, 'currency', 'IQD', '1'.repeat(64), '{"code":"IQD"}', now);
+  db.native.prepare('INSERT INTO ledger_bootstrap_recovery_rows_v10(namespace,session_id,ordinal,row_type,row_key,row_hash,payload_text,received_at) VALUES (?,?,?,?,?,?,?,?)').run(namespace, 'hot', 2, 'account', 'wallet-remote', '2'.repeat(64), '{"id":"wallet-remote"}', now);
+  db.native.prepare('INSERT INTO ledger_bootstrap_recovery_rows_v10(namespace,session_id,ordinal,row_type,row_key,row_hash,payload_text,received_at) VALUES (?,?,?,?,?,?,?,?)').run(namespace, 'hot', 3, 'workspace_state', 'workspace', '3'.repeat(64), '{"source_mode":"shadow"}', now);
   db.native.prepare('INSERT INTO cold_archive_years(namespace,scope,year,archived_at,checksum,transaction_count,income,expense,net,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?)').run(coldStage, 'personal', 2025, now, 'checksum', 1, 20, 5, 15, '{}');
   db.native.prepare('INSERT INTO cold_archive_transactions(namespace,scope,year,id,date_iso,ts,wallet_id,category_id,flow_type,search_text,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(coldStage, 'personal', 2025, 'old-row', '2025-01-01', 1, '', '', 'expense', 'old', '{}');
+  db.native.prepare('INSERT INTO ledger_archive_recovery_rows_v12(namespace,session_id,ordinal,row_type,row_key,row_hash,payload_text,received_at) VALUES (?,?,?,?,?,?,?,?)').run(namespace, 'cold', 1, 'archive_year', '["personal",2025]', '4'.repeat(64), '{"scope":"personal","year":2025}', now);
+  db.native.prepare('INSERT INTO ledger_archive_recovery_rows_v12(namespace,session_id,ordinal,row_type,row_key,row_hash,payload_text,received_at) VALUES (?,?,?,?,?,?,?,?)').run(namespace, 'cold', 2, 'archive_transaction', '["personal",2025,"old-row"]', '5'.repeat(64), '{"scope":"personal","year":2025,"transaction":{"id":"old-row"}}', now);
   return { namespace, oldLedger, remoteLedger, hotStage, coldStage, badCopy };
 };
 
