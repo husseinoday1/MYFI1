@@ -170,8 +170,12 @@ export const verifyFinancialArchiveSnapshotReadbackV2 = async ({
   expectedRowCount,
   pageSize = 200,
   maxPages = 10000,
+  onVerifiedRow = null,
 } = {}) => {
   if (!supabase?.rpc) return { supported: false, ok: false, reason: 'supabase_unavailable' };
+  if (onVerifiedRow != null && typeof onVerifiedRow !== 'function') {
+    return { supported: true, ok: false, reason: 'financial_archive_snapshot_readback_callback_invalid' };
+  }
   const expectedLedger = String(ledgerId || '').trim();
   const expectedEpoch = Number(restoreEpoch);
   const expectedGeneration = Number(archiveGeneration);
@@ -226,6 +230,10 @@ export const verifyFinancialArchiveSnapshotReadbackV2 = async ({
         keys.add(key);
         const computedHash = String(await sha256Hex(`${rowType}\n${rowKey}\n${payloadText}`)).toLowerCase();
         if (computedHash !== rowHash) throw new Error('financial_archive_snapshot_readback_row_hash_mismatch');
+        // The caller may write this row only after all structural and cryptographic
+        // checks above. A callback failure fails closed and no later ordinal is
+        // treated as received.
+        if (onVerifiedRow) await onVerifiedRow({ ordinal, rowType, rowKey, rowHash, payloadText });
         hashes.push(rowHash);
         afterOrdinal = ordinal;
       }

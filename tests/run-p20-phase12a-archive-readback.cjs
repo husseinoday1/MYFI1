@@ -85,13 +85,16 @@ const makeSupabase = ({ rows, manifestHash, archivePresent = true }) => ({
   });
   assert.equal(head.ok, true);
   assert.equal(head.archivePresent, true);
+  const received = [];
   const verified = await verifyFinancialArchiveSnapshotReadbackV2({
     supabase, ledgerId: head.ledgerId, restoreEpoch: head.restoreEpoch,
     archiveGeneration: head.archiveGeneration, snapshotId: head.snapshotId,
     manifestHash: head.manifestHash, expectedRowCount: head.expectedRowCount, pageSize: 1,
+    onVerifiedRow: row => received.push(row),
   });
   assert.equal(verified.ok, true);
   assert.equal(verified.pages, 2);
+  assert.equal(received.length, built.rows.length, 'only verified archive rows may reach a private-stage writer');
 
   const noArchive = await readFinancialArchiveHeadV2({
     supabase: makeSupabase({ rows: [], manifestHash: sha(''), archivePresent: false }),
@@ -102,14 +105,17 @@ const makeSupabase = ({ rows, manifestHash, archivePresent = true }) => ({
 
   const damaged = built.rows.map(row => ({ ...row }));
   damaged[1].rowHash = '0'.repeat(64);
+  let corruptCallbacks = 0;
   const corrupted = await verifyFinancialArchiveSnapshotReadbackV2({
     supabase: makeSupabase({ rows: damaged, manifestHash: built.manifestHash }),
     ledgerId: 'ledger-1234567890123456', restoreEpoch: 1, archiveGeneration: 1,
     snapshotId: 'archive-snapshot-123456', manifestHash: built.manifestHash,
     expectedRowCount: damaged.length,
+    onVerifiedRow: () => { corruptCallbacks += 1; },
   });
   assert.equal(corrupted.ok, false);
   assert.equal(corrupted.reason, 'financial_archive_snapshot_readback_row_hash_mismatch');
+  assert.equal(corruptCallbacks, 1, 'only the valid prefix may reach the callback before a tampered row fails closed');
 
   await assert.rejects(
     () => buildFinancialArchiveSnapshotRowsV2([{ year: 2025, scope: 'personal', data: { trans: [{ id: 'same' }, { id: 'same' }] } }]),

@@ -1,0 +1,14 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
+const source = fs.readFileSync(path.join(root, 'src/lib/financialArchiveRecoveryImportV2.js'), 'utf8');
+const reader = fs.readFileSync(path.join(root, 'src/lib/financialArchiveSnapshotV2.js'), 'utf8');
+assert.match(source, /stageFinancialArchiveRecoveryImportV2/);
+assert.match(source, /readFinancialArchiveHeadV2/);
+assert.match(source, /writeFinancialArchiveRecoveryStageRowV12/);
+assert.match(source, /markFinancialArchiveRecoveryImportReadyV11/);
+assert.match(source, /financial-archive-recovery-stage-v1/);
+assert.match(reader, /onVerifiedRow/);
+assert.match(reader, /financial_archive_snapshot_readback_callback_invalid/);
+console.log('MYFI P20 PHASE 12-D ARCHIVE RECOVERY STAGE CONTRACT: PASSED');
