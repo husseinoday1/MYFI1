@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - impl/p10-014a-local-strategy-b-device-gate-2026-08-22
+      # Temporary explicit test branch: produces the normal, update-compatible
+      # MYFI APK through GitHub Actions instead of a local machine build.
+      - fix/pui-001-r2-onboarding-reader-recent-transactions
 
 permissions:
   contents: read
