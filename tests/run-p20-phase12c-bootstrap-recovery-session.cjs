@@ -65,6 +65,10 @@ source += `\nmodule.exports = {
   markFinancialBootstrapRecoveryImportReadyV9,
   writeFinancialBootstrapRecoveryStageRowV10,
   inspectFinancialBootstrapRecoveryStageV10,
+  beginFinancialArchiveRecoveryImportV11,
+  writeFinancialArchiveRecoveryStageRowV12,
+  inspectFinancialArchiveRecoveryStageV12,
+  markFinancialArchiveRecoveryImportReadyV11,
 };\n`;
 
 const compiled = new Module(filename, module);
@@ -78,6 +82,10 @@ const {
   markFinancialBootstrapRecoveryImportReadyV9,
   writeFinancialBootstrapRecoveryStageRowV10,
   inspectFinancialBootstrapRecoveryStageV10,
+  beginFinancialArchiveRecoveryImportV11,
+  writeFinancialArchiveRecoveryStageRowV12,
+  inspectFinancialArchiveRecoveryStageV12,
+  markFinancialArchiveRecoveryImportReadyV11,
 } = compiled.exports;
 
 class SqliteHarness {
@@ -88,6 +96,23 @@ class SqliteHarness {
     this.native.exec(ddl('FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL'));
     this.native.exec(ddl('FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_SQL'));
     this.native.exec(ddl('FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_SQL'));
+    this.native.exec(ddl('FINANCIAL_LEDGER_V11_ARCHIVE_RECOVERY_SQL'));
+    this.native.exec(ddl('FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_SQL'));
+    this.native.exec(`
+      CREATE TABLE cold_archive_years (
+        namespace TEXT NOT NULL, scope TEXT NOT NULL, year INTEGER NOT NULL, archived_at TEXT NOT NULL,
+        checksum TEXT, transaction_count INTEGER NOT NULL DEFAULT 0, income REAL NOT NULL DEFAULT 0,
+        expense REAL NOT NULL DEFAULT 0, net REAL NOT NULL DEFAULT 0, metadata_json TEXT NOT NULL,
+        PRIMARY KEY(namespace,scope,year)
+      );
+      CREATE TABLE cold_archive_transactions (
+        namespace TEXT NOT NULL, scope TEXT NOT NULL, year INTEGER NOT NULL, id TEXT NOT NULL,
+        date_iso TEXT, ts INTEGER NOT NULL DEFAULT 0, wallet_id TEXT, category_id TEXT, flow_type TEXT,
+        search_text TEXT, payload_json TEXT NOT NULL,
+        PRIMARY KEY(namespace,scope,year,id),
+        FOREIGN KEY(namespace,scope,year) REFERENCES cold_archive_years(namespace,scope,year) ON DELETE CASCADE
+      );
+    `);
   }
   async execAsync(sql) { this.native.exec(String(sql)); }
   async getFirstAsync(sql, ...params) { return this.native.prepare(String(sql)).get(...params) || null; }
@@ -216,6 +241,50 @@ const sourceInput = {
     0,
     'verified stage rows must remain private rather than entering the live namespace',
   );
+
+  const archive = await beginFinancialArchiveRecoveryImportV11({
+    namespace: NS, accountId: 'account-phase12c', sourceLedgerId: sourceInput.sourceLedgerId,
+    sourceRestoreEpoch: sourceInput.sourceRestoreEpoch, archivePresent: true,
+    sourceArchiveGeneration: 3, sourceSnapshotId: 'archive-snapshot-phase12c',
+    sourceManifestHash: 'f'.repeat(64), expectedRowCount: 2, database: db,
+  });
+  assert.equal(archive.status, 'downloading');
+  await writeFinancialArchiveRecoveryStageRowV12({
+    namespace: NS, sessionId: archive.session_id, database: db,
+    row: {
+      ordinal: 1, rowType: 'archive_year', rowKey: '["personal",2025]', rowHash: '1'.repeat(64),
+      payloadText: JSON.stringify({ scope: 'personal', year: 2025, checksum: 'archive-checksum',
+        summary: { archivedAt: '2026-01-01T00:00:00.000Z', count: 1, income: 10, expense: 4, net: 6 },
+        metadata: { cfg: { currency: 'IQD' }, wallets: [], cats: [] } }),
+    },
+  });
+  await writeFinancialArchiveRecoveryStageRowV12({
+    namespace: NS, sessionId: archive.session_id, database: db,
+    row: {
+      ordinal: 2, rowType: 'archive_transaction', rowKey: '["personal",2025,"cold-1"]', rowHash: '2'.repeat(64),
+      payloadText: JSON.stringify({ scope: 'personal', year: 2025,
+        transaction: { id: 'cold-1', dateISO: '2025-05-01', ts: 1, title: 'Old expense', cat: 'food', amount: 4 } }),
+    },
+  });
+  const archiveInspection = await inspectFinancialArchiveRecoveryStageV12({
+    namespace: NS, sessionId: archive.session_id, database: db,
+  });
+  assert.equal(archiveInspection.ok, true, 'archive stage must satisfy actual SQLite checks before promotion');
+  const archiveReady = await markFinancialArchiveRecoveryImportReadyV11({
+    namespace: NS, sessionId: archive.session_id, proofDigest: '3'.repeat(64), database: db,
+  });
+  assert.equal(archiveReady.status, 'ready');
+  assert.equal(
+    db.native.prepare('SELECT COUNT(*) AS n FROM cold_archive_transactions WHERE namespace=?').get(archive.stage_namespace).n,
+    1,
+    'archive content must remain in the private stage before promotion',
+  );
+  const absentArchive = await beginFinancialArchiveRecoveryImportV11({
+    namespace: 'user:phase12c-empty-archive', accountId: 'account-phase12c',
+    sourceLedgerId: sourceInput.sourceLedgerId, sourceRestoreEpoch: sourceInput.sourceRestoreEpoch,
+    archivePresent: false, database: db,
+  });
+  assert.equal(absentArchive.status, 'ready', 'no archive head is a normal ready empty archive');
   db.native.close();
   console.log('MYFI P20 PHASE 12-C BOOTSTRAP RECOVERY SESSION SQLITE RUNTIME: PASSED');
 })().catch(error => {

@@ -6,10 +6,12 @@ const { DatabaseSync } = require('node:sqlite');
 const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const repository = fs.readFileSync(path.join(root, 'src/lib/financialLedgerV7Repository.js'), 'utf8');
 
-assert.match(repository, /FINANCIAL_SQLITE_SCHEMA_VERSION = 10/);
+assert.match(repository, /FINANCIAL_SQLITE_SCHEMA_VERSION = 12/);
 assert.match(repository, /0008_sync_identity_v2/);
 assert.match(repository, /0009_bootstrap_recovery_import/);
 assert.match(repository, /0010_bootstrap_recovery_stage_rows/);
+assert.match(repository, /0011_archive_recovery_import/);
+assert.match(repository, /0012_archive_recovery_stage_rows/);
 assert.match(repository, /fromVersion:\s*FINANCIAL_LEDGER_SCHEMA_VERSION/);
 assert.match(repository, /toVersion:\s*FINANCIAL_SQLITE_SCHEMA_VERSION/);
 assert.match(repository, /ensureLedgerSyncIdentityV8/);

@@ -19,7 +19,7 @@ import {
 
 const readyDatabases = new WeakSet();
 const readyDatabasePromises = new WeakMap();
-export const FINANCIAL_SQLITE_SCHEMA_VERSION = 10;
+export const FINANCIAL_SQLITE_SCHEMA_VERSION = 12;
 
 const safeJson = value => {
   try { return JSON.stringify(value ?? null); } catch { return 'null'; }
@@ -465,7 +465,7 @@ CREATE INDEX IF NOT EXISTS idx_ledger_bootstrap_recovery_rows_v10_session
 const FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_MIGRATION = {
   migrationId: '0010_bootstrap_recovery_stage_rows',
   fromVersion: 9,
-  toVersion: FINANCIAL_SQLITE_SCHEMA_VERSION,
+  toVersion: 10,
   signature: [
     FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_SQL,
     'store immutable verified bootstrap row receipts with private staged rows',
@@ -476,6 +476,100 @@ const FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_MIGRATION = {
     await db.runAsync(
       `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at)
        VALUES ('sqlite_schema_version','10',?)`,
+      new Date().toISOString(),
+    );
+  },
+};
+
+// Phase 12-D: cold archive has a separate immutable cloud channel.  A fresh
+// device receives it into a private stage with receipts before *either* the
+// hot ledger or the archive can be promoted.  This table deliberately has no
+// V2 identity foreign key: recovery starts before the remote identity is
+// adopted on a fresh device.
+export const FINANCIAL_LEDGER_V11_ARCHIVE_RECOVERY_SQL = `
+CREATE TABLE IF NOT EXISTS ledger_archive_recovery_import_v11 (
+  namespace TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  source_ledger_id TEXT NOT NULL,
+  source_restore_epoch INTEGER NOT NULL CHECK(source_restore_epoch > 0),
+  archive_present INTEGER NOT NULL CHECK(archive_present IN (0,1)),
+  source_archive_generation INTEGER NOT NULL DEFAULT 0 CHECK(source_archive_generation >= 0),
+  source_snapshot_id TEXT NOT NULL DEFAULT '',
+  source_manifest_hash TEXT NOT NULL DEFAULT '',
+  expected_row_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_row_count >= 0),
+  stage_namespace TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK(status IN ('downloading','verifying','ready','failed','aborted')),
+  last_cloud_row_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(last_cloud_row_ordinal >= 0),
+  proof_digest TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  verified_at TEXT,
+  last_error TEXT,
+  PRIMARY KEY(namespace, session_id),
+  UNIQUE(namespace, source_ledger_id, source_restore_epoch, source_snapshot_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_archive_recovery_import_v11_active
+  ON ledger_archive_recovery_import_v11(namespace)
+  WHERE status IN ('downloading','verifying','ready');
+CREATE INDEX IF NOT EXISTS idx_ledger_archive_recovery_import_v11_source
+  ON ledger_archive_recovery_import_v11(account_id,source_ledger_id,source_restore_epoch,status,created_at);
+`;
+
+const FINANCIAL_LEDGER_V11_ARCHIVE_RECOVERY_MIGRATION = {
+  migrationId: '0011_archive_recovery_import',
+  fromVersion: 10,
+  toVersion: 11,
+  signature: [
+    FINANCIAL_LEDGER_V11_ARCHIVE_RECOVERY_SQL,
+    'create identity-free durable cold archive recovery import sessions',
+    'ledger_v7_meta sqlite_schema_version=11',
+  ].join('\n'),
+  apply: async (db) => {
+    await db.execAsync(FINANCIAL_LEDGER_V11_ARCHIVE_RECOVERY_SQL);
+    await db.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at)
+       VALUES ('sqlite_schema_version','11',?)`,
+      new Date().toISOString(),
+    );
+  },
+};
+
+// The receipts bind the exact source archive head to the private materialized
+// stage.  They stay durable until after a later atomic promotion and activation.
+export const FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_SQL = `
+CREATE TABLE IF NOT EXISTS ledger_archive_recovery_rows_v12 (
+  namespace TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+  row_type TEXT NOT NULL CHECK(row_type IN ('archive_year','archive_transaction')),
+  row_key TEXT NOT NULL,
+  row_hash TEXT NOT NULL,
+  payload_text TEXT NOT NULL,
+  received_at TEXT NOT NULL,
+  PRIMARY KEY(namespace, session_id, ordinal),
+  UNIQUE(namespace, session_id, row_type, row_key),
+  FOREIGN KEY(namespace, session_id)
+    REFERENCES ledger_archive_recovery_import_v11(namespace, session_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_archive_recovery_rows_v12_session
+  ON ledger_archive_recovery_rows_v12(namespace,session_id,ordinal);
+`;
+
+const FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_MIGRATION = {
+  migrationId: '0012_archive_recovery_stage_rows',
+  fromVersion: 11,
+  toVersion: FINANCIAL_SQLITE_SCHEMA_VERSION,
+  signature: [
+    FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_SQL,
+    'store immutable verified archive row receipts with private staged rows',
+    'ledger_v7_meta sqlite_schema_version=12',
+  ].join('\n'),
+  apply: async (db) => {
+    await db.execAsync(FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_SQL);
+    await db.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at)
+       VALUES ('sqlite_schema_version','12',?)`,
       new Date().toISOString(),
     );
   },
@@ -505,6 +599,8 @@ export const ensureFinancialLedgerV7 = async (db) => {
         FINANCIAL_LEDGER_V8_SYNC_IDENTITY_MIGRATION,
         FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_MIGRATION,
         FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_MIGRATION,
+        FINANCIAL_LEDGER_V11_ARCHIVE_RECOVERY_MIGRATION,
+        FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_MIGRATION,
       ],
       appVersion: '1.0.0',
       healthCheck: financialLedgerHealthCheck,
@@ -1433,6 +1529,296 @@ export const markFinancialBootstrapRecoveryImportReadyV9 = async ({
     return txn.getFirstAsync(
       `SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`,
       target, id,
+    );
+  }));
+};
+
+const validateArchiveRecoverySourceV11 = ({
+  accountId, sourceLedgerId, sourceRestoreEpoch, archivePresent,
+  sourceArchiveGeneration = 0, sourceSnapshotId = '', sourceManifestHash = '', expectedRowCount = 0,
+} = {}) => {
+  const owner = String(accountId || '').trim();
+  const ledgerId = String(sourceLedgerId || '').trim();
+  const epoch = Number(sourceRestoreEpoch);
+  const present = archivePresent === true || Number(archivePresent) === 1;
+  const generation = Number(sourceArchiveGeneration);
+  const snapshotId = String(sourceSnapshotId || '').trim();
+  const manifestHash = String(sourceManifestHash || '').trim().toLowerCase();
+  const count = Number(expectedRowCount);
+  if (!owner || !ledgerId || !Number.isSafeInteger(epoch) || epoch <= 0
+      || !Number.isSafeInteger(generation) || generation < 0
+      || !Number.isSafeInteger(count) || count < 0) {
+    throw new Error('financial_archive_recovery_source_invalid');
+  }
+  if (!present) {
+    if (generation !== 0 || snapshotId || manifestHash || count !== 0) {
+      throw new Error('financial_archive_recovery_absent_source_invalid');
+    }
+    return {
+      accountId: owner, sourceLedgerId: ledgerId, sourceRestoreEpoch: epoch, archivePresent: false,
+      sourceArchiveGeneration: 0, sourceSnapshotId: '', sourceManifestHash: '', expectedRowCount: 0,
+    };
+  }
+  if (generation <= 0 || !snapshotId || !/^[0-9a-f]{64}$/.test(manifestHash)) {
+    throw new Error('financial_archive_recovery_present_source_invalid');
+  }
+  return {
+    accountId: owner, sourceLedgerId: ledgerId, sourceRestoreEpoch: epoch, archivePresent: true,
+    sourceArchiveGeneration: generation, sourceSnapshotId: snapshotId,
+    sourceManifestHash: manifestHash, expectedRowCount: count,
+  };
+};
+
+// Start a receipt for the archive head observed beside the immutable Bootstrap.
+// An absent head is a valid, explicitly recorded empty archive — it is not an
+// error or a request to wait for another device.
+export const beginFinancialArchiveRecoveryImportV11 = async ({
+  namespace = 'guest', accountId, sourceLedgerId, sourceRestoreEpoch, archivePresent,
+  sourceArchiveGeneration = 0, sourceSnapshotId = '', sourceManifestHash = '', expectedRowCount = 0,
+  database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  if (!target) throw new Error('financial_archive_recovery_namespace_required');
+  const source = validateArchiveRecoverySourceV11({
+    accountId, sourceLedgerId, sourceRestoreEpoch, archivePresent,
+    sourceArchiveGeneration, sourceSnapshotId, sourceManifestHash, expectedRowCount,
+  });
+
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    const intent = await txn.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, restoreIntentMetaKey(target),
+    );
+    if (intent?.value) throw new Error('financial_archive_recovery_restore_intent_active');
+    const prior = await txn.getFirstAsync(
+      `SELECT * FROM ledger_archive_recovery_import_v11
+        WHERE namespace=? AND source_ledger_id=? AND source_restore_epoch=? AND source_snapshot_id=? LIMIT 1`,
+      target, source.sourceLedgerId, source.sourceRestoreEpoch, source.sourceSnapshotId,
+    );
+    if (prior) {
+      const exact = String(prior.account_id) === source.accountId
+        && Number(prior.archive_present) === Number(source.archivePresent)
+        && Number(prior.source_archive_generation) === source.sourceArchiveGeneration
+        && String(prior.source_manifest_hash || '').toLowerCase() === source.sourceManifestHash
+        && Number(prior.expected_row_count) === source.expectedRowCount;
+      if (!exact) throw new Error('financial_archive_recovery_source_conflict');
+      return prior;
+    }
+    const active = await txn.getFirstAsync(
+      `SELECT session_id FROM ledger_archive_recovery_import_v11
+        WHERE namespace=? AND status IN ('downloading','verifying','ready') LIMIT 1`, target,
+    );
+    if (active?.session_id) throw new Error('financial_archive_recovery_session_conflict');
+    const idRow = await txn.getFirstAsync(`SELECT 'archive-recovery-' || lower(hex(randomblob(16))) AS session_id`);
+    const sessionId = String(idRow?.session_id || '').trim();
+    if (!sessionId) throw new Error('financial_archive_recovery_session_generation_failed');
+    const now = new Date().toISOString();
+    const stageNamespace = `archive-recovery-stage:${sessionId}`;
+    const status = source.archivePresent ? 'downloading' : 'ready';
+    const proof = source.archivePresent ? null : '0'.repeat(64);
+    await txn.runAsync(
+      `INSERT INTO ledger_archive_recovery_import_v11
+       (namespace,session_id,account_id,source_ledger_id,source_restore_epoch,archive_present,
+        source_archive_generation,source_snapshot_id,source_manifest_hash,expected_row_count,stage_namespace,
+        status,last_cloud_row_ordinal,proof_digest,created_at,updated_at,verified_at,last_error)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,NULL)`,
+      target, sessionId, source.accountId, source.sourceLedgerId, source.sourceRestoreEpoch,
+      source.archivePresent ? 1 : 0, source.sourceArchiveGeneration, source.sourceSnapshotId,
+      source.sourceManifestHash, source.expectedRowCount, stageNamespace, status, proof, now, now,
+      source.archivePresent ? null : now,
+    );
+    return txn.getFirstAsync(
+      `SELECT * FROM ledger_archive_recovery_import_v11 WHERE namespace=? AND session_id=? LIMIT 1`,
+      target, sessionId,
+    );
+  }));
+};
+
+const archiveRecoveryRowKeyV12 = (rowType, payload) => {
+  if (rowType === 'archive_year') return safeJson([String(payload?.scope || ''), Number(payload?.year)]);
+  return safeJson([String(payload?.scope || ''), Number(payload?.year), String(payload?.transaction?.id || '')]);
+};
+
+const archiveRecoverySearchTextV12 = item => [
+  item?.title, item?.note, item?.dateISO, item?.cat, item?.walletId,
+  item?.fromWalletId, item?.toWalletId, item?.transactionTag,
+].filter(Boolean).join(' ').toLowerCase();
+
+const archiveRecoveryStageInsertV12 = async (db, stageNamespace, rowType, payload) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('financial_archive_recovery_stage_payload_invalid');
+  }
+  const scope = String(payload.scope || '').trim();
+  const year = Number(payload.year);
+  if (!scope || !Number.isSafeInteger(year) || year < 1) {
+    throw new Error('financial_archive_recovery_stage_identity_invalid');
+  }
+  if (rowType === 'archive_year') {
+    const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {};
+    const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+    await db.runAsync(
+      `INSERT INTO cold_archive_years
+       (namespace,scope,year,archived_at,checksum,transaction_count,income,expense,net,metadata_json)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      stageNamespace, scope, year, String(summary.archivedAt || summary.archived_at || ''),
+      String(payload.checksum || ''), Number(summary.count || summary.transactionCount || 0),
+      Number(summary.income || 0), Number(summary.expense || 0), Number(summary.net || 0),
+      safeJson({ ...metadata, archiveScope: scope }),
+    );
+    return;
+  }
+  if (rowType === 'archive_transaction') {
+    const item = payload.transaction;
+    const id = String(item?.id || '').trim();
+    const header = await db.getFirstAsync(
+      `SELECT 1 AS ok FROM cold_archive_years WHERE namespace=? AND scope=? AND year=? LIMIT 1`,
+      stageNamespace, scope, year,
+    );
+    if (!id || !header?.ok) throw new Error('financial_archive_recovery_stage_transaction_invalid');
+    await db.runAsync(
+      `INSERT INTO cold_archive_transactions
+       (namespace,scope,year,id,date_iso,ts,wallet_id,category_id,flow_type,search_text,payload_json)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      stageNamespace, scope, year, id, String(item.dateISO || ''), Number(item.ts || 0),
+      String(item.walletId || item.fromWalletId || ''), String(item.cat || ''),
+      String(item.flowType || item.kind || ''), archiveRecoverySearchTextV12(item), safeJson(item),
+    );
+    return;
+  }
+  throw new Error('financial_archive_recovery_stage_row_type_invalid');
+};
+
+export const writeFinancialArchiveRecoveryStageRowV12 = async ({
+  namespace = 'guest', sessionId, row, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  const id = String(sessionId || '').trim();
+  const ordinal = Number(row?.ordinal);
+  const rowType = String(row?.rowType || '').trim();
+  const rowKey = String(row?.rowKey || '').trim();
+  const rowHash = String(row?.rowHash || '').trim().toLowerCase();
+  const payloadText = String(row?.payloadText || '');
+  if (!target || !id || !Number.isSafeInteger(ordinal) || ordinal <= 0
+      || !['archive_year', 'archive_transaction'].includes(rowType) || !rowKey
+      || !/^[0-9a-f]{64}$/.test(rowHash) || !payloadText) {
+    throw new Error('financial_archive_recovery_stage_input_invalid');
+  }
+  let payload;
+  try { payload = JSON.parse(payloadText); } catch { throw new Error('financial_archive_recovery_stage_payload_json_invalid'); }
+  if (archiveRecoveryRowKeyV12(rowType, payload) !== rowKey) {
+    throw new Error('financial_archive_recovery_stage_row_key_invalid');
+  }
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    const session = await txn.getFirstAsync(
+      `SELECT * FROM ledger_archive_recovery_import_v11 WHERE namespace=? AND session_id=? LIMIT 1`, target, id,
+    );
+    if (!session) throw new Error('financial_archive_recovery_session_missing');
+    if (Number(session.archive_present) !== 1 || !['downloading', 'verifying'].includes(String(session.status))) {
+      throw new Error('financial_archive_recovery_session_not_writable');
+    }
+    if (ordinal > Number(session.expected_row_count)) throw new Error('financial_archive_recovery_stage_ordinal_invalid');
+    const existing = await txn.getFirstAsync(
+      `SELECT row_type,row_key,row_hash,payload_text FROM ledger_archive_recovery_rows_v12
+        WHERE namespace=? AND session_id=? AND ordinal=? LIMIT 1`, target, id, ordinal,
+    );
+    if (existing) {
+      const exact = String(existing.row_type) === rowType && String(existing.row_key) === rowKey
+        && String(existing.row_hash).toLowerCase() === rowHash && String(existing.payload_text) === payloadText;
+      if (!exact) throw new Error('financial_archive_recovery_stage_ordinal_conflict');
+      return session;
+    }
+    const expectedOrdinal = Number(session.last_cloud_row_ordinal) + 1;
+    if (ordinal !== expectedOrdinal) throw new Error('financial_archive_recovery_stage_ordinal_invalid');
+    const now = new Date().toISOString();
+    await txn.runAsync(
+      `INSERT INTO ledger_archive_recovery_rows_v12
+       (namespace,session_id,ordinal,row_type,row_key,row_hash,payload_text,received_at)
+       VALUES (?,?,?,?,?,?,?,?)`, target, id, ordinal, rowType, rowKey, rowHash, payloadText, now,
+    );
+    await archiveRecoveryStageInsertV12(txn, String(session.stage_namespace), rowType, payload);
+    await txn.runAsync(
+      `UPDATE ledger_archive_recovery_import_v11
+          SET last_cloud_row_ordinal=?,status='verifying',updated_at=?,last_error=NULL
+        WHERE namespace=? AND session_id=?`, ordinal, now, target, id,
+    );
+    return txn.getFirstAsync(
+      `SELECT * FROM ledger_archive_recovery_import_v11 WHERE namespace=? AND session_id=? LIMIT 1`, target, id,
+    );
+  }));
+};
+
+export const inspectFinancialArchiveRecoveryStageV12 = async ({
+  namespace = 'guest', sessionId, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  const id = String(sessionId || '').trim();
+  const session = await db.getFirstAsync(
+    `SELECT * FROM ledger_archive_recovery_import_v11 WHERE namespace=? AND session_id=? LIMIT 1`, target, id,
+  );
+  if (!session) return { ok: false, reason: 'financial_archive_recovery_session_missing' };
+  const receipts = await db.getAllAsync(
+    `SELECT ordinal,row_type,row_key,row_hash,payload_text FROM ledger_archive_recovery_rows_v12
+      WHERE namespace=? AND session_id=? ORDER BY ordinal`, target, id,
+  );
+  const expected = Number(session.expected_row_count);
+  const valid = receipts.length === expected && receipts.every((row, index) => (
+    Number(row.ordinal) === index + 1 && /^[0-9a-f]{64}$/.test(String(row.row_hash || '').toLowerCase())
+      && ['archive_year', 'archive_transaction'].includes(String(row.row_type))
+      && String(row.row_key || '') && parseJson(row.payload_text, null) != null
+  ));
+  if (!valid) return { ok: false, reason: 'financial_archive_recovery_stage_receipt_invalid', session, receipts };
+  const quick = await db.getFirstAsync('PRAGMA quick_check');
+  if (String(quick ? Object.values(quick)[0] : '').toLowerCase() !== 'ok') {
+    return { ok: false, reason: 'financial_archive_recovery_stage_quick_check_failed', session, receipts };
+  }
+  const foreignKeys = await db.getAllAsync('PRAGMA foreign_key_check');
+  if (foreignKeys.length) return { ok: false, reason: 'financial_archive_recovery_stage_foreign_key_failed', session, receipts };
+  return { ok: true, session, receipts };
+};
+
+export const markFinancialArchiveRecoveryImportReadyV11 = async ({
+  namespace = 'guest', sessionId, proofDigest, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  const id = String(sessionId || '').trim();
+  const proof = String(proofDigest || '').trim().toLowerCase();
+  if (!target || !id || !/^[0-9a-f]{64}$/.test(proof)) throw new Error('financial_archive_recovery_proof_invalid');
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    const current = await txn.getFirstAsync(
+      `SELECT * FROM ledger_archive_recovery_import_v11 WHERE namespace=? AND session_id=? LIMIT 1`, target, id,
+    );
+    if (!current) throw new Error('financial_archive_recovery_session_missing');
+    const rows = await txn.getFirstAsync(
+      `SELECT COUNT(*) AS n,COALESCE(MAX(ordinal),0) AS max_ordinal
+         FROM ledger_archive_recovery_rows_v12 WHERE namespace=? AND session_id=?`, target, id,
+    );
+    if (Number(current.last_cloud_row_ordinal) !== Number(current.expected_row_count)
+        || Number(rows?.n || 0) !== Number(current.expected_row_count)
+        || Number(rows?.max_ordinal || 0) !== Number(current.expected_row_count)) {
+      throw new Error('financial_archive_recovery_rows_incomplete');
+    }
+    if (String(current.status) === 'ready' && String(current.proof_digest || '') !== proof) {
+      throw new Error('financial_archive_recovery_proof_conflict');
+    }
+    const now = new Date().toISOString();
+    await txn.runAsync(
+      `UPDATE ledger_archive_recovery_import_v11
+          SET status='ready',proof_digest=?,verified_at=COALESCE(verified_at,?),updated_at=?,last_error=NULL
+        WHERE namespace=? AND session_id=?`, proof, now, now, target, id,
+    );
+    return txn.getFirstAsync(
+      `SELECT * FROM ledger_archive_recovery_import_v11 WHERE namespace=? AND session_id=? LIMIT 1`, target, id,
     );
   }));
 };

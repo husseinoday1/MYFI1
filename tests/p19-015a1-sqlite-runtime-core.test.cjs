@@ -58,9 +58,11 @@ for (const fn of [
     fn + ': out-of-queue identity write remains');
 }
 
-assert(v7.includes('export const FINANCIAL_SQLITE_SCHEMA_VERSION = 10;'), 'SQLite schema version changed unexpectedly');
+assert(v7.includes('export const FINANCIAL_SQLITE_SCHEMA_VERSION = 12;'), 'SQLite schema version changed unexpectedly');
 assert(v7.includes("migrationId: '0008_sync_identity_v2'"), 'existing V8 migration identity changed unexpectedly');
 assert(v7.includes("migrationId: '0009_bootstrap_recovery_import'"), 'V9 recovery import migration missing');
 assert(v7.includes("migrationId: '0010_bootstrap_recovery_stage_rows'"), 'V10 recovery row migration missing');
+assert(v7.includes("migrationId: '0011_archive_recovery_import'"), 'V11 archive recovery migration missing');
+assert(v7.includes("migrationId: '0012_archive_recovery_stage_rows'"), 'V12 archive receipt migration missing');
 
 console.log('MYFI P19-015A1 SQLITE RUNTIME CORE CONTRACT: PASSED');
