@@ -26,6 +26,8 @@ export default function AuthScreen({ onSkip }) {
   const [termsAccepted, setTermsAccepted] = useState(cfg.accountConsentAccepted === true);
   const [loading, setLoading] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const [pendingConfirmationEmail, setPendingConfirmationEmail] = useState('');
+  const [resendingConfirmation, setResendingConfirmation] = useState(false);
 
   const S = {
     signin:   ar ? 'تسجيل الدخول'  : 'Sign In',
@@ -49,11 +51,16 @@ export default function AuthScreen({ onSkip }) {
     switch_i: ar ? 'سجّل دخولك'    : 'Sign in',
     tagline:  ar ? 'تحكّم بمصاريفك بذكاء' : 'Smart expense tracking',
     emailChk: ar ? 'تحقق من بريدك لتفعيل الحساب ✉️' : 'Check your email to confirm your account ✉️',
+    confirmationPending: ar ? 'الحساب بانتظار تأكيد البريد.' : 'This account is waiting for email confirmation.',
+    resendConfirmation: ar ? 'إعادة إرسال رسالة التفعيل' : 'Resend confirmation email',
+    confirmationResent: ar ? 'أعدنا إرسال رسالة التفعيل. تحقّق من الوارد والرسائل غير المرغوب فيها.' : 'We sent another confirmation email. Check inbox and spam.',
+    unconfirmed: ar ? 'هذا الحساب يحتاج تأكيد البريد أولاً.' : 'This account needs email confirmation first.',
     invalidCredentials: ar ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' : 'Email or password is incorrect.',
   };
 
   const authErrorMessage = (error) => {
     const message = String(error?.message || '');
+    if (/email not confirmed|email not verified/i.test(message)) return S.unconfirmed;
     if (/invalid login credentials/i.test(message)) return S.invalidCredentials;
     return message || (ar ? 'تعذر تسجيل الدخول حالياً.' : 'Could not sign in right now.');
   };
@@ -155,15 +162,38 @@ export default function AuthScreen({ onSkip }) {
           consentAccepted: termsAccepted,
         }));
         if (data.user && !data.session) {
+          setPendingConfirmationEmail(email.trim().toLowerCase());
           Alert.alert(S.signup, S.emailChk);
         } else {
           await setUser(data.user);
         }
       }
     } catch (e) {
+      if (mode === 'signin' && /email not confirmed|email not verified/i.test(String(e?.message || ''))) {
+        setPendingConfirmationEmail(email.trim().toLowerCase());
+      }
       Alert.alert(mode === 'signin' ? S.authErrorTitle : S.signupErrorTitle, authErrorMessage(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    const confirmationEmail = (pendingConfirmationEmail || email).trim().toLowerCase();
+    if (!confirmationEmail) return;
+    setResendingConfirmation(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: confirmationEmail,
+        options: { emailRedirectTo: getAuthRedirectUrl('confirm') },
+      });
+      if (error) throw error;
+      Alert.alert(S.signup, S.confirmationResent);
+    } catch (error) {
+      Alert.alert(S.signupErrorTitle, authErrorMessage(error));
+    } finally {
+      setResendingConfirmation(false);
     }
   };
 
@@ -302,6 +332,23 @@ export default function AuthScreen({ onSkip }) {
               </Text>
             </TouchableOpacity>
           ) : null}
+          {pendingConfirmationEmail ? (
+            <View style={[s.confirmationPanel, { backgroundColor: th.muted, borderColor: th.border }]}>
+              <Ionicons name="mail-unread-outline" size={20} color={th.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: th.text, fontSize: 13, ...weight('800'), textAlign: ar ? 'right' : 'left' }}>{S.confirmationPending}</Text>
+                <Text style={{ color: th.sub, fontSize: 12, marginTop: 3, textAlign: ar ? 'right' : 'left' }}>{pendingConfirmationEmail}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={handleResendConfirmation}
+                disabled={resendingConfirmation || loading}
+                accessibilityRole="button"
+                accessibilityLabel={S.resendConfirmation}
+              >
+                <Text style={{ color: th.primary, fontSize: 12, ...weight('800') }}>{resendingConfirmation ? '…' : S.resendConfirmation}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
           {mode === 'signup' ? (
             <TouchableOpacity
               onPress={() => setTermsAccepted(value => !value)}
@@ -354,6 +401,7 @@ const s = StyleSheet.create({
   passwordField: { minHeight: 50, borderRadius: 12, borderWidth: 0.5, marginBottom: 12, flexDirection: 'row', alignItems: 'center' },
   passwordInput: { flex: 1, paddingVertical: 14, paddingHorizontal: 14, fontSize: 14 },
   eyeButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  confirmationPanel: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 0.5, borderRadius: 12, padding: 12, marginTop: 14 },
   termsRow: { alignItems: 'center', gap: 8, marginTop: 12 },
   btn:        { borderRadius: 14, padding: 15, alignItems: 'center', marginTop: 4 },
   switchRow:  { flexDirection: 'row', justifyContent: 'center', marginTop: 16 },

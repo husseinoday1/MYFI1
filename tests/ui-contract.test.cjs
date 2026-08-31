@@ -70,6 +70,9 @@ const theme = fs.readFileSync(path.join(srcRoot, 'lib', 'theme.js'), 'utf8');
 const startupTiming = fs.readFileSync(path.join(srcRoot, 'lib', 'startupTiming.js'), 'utf8');
 const demoData = fs.readFileSync(path.join(srcRoot, 'store', 'demoData.js'), 'utf8');
 const monthsLib = fs.readFileSync(path.join(srcRoot, 'lib', 'months.js'), 'utf8');
+assert(auth.includes("supabase.auth.resend({") && auth.includes("type: 'signup'") && auth.includes("emailRedirectTo: getAuthRedirectUrl('confirm')"), 'Unconfirmed accounts must be able to request a new confirmation email with the mobile callback');
+assert(auth.includes('pendingConfirmationEmail') && auth.includes('confirmationPending'), 'Auth must keep an explicit confirmation-pending state instead of leaving a signed-up user at a dead end');
+assert(settings.includes("supabase.auth.resend({") && settings.includes("type: 'signup'") && settings.includes('handleResendConfirmation'), 'Account connection signup must offer the same confirmation-email recovery path as onboarding signup');
 assert(addModal.includes('style={StyleSheet.absoluteFill} onPress={handleClose}'), 'Transaction modal must dismiss from an independent backdrop');
 assert(newItemModal.includes('style={StyleSheet.absoluteFill} onPress={handleClose}'), 'Tracker modal must dismiss from an independent backdrop');
 jsFiles(srcRoot).forEach(file => {

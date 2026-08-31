@@ -207,6 +207,9 @@ const pageCopy = (lang = 'ar') => {
     passwordLength: ar ? 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.' : 'Password must be at least 8 characters.',
     invalidUsername: ar ? 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل ويحتوي أحرفاً إنكليزية أو أرقاماً أو _.' : 'Username must be 3+ characters using letters, numbers or _.',
     accountCreated: ar ? 'تحقق من بريدك لإكمال تفعيل الحساب.' : 'Check your email to complete account activation.',
+    resendConfirmation: ar ? 'إعادة إرسال التفعيل' : 'Resend confirmation',
+    confirmationResent: ar ? 'أُعيد إرسال رسالة التفعيل. تحقق من الوارد والرسائل غير المرغوب فيها.' : 'A new confirmation email was sent. Check inbox and spam.',
+    later: ar ? 'لاحقًا' : 'Later',
     authFailed: ar ? 'تعذر إكمال العملية. تحقق من الاتصال والبيانات.' : 'Could not complete the request. Check your connection and details.',
     resetSent: ar ? 'أُرسلت رسالة استعادة كلمة المرور إن كان الحساب موجوداً.' : 'A password recovery email was sent if the account exists.',
     saved: ar ? 'تم الحفظ.' : 'Saved.',
@@ -656,7 +659,10 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
         await setUser(result.data.session.user);
         setAuthOpen(false);
       } else if (authMode === 'signup' && result.data?.user) {
-        Alert.alert('', T.accountCreated);
+        Alert.alert('', T.accountCreated, [
+          { text: T.later, style: 'cancel' },
+          { text: T.resendConfirmation, onPress: () => { void handleResendConfirmation(emailValue); } },
+        ]);
       }
     } catch (error) {
       Alert.alert('', error?.message || T.authFailed);
@@ -678,6 +684,25 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
       });
       if (error) throw error;
       Alert.alert('', T.resetSent);
+    } catch (error) {
+      Alert.alert('', error?.message || T.authFailed);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async (rawEmail = email) => {
+    const emailValue = String(rawEmail || '').trim().toLowerCase();
+    if (!emailValue) return;
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: emailValue,
+        options: { emailRedirectTo: getAuthRedirectUrl('confirm') },
+      });
+      if (error) throw error;
+      Alert.alert('', T.confirmationResent);
     } catch (error) {
       Alert.alert('', error?.message || T.authFailed);
     } finally {
