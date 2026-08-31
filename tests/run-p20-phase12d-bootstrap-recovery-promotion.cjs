@@ -107,6 +107,27 @@ const compilePromotion = repoMock => {
 };
 
 (async () => {
+  const liveDb = new Db(); const liveFixture = { db: liveDb, ...prepare(liveDb, 'user:phase12d-live') };
+  const promoteLive = compilePromotion({ runFinancialRestorePromotionTransactionV8: makeRunner(liveFixture) });
+  const liveBase = { namespace: liveFixture.namespace, accountId: 'account-1', bootstrapSessionId: 'hot', archiveSessionId: 'cold', ...sources(liveFixture) };
+  liveDb.native.prepare('INSERT INTO ledger_entities_v7(namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at) VALUES (?,?,?,?,NULL,?,?,?)')
+    .run(liveFixture.namespace, 'wallet', 'local-live-wallet', 1, JSON.stringify({ openingBalance: 25, openingBaseBalance: 25 }), '2026-08-31T00:00:00.000Z', '2026-08-31T00:00:00.000Z');
+  const liveRejected = await promoteLive(liveBase);
+  assert.equal(liveRejected.ok, false, 'a live wallet must reject destructive recovery');
+  assert.equal(liveRejected.reason, 'financial_v2_bootstrap_recovery_promotion_live_state_present');
+  assert.equal(liveDb.native.prepare('SELECT ledger_id FROM ledger_sync_identity_v8 WHERE namespace=?').get(liveFixture.namespace).ledger_id, liveFixture.oldLedger, 'live-state rejection must not alter identity');
+  liveDb.native.close();
+
+  const damagedDb = new Db(); const damagedFixture = { db: damagedDb, ...prepare(damagedDb, 'user:phase12d-damaged') };
+  const promoteDamaged = compilePromotion({ runFinancialRestorePromotionTransactionV8: makeRunner(damagedFixture) });
+  const damagedBase = { namespace: damagedFixture.namespace, accountId: 'account-1', bootstrapSessionId: 'hot', archiveSessionId: 'cold', ...sources(damagedFixture) };
+  damagedDb.native.prepare('DELETE FROM ledger_accounts_v7 WHERE namespace=?').run(damagedFixture.hotStage);
+  const damagedRejected = await promoteDamaged(damagedBase);
+  assert.equal(damagedRejected.ok, false, 'a ready receipt with a missing materialized row must reject recovery');
+  assert.equal(damagedRejected.reason, 'financial_v2_bootstrap_recovery_promotion_hot_stage_incomplete');
+  assert.equal(damagedDb.native.prepare('SELECT ledger_id FROM ledger_sync_identity_v8 WHERE namespace=?').get(damagedFixture.namespace).ledger_id, damagedFixture.oldLedger, 'damaged-stage rejection must not alter identity');
+  damagedDb.native.close();
+
   const db = new Db(); const fixture = { db, ...prepare(db) };
   const promote = compilePromotion({ runFinancialRestorePromotionTransactionV8: makeRunner(fixture) });
   const base = { namespace: fixture.namespace, accountId: 'account-1', bootstrapSessionId: 'hot', archiveSessionId: 'cold', ...sources(fixture) };

@@ -120,7 +120,13 @@ const exactArchiveSession = (row, namespace, accountId, expected) => (
 // READY is necessary but not sufficient: a damaged local database could retain
 // the receipt session while losing a materialized stage row. Re-count both
 // representations inside the same transaction immediately before live writes.
-const assertMaterializedStages = async (db, hotSession, coldSession) => {
+const assertMaterializedStages = async (db, namespace, hotSession, coldSession) => {
+  // Stage namespaces are generated privately by the repository. Keep this
+  // independent guard here too: treating the live namespace as a stage would
+  // make the later clear-and-copy sequence destructive.
+  if (String(hotSession.stage_namespace) === namespace || String(coldSession.stage_namespace) === namespace) {
+    throw new Error('financial_v2_bootstrap_recovery_promotion_stage_namespace_live');
+  }
   const hotReceipts = await db.getAllAsync(
     `SELECT row_type,COUNT(*) AS n FROM ledger_bootstrap_recovery_rows_v10
       WHERE namespace=? AND session_id=? GROUP BY row_type`, hotSession.namespace, hotSession.session_id,
@@ -197,7 +203,7 @@ export const promoteVerifiedBootstrapRecoveryV2 = async ({
       }
       if (priorPromotion?.value) throw new Error('financial_v2_bootstrap_recovery_promotion_already_recorded');
       await assertSafeEmptyShell(db, target, identity);
-      await assertMaterializedStages(db, hotSession, coldSession);
+      await assertMaterializedStages(db, target, hotSession, coldSession);
 
       const now = new Date().toISOString();
       // All destructive edits begin only after every source, archive, identity,
@@ -238,8 +244,13 @@ export const promoteVerifiedBootstrapRecoveryV2 = async ({
         `INSERT INTO ledger_sync_state_v8
          (ledger_id,restore_epoch,shadow_last_server_sequence,last_server_sequence,last_shadow_success_at,
           last_success_at,activated_at,last_device_id,updated_at)
-         VALUES (?,?,0,0,NULL,NULL,NULL,NULL,?)`, hot.ledgerId, hot.restoreEpoch, now,
+        VALUES (?,?,0,0,NULL,NULL,NULL,NULL,?)`, hot.ledgerId, hot.restoreEpoch, now,
       );
+      // This is deliberately not advanceRestoreEpoch(): that operation moves
+      // one existing ledger forward by exactly one epoch and rebinds its live
+      // generation. Recovery instead replaces an empty local shell with a
+      // different, already-existing cloud ledger and leaves it unactivated.
+      // The first normal V2 activation owns generation registration.
       const receipt = {
         version: 1, status: 'promoted_pending_activation', namespace: target, accountId: owner,
         ledgerId: hot.ledgerId, restoreEpoch: hot.restoreEpoch, bootstrap: {

@@ -38,5 +38,29 @@ const { stageFinancialArchiveRecoveryImportV2 } = compiled.exports;
   assert.deepEqual(calls, { begin: 1, write: 1, mark: 1 });
   const missing = await stageFinancialArchiveRecoveryImportV2({ supabase: { rpc: async () => ({}) }, namespace: 'user:archive-stage', accountId: '', bootstrapSource: { ledgerId: 'ledger-archive-stage', restoreEpoch: 5 } });
   assert.equal(missing.reason, 'financial_archive_recovery_account_missing');
+  const absentCalls = { begin: 0, readback: 0 };
+  const absentArchive = {
+    readFinancialArchiveHeadV2: async () => ({ ok: true, ledgerId: 'ledger-archive-stage', restoreEpoch: 5, archivePresent: false, archiveGeneration: 0, snapshotId: '', manifestHash: '', expectedRowCount: 0 }),
+    verifyFinancialArchiveSnapshotReadbackV2: async () => { absentCalls.readback += 1; throw new Error('archive readback must not run when absent'); },
+  };
+  const absentRepo = {
+    beginFinancialArchiveRecoveryImportV11: async () => { absentCalls.begin += 1; return { session_id: 'archive-absent-session', status: 'ready', proof_digest: '0'.repeat(64) }; },
+    writeFinancialArchiveRecoveryStageRowV12: async () => { throw new Error('archive write must not run when absent'); },
+    inspectFinancialArchiveRecoveryStageV12: async () => { throw new Error('archive inspection must not run when absent'); },
+    markFinancialArchiveRecoveryImportReadyV11: async () => { throw new Error('archive marking must not run when absent'); },
+  };
+  const absentLoad = Module._load;
+  Module._load = function(request, parent, isMain) {
+    if (parent?.filename === target && request === 'expo-crypto') return cryptoMock;
+    if (parent?.filename === target && request === './financialArchiveSnapshotV2') return absentArchive;
+    if (parent?.filename === target && request === './financialLedgerV7Repository') return absentRepo;
+    return absentLoad.call(this, request, parent, isMain);
+  };
+  const absentCompiled = new Module(target, module); absentCompiled.filename = target; absentCompiled.paths = Module._nodeModulePaths(path.dirname(target));
+  absentCompiled._compile(babel.transformFileSync(target, { babelrc: false, configFile: false, plugins: ['@babel/plugin-transform-modules-commonjs'] }).code, target);
+  Module._load = absentLoad;
+  const absent = await absentCompiled.exports.stageFinancialArchiveRecoveryImportV2({ supabase: { rpc: async () => ({}) }, namespace: 'user:archive-absent', accountId: 'account-1', bootstrapSource: { ledgerId: 'ledger-archive-stage', restoreEpoch: 5 } });
+  assert.equal(absent.ok, true); assert.equal(absent.session.status, 'ready');
+  assert.deepEqual(absentCalls, { begin: 1, readback: 0 });
   console.log('MYFI P20 PHASE 12-D ARCHIVE RECOVERY PRIVATE STAGE: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });
