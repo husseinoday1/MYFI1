@@ -23,8 +23,10 @@ const resetEnd = data.indexOf('restoreLastBackupRollback: async', resetStart);
 const resetBody = data.slice(resetStart, resetEnd);
 assert(resetBody.includes('local_reset_requires_protocol_v2'),
   'signed-in destructive local reset is not fail-closed before V2 epoch activation');
-const resetInterlockStart = resetBody.indexOf('if (current.user && current.financialLedgerV7Cutover)');
-const resetDestructiveStart = resetBody.indexOf("const namespace = current.workspaceNamespace || 'guest';");
+assert(resetBody.includes('local_reset_requires_complete_v2_recovery'),
+  'signed-out V2 destructive local reset must be fail-closed too');
+const resetInterlockStart = resetBody.indexOf('const localResetSafety');
+const resetDestructiveStart = resetBody.indexOf('const wallets = normalizeWallets');
 const resetInterlockReturn = resetBody.indexOf('return false;', resetInterlockStart);
 assert(resetInterlockStart >= 0 && resetDestructiveStart > resetInterlockStart,
   'reset interlock must be installed before destructive reset setup begins');

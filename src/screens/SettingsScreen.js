@@ -1086,7 +1086,21 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
     }
     Alert.alert(T.deleteLocal, T.deleteLocalSub, [
       { text: T.cancel, style: 'cancel' },
-      { text: isAr ? 'حذف' : 'Delete', style: 'destructive', onPress: resetAll },
+      {
+        text: isAr ? 'حذف' : 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const ok = await resetAll();
+          if (!ok) {
+            Alert.alert(
+              isAr ? 'حذف البيانات غير متاح الآن' : 'Local deletion is not available yet',
+              isAr
+                ? 'نحتاج إكمال استعادة النسخة السحابية بأمان قبل السماح بحذف هذه البيانات من الجهاز.'
+                : 'MYFI must complete a safe cloud recovery before local data can be deleted.',
+            );
+          }
+        },
+      },
     ]);
   };
 

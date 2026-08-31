@@ -790,6 +790,64 @@ const epochActivationPendingKey = (namespace, ledgerId, restoreEpoch) => (
   `sync_v2_epoch_activation_pending:${String(namespace || 'guest')}:${String(ledgerId || '')}:${Number(restoreEpoch || 0)}`
 );
 
+// A local reset must never partially remove a V2 workspace. In particular, a
+// signed-out user may still have a durable V2 identity and transport state on
+// this device. Keep this inspection read-only: callers use it as a fail-closed
+// interlock before touching any financial rows.
+export const inspectLocalFinancialResetSafetyV8 = async ({
+  namespace = 'guest', database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return { supported: false, blocked: true, reason: 'sqlite_unavailable' };
+  await ensureFinancialLedgerV7(db);
+
+  const identity = await readLedgerSyncIdentityV8({
+    namespace,
+    database: db,
+    schemaReady: true,
+  });
+  if (!identity) {
+    return { supported: true, blocked: false, reason: 'no_v2_identity' };
+  }
+
+  const [syncState, outbox, metadata] = await Promise.all([
+    db.getFirstAsync(
+      `SELECT activated_at FROM ledger_sync_state_v8
+        WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+      identity.ledgerId, identity.restoreEpoch,
+    ),
+    db.getFirstAsync(
+      `SELECT COUNT(*) AS count FROM ledger_outbox_v3
+        WHERE ledger_id=? AND restore_epoch=?`,
+      identity.ledgerId, identity.restoreEpoch,
+    ),
+    db.getFirstAsync(
+      `SELECT COUNT(*) AS count FROM ledger_v7_meta
+        WHERE key IN (?,?,?)`,
+      activationEvidenceKey(identity.namespace, identity.ledgerId, identity.restoreEpoch),
+      `sync_v2_activation_evidence:${String(identity.namespace || 'guest')}`,
+      epochActivationPendingKey(identity.namespace, identity.ledgerId, identity.restoreEpoch),
+    ),
+  ]);
+
+  const hasSyncState = !!syncState;
+  const outboxCount = Math.max(0, Number(outbox?.count || 0));
+  const metadataCount = Math.max(0, Number(metadata?.count || 0));
+  const blocked = hasSyncState || outboxCount > 0 || metadataCount > 0;
+  return {
+    supported: true,
+    blocked,
+    reason: blocked ? 'local_reset_requires_complete_v2_recovery' : 'v2_identity_inactive',
+    namespace: identity.namespace,
+    ledgerId: identity.ledgerId,
+    restoreEpoch: identity.restoreEpoch,
+    hasSyncState,
+    activeProtocolVersion: syncState?.activated_at ? 2 : 1,
+    outboxCount,
+    metadataCount,
+  };
+};
+
 export const readLedgerRestoreIntentV8 = async ({ namespace = 'guest', database = null } = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return null;

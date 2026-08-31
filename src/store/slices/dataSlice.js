@@ -22,7 +22,7 @@ import { clearPerformanceSnapshot, flushScheduledPerformanceSnapshot } from '../
 import { clearColdArchives, exportColdArchives, getColdArchiveNamespace, replaceColdArchives, storeColdArchiveYear, storeColdArchiveYears } from '../../lib/localArchiveRepository';
 import { compareTransactionsNewestFirst } from '../../lib/transactionIndex';
 import { activeLedgerSupported, clearLedgerNamespace, getLedgerNamespace, replaceLedgerSnapshot } from '../../lib/activeLedgerRepository';
-import { archiveFinancialTransactionsV7, clearFinancialWorkspaceV7 } from '../../lib/financialLedgerV7Repository';
+import { archiveFinancialTransactionsV7, clearFinancialWorkspaceV7, inspectLocalFinancialResetSafetyV8 } from '../../lib/financialLedgerV7Repository';
 import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
 import { createCanonicalBackupV11 } from '../../lib/financialBackupV11';
 import { decodeCanonicalBackupV11 } from '../../lib/financialBackupV11Decoder';
@@ -217,21 +217,29 @@ export const createDataSlice = (set, get) => ({
       );
     }
     const current = get();
-    if (current.user && current.financialLedgerV7Cutover) {
+    const namespace = current.workspaceNamespace || 'guest';
+    const localResetSafety = activeLedgerSupported()
+      ? await inspectLocalFinancialResetSafetyV8({ namespace: getLedgerNamespace(namespace, current.cfg) })
+      : { blocked: false, reason: 'active_ledger_unsupported' };
+    if ((current.user && current.financialLedgerV7Cutover) || localResetSafety.blocked) {
       // V1 cloud history has no restore epoch. Deleting the local ledger now
-      // could allow old cloud mutations/snapshots to resurrect it on reconnect.
-      // P19-008 replaces this interlock with the V2 restore-epoch handshake.
+      // or partially deleting a V2 transport can create revision conflicts on
+      // reconnect. Phase 12 owns the verified V2 bootstrap importer; until it
+      // exists, this action must stay fail-closed even after sign-out.
       set({
-        lastSyncError: 'local_reset_requires_protocol_v2',
+        lastSyncError: current.user && current.financialLedgerV7Cutover
+          ? 'local_reset_requires_protocol_v2'
+          : 'local_reset_requires_complete_v2_recovery',
         restoreSafety: {
           status: 'restore_interlock_active',
           operation: 'delete_local_data',
           checkedAt: new Date().toISOString(),
+          reason: localResetSafety.reason,
+          localV2State: localResetSafety.blocked === true,
         },
       });
       return false;
     }
-    const namespace = current.workspaceNamespace || 'guest';
     const wallets = normalizeWallets([], current.cfg.currency);
     const defaultWalletId = getDefaultWalletId(wallets, current.cfg.currency, null);
     const resetCfg = {
