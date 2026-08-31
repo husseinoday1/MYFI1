@@ -19,7 +19,7 @@ import {
 
 const readyDatabases = new WeakSet();
 const readyDatabasePromises = new WeakMap();
-export const FINANCIAL_SQLITE_SCHEMA_VERSION = 8;
+export const FINANCIAL_SQLITE_SCHEMA_VERSION = 9;
 
 const safeJson = value => {
   try { return JSON.stringify(value ?? null); } catch { return 'null'; }
@@ -349,7 +349,7 @@ const FINANCIAL_LEDGER_V7_MIGRATION = {
 const FINANCIAL_LEDGER_V8_SYNC_IDENTITY_MIGRATION = {
   migrationId: '0008_sync_identity_v2',
   fromVersion: FINANCIAL_LEDGER_SCHEMA_VERSION,
-  toVersion: FINANCIAL_SQLITE_SCHEMA_VERSION,
+  toVersion: 8,
   signature: [
     FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL,
     'backfill immutable ledger ids for existing namespaces',
@@ -378,13 +378,64 @@ const FINANCIAL_LEDGER_V8_SYNC_IDENTITY_MIGRATION = {
     );
     await db.runAsync(
       `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at)
-       VALUES ('sqlite_schema_version',?,?)`,
-      String(FINANCIAL_SQLITE_SCHEMA_VERSION), now,
+       VALUES ('sqlite_schema_version','8',?)`,
+      now,
     );
     await db.runAsync(
       `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at)
        VALUES ('sync_protocol_version','2',?)`,
       now,
+    );
+  },
+};
+
+// Phase 12-C: unlike ledger_bootstrap_import_state_v8, this durable session is
+// created before a fresh device adopts the remote V2 identity. It must therefore
+// never have a foreign key to ledger_sync_identity_v8.
+export const FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_SQL = `
+CREATE TABLE IF NOT EXISTS ledger_bootstrap_recovery_import_v9 (
+  namespace TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  source_ledger_id TEXT NOT NULL,
+  source_restore_epoch INTEGER NOT NULL CHECK(source_restore_epoch > 0),
+  source_bootstrap_id TEXT NOT NULL,
+  source_manifest_hash TEXT NOT NULL,
+  expected_row_count INTEGER NOT NULL CHECK(expected_row_count >= 0),
+  stage_namespace TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK(status IN ('downloading','verifying','ready','failed','aborted')),
+  last_cloud_row_ordinal INTEGER NOT NULL DEFAULT 0
+    CHECK(last_cloud_row_ordinal >= 0),
+  proof_digest TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  verified_at TEXT,
+  last_error TEXT,
+  PRIMARY KEY(namespace, session_id),
+  UNIQUE(namespace, source_ledger_id, source_restore_epoch, source_bootstrap_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_bootstrap_recovery_import_v9_active
+  ON ledger_bootstrap_recovery_import_v9(namespace)
+  WHERE status IN ('downloading','verifying','ready');
+CREATE INDEX IF NOT EXISTS idx_ledger_bootstrap_recovery_import_v9_source
+  ON ledger_bootstrap_recovery_import_v9(account_id,source_ledger_id,source_restore_epoch,status,created_at);
+`;
+
+const FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_MIGRATION = {
+  migrationId: '0009_bootstrap_recovery_import',
+  fromVersion: 8,
+  toVersion: FINANCIAL_SQLITE_SCHEMA_VERSION,
+  signature: [
+    FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_SQL,
+    'create identity-free durable bootstrap recovery import sessions',
+    'ledger_v7_meta sqlite_schema_version=9',
+  ].join('\n'),
+  apply: async (db) => {
+    await db.execAsync(FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_SQL);
+    await db.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at)
+       VALUES ('sqlite_schema_version','9',?)`,
+      new Date().toISOString(),
     );
   },
 };
@@ -408,7 +459,11 @@ export const ensureFinancialLedgerV7 = async (db) => {
   const readiness = (async () => {
     await runLedgerSchemaMigrations({
       database: db,
-      migrations: [FINANCIAL_LEDGER_V7_MIGRATION, FINANCIAL_LEDGER_V8_SYNC_IDENTITY_MIGRATION],
+      migrations: [
+        FINANCIAL_LEDGER_V7_MIGRATION,
+        FINANCIAL_LEDGER_V8_SYNC_IDENTITY_MIGRATION,
+        FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_MIGRATION,
+      ],
       appVersion: '1.0.0',
       healthCheck: financialLedgerHealthCheck,
     });
@@ -857,6 +912,211 @@ export const readLedgerRestoreIntentV8 = async ({ namespace = 'guest', database 
     restoreIntentMetaKey(namespace),
   );
   return parseJson(row?.value, null);
+};
+
+const validateBootstrapRecoverySourceV9 = ({
+  accountId, sourceLedgerId, sourceRestoreEpoch, sourceBootstrapId,
+  sourceManifestHash, expectedRowCount,
+} = {}) => {
+  const account = String(accountId || '').trim();
+  const ledger = String(sourceLedgerId || '').trim();
+  const epoch = Number(sourceRestoreEpoch);
+  const bootstrap = String(sourceBootstrapId || '').trim();
+  const manifest = String(sourceManifestHash || '').trim().toLowerCase();
+  const count = Number(expectedRowCount);
+  if (!account || !ledger || !bootstrap
+      || !Number.isSafeInteger(epoch) || epoch <= 0
+      || !/^[0-9a-f]{64}$/.test(manifest)
+      || !Number.isSafeInteger(count) || count < 0) {
+    throw new Error('financial_v2_bootstrap_recovery_source_invalid');
+  }
+  return {
+    accountId: account,
+    sourceLedgerId: ledger,
+    sourceRestoreEpoch: epoch,
+    sourceBootstrapId: bootstrap,
+    sourceManifestHash: manifest,
+    expectedRowCount: count,
+  };
+};
+
+// Starts only the durable, identity-free local receipt of an immutable cloud
+// Bootstrap. It deliberately does not call ensureShadowLedgerSyncIdentityV8,
+// bind a cloud identity, advance a Restore Epoch, or copy a row to the live
+// namespace. Those happen only after complete proof in a later promotion step.
+export const beginFinancialBootstrapRecoveryImportV9 = async ({
+  namespace = 'guest', accountId, sourceLedgerId, sourceRestoreEpoch,
+  sourceBootstrapId, sourceManifestHash, expectedRowCount, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  if (!target) throw new Error('financial_v2_bootstrap_recovery_namespace_required');
+  const source = validateBootstrapRecoverySourceV9({
+    accountId, sourceLedgerId, sourceRestoreEpoch, sourceBootstrapId,
+    sourceManifestHash, expectedRowCount,
+  });
+
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    const intent = await txn.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+      restoreIntentMetaKey(target),
+    );
+    if (intent?.value) throw new Error('financial_v2_bootstrap_recovery_restore_intent_active');
+
+    const prior = await txn.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_recovery_import_v9
+        WHERE namespace=? AND source_ledger_id=? AND source_restore_epoch=? AND source_bootstrap_id=?
+        LIMIT 1`,
+      target, source.sourceLedgerId, source.sourceRestoreEpoch, source.sourceBootstrapId,
+    );
+    if (prior) {
+      const exact = String(prior.account_id) === source.accountId
+        && String(prior.source_manifest_hash).toLowerCase() === source.sourceManifestHash
+        && Number(prior.expected_row_count) === source.expectedRowCount;
+      if (!exact) throw new Error('financial_v2_bootstrap_recovery_source_conflict');
+      if (['failed', 'aborted'].includes(String(prior.status))) {
+        const now = new Date().toISOString();
+        await txn.runAsync(
+          `UPDATE ledger_bootstrap_recovery_import_v9
+              SET status='downloading',last_error=NULL,updated_at=?
+            WHERE namespace=? AND session_id=?`,
+          now, target, String(prior.session_id),
+        );
+        return txn.getFirstAsync(
+          `SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`,
+          target, String(prior.session_id),
+        );
+      }
+      return prior;
+    }
+
+    const active = await txn.getFirstAsync(
+      `SELECT session_id FROM ledger_bootstrap_recovery_import_v9
+        WHERE namespace=? AND status IN ('downloading','verifying','ready') LIMIT 1`,
+      target,
+    );
+    if (active?.session_id) throw new Error('financial_v2_bootstrap_recovery_session_conflict');
+
+    const idRow = await txn.getFirstAsync(
+      `SELECT 'bootstrap-recovery-' || lower(hex(randomblob(16))) AS session_id`,
+    );
+    const sessionId = String(idRow?.session_id || '').trim();
+    if (!sessionId) throw new Error('financial_v2_bootstrap_recovery_session_generation_failed');
+    const now = new Date().toISOString();
+    const stageNamespace = `bootstrap-recovery-stage:${sessionId}`;
+    await txn.runAsync(
+      `INSERT INTO ledger_bootstrap_recovery_import_v9
+       (namespace,session_id,account_id,source_ledger_id,source_restore_epoch,source_bootstrap_id,
+        source_manifest_hash,expected_row_count,stage_namespace,status,last_cloud_row_ordinal,
+        proof_digest,created_at,updated_at,verified_at,last_error)
+       VALUES (?,?,?,?,?,?,?,?,?,'downloading',0,NULL,?,?,NULL,NULL)`,
+      target, sessionId, source.accountId, source.sourceLedgerId, source.sourceRestoreEpoch,
+      source.sourceBootstrapId, source.sourceManifestHash, source.expectedRowCount,
+      stageNamespace, now, now,
+    );
+    return txn.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`,
+      target, sessionId,
+    );
+  }));
+};
+
+export const readFinancialBootstrapRecoveryImportV9 = async ({
+  namespace = 'guest', database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return null;
+  await ensureFinancialLedgerV7(db);
+  return db.getFirstAsync(
+    `SELECT * FROM ledger_bootstrap_recovery_import_v9
+      WHERE namespace=? AND status IN ('downloading','verifying','ready')
+      ORDER BY updated_at DESC LIMIT 1`,
+    String(namespace || '').trim(),
+  );
+};
+
+export const recordFinancialBootstrapRecoveryImportProgressV9 = async ({
+  namespace = 'guest', sessionId, lastCloudRowOrdinal, status = 'downloading', database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  const id = String(sessionId || '').trim();
+  const ordinal = Number(lastCloudRowOrdinal);
+  const nextStatus = String(status || '').trim();
+  if (!target || !id || !Number.isSafeInteger(ordinal) || ordinal < 0
+      || !['downloading', 'verifying'].includes(nextStatus)) {
+    throw new Error('financial_v2_bootstrap_recovery_progress_invalid');
+  }
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    const current = await txn.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`,
+      target, id,
+    );
+    if (!current) throw new Error('financial_v2_bootstrap_recovery_session_missing');
+    if (!['downloading', 'verifying'].includes(String(current.status))) {
+      throw new Error('financial_v2_bootstrap_recovery_session_not_writable');
+    }
+    if (ordinal < Number(current.last_cloud_row_ordinal)
+        || ordinal > Number(current.expected_row_count)) {
+      throw new Error('financial_v2_bootstrap_recovery_progress_conflict');
+    }
+    const now = new Date().toISOString();
+    await txn.runAsync(
+      `UPDATE ledger_bootstrap_recovery_import_v9
+          SET last_cloud_row_ordinal=?,status=?,updated_at=?,last_error=NULL
+        WHERE namespace=? AND session_id=?`,
+      ordinal, nextStatus, now, target, id,
+    );
+    return txn.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`,
+      target, id,
+    );
+  }));
+};
+
+export const markFinancialBootstrapRecoveryImportReadyV9 = async ({
+  namespace = 'guest', sessionId, proofDigest, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  const id = String(sessionId || '').trim();
+  const proof = String(proofDigest || '').trim().toLowerCase();
+  if (!target || !id || !/^[0-9a-f]{64}$/.test(proof)) {
+    throw new Error('financial_v2_bootstrap_recovery_proof_invalid');
+  }
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    const current = await txn.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`,
+      target, id,
+    );
+    if (!current) throw new Error('financial_v2_bootstrap_recovery_session_missing');
+    if (!['downloading', 'verifying', 'ready'].includes(String(current.status))) {
+      throw new Error('financial_v2_bootstrap_recovery_session_not_readyable');
+    }
+    if (Number(current.last_cloud_row_ordinal) !== Number(current.expected_row_count)) {
+      throw new Error('financial_v2_bootstrap_recovery_rows_incomplete');
+    }
+    if (String(current.status) === 'ready' && String(current.proof_digest || '') !== proof) {
+      throw new Error('financial_v2_bootstrap_recovery_proof_conflict');
+    }
+    const now = new Date().toISOString();
+    await txn.runAsync(
+      `UPDATE ledger_bootstrap_recovery_import_v9
+          SET status='ready',proof_digest=?,verified_at=COALESCE(verified_at,?),updated_at=?,last_error=NULL
+        WHERE namespace=? AND session_id=?`,
+      proof, now, now, target, id,
+    );
+    return txn.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`,
+      target, id,
+    );
+  }));
 };
 
 export const beginLedgerRestoreEpochV8 = async ({
