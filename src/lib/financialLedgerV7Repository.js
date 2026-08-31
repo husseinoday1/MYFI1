@@ -1271,6 +1271,82 @@ export const writeFinancialBootstrapRecoveryStageRowV10 = async ({
   }));
 };
 
+// Read-only proof input. Currency rows are global in the ledger schema, so this
+// function selects only the exact currency codes named by the immutable recovery
+// receipts; it never mistakes unrelated enabled currencies for source data.
+export const readFinancialBootstrapRecoveryStageV10 = async ({
+  namespace = 'guest', sessionId, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  const id = String(sessionId || '').trim();
+  if (!target || !id) throw new Error('financial_v2_bootstrap_recovery_stage_read_invalid');
+  const session = await db.getFirstAsync(
+    `SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`,
+    target, id,
+  );
+  if (!session) throw new Error('financial_v2_bootstrap_recovery_session_missing');
+  const receipts = await db.getAllAsync(
+    `SELECT ordinal,row_type,row_key,row_hash,payload_text
+       FROM ledger_bootstrap_recovery_rows_v10
+      WHERE namespace=? AND session_id=? ORDER BY ordinal`,
+    target, id,
+  );
+  const currencyCodes = receipts
+    .filter(row => String(row.row_type) === 'currency')
+    .map(row => parseJson(row.payload_text, null)?.code)
+    .filter(code => typeof code === 'string' && code.trim());
+  const currencyPlaceholders = currencyCodes.map(() => '?').join(',');
+  const stage = String(session.stage_namespace);
+  const currencies = currencyCodes.length
+    ? await db.getAllAsync(
+      `SELECT code,minor_exponent,enabled FROM ledger_currencies
+        WHERE code IN (${currencyPlaceholders}) ORDER BY code`,
+      ...currencyCodes,
+    )
+    : [];
+  const [accounts, exchangeRates, transactions, postings, links, entities, workspaceState] = await Promise.all([
+    db.getAllAsync(`SELECT * FROM ledger_accounts_v7 WHERE namespace=? ORDER BY id`, stage),
+    db.getAllAsync(`SELECT * FROM ledger_exchange_rates_v7 WHERE namespace=? ORDER BY id`, stage),
+    db.getAllAsync(`SELECT * FROM ledger_financial_transactions_v7 WHERE namespace=? ORDER BY id`, stage),
+    db.getAllAsync(`SELECT * FROM ledger_postings_v7 WHERE namespace=? ORDER BY id`, stage),
+    db.getAllAsync(`SELECT * FROM ledger_transaction_links_v7 WHERE namespace=? ORDER BY id`, stage),
+    db.getAllAsync(`SELECT * FROM ledger_entities_v7 WHERE namespace=? ORDER BY entity_type,id`, stage),
+    db.getFirstAsync(`SELECT * FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1`, stage),
+  ]);
+  return {
+    session,
+    receipts,
+    snapshot: { currencies, accounts, exchangeRates, transactions, postings, links, entities, workspaceState },
+  };
+};
+
+export const inspectFinancialBootstrapRecoveryStageV10 = async ({
+  namespace = 'guest', sessionId, database = null,
+} = {}) => {
+  const stage = await readFinancialBootstrapRecoveryStageV10({ namespace, sessionId, database });
+  const expected = Number(stage.session.expected_row_count);
+  const ordinalOk = stage.receipts.every((row, index) => Number(row.ordinal) === index + 1
+    && /^[0-9a-f]{64}$/.test(String(row.row_hash || '').toLowerCase())
+    && String(row.row_type || '') && String(row.row_key || '')
+    && parseJson(row.payload_text, null) != null);
+  if (stage.receipts.length !== expected || !ordinalOk) {
+    return { ok: false, reason: 'financial_v2_bootstrap_recovery_stage_receipt_invalid', stage };
+  }
+  const db = database || await getLedgerDb();
+  const quick = await db.getFirstAsync(`PRAGMA quick_check`);
+  if (String(quick ? Object.values(quick)[0] : '').toLowerCase() !== 'ok') {
+    return { ok: false, reason: 'financial_v2_bootstrap_recovery_stage_quick_check_failed', stage };
+  }
+  const foreignKeys = await db.getAllAsync(`PRAGMA foreign_key_check`);
+  if (foreignKeys.length) {
+    return { ok: false, reason: 'financial_v2_bootstrap_recovery_stage_foreign_key_failed', stage };
+  }
+  return { ok: true, stage };
+};
+
 export const recordFinancialBootstrapRecoveryImportProgressV9 = async ({
   namespace = 'guest', sessionId, lastCloudRowOrdinal, status = 'downloading', database = null,
 } = {}) => {

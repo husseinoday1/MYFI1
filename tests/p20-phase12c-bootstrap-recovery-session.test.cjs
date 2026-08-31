@@ -15,6 +15,7 @@ assert.match(repository, /beginFinancialBootstrapRecoveryImportV9/);
 assert.match(repository, /recordFinancialBootstrapRecoveryImportProgressV9/);
 assert.match(repository, /markFinancialBootstrapRecoveryImportReadyV9/);
 assert.match(repository, /writeFinancialBootstrapRecoveryStageRowV10/);
+assert.match(repository, /inspectFinancialBootstrapRecoveryStageV10/);
 assert.match(repository, /financial_v2_bootstrap_recovery_restore_intent_active/);
 assert.match(repository, /financial_v2_bootstrap_recovery_rows_incomplete/);
 

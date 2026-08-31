@@ -64,6 +64,7 @@ source += `\nmodule.exports = {
   recordFinancialBootstrapRecoveryImportProgressV9,
   markFinancialBootstrapRecoveryImportReadyV9,
   writeFinancialBootstrapRecoveryStageRowV10,
+  inspectFinancialBootstrapRecoveryStageV10,
 };\n`;
 
 const compiled = new Module(filename, module);
@@ -76,6 +77,7 @@ const {
   recordFinancialBootstrapRecoveryImportProgressV9,
   markFinancialBootstrapRecoveryImportReadyV9,
   writeFinancialBootstrapRecoveryStageRowV10,
+  inspectFinancialBootstrapRecoveryStageV10,
 } = compiled.exports;
 
 class SqliteHarness {
@@ -174,6 +176,10 @@ const sourceInput = {
     },
     database: db,
   });
+  const inspection = await inspectFinancialBootstrapRecoveryStageV10({
+    namespace: NS, sessionId: first.session_id, database: db,
+  });
+  assert.equal(inspection.ok, true, 'private stage must satisfy actual SQLite checks before proof');
   const ready = await markFinancialBootstrapRecoveryImportReadyV9({
     namespace: NS, sessionId: first.session_id, proofDigest: 'b'.repeat(64), database: db,
   });
