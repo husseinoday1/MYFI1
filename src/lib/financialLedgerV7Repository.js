@@ -19,7 +19,7 @@ import {
 
 const readyDatabases = new WeakSet();
 const readyDatabasePromises = new WeakMap();
-export const FINANCIAL_SQLITE_SCHEMA_VERSION = 9;
+export const FINANCIAL_SQLITE_SCHEMA_VERSION = 10;
 
 const safeJson = value => {
   try { return JSON.stringify(value ?? null); } catch { return 'null'; }
@@ -424,7 +424,7 @@ CREATE INDEX IF NOT EXISTS idx_ledger_bootstrap_recovery_import_v9_source
 const FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_MIGRATION = {
   migrationId: '0009_bootstrap_recovery_import',
   fromVersion: 8,
-  toVersion: FINANCIAL_SQLITE_SCHEMA_VERSION,
+  toVersion: 9,
   signature: [
     FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_SQL,
     'create identity-free durable bootstrap recovery import sessions',
@@ -435,6 +435,47 @@ const FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_MIGRATION = {
     await db.runAsync(
       `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at)
        VALUES ('sqlite_schema_version','9',?)`,
+      new Date().toISOString(),
+    );
+  },
+};
+
+// Rows are stored as immutable receipts as well as materialized into the private
+// stage. The receipt lets an interrupted download prove an already received
+// ordinal is byte-for-byte the same before it is treated as idempotent.
+export const FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_SQL = `
+CREATE TABLE IF NOT EXISTS ledger_bootstrap_recovery_rows_v10 (
+  namespace TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+  row_type TEXT NOT NULL,
+  row_key TEXT NOT NULL,
+  row_hash TEXT NOT NULL,
+  payload_text TEXT NOT NULL,
+  received_at TEXT NOT NULL,
+  PRIMARY KEY(namespace, session_id, ordinal),
+  UNIQUE(namespace, session_id, row_type, row_key),
+  FOREIGN KEY(namespace, session_id)
+    REFERENCES ledger_bootstrap_recovery_import_v9(namespace, session_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_bootstrap_recovery_rows_v10_session
+  ON ledger_bootstrap_recovery_rows_v10(namespace,session_id,ordinal);
+`;
+
+const FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_MIGRATION = {
+  migrationId: '0010_bootstrap_recovery_stage_rows',
+  fromVersion: 9,
+  toVersion: FINANCIAL_SQLITE_SCHEMA_VERSION,
+  signature: [
+    FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_SQL,
+    'store immutable verified bootstrap row receipts with private staged rows',
+    'ledger_v7_meta sqlite_schema_version=10',
+  ].join('\n'),
+  apply: async (db) => {
+    await db.execAsync(FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_SQL);
+    await db.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at)
+       VALUES ('sqlite_schema_version','10',?)`,
       new Date().toISOString(),
     );
   },
@@ -463,6 +504,7 @@ export const ensureFinancialLedgerV7 = async (db) => {
         FINANCIAL_LEDGER_V7_MIGRATION,
         FINANCIAL_LEDGER_V8_SYNC_IDENTITY_MIGRATION,
         FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_MIGRATION,
+        FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_MIGRATION,
       ],
       appVersion: '1.0.0',
       healthCheck: financialLedgerHealthCheck,
@@ -1037,6 +1079,198 @@ export const readFinancialBootstrapRecoveryImportV9 = async ({
   );
 };
 
+const bootstrapRecoveryStageRowKeyV10 = (rowType, payload) => {
+  if (rowType === 'currency') return String(payload?.code || '');
+  if (rowType === 'entity') return safeJson([String(payload?.entity_type || ''), String(payload?.id || '')]);
+  if (rowType === 'workspace_state') return 'workspace';
+  return String(payload?.id || '');
+};
+
+const bootstrapRecoveryStageInsertV10 = async (db, stageNamespace, rowType, payload) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.namespace != null) {
+    throw new Error('financial_v2_bootstrap_recovery_stage_payload_invalid');
+  }
+  if (rowType === 'currency') {
+    const code = String(payload.code || '').trim();
+    const exponent = Number(payload.minor_exponent);
+    const enabled = Number(payload.enabled);
+    if (!code || !Number.isSafeInteger(exponent) || ![0, 1].includes(enabled)) {
+      throw new Error('financial_v2_bootstrap_recovery_stage_currency_invalid');
+    }
+    const existing = await db.getFirstAsync(
+      `SELECT minor_exponent,enabled FROM ledger_currencies WHERE code=? LIMIT 1`, code,
+    );
+    if (existing && (Number(existing.minor_exponent) !== exponent || Number(existing.enabled) !== enabled)) {
+      throw new Error('financial_v2_bootstrap_recovery_stage_currency_conflict');
+    }
+    await db.runAsync(
+      `INSERT OR IGNORE INTO ledger_currencies(code,minor_exponent,enabled) VALUES (?,?,?)`,
+      code, exponent, enabled,
+    );
+    return;
+  }
+  const required = (...keys) => {
+    if (keys.some(key => payload[key] == null || String(payload[key]).trim() === '')) {
+      throw new Error('financial_v2_bootstrap_recovery_stage_row_invalid');
+    }
+  };
+  if (rowType === 'account') {
+    required('id', 'account_type', 'scope', 'currency_code', 'status', 'created_at', 'updated_at');
+    await db.runAsync(
+      `INSERT INTO ledger_accounts_v7
+       (namespace,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      stageNamespace, payload.id, payload.name ?? null, payload.account_type, payload.scope,
+      payload.currency_code, payload.status, payload.created_at, payload.updated_at, payload.archived_at ?? null,
+    );
+    return;
+  }
+  if (rowType === 'exchange_rate') {
+    required('id', 'base_currency_code', 'quote_currency_code', 'numerator', 'denominator', 'rate_date', 'source', 'captured_at');
+    await db.runAsync(
+      `INSERT INTO ledger_exchange_rates_v7
+       (namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      stageNamespace, payload.id, payload.base_currency_code, payload.quote_currency_code,
+      payload.numerator, payload.denominator, payload.rate_date, payload.source, payload.captured_at,
+    );
+    return;
+  }
+  if (rowType === 'financial_transaction') {
+    required('id', 'kind', 'status', 'scope', 'date_iso', 'occurred_at', 'idempotency_key', 'device_id', 'revision', 'payload_json', 'created_at', 'updated_at');
+    await db.runAsync(
+      `INSERT INTO ledger_financial_transactions_v7
+       (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
+        idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      stageNamespace, payload.id, payload.kind, payload.status, payload.scope, payload.date_iso, payload.occurred_at,
+      payload.category_id ?? null, payload.title ?? null, payload.note ?? null, payload.source_type ?? null,
+      payload.source_id ?? null, payload.idempotency_key, payload.device_id, payload.revision,
+      payload.archive_year ?? null, payload.archived_at ?? null, payload.deleted_at ?? null,
+      payload.payload_json, payload.created_at, payload.updated_at,
+    );
+    return;
+  }
+  if (rowType === 'posting') {
+    required('id', 'transaction_id', 'account_id', 'bucket', 'role', 'amount_minor', 'currency_code', 'created_at');
+    await db.runAsync(
+      `INSERT INTO ledger_postings_v7
+       (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      stageNamespace, payload.id, payload.transaction_id, payload.account_id, payload.bucket, payload.role,
+      payload.amount_minor, payload.currency_code, payload.exchange_rate_id ?? null, payload.created_at,
+    );
+    return;
+  }
+  if (rowType === 'transaction_link') {
+    required('id', 'transaction_id', 'link_type', 'link_id', 'relation', 'created_at');
+    await db.runAsync(
+      `INSERT INTO ledger_transaction_links_v7
+       (namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      stageNamespace, payload.id, payload.transaction_id, payload.link_type, payload.link_id,
+      payload.relation, payload.applied_amount_minor ?? null, payload.currency_code ?? null, payload.created_at,
+    );
+    return;
+  }
+  if (rowType === 'entity') {
+    required('entity_type', 'id', 'revision', 'payload_json', 'created_at', 'updated_at');
+    await db.runAsync(
+      `INSERT INTO ledger_entities_v7
+       (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      stageNamespace, payload.entity_type, payload.id, payload.revision, payload.deleted_at ?? null,
+      payload.payload_json, payload.created_at, payload.updated_at,
+    );
+    return;
+  }
+  if (rowType === 'workspace_state') {
+    required('source_mode', 'schema_version', 'payload_json', 'updated_at');
+    await db.runAsync(
+      `INSERT INTO ledger_workspace_state_v7
+       (namespace,source_mode,schema_version,shadow_checksum,shadow_verified_at,cutover_at,
+        last_reconciled_at,payload_json,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      stageNamespace, payload.source_mode, payload.schema_version, payload.shadow_checksum ?? null,
+      payload.shadow_verified_at ?? null, payload.cutover_at ?? null, payload.last_reconciled_at ?? null,
+      payload.payload_json, payload.updated_at,
+    );
+    return;
+  }
+  throw new Error('financial_v2_bootstrap_recovery_stage_row_type_invalid');
+};
+
+// Only call this after verifyFinancialBootstrapReadbackV2 has verified the exact
+// payload text and SHA-256. A receipt and its materialized stage row are written
+// in one SQLite transaction; no live namespace is ever addressed here.
+export const writeFinancialBootstrapRecoveryStageRowV10 = async ({
+  namespace = 'guest', sessionId, row, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) throw new Error('sqlite_unavailable');
+  await ensureFinancialLedgerV7(db);
+  const target = String(namespace || '').trim();
+  const id = String(sessionId || '').trim();
+  const ordinal = Number(row?.ordinal);
+  const rowType = String(row?.rowType || '').trim();
+  const rowKey = String(row?.rowKey || '').trim();
+  const rowHash = String(row?.rowHash || '').trim().toLowerCase();
+  const payloadText = String(row?.payloadText || '');
+  if (!target || !id || !Number.isSafeInteger(ordinal) || ordinal <= 0 || !rowType || !rowKey
+      || !/^[0-9a-f]{64}$/.test(rowHash) || !payloadText) {
+    throw new Error('financial_v2_bootstrap_recovery_stage_input_invalid');
+  }
+  let payload;
+  try { payload = JSON.parse(payloadText); } catch { throw new Error('financial_v2_bootstrap_recovery_stage_payload_json_invalid'); }
+  if (bootstrapRecoveryStageRowKeyV10(rowType, payload) !== rowKey) {
+    throw new Error('financial_v2_bootstrap_recovery_stage_row_key_invalid');
+  }
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    const session = await txn.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`,
+      target, id,
+    );
+    if (!session) throw new Error('financial_v2_bootstrap_recovery_session_missing');
+    if (!['downloading', 'verifying'].includes(String(session.status))) {
+      throw new Error('financial_v2_bootstrap_recovery_session_not_writable');
+    }
+    const existing = await txn.getFirstAsync(
+      `SELECT ordinal,row_type,row_key,row_hash,payload_text
+         FROM ledger_bootstrap_recovery_rows_v10
+        WHERE namespace=? AND session_id=? AND ordinal=? LIMIT 1`,
+      target, id, ordinal,
+    );
+    if (existing) {
+      const exact = String(existing.row_type) === rowType && String(existing.row_key) === rowKey
+        && String(existing.row_hash).toLowerCase() === rowHash && String(existing.payload_text) === payloadText;
+      if (!exact) throw new Error('financial_v2_bootstrap_recovery_stage_ordinal_conflict');
+      return session;
+    }
+    if (ordinal !== Number(session.last_cloud_row_ordinal) + 1
+        || ordinal > Number(session.expected_row_count)) {
+      throw new Error('financial_v2_bootstrap_recovery_stage_ordinal_invalid');
+    }
+    await bootstrapRecoveryStageInsertV10(txn, String(session.stage_namespace), rowType, payload);
+    const now = new Date().toISOString();
+    await txn.runAsync(
+      `INSERT INTO ledger_bootstrap_recovery_rows_v10
+       (namespace,session_id,ordinal,row_type,row_key,row_hash,payload_text,received_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      target, id, ordinal, rowType, rowKey, rowHash, payloadText, now,
+    );
+    await txn.runAsync(
+      `UPDATE ledger_bootstrap_recovery_import_v9
+          SET last_cloud_row_ordinal=?,status='verifying',updated_at=?,last_error=NULL
+        WHERE namespace=? AND session_id=?`,
+      ordinal, now, target, id,
+    );
+    return txn.getFirstAsync(
+      `SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`,
+      target, id,
+    );
+  }));
+};
+
 export const recordFinancialBootstrapRecoveryImportProgressV9 = async ({
   namespace = 'guest', sessionId, lastCloudRowOrdinal, status = 'downloading', database = null,
 } = {}) => {
@@ -1099,7 +1333,15 @@ export const markFinancialBootstrapRecoveryImportReadyV9 = async ({
     if (!['downloading', 'verifying', 'ready'].includes(String(current.status))) {
       throw new Error('financial_v2_bootstrap_recovery_session_not_readyable');
     }
-    if (Number(current.last_cloud_row_ordinal) !== Number(current.expected_row_count)) {
+    const receiptCount = await txn.getFirstAsync(
+      `SELECT COUNT(*) AS n,COALESCE(MAX(ordinal),0) AS max_ordinal
+         FROM ledger_bootstrap_recovery_rows_v10
+        WHERE namespace=? AND session_id=?`,
+      target, id,
+    );
+    if (Number(current.last_cloud_row_ordinal) !== Number(current.expected_row_count)
+        || Number(receiptCount?.n || 0) !== Number(current.expected_row_count)
+        || Number(receiptCount?.max_ordinal || 0) !== Number(current.expected_row_count)) {
       throw new Error('financial_v2_bootstrap_recovery_rows_incomplete');
     }
     if (String(current.status) === 'ready' && String(current.proof_digest || '') !== proof) {

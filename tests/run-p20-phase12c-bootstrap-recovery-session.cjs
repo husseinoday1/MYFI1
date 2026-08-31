@@ -63,6 +63,7 @@ source += `\nmodule.exports = {
   readFinancialBootstrapRecoveryImportV9,
   recordFinancialBootstrapRecoveryImportProgressV9,
   markFinancialBootstrapRecoveryImportReadyV9,
+  writeFinancialBootstrapRecoveryStageRowV10,
 };\n`;
 
 const compiled = new Module(filename, module);
@@ -74,6 +75,7 @@ const {
   readFinancialBootstrapRecoveryImportV9,
   recordFinancialBootstrapRecoveryImportProgressV9,
   markFinancialBootstrapRecoveryImportReadyV9,
+  writeFinancialBootstrapRecoveryStageRowV10,
 } = compiled.exports;
 
 class SqliteHarness {
@@ -83,6 +85,7 @@ class SqliteHarness {
     this.native.exec(ddl('FINANCIAL_LEDGER_V7_SCHEMA_SQL'));
     this.native.exec(ddl('FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL'));
     this.native.exec(ddl('FINANCIAL_LEDGER_V9_BOOTSTRAP_RECOVERY_SQL'));
+    this.native.exec(ddl('FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_SQL'));
   }
   async execAsync(sql) { this.native.exec(String(sql)); }
   async getFirstAsync(sql, ...params) { return this.native.prepare(String(sql)).get(...params) || null; }
@@ -138,24 +141,49 @@ const sourceInput = {
     }),
     /financial_v2_bootstrap_recovery_rows_incomplete/,
   );
-  const progressed = await recordFinancialBootstrapRecoveryImportProgressV9({
-    namespace: NS, sessionId: first.session_id, lastCloudRowOrdinal: 1, status: 'verifying', database: db,
+  const currency = {
+    ordinal: 1,
+    rowType: 'currency',
+    rowKey: 'IQD',
+    rowHash: 'c'.repeat(64),
+    payloadText: '{"code":"IQD","minor_exponent":3,"enabled":1}',
+  };
+  const stagedCurrency = await writeFinancialBootstrapRecoveryStageRowV10({
+    namespace: NS, sessionId: first.session_id, row: currency, database: db,
   });
-  assert.equal(progressed.last_cloud_row_ordinal, 1);
+  assert.equal(stagedCurrency.last_cloud_row_ordinal, 1);
+  const replayedCurrency = await writeFinancialBootstrapRecoveryStageRowV10({
+    namespace: NS, sessionId: first.session_id, row: currency, database: db,
+  });
+  assert.equal(replayedCurrency.last_cloud_row_ordinal, 1, 'same verified ordinal is idempotent');
   await assert.rejects(
-    recordFinancialBootstrapRecoveryImportProgressV9({
-      namespace: NS, sessionId: first.session_id, lastCloudRowOrdinal: 0, database: db,
+    writeFinancialBootstrapRecoveryStageRowV10({
+      namespace: NS, sessionId: first.session_id, row: { ...currency, rowHash: 'd'.repeat(64) }, database: db,
     }),
-    /financial_v2_bootstrap_recovery_progress_conflict/,
+    /financial_v2_bootstrap_recovery_stage_ordinal_conflict/,
   );
-  await recordFinancialBootstrapRecoveryImportProgressV9({
-    namespace: NS, sessionId: first.session_id, lastCloudRowOrdinal: 2, status: 'verifying', database: db,
+  await writeFinancialBootstrapRecoveryStageRowV10({
+    namespace: NS,
+    sessionId: first.session_id,
+    row: {
+      ordinal: 2,
+      rowType: 'account',
+      rowKey: 'wallet-1',
+      rowHash: 'e'.repeat(64),
+      payloadText: '{"id":"wallet-1","name":"Wallet","account_type":"cash","scope":"personal","currency_code":"IQD","status":"active","created_at":"2026-08-31T00:00:00.000Z","updated_at":"2026-08-31T00:00:00.000Z","archived_at":null}',
+    },
+    database: db,
   });
   const ready = await markFinancialBootstrapRecoveryImportReadyV9({
     namespace: NS, sessionId: first.session_id, proofDigest: 'b'.repeat(64), database: db,
   });
   assert.equal(ready.status, 'ready');
   assert.equal(ready.proof_digest, 'b'.repeat(64));
+  assert.equal(
+    db.native.prepare('SELECT COUNT(*) AS n FROM ledger_bootstrap_recovery_rows_v10 WHERE namespace=? AND session_id=?')
+      .get(NS, first.session_id).n,
+    2,
+  );
   assert.equal((await readFinancialBootstrapRecoveryImportV9({ namespace: NS, database: db })).session_id, first.session_id);
 
   const blockedNs = 'user:phase12c-restore-active';
@@ -176,6 +204,11 @@ const sourceInput = {
     db.native.prepare('SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7 WHERE namespace=?').get(NS).n,
     financialBefore,
     'verified receipt must still leave live rows untouched',
+  );
+  assert.equal(
+    db.native.prepare('SELECT COUNT(*) AS n FROM ledger_accounts_v7 WHERE namespace=?').get(NS).n,
+    0,
+    'verified stage rows must remain private rather than entering the live namespace',
   );
   db.native.close();
   console.log('MYFI P20 PHASE 12-C BOOTSTRAP RECOVERY SESSION SQLITE RUNTIME: PASSED');
