@@ -326,6 +326,9 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
     disconnectCloudSession,
     resetAll,
     restoreLocalDataFromCloud,
+    prepareV2ConflictRecovery,
+    confirmV2ConflictRecovery,
+    restoreSafety,
     syncing,
     online,
     lastSyncError,
@@ -367,6 +370,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState('signin');
   const [loading, setLoading] = useState(false);
+  const [conflictRecoveryBusy, setConflictRecoveryBusy] = useState(false);
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [email, setEmail] = useState('');
@@ -1141,6 +1145,47 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
     }
   };
 
+  const prepareConflictRecovery = async () => {
+    if (conflictRecoveryBusy) return;
+    setConflictRecoveryBusy(true);
+    try {
+      const result = await prepareV2ConflictRecovery();
+      if (!result?.ok) {
+        Alert.alert(isAr ? 'تعذر تجهيز الاستعادة' : 'Could not prepare recovery', isAr
+          ? 'لم نغيّر بيانات هذا الجهاز. احتفظ بنسخة احتياطية وحاول لاحقًا.'
+          : 'No device data was changed. Keep a backup and try again later.');
+        return;
+      }
+      Alert.alert(isAr ? 'نسخة سحابية موثقة جاهزة' : 'Verified cloud copy is ready', isAr
+        ? 'احتفظ MYFI بنسخة أمان محلية كاملة للدعم. يمكنك الآن استبدال النسخة غير المتزامنة بهذه النسخة السحابية الموثقة.'
+        : 'MYFI kept a complete local safety copy for support. You can now replace the unsynced copy with this verified cloud copy.');
+    } finally { setConflictRecoveryBusy(false); }
+  };
+
+  const confirmConflictRecovery = () => {
+    Alert.alert(
+      isAr ? 'استبدال نسخة هذا الجهاز؟' : 'Replace this device copy?',
+      isAr
+        ? 'سنثبت نسخة السحابة التي تم التحقق منها. احتفظنا بنسخة أمان محلية للدعم، ولن يتغير أي شيء في السحابة.'
+        : 'MYFI will install the verified cloud copy. A local safety copy is retained for support and nothing in the cloud will change.',
+      [
+        { text: T.cancel, style: 'cancel' },
+        { text: isAr ? 'استبدال النسخة المحلية' : 'Replace local copy', style: 'destructive', onPress: async () => {
+          if (conflictRecoveryBusy) return;
+          setConflictRecoveryBusy(true);
+          try {
+            const result = await confirmV2ConflictRecovery();
+            if (!result?.ok) {
+              Alert.alert(isAr ? 'لم يكتمل الاستبدال' : 'Replacement was not completed', isAr
+                ? 'بقيت نقطة الرجوع المحلية محفوظة ولم نغيّر السحابة.'
+                : 'The local restore point remains and the cloud was not changed.');
+            }
+          } finally { setConflictRecoveryBusy(false); }
+        } },
+      ],
+    );
+  };
+
   const screenTitle = page === 'account' ? T.account
     : page === 'devices' ? T.devices
       : page === 'financial' ? T.financial
@@ -1314,6 +1359,11 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
             onReset={confirmReset}
             onRestoreCloudData={restoreCloudData}
             localCloudRecoveryBusy={localCloudRecoveryBusy}
+            onPrepareConflictRecovery={prepareConflictRecovery}
+            onConfirmConflictRecovery={confirmConflictRecovery}
+            conflictRecoveryBusy={conflictRecoveryBusy}
+            restoreSafety={restoreSafety}
+            lastSyncError={lastSyncError}
             financialCloudRecoveryV2={financialCloudRecoveryV2}
             cfg={cfg}
             testDataBusy={testDataBusy}
@@ -1924,7 +1974,7 @@ function AboutPage({ th, isAr, T }) {
   );
 }
 
-function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview, onExport, onPickImport, onRestore, onClearImport, onReset, onRestoreCloudData, localCloudRecoveryBusy, financialCloudRecoveryV2, cfg, testDataBusy, onActivateTestTier, onExitTestData, dataHealth, onRefreshDataHealth, financialLedgerV7Cutover, financialMutationSync }) {
+function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview, onExport, onPickImport, onRestore, onClearImport, onReset, onRestoreCloudData, localCloudRecoveryBusy, onPrepareConflictRecovery, onConfirmConflictRecovery, conflictRecoveryBusy, restoreSafety, lastSyncError, financialCloudRecoveryV2, cfg, testDataBusy, onActivateTestTier, onExitTestData, dataHealth, onRefreshDataHealth, financialLedgerV7Cutover, financialMutationSync }) {
   const activeTier = cfg?.demoMode ? String(cfg?.performanceTestTier || '') : '';
   return (
     <>
@@ -2034,6 +2084,22 @@ function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview,
                 title={T.cloudRecoveryReady}
                 subtitle={localCloudRecoveryBusy ? (isAr ? 'جارٍ التحقق والاستعادة بأمان…' : 'Verifying and restoring safely…') : T.cloudRecoveryReadySub}
                 onPress={localCloudRecoveryBusy ? null : onRestoreCloudData}
+              />
+            ) : null}
+            {restoreSafety?.status === 'financial_v2_conflict_recovery_ready' ? (
+              <MenuRow
+                th={th} isAr={isAr} icon="cloud-done-outline" iconColor={th.primary}
+                title={isAr ? 'استبدال النسخة المحلية المتعارضة' : 'Replace the conflicting local copy'}
+                subtitle={conflictRecoveryBusy ? (isAr ? 'جارٍ التحقق والاستبدال بأمان…' : 'Verifying and replacing safely…') : (isAr ? 'تم حفظ نسخة أمان محلية للدعم؛ اضغط لتثبيت النسخة السحابية الموثقة.' : 'A local safety copy is saved for support. Install the verified cloud copy.')}
+                onPress={conflictRecoveryBusy ? null : onConfirmConflictRecovery}
+              />
+            ) : null}
+            {lastSyncError === 'financial_v2_revision_conflict' && restoreSafety?.status !== 'financial_v2_conflict_recovery_ready' ? (
+              <MenuRow
+                th={th} isAr={isAr} icon="shield-checkmark-outline" iconColor={th.warn}
+                title={isAr ? 'إصلاح تعارض المزامنة' : 'Repair sync conflict'}
+                subtitle={conflictRecoveryBusy ? (isAr ? 'جارٍ تجهيز نقطة رجوع محلية…' : 'Preparing a local restore point…') : (isAr ? 'نتحقق من السحابة أولًا ولا نستبدل شيئًا دون موافقتك.' : 'MYFI verifies the cloud first and never replaces anything without your confirmation.')}
+                onPress={conflictRecoveryBusy ? null : onPrepareConflictRecovery}
               />
             ) : null}
             <MenuRow th={th} isAr={isAr} icon="trash-outline" iconColor={th.exp} title={T.deleteLocal} subtitle={T.deleteLocalSub} danger onPress={onReset} last />
