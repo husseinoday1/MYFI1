@@ -3,6 +3,7 @@
 // SQLite transaction either installs the verified hot ledger + cold archive and
 // cloud identity together, or rolls all of it back.
 import { runFinancialRestorePromotionTransactionV8 } from './financialLedgerV7Repository';
+import { readLiveGenerationInTransactionV13 } from './financialLiveGenerationV13';
 
 const text = value => String(value ?? '').trim();
 const hash = value => /^[a-f0-9]{64}$/i.test(text(value));
@@ -10,6 +11,10 @@ const positiveInt = value => Number.isSafeInteger(Number(value)) && Number(value
 const nonNegativeInt = value => Number.isSafeInteger(Number(value)) && Number(value) >= 0;
 const promotionKey = namespace => `bootstrap_recovery_promotion_v1:${text(namespace)}`;
 const restoreIntentKey = namespace => `restore_intent:${text(namespace)}`;
+const conflictRecoveryIntentKey = namespace => `financial_v2_conflict_recovery_intent_v1:${text(namespace)}`;
+const conflictRecoveryCheckpointKey = (namespace, checkpointId) => (
+  `financial_v2_conflict_checkpoint_v1:${text(namespace)}:${text(checkpointId)}`
+);
 
 const source = value => {
   const ledgerId = text(value?.ledgerId);
@@ -50,6 +55,7 @@ const archiveSource = (value, hot) => {
 const failure = reason => ({ supported: true, ok: false, reason: text(reason) || 'financial_v2_bootstrap_recovery_promotion_failed' });
 
 const count = async (db, sql, ...params) => Math.max(0, Number((await db.getFirstAsync(sql, ...params))?.n || 0));
+const parse = value => { try { return JSON.parse(String(value ?? '')); } catch { return null; } };
 
 // This is deliberately stricter than normal login. Promotion is destructive to
 // the *empty setup shell* only; any actual financial or transport history makes
@@ -165,6 +171,77 @@ const assertMaterializedStages = async (db, namespace, hotSession, coldSession) 
   }
 };
 
+const exactConflictIntent = ({ value, namespace, accountId, hot, cold, checkpointId }) => (
+  value && value.version === 1 && value.status === 'ready_for_explicit_cloud_replacement'
+  && text(value.namespace) === namespace && text(value.accountId) === accountId
+  && text(value.cloud?.ledgerId) === hot.ledgerId && Number(value.cloud?.restoreEpoch) === hot.restoreEpoch
+  && text(value.cloud?.bootstrapId) === hot.bootstrapId && text(value.cloud?.manifestHash).toLowerCase() === hot.manifestHash
+  && Number(value.cloud?.expectedRowCount) === hot.expectedRowCount
+  && Boolean(value.cloud?.archivePresent) === cold.archivePresent
+  && Number(value.cloud?.archiveGeneration || 0) === cold.archiveGeneration
+  && text(value.cloud?.archiveSnapshotId) === cold.snapshotId
+  && text(value.cloud?.archiveManifestHash).toLowerCase() === cold.manifestHash
+  && Number(value.cloud?.archiveExpectedRowCount || 0) === cold.expectedRowCount
+  && text(value.local?.checkpointId) === checkpointId
+  && Array.isArray(value.local?.staleWorkspaceMutationIds)
+  && value.local.staleWorkspaceMutationIds.length > 0
+  && Array.isArray(value.local?.staleWorkspaceMutations)
+  && value.local.staleWorkspaceMutations.length === value.local.staleWorkspaceMutationIds.length
+);
+
+const assertConflictCheckpoint = async (db, namespace, checkpointId, identity, intent) => {
+  const receiptRow = await db.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, conflictRecoveryCheckpointKey(namespace, checkpointId));
+  const checkpoint = parse(receiptRow?.value);
+  if (!checkpoint || checkpoint.version !== 1 || checkpoint.checkpointId !== checkpointId
+      || !text(checkpoint.checkpointNamespace) || text(checkpoint.ledgerId) !== text(identity.ledger_id)
+      || Number(checkpoint.restoreEpoch) !== Number(identity.restore_epoch)
+      || Number(checkpoint.sourceGeneration) !== Number(intent.local?.sourceGeneration)) {
+    throw new Error('financial_v2_conflict_recovery_promotion_checkpoint_invalid');
+  }
+  const generation = await readLiveGenerationInTransactionV13({
+    database: db, namespace, ledgerId: String(identity.ledger_id), restoreEpoch: Number(identity.restore_epoch),
+  });
+  if (Number(generation.generation) !== Number(checkpoint.sourceGeneration)) {
+    throw new Error('financial_v2_conflict_recovery_promotion_generation_changed');
+  }
+  const tables = {
+    accounts: 'ledger_accounts_v7', exchangeRates: 'ledger_exchange_rates_v7',
+    transactions: 'ledger_financial_transactions_v7', postings: 'ledger_postings_v7',
+    links: 'ledger_transaction_links_v7', entities: 'ledger_entities_v7', workspace: 'ledger_workspace_state_v7',
+    coldArchiveYears: 'cold_archive_years', coldArchiveTransactions: 'cold_archive_transactions',
+  };
+  for (const [key, table] of Object.entries(tables)) {
+    if (await count(db, `SELECT COUNT(*) AS n FROM ${table} WHERE namespace=?`, checkpoint.checkpointNamespace) !== Number(checkpoint.counts?.[key] || 0)) {
+      throw new Error('financial_v2_conflict_recovery_promotion_checkpoint_incomplete');
+    }
+  }
+  return checkpoint;
+};
+
+const assertOnlyPreparedWorkspaceMutations = async (db, namespace, identity, intent) => {
+  const rows = await db.getAllAsync(
+    `SELECT sequence_id,mutation_id,command_id,entity_type,entity_id,operation,revision,base_revision,payload_json
+       FROM ledger_outbox_v3 WHERE namespace=? AND ledger_id=? AND restore_epoch=?
+       AND acknowledged_at IS NULL AND superseded_by_bootstrap_id IS NULL ORDER BY sequence_id`,
+    namespace, String(identity.ledger_id), Number(identity.restore_epoch),
+  );
+  const expected = Array.isArray(intent.local?.staleWorkspaceMutationIds) ? intent.local.staleWorkspaceMutationIds.map(text) : [];
+  const snapshots = Array.isArray(intent.local?.staleWorkspaceMutations) ? intent.local.staleWorkspaceMutations : [];
+  if (rows.length !== expected.length || rows.some((row, index) => (
+    text(row.mutation_id) !== expected[index] || text(row.entity_type) !== 'workspace'
+    || text(row.entity_id) !== 'workspace' || text(row.operation) !== 'upsert'
+    || Number(row.base_revision) >= Number(intent.local?.cloudWorkspaceRevision)
+    || Number(row.revision) > Number(intent.local?.cloudWorkspaceRevision)
+    || Number(row.sequence_id) !== Number(snapshots[index]?.sequenceId)
+    || text(row.command_id) !== text(snapshots[index]?.commandId)
+    || Number(row.revision) !== Number(snapshots[index]?.revision)
+    || Number(row.base_revision) !== Number(snapshots[index]?.baseRevision)
+    || text(row.payload_json) !== text(snapshots[index]?.payloadJson)
+  ))) {
+    throw new Error('financial_v2_conflict_recovery_promotion_pending_state_changed');
+  }
+};
+
 /**
  * The caller refreshes both source heads immediately before calling this local
  * function, then passes those exact values. Network is intentionally outside
@@ -273,6 +350,114 @@ export const promoteVerifiedBootstrapRecoveryV2 = async ({
       }
       return { supported: true, ok: true, namespace: target, ledgerId: hot.ledgerId, restoreEpoch: hot.restoreEpoch,
         bootstrapSessionId: hotId, archiveSessionId: coldId, activationState: 'pending' };
+    }});
+  } catch (error) {
+    return failure(error?.message);
+  }
+};
+
+// This is intentionally separate from the empty-shell promotion above. It is
+// the only path allowed to replace a non-empty namespace, and only after the
+// narrow conflict-preparation step has preserved a complete local checkpoint
+// and a UI has received an explicit confirmation from the account owner.
+export const promotePreparedCloudConflictRecoveryV1 = async ({
+  namespace = 'guest', accountId, bootstrapSessionId, archiveSessionId,
+  bootstrapSource, archiveHead, checkpointId, confirmed = false, database = null,
+} = {}) => {
+  const target = text(namespace);
+  const owner = text(accountId);
+  const hotId = text(bootstrapSessionId);
+  const coldId = text(archiveSessionId);
+  const checkpoint = text(checkpointId);
+  if (!confirmed || !target || !owner || !hotId || !coldId || !checkpoint) {
+    return failure('financial_v2_conflict_recovery_promotion_confirmation_required');
+  }
+  let hot; let cold;
+  try { hot = source(bootstrapSource); cold = archiveSource(archiveHead, hot); }
+  catch (error) { return failure(error?.message); }
+
+  try {
+    return await runFinancialRestorePromotionTransactionV8({ database, task: async actions => {
+      const db = actions.database;
+      const [identity, restoreIntent, intentRow, hotSession, coldSession] = await Promise.all([
+        db.getFirstAsync(`SELECT * FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`, target),
+        db.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, restoreIntentKey(target)),
+        db.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, conflictRecoveryIntentKey(target)),
+        db.getFirstAsync(`SELECT * FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=? AND session_id=? LIMIT 1`, target, hotId),
+        db.getFirstAsync(`SELECT * FROM ledger_archive_recovery_import_v11 WHERE namespace=? AND session_id=? LIMIT 1`, target, coldId),
+      ]);
+      if (restoreIntent?.value) throw new Error('financial_v2_conflict_recovery_promotion_restore_intent_active');
+      if (!identity?.ledger_id || String(identity.ledger_id) !== hot.ledgerId || Number(identity.restore_epoch) !== hot.restoreEpoch) {
+        throw new Error('financial_v2_conflict_recovery_promotion_identity_changed');
+      }
+      const intent = parse(intentRow?.value);
+      if (!exactConflictIntent({ value: intent, namespace: target, accountId: owner, hot, cold, checkpointId: checkpoint })) {
+        throw new Error('financial_v2_conflict_recovery_promotion_intent_invalid');
+      }
+      if (!exactHotSession(hotSession, target, owner, hot) || !exactArchiveSession(coldSession, target, owner, cold)) {
+        throw new Error('financial_v2_conflict_recovery_promotion_stage_source_mismatch');
+      }
+      await assertConflictCheckpoint(db, target, checkpoint, identity, intent);
+      await assertOnlyPreparedWorkspaceMutations(db, target, identity, intent);
+      await assertMaterializedStages(db, target, hotSession, coldSession);
+
+      const now = new Date().toISOString();
+      // The checkpoint has been independently proven above. From here to the
+      // receipt write every edit belongs to this one transaction: either the
+      // verified cloud copy replaces the local projection, or nothing changes.
+      await actions.clearFinancialNamespace(target);
+      await actions.replaceColdArchiveNamespaceFromStage({ namespace: target, stageNamespace: String(coldSession.stage_namespace) });
+      await actions.copyFinancialNamespaceFromStage({
+        namespace: target, stageNamespace: String(hotSession.stage_namespace), includeWorkspaceState: true,
+      });
+      await db.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=?`, target);
+      await db.runAsync(`DELETE FROM ledger_inbox_v2 WHERE namespace=?`, target);
+      await db.runAsync(`DELETE FROM ledger_sync_state_v7 WHERE namespace=?`, target);
+      await db.runAsync(`DELETE FROM ledger_outbox_v3 WHERE ledger_id=? AND restore_epoch=?`, hot.ledgerId, hot.restoreEpoch);
+      await db.runAsync(`DELETE FROM ledger_inbox_v3 WHERE ledger_id=? AND restore_epoch=?`, hot.ledgerId, hot.restoreEpoch);
+      await db.runAsync(`DELETE FROM ledger_bootstrap_state_v8 WHERE ledger_id=? AND restore_epoch=?`, hot.ledgerId, hot.restoreEpoch);
+      await db.runAsync(`DELETE FROM ledger_bootstrap_import_state_v8 WHERE ledger_id=? AND restore_epoch=?`, hot.ledgerId, hot.restoreEpoch);
+      await db.runAsync(`DELETE FROM ledger_sync_state_v8 WHERE ledger_id=? AND restore_epoch=?`, hot.ledgerId, hot.restoreEpoch);
+      await db.runAsync(`DELETE FROM ledger_v7_meta WHERE key=? OR key=? OR key LIKE ? OR key LIKE ?`,
+        `active_sync_protocol:${target}`, `sync_v2_activation_evidence:${target}`,
+        `sync_v2_activation_evidence:${target}:%`, `sync_v2_epoch_activation_pending:${target}:%`,
+      );
+      await db.runAsync(
+        `INSERT INTO ledger_bootstrap_state_v8
+         (namespace,ledger_id,restore_epoch,bootstrap_id,stage_namespace,checkpoint_outbox_sequence,status,
+          expected_row_count,manifest_hash,created_at,finalized_at,last_error)
+         VALUES (?,?,?,?,?,0,'finalized',?,?,?,?,NULL)`,
+        target, hot.ledgerId, hot.restoreEpoch, hot.bootstrapId, String(hotSession.stage_namespace),
+        hot.expectedRowCount, hot.manifestHash, now, now,
+      );
+      await db.runAsync(
+        `INSERT INTO ledger_sync_state_v8
+         (ledger_id,restore_epoch,shadow_last_server_sequence,last_server_sequence,last_shadow_success_at,
+          last_success_at,activated_at,last_device_id,updated_at)
+         VALUES (?,?,0,0,NULL,NULL,NULL,NULL,?)`, hot.ledgerId, hot.restoreEpoch, now,
+      );
+      const receipt = {
+        ...intent,
+        version: 1,
+        status: 'local_promoted_pending_activation',
+        promotedAt: now,
+        activation: { required: true, productionCursor: 0 },
+      };
+      const updated = await db.runAsync(
+        `UPDATE ledger_v7_meta SET value=?,updated_at=? WHERE key=? AND value=?`,
+        JSON.stringify(receipt), now, conflictRecoveryIntentKey(target), String(intentRow.value),
+      );
+      if (Number(updated?.changes || 0) !== 1) throw new Error('financial_v2_conflict_recovery_promotion_intent_compare_and_swap_failed');
+      const foreignKeys = await db.getAllAsync('PRAGMA foreign_key_check');
+      if (foreignKeys.length) throw new Error('financial_v2_conflict_recovery_promotion_foreign_key_failed');
+      const quick = await db.getFirstAsync('PRAGMA quick_check');
+      if (String(quick ? Object.values(quick)[0] : '').toLowerCase() !== 'ok') {
+        throw new Error('financial_v2_conflict_recovery_promotion_quick_check_failed');
+      }
+      return {
+        supported: true, ok: true, namespace: target, ledgerId: hot.ledgerId, restoreEpoch: hot.restoreEpoch,
+        checkpointId: checkpoint, activationState: 'pending',
+      };
     }});
   } catch (error) {
     return failure(error?.message);

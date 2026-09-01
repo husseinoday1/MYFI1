@@ -19,12 +19,14 @@ class FakeDatabase {
     currentTransactionRevision = null,
     currentEntityRevision = null,
     archivedGoal = false,
+    v2Active = true,
   } = {}) {
     this.failOutbox = failOutbox;
     this.existingId = existingId;
     this.currentTransactionRevision = currentTransactionRevision;
     this.currentEntityRevision = currentEntityRevision;
     this.archivedGoal = archivedGoal;
+    this.v2Active = v2Active;
     this.events = [];
     this.meta = new Map();
     this.shadowId = 0;
@@ -63,7 +65,7 @@ class FakeDatabase {
       };
     }
     if (sql.includes('FROM ledger_sync_state_v8') && sql.includes('activated_at')) {
-      return { activated_at: '2026-08-22T00:00:00.000Z' };
+      return { activated_at: this.v2Active ? '2026-08-22T00:00:00.000Z' : null };
     }
     if (sql.includes('FROM ledger_v7_meta')) {
       const value = this.meta.get(String(args[0]));
@@ -270,13 +272,32 @@ const run = async () => {
   assert.equal(db.rolledBack, false);
   assert.equal(liveGeneration(db), 1, `local command generation=${liveGeneration(db)}`);
 
-  for (const table of ['ledger_financial_transactions_v7', 'ledger_postings_v7', 'ledger_outbox_v2']) {
+  for (const table of ['ledger_financial_transactions_v7', 'ledger_postings_v7', 'ledger_outbox_v3']) {
     const write = db.events.find(event => event.type === 'run' && event.sql.includes(`INSERT INTO ${table}`));
     assert.ok(write, `${table} insert missing`);
     assert.equal(write.inTransaction, true, `${table} must be written inside the SQLite transaction`);
   }
+  assert.equal(
+    db.events.some(event => event.type === 'run' && event.sql.includes('INSERT INTO ledger_outbox_v2')),
+    false,
+    'an active V2 ledger must not keep writing commands into the retired V1 outbox',
+  );
 
-  const failingDb = new FakeDatabase({ failOutbox: true });
+  const preActivationDb = new FakeDatabase({ v2Active: false });
+  const preActivationResult = await commitExpenseLedgerV7Command(command, { database: preActivationDb });
+  assert.equal(preActivationResult.ok, true);
+  assert.equal(
+    preActivationDb.events.some(event => event.type === 'run' && event.sql.includes('INSERT INTO ledger_outbox_v2')),
+    true,
+    'a namespace that has not activated V2 must retain the existing V1 compatibility write',
+  );
+  assert.equal(
+    preActivationDb.events.some(event => event.type === 'run' && event.sql.includes('INSERT INTO ledger_outbox_v3')),
+    true,
+    'the V2 command is still recorded before activation so activation can verify it later',
+  );
+
+  const failingDb = new FakeDatabase({ failOutbox: true, v2Active: false });
   await assert.rejects(
     () => commitExpenseLedgerV7Command(command, { database: failingDb }),
     /outbox_insert_failed/,
@@ -316,7 +337,7 @@ const run = async () => {
     'stale replacement must be rejected before deleting the current postings',
   );
 
-  const replacementDb = new FakeDatabase({ currentTransactionRevision: 5, currentEntityRevision: 8 });
+  const replacementDb = new FakeDatabase({ currentTransactionRevision: 5, currentEntityRevision: 8, v2Active: false });
   const replacement = await replaceFinancialTransactionV7({
     namespace: 'user:test',
     transaction: { ...command.originalTransaction, revision: 6 },
@@ -358,13 +379,15 @@ const run = async () => {
     now: '2026-08-14T04:00:00.000Z',
   });
   assert.equal(entityResult.ok, true);
+  assert.equal(
+    entityDb.events.some(event => event.type === 'run' && /INSERT(?: OR IGNORE)? INTO ledger_outbox_v2/.test(event.sql)),
+    false,
+    'active V2 entity updates must not create retired V1 rows',
+  );
   const entityOutbox = entityDb.events.find(event => (
-    event.type === 'run'
-    && event.sql.includes('INSERT OR IGNORE INTO ledger_outbox_v2')
-    && event.args[2] === 'goal'
+    event.type === 'run' && event.sql.includes('INSERT INTO ledger_outbox_v3') && event.args[5] === 'goal'
   ));
-  assert.equal(entityOutbox.args[1], 'user:test:goal:goal-1:revision:13');
-  assert.equal(entityOutbox.args[5], 13);
+  assert.equal(entityOutbox.args[8], 13);
   assert.equal(liveGeneration(entityDb), 1, `entity generation=${liveGeneration(entityDb)}`);
 
   const voidDb = new FakeDatabase({ currentTransactionRevision: 1 });
@@ -373,6 +396,11 @@ const run = async () => {
   });
   assert.equal(voided.ok, true);
   assert.equal(voided.changed, 1);
+  assert.equal(
+    voidDb.events.some(event => event.type === 'run' && /INSERT(?: OR IGNORE)? INTO ledger_outbox_v2/.test(event.sql)),
+    false,
+    'active V2 voids must not create retired V1 rows',
+  );
   assert.equal(liveGeneration(voidDb), 1, `void generation=${liveGeneration(voidDb)}`);
 
   const remoteDb = new FakeDatabase();
@@ -416,8 +444,13 @@ const run = async () => {
   assert.equal(releasePosting.args[6], -25000000, 'archive must release the reserved posting atomically');
   assert.equal(
     archiveDb.events.filter(event => event.type === 'run' && /INSERT(?: OR IGNORE)? INTO ledger_outbox_v2/.test(event.sql)).length,
+    0,
+    'active V2 archive work must not write the retired V1 outbox',
+  );
+  assert.equal(
+    archiveDb.events.filter(event => event.type === 'run' && /ledger_outbox_v3/.test(event.sql)).length,
     2,
-    'archive and its hidden release must both be mutation-synced',
+    'archive and its hidden release must stay fully V2 mutation-synced',
   );
   assert.equal(archiveDb.committed, true);
   assert.equal(liveGeneration(archiveDb), 1, `archive generation=${liveGeneration(archiveDb)}`);

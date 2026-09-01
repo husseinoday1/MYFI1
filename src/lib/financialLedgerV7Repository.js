@@ -14,6 +14,7 @@ import {
 } from './localArchiveRepository';
 import {
   advanceLiveGenerationForMutationInTransactionV13,
+  readLiveGenerationInTransactionV13,
   rebindLiveGenerationForRestoreEpochInTransactionV13,
 } from './financialLiveGenerationV13';
 
@@ -3700,7 +3701,7 @@ const ensureShadowLedgerSyncIdentityV8 = async (db, namespace) => {
 // P10-013 Strategy B: this is the only adapter used by ordinary active-ledger
 // mutations. It deliberately creates the token only while committing a real
 // mutation, never from a read/advance call or from a private restore namespace.
-const isPrivateFinancialNamespaceV13 = namespace => /::(?:shadow-stage|restore-stage|restore-checkpoint)::/.test(String(namespace || ''));
+const isPrivateFinancialNamespaceV13 = namespace => /::(?:shadow-stage|restore-stage|restore-checkpoint|conflict-recovery-checkpoint)::/.test(String(namespace || ''));
 const advanceActiveFinancialGenerationInTransactionV13 = async (database, namespace) => {
   if (isPrivateFinancialNamespaceV13(namespace)) return null;
   return advanceLiveGenerationForMutationInTransactionV13({ database, namespace });
@@ -3746,6 +3747,76 @@ const insertShadowMutationV2 = async (db, {
   return mutationId;
 };
 
+// V1 is retained only while a namespace is still waiting for V2 activation.
+// Once V2 is active, writing a second command into the retired outbox creates
+// data that no active sync client can acknowledge or replay.  That residue was
+// able to make later recovery classification look unsafe, even though the V2
+// command had already reached the cloud.  Keep this check inside the same
+// SQLite transaction as the mutation so an activation cannot race a write.
+const shouldWriteLegacyOutboxV1 = async (db, namespace) => {
+  if (isPrivateFinancialNamespaceV13(namespace)) return false;
+  const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
+  const state = await db.getFirstAsync(
+    `SELECT activated_at FROM ledger_sync_state_v8
+      WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+    identity.ledgerId, identity.restoreEpoch,
+  );
+  return !state?.activated_at;
+};
+
+const insertLegacyEntityOutboxV1 = async (db, entity) => {
+  if (!(await shouldWriteLegacyOutboxV1(db, entity.namespace))) return false;
+  await db.runAsync(
+    `INSERT OR IGNORE INTO ledger_outbox_v2
+     (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    entity.namespace, `${entity.namespace}:${entity.entityType}:${entity.id}:revision:${entity.revision}`,
+    entity.entityType, entity.id, entity.deletedAt ? 'delete' : 'upsert', entity.revision,
+    FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson(entity), entity.updatedAt,
+  );
+  return true;
+};
+
+const insertLegacyFinancialTransactionOutboxV1 = async (db, command) => {
+  const mutation = command.mutation;
+  if (!(await shouldWriteLegacyOutboxV1(db, mutation.namespace))) return false;
+  await db.runAsync(
+    `INSERT INTO ledger_outbox_v2
+     (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    mutation.namespace, mutation.mutationId, mutation.entityType, mutation.entityId,
+    mutation.operation, mutation.entityRevision, mutation.payloadVersion,
+    safeJson(financialTransactionV1Payload(command)),
+    mutation.createdAt,
+  );
+  return true;
+};
+
+const insertLegacyVoidOutboxV1 = async (db, { namespace, id, revision, deletedAt }) => {
+  if (!(await shouldWriteLegacyOutboxV1(db, namespace))) return false;
+  await db.runAsync(
+    `INSERT OR IGNORE INTO ledger_outbox_v2
+     (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    namespace, `${namespace}:${id}:void:${revision}`, 'financial_transaction', id, 'void', revision,
+    FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson({ transactionId: id, revision, deletedAt }), deletedAt,
+  );
+  return true;
+};
+
+const insertLegacyArchiveOutboxV1 = async (db, { namespace, id, revision, archiveYear, archivedAt }) => {
+  if (!(await shouldWriteLegacyOutboxV1(db, namespace))) return false;
+  await db.runAsync(
+    `INSERT OR IGNORE INTO ledger_outbox_v2
+     (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    namespace, `${namespace}:${id}:archive:${revision}`, 'financial_transaction', id,
+    'upsert', revision, FINANCIAL_LEDGER_SCHEMA_VERSION,
+    safeJson({ transactionId: id, archiveYear, archivedAt, revision }), archivedAt,
+  );
+  return true;
+};
+
 const financialTransactionV1Payload = command => ({
   schemaVersion: command.schemaVersion,
   transaction: command.header,
@@ -3771,14 +3842,7 @@ const financialTransactionShadowPayload = command => ({
 
 const insertEntityOutbox = async (db, entity, { commandId = null } = {}) => {
   const shadowCommandId = commandId || await createShadowCommandIdV2(db);
-  await db.runAsync(
-    `INSERT OR IGNORE INTO ledger_outbox_v2
-     (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
-     VALUES (?,?,?,?,?,?,?,?,?)`,
-    entity.namespace, `${entity.namespace}:${entity.entityType}:${entity.id}:revision:${entity.revision}`,
-    entity.entityType, entity.id, entity.deletedAt ? 'delete' : 'upsert', entity.revision,
-    FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson(entity), entity.updatedAt,
-  );
+  await insertLegacyEntityOutboxV1(db, entity);
   await insertShadowMutationV2(db, {
     namespace: entity.namespace,
     commandId: shadowCommandId,
@@ -3795,15 +3859,7 @@ const insertEntityOutbox = async (db, entity, { commandId = null } = {}) => {
 const insertFinancialTransactionOutbox = async (db, command, { commandId = null } = {}) => {
   const mutation = command.mutation;
   const shadowCommandId = commandId || await createShadowCommandIdV2(db);
-  await db.runAsync(
-    `INSERT INTO ledger_outbox_v2
-     (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
-     VALUES (?,?,?,?,?,?,?,?,?)`,
-    mutation.namespace, mutation.mutationId, mutation.entityType, mutation.entityId,
-    mutation.operation, mutation.entityRevision, mutation.payloadVersion,
-    safeJson(financialTransactionV1Payload(command)),
-    mutation.createdAt,
-  );
+  await insertLegacyFinancialTransactionOutboxV1(db, command);
   await insertShadowMutationV2(db, {
     namespace: mutation.namespace,
     commandId: shadowCommandId,
@@ -4117,13 +4173,7 @@ export const voidFinancialTransactionsV7 = async ({
             WHERE namespace=? AND id=? AND deleted_at IS NULL`,
           now, revision, safeJson(payload), now, namespace, id,
         );
-        await txn.runAsync(
-          `INSERT OR IGNORE INTO ledger_outbox_v2
-           (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
-           VALUES (?,?,?,?,?,?,?,?,?)`,
-          namespace, `${namespace}:${id}:void:${revision}`, 'financial_transaction', id, 'void', revision,
-          FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson({ transactionId: id, revision, deletedAt: now }), now,
-        );
+        await insertLegacyVoidOutboxV1(txn, { namespace, id, revision, deletedAt: now });
         await insertShadowMutationV2(txn, {
           namespace, commandId: shadowCommandId, entityType: 'financial_transaction', entityId: id,
           operation: 'void', revision, baseRevision: revision - 1,
@@ -4185,14 +4235,9 @@ export const archiveFinancialTransactionsV7 = async ({
             WHERE namespace=? AND id=? AND deleted_at IS NULL`,
           targetYear, archivedAt, revision, safeJson(payload), archivedAt, namespace, id,
         );
-        await txn.runAsync(
-          `INSERT OR IGNORE INTO ledger_outbox_v2
-           (namespace,mutation_id,entity_type,entity_id,operation,entity_revision,payload_version,payload_json,created_at)
-           VALUES (?,?,?,?,?,?,?,?,?)`,
-          namespace, `${namespace}:${id}:archive:${revision}`, 'financial_transaction', id,
-          'upsert', revision, FINANCIAL_LEDGER_SCHEMA_VERSION,
-          safeJson({ transactionId: id, archiveYear: targetYear, archivedAt, revision }), archivedAt,
-        );
+        await insertLegacyArchiveOutboxV1(txn, {
+          namespace, id, revision, archiveYear: targetYear, archivedAt,
+        });
         await insertShadowMutationV2(txn, {
           namespace, commandId: shadowCommandId, entityType: 'financial_transaction', entityId: id,
           operation: 'upsert', revision, baseRevision: revision - 1,
@@ -5366,6 +5411,128 @@ export const cloneFinancialWorkspaceV7 = async ({ sourceNamespace, targetNamespa
     });
     return { supported: true, ok: true, sourceNamespace: source, targetNamespace: target };
   });
+};
+
+// A conflict repair may never replace a non-empty live ledger until this
+// checkpoint exists.  Unlike the generic clone helper it includes cold
+// archives, is bound to the active V2 identity and carries a generation proof.
+// It is private local evidence only: it neither syncs nor changes the cloud.
+const conflictRecoveryCheckpointKeyV1 = (namespace, checkpointId) => (
+  `financial_v2_conflict_checkpoint_v1:${String(namespace)}:${String(checkpointId)}`
+);
+
+const conflictRecoveryCheckpointCountsV1 = async (db, namespace) => {
+  const tables = {
+    accounts: 'ledger_accounts_v7',
+    exchangeRates: 'ledger_exchange_rates_v7',
+    transactions: 'ledger_financial_transactions_v7',
+    postings: 'ledger_postings_v7',
+    links: 'ledger_transaction_links_v7',
+    entities: 'ledger_entities_v7',
+    workspace: 'ledger_workspace_state_v7',
+    coldArchiveYears: 'cold_archive_years',
+    coldArchiveTransactions: 'cold_archive_transactions',
+  };
+  const entries = await Promise.all(Object.entries(tables).map(async ([key, table]) => {
+    const row = await db.getFirstAsync(`SELECT COUNT(*) AS n FROM ${table} WHERE namespace=?`, namespace);
+    return [key, Math.max(0, Number(row?.n || 0))];
+  }));
+  return Object.freeze(Object.fromEntries(entries));
+};
+
+const sameConflictRecoveryCheckpointCountsV1 = (left, right) => (
+  Object.keys(left || {}).length === Object.keys(right || {}).length
+  && Object.keys(left || {}).every(key => Number(left[key]) === Number(right?.[key]))
+);
+
+export const createFinancialConflictRecoveryCheckpointV1 = async ({
+  namespace = 'guest', checkpointId, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
+  await ensureFinancialLedgerV7(db);
+  await ensureColdArchiveSchema();
+  const source = String(namespace || '').trim();
+  const id = String(checkpointId || '').trim().toLowerCase();
+  if (!source || !/^[a-z0-9-]{16,128}$/.test(id)) {
+    return { supported: true, ok: false, reason: 'financial_v2_conflict_checkpoint_input_invalid' };
+  }
+  const target = `${source}::conflict-recovery-checkpoint::${id}`;
+  try {
+    return await runFinancialRestorePromotionTransactionV8({ database: db, task: async actions => {
+      const [identity, sync, sourceWorkspace, existing] = await Promise.all([
+        actions.database.getFirstAsync(
+          `SELECT namespace,ledger_id,restore_epoch FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`, source,
+        ),
+        actions.database.getFirstAsync(
+          `SELECT activated_at FROM ledger_sync_state_v8 WHERE ledger_id=(
+             SELECT ledger_id FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1
+           ) AND restore_epoch=(
+             SELECT restore_epoch FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1
+           ) LIMIT 1`, source, source,
+        ),
+        actions.database.getFirstAsync(`SELECT 1 AS present FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1`, source),
+        actions.database.getFirstAsync(
+          `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, conflictRecoveryCheckpointKeyV1(source, id),
+        ),
+      ]);
+      if (!identity?.ledger_id || !sync?.activated_at || !sourceWorkspace?.present) {
+        throw new Error('financial_v2_conflict_checkpoint_live_source_invalid');
+      }
+      if (existing?.value) throw new Error('financial_v2_conflict_checkpoint_already_exists');
+      const generationBefore = await readLiveGenerationInTransactionV13({
+        database: actions.database,
+        namespace: source,
+        ledgerId: String(identity.ledger_id),
+        restoreEpoch: Number(identity.restore_epoch),
+      });
+      const sourceCounts = await conflictRecoveryCheckpointCountsV1(actions.database, source);
+      await actions.clearFinancialNamespace(target);
+      await actions.clearColdArchiveNamespace(target);
+      await actions.copyFinancialNamespaceFromStage({
+        namespace: target, stageNamespace: source, includeWorkspaceState: true,
+      });
+      await actions.replaceColdArchiveNamespaceFromStage({ namespace: target, stageNamespace: source });
+      const targetCounts = await conflictRecoveryCheckpointCountsV1(actions.database, target);
+      if (!sameConflictRecoveryCheckpointCountsV1(sourceCounts, targetCounts)) {
+        throw new Error('financial_v2_conflict_checkpoint_counts_mismatch');
+      }
+      const generationAfter = await readLiveGenerationInTransactionV13({
+        database: actions.database,
+        namespace: source,
+        ledgerId: String(identity.ledger_id),
+        restoreEpoch: Number(identity.restore_epoch),
+      });
+      if (Number(generationAfter.generation) !== Number(generationBefore.generation)) {
+        throw new Error('financial_v2_conflict_checkpoint_source_changed');
+      }
+      const foreignKeys = await actions.database.getAllAsync('PRAGMA foreign_key_check');
+      if (foreignKeys.length) throw new Error('financial_v2_conflict_checkpoint_foreign_key_failed');
+      const quick = await actions.database.getFirstAsync('PRAGMA quick_check');
+      if (String(quick ? Object.values(quick)[0] : '').toLowerCase() !== 'ok') {
+        throw new Error('financial_v2_conflict_checkpoint_quick_check_failed');
+      }
+      const now = new Date().toISOString();
+      const receipt = {
+        version: 1,
+        namespace: source,
+        checkpointId: id,
+        checkpointNamespace: target,
+        ledgerId: String(identity.ledger_id),
+        restoreEpoch: Number(identity.restore_epoch),
+        sourceGeneration: Number(generationBefore.generation),
+        counts: targetCounts,
+        createdAt: now,
+      };
+      await actions.database.runAsync(
+        `INSERT INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+        conflictRecoveryCheckpointKeyV1(source, id), safeJson(receipt), now,
+      );
+      return { supported: true, ok: true, checkpoint: receipt };
+    }});
+  } catch (error) {
+    return { supported: true, ok: false, reason: String(error?.message || 'financial_v2_conflict_checkpoint_failed') };
+  }
 };
 
 const canonicalJson = value => {

@@ -63,6 +63,10 @@ import { bootstrapFinancialLedgerV2 } from '../../lib/financialBootstrapV2';
 import { fetchVerifiedFinancialCloudRecoverySourceV2 } from '../../lib/financialCloudRecoveryV2';
 import { recoverVerifiedBootstrapWithArchiveV2 } from '../../lib/financialBootstrapRecoveryCoordinatorV2';
 import {
+  confirmPreparedCloudConflictRecoveryV1,
+  prepareVerifiedCloudConflictRecoveryV1,
+} from '../../lib/financialV2ConflictRecoveryV1';
+import {
   GUEST_NAMESPACE,
   clearVaultSnapshot,
   getOrCreateDeviceId,
@@ -1575,6 +1579,68 @@ export const createSyncSlice = (set, get) => ({
     return { ok: true, recovered: true, recovery };
   },
 
+  // Revision conflict repair is explicitly user-driven. Preparation only
+  // creates a local checkpoint and a verified cloud candidate; confirmation is
+  // a later action after the user has read what will be replaced.
+  prepareV2ConflictRecovery: async () => {
+    const current = get();
+    if (!current.user || current.cfg?.demoMode || !current.workspaceReady) {
+      return { ok: false, reason: 'financial_v2_conflict_recovery_signin_required' };
+    }
+    if (!current.online || current.syncing || String(current.lastSyncError || '') !== 'financial_v2_revision_conflict') {
+      return { ok: false, reason: 'financial_v2_conflict_recovery_not_eligible' };
+    }
+    const workspaceNamespace = current.workspaceNamespace || workspaceNamespaceForSession({ user: current.user });
+    const result = await get().runFinancialMaintenance(
+      'financial_v2_conflict_recovery_prepare',
+      () => prepareVerifiedCloudConflictRecoveryV1({
+        supabase, namespace: getLedgerNamespace(workspaceNamespace, get().cfg), accountId: current.user.id,
+      }),
+      { resumeSync: false, presentation: 'blocking' },
+    );
+    set({
+      restoreSafety: {
+        status: result?.ok ? 'financial_v2_conflict_recovery_ready' : 'financial_v2_conflict_recovery_blocked',
+        operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString(),
+        checkpointId: result?.intent?.local?.checkpointId || null, reason: result?.ok ? null : String(result?.reason || 'prepare_failed'),
+      },
+    });
+    return result;
+  },
+
+  confirmV2ConflictRecovery: async () => {
+    const current = get();
+    if (!current.user || current.cfg?.demoMode || !current.workspaceReady) {
+      return { ok: false, reason: 'financial_v2_conflict_recovery_signin_required' };
+    }
+    if (current.restoreSafety?.status !== 'financial_v2_conflict_recovery_ready') {
+      return { ok: false, reason: 'financial_v2_conflict_recovery_confirmation_not_ready' };
+    }
+    const workspaceNamespace = current.workspaceNamespace || workspaceNamespaceForSession({ user: current.user });
+    const result = await get().runFinancialMaintenance(
+      'financial_v2_conflict_recovery_confirm',
+      () => confirmPreparedCloudConflictRecoveryV1({
+        supabase, namespace: getLedgerNamespace(workspaceNamespace, get().cfg), accountId: current.user.id, confirmed: true,
+      }),
+      { resumeSync: false, presentation: 'blocking' },
+    );
+    if (!result?.ok) {
+      set({ restoreSafety: { status: 'financial_v2_conflict_recovery_blocked', operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString(), reason: String(result?.reason || 'promotion_failed') } });
+      return result;
+    }
+    // The atomic local promotion deliberately leaves activation to the existing
+    // V2 activation path. Reload the verified local projection first, then let
+    // that single path record its own evidence and production cursor.
+    await get().loadLocal(workspaceNamespace, { allowLegacy: false, maintenanceOwned: true });
+    const activation = await get().activateFinancialSyncV2();
+    if (!activation?.ok) {
+      set({ lastSyncError: activation?.reason || 'financial_v2_conflict_recovery_activation_required', restoreSafety: { status: 'financial_v2_conflict_recovery_activation_required', operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString() } });
+      return { ...result, ok: false, pending: true, reason: activation?.reason || 'financial_v2_conflict_recovery_activation_required' };
+    }
+    set({ lastSyncError: null, restoreSafety: { status: 'financial_v2_conflict_recovery_complete', operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString() } });
+    return { ...result, activated: true };
+  },
+
   previewNormalizedCloud: async ({ baseline } = {}) => {
     const current = get();
     if (!normalizedPreviewEnabled) return { ok: false, reason: 'disabled' };
@@ -2967,9 +3033,14 @@ export const createSyncSlice = (set, get) => ({
           ? armTransientCloudRetry(get, syncUserId, e)
           : false;
         if (get().user?.id === syncUserId) {
+          const syncReason = String(e?.message || 'sync_failed');
+          // A revision conflict is an authenticated response from the cloud,
+          // not a network outage. Keeping the device online makes the account
+          // screen truthful and leaves recovery actions available.
+          const revisionConflict = syncReason === 'financial_v2_revision_conflict';
           set({
-            online: false,
-            lastSyncError: String(e?.message || 'sync_failed'),
+            online: revisionConflict,
+            lastSyncError: syncReason,
           });
         }
         if (!transientRetryScheduled && !isTransientCloudSyncError(e)) {

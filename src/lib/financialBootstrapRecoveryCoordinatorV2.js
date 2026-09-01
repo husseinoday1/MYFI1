@@ -28,7 +28,12 @@ const exactArchiveHead = (left, right) => (
 
 const failure = (reason, extra = {}) => ({ supported: true, ok: false, reason: String(reason || 'financial_v2_bootstrap_recovery_failed'), ...extra });
 
-export const recoverVerifiedBootstrapWithArchiveV2 = async ({
+// Download and prove both cloud channels without touching the live namespace.
+// This is intentionally public because a non-empty conflict recovery must show
+// the user a verified, stable cloud candidate *before* it can ask for consent
+// to replace any local projection.  The existing empty-shell recovery consumes
+// exactly this same proof rather than maintaining a second downloader.
+export const stageVerifiedBootstrapWithArchiveV2 = async ({
   supabase, namespace = 'guest', accountId, database = null,
 } = {}) => {
   if (!supabase?.rpc) return { supported: false, ok: false, reason: 'supabase_unavailable' };
@@ -60,9 +65,34 @@ export const recoverVerifiedBootstrapWithArchiveV2 = async ({
   if (!freshArchive?.ok || !exactArchiveHead(archive.head, freshArchive)) {
     return failure('financial_archive_recovery_source_changed', { source: initial, archive, freshArchive, bootstrap });
   }
+  return {
+    supported: true,
+    ok: true,
+    namespace,
+    accountId: owner,
+    bootstrapSource: freshBootstrap,
+    archiveHead: freshArchive,
+    bootstrapSessionId: bootstrap.session.session_id,
+    archiveSessionId: archive.session.session_id,
+    bootstrap,
+    archive,
+  };
+};
+
+export const recoverVerifiedBootstrapWithArchiveV2 = async ({
+  supabase, namespace = 'guest', accountId, database = null,
+} = {}) => {
+  const staged = await stageVerifiedBootstrapWithArchiveV2({
+    supabase, namespace, accountId, database,
+  });
+  if (!staged?.ok) return staged;
   return promoteVerifiedBootstrapRecoveryV2({
-    namespace, accountId: owner, bootstrapSessionId: bootstrap.session.session_id,
-    archiveSessionId: archive.session.session_id, bootstrapSource: freshBootstrap,
-    archiveHead: freshArchive, database,
+    namespace: staged.namespace,
+    accountId: staged.accountId,
+    bootstrapSessionId: staged.bootstrapSessionId,
+    archiveSessionId: staged.archiveSessionId,
+    bootstrapSource: staged.bootstrapSource,
+    archiveHead: staged.archiveHead,
+    database,
   });
 };

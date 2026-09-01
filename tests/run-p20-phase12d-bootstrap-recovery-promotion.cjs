@@ -97,18 +97,39 @@ const compilePromotion = repoMock => {
   const originalLoad = Module._load;
   Module._load = function(request, parent, isMain) {
     if (parent?.filename === target && request === './financialLedgerV7Repository') return repoMock;
+    if (parent?.filename === target && request === './financialLiveGenerationV13') return { readLiveGenerationInTransactionV13: async () => ({ generation: 0 }) };
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
     const compiled = new Module(target, module); compiled.filename = target; compiled.paths = Module._nodeModulePaths(path.dirname(target));
     compiled._compile(babel.transformFileSync(target, { babelrc: false, configFile: false, plugins: ['@babel/plugin-transform-modules-commonjs'] }).code, target);
-    return compiled.exports.promoteVerifiedBootstrapRecoveryV2;
+    return compiled.exports;
   } finally { Module._load = originalLoad; }
+};
+
+const createConflictPromotionFixture = namespace => {
+  const db = new Db(); const fixture = { db, ...prepare(db, namespace) };
+  const promote = compilePromotion({ runFinancialRestorePromotionTransactionV8: makeRunner(fixture) }).promotePreparedCloudConflictRecoveryV1;
+  const now = '2026-09-01T03:00:00.000Z';
+  const checkpointNamespace = `${fixture.namespace}::conflict-recovery-checkpoint::checkpoint-1`;
+  fixture.db.native.prepare('UPDATE ledger_bootstrap_recovery_import_v9 SET source_ledger_id=?,source_restore_epoch=?,expected_row_count=? WHERE namespace=? AND session_id=?').run(fixture.oldLedger, 1, 4, fixture.namespace, 'hot');
+  fixture.db.native.prepare('UPDATE ledger_archive_recovery_import_v11 SET source_ledger_id=?,source_restore_epoch=? WHERE namespace=?').run(fixture.oldLedger, 1, fixture.namespace);
+  fixture.db.native.prepare('INSERT INTO ledger_sync_state_v8(ledger_id,restore_epoch,shadow_last_server_sequence,last_server_sequence,activated_at,updated_at) VALUES (?,?,?,?,?,?)').run(fixture.oldLedger, 1, 0, 217, now, now);
+  fixture.db.native.prepare('INSERT INTO ledger_entities_v7(namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at) VALUES (?,?,?,?,NULL,?,?,?)').run(fixture.namespace, 'workspace', 'workspace', 2, '{}', now, now);
+  fixture.db.native.prepare('INSERT INTO ledger_entities_v7(namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at) VALUES (?,?,?,?,NULL,?,?,?)').run(fixture.hotStage, 'workspace', 'workspace', 7, '{}', now, now);
+  fixture.db.native.prepare('INSERT INTO ledger_bootstrap_recovery_rows_v10(namespace,session_id,ordinal,row_type,row_key,row_hash,payload_text,received_at) VALUES (?,?,?,?,?,?,?,?)').run(fixture.namespace, 'hot', 4, 'entity', 'workspace', '6'.repeat(64), '{}', now);
+  fixture.db.native.prepare('INSERT INTO ledger_workspace_state_v7(namespace,source_mode,schema_version,payload_json,updated_at) VALUES (?,?,?,?,?)').run(checkpointNamespace, 'sqlite', 9, '{"old":true}', now);
+  fixture.db.native.prepare('INSERT INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)').run(`financial_v2_conflict_checkpoint_v1:${fixture.namespace}:checkpoint-1`, JSON.stringify({ version: 1, checkpointId: 'checkpoint-1', checkpointNamespace, ledgerId: fixture.oldLedger, restoreEpoch: 1, sourceGeneration: 0, counts: { accounts: 0, exchangeRates: 0, transactions: 0, postings: 0, links: 0, entities: 0, workspace: 1, coldArchiveYears: 0, coldArchiveTransactions: 0 } }), now);
+  fixture.db.native.prepare('INSERT INTO ledger_outbox_v3(namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,operation,revision,base_revision,protocol_version,minimum_supported_version,payload_schema_version,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(fixture.namespace, fixture.oldLedger, 1, 'stale-workspace', 'cmd-workspace', 'workspace', 'workspace', 'upsert', 2, 1, 2, 2, 1, '{}', now);
+  const intentKey = `financial_v2_conflict_recovery_intent_v1:${fixture.namespace}`;
+  fixture.db.native.prepare('INSERT INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)').run(intentKey, JSON.stringify({ version: 1, status: 'ready_for_explicit_cloud_replacement', namespace: fixture.namespace, accountId: 'account-1', cloud: { ledgerId: fixture.oldLedger, restoreEpoch: 1, bootstrapId: 'bootstrap-1', manifestHash: 'a'.repeat(64), expectedRowCount: 4, archivePresent: true, archiveGeneration: 2, archiveSnapshotId: 'archive-1', archiveManifestHash: 'c'.repeat(64), archiveExpectedRowCount: 2 }, local: { checkpointId: 'checkpoint-1', sourceGeneration: 0, cloudWorkspaceRevision: 7, staleWorkspaceMutationIds: ['stale-workspace'], staleWorkspaceMutations: [{ sequenceId: 1, mutationId: 'stale-workspace', commandId: 'cmd-workspace', revision: 2, baseRevision: 1, payloadJson: '{}' }] } }), now);
+  const args = { namespace: fixture.namespace, accountId: 'account-1', checkpointId: 'checkpoint-1', bootstrapSessionId: 'hot', archiveSessionId: 'cold', confirmed: true, bootstrapSource: { ledgerId: fixture.oldLedger, restoreEpoch: 1, bootstrapId: 'bootstrap-1', manifestHash: 'a'.repeat(64), expectedRowCount: 4 }, archiveHead: { ledgerId: fixture.oldLedger, restoreEpoch: 1, archivePresent: true, archiveGeneration: 2, snapshotId: 'archive-1', manifestHash: 'c'.repeat(64), expectedRowCount: 2 } };
+  return { db, fixture, promote, checkpointNamespace, intentKey, args };
 };
 
 (async () => {
   const liveDb = new Db(); const liveFixture = { db: liveDb, ...prepare(liveDb, 'user:phase12d-live') };
-  const promoteLive = compilePromotion({ runFinancialRestorePromotionTransactionV8: makeRunner(liveFixture) });
+  const promoteLive = compilePromotion({ runFinancialRestorePromotionTransactionV8: makeRunner(liveFixture) }).promoteVerifiedBootstrapRecoveryV2;
   const liveBase = { namespace: liveFixture.namespace, accountId: 'account-1', bootstrapSessionId: 'hot', archiveSessionId: 'cold', ...sources(liveFixture) };
   liveDb.native.prepare('INSERT INTO ledger_entities_v7(namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at) VALUES (?,?,?,?,NULL,?,?,?)')
     .run(liveFixture.namespace, 'wallet', 'local-live-wallet', 1, JSON.stringify({ openingBalance: 25, openingBaseBalance: 25 }), '2026-08-31T00:00:00.000Z', '2026-08-31T00:00:00.000Z');
@@ -119,7 +140,7 @@ const compilePromotion = repoMock => {
   liveDb.native.close();
 
   const damagedDb = new Db(); const damagedFixture = { db: damagedDb, ...prepare(damagedDb, 'user:phase12d-damaged') };
-  const promoteDamaged = compilePromotion({ runFinancialRestorePromotionTransactionV8: makeRunner(damagedFixture) });
+  const promoteDamaged = compilePromotion({ runFinancialRestorePromotionTransactionV8: makeRunner(damagedFixture) }).promoteVerifiedBootstrapRecoveryV2;
   const damagedBase = { namespace: damagedFixture.namespace, accountId: 'account-1', bootstrapSessionId: 'hot', archiveSessionId: 'cold', ...sources(damagedFixture) };
   damagedDb.native.prepare('DELETE FROM ledger_accounts_v7 WHERE namespace=?').run(damagedFixture.hotStage);
   const damagedRejected = await promoteDamaged(damagedBase);
@@ -129,7 +150,7 @@ const compilePromotion = repoMock => {
   damagedDb.native.close();
 
   const db = new Db(); const fixture = { db, ...prepare(db) };
-  const promote = compilePromotion({ runFinancialRestorePromotionTransactionV8: makeRunner(fixture) });
+  const promote = compilePromotion({ runFinancialRestorePromotionTransactionV8: makeRunner(fixture) }).promoteVerifiedBootstrapRecoveryV2;
   const base = { namespace: fixture.namespace, accountId: 'account-1', bootstrapSessionId: 'hot', archiveSessionId: 'cold', ...sources(fixture) };
   const mismatched = await promote({ ...base, bootstrapSource: { ...base.bootstrapSource, manifestHash: 'e'.repeat(64) } });
   assert.equal(mismatched.ok, false);
@@ -153,5 +174,41 @@ const compilePromotion = repoMock => {
   assert.equal(db.native.prepare('SELECT activated_at FROM ledger_sync_state_v8 WHERE ledger_id=? AND restore_epoch=?').get(fixture.remoteLedger, 7).activated_at, null, 'promotion must not activate sync');
   assert.equal(db.native.prepare('SELECT value FROM ledger_v7_meta WHERE key=?').get(`bootstrap_recovery_promotion_v1:${fixture.namespace}`).value.includes('promoted_pending_activation'), true);
   db.native.close();
+
+  // A real non-empty conflict repair: only the previously-proven stale workspace
+  // command is discarded, while a complete private checkpoint remains present.
+  const successfulConflict = createConflictPromotionFixture('user:phase12d-conflict');
+  const conflictResult = await successfulConflict.promote(successfulConflict.args);
+  assert.equal(conflictResult.ok, true, JSON.stringify(conflictResult));
+  assert.equal(successfulConflict.db.native.prepare('SELECT COUNT(*) AS n FROM ledger_outbox_v3 WHERE ledger_id=?').get(successfulConflict.fixture.oldLedger).n, 0);
+  assert.equal(successfulConflict.db.native.prepare('SELECT COUNT(*) AS n FROM ledger_workspace_state_v7 WHERE namespace=?').get(successfulConflict.checkpointNamespace).n, 1, 'private checkpoint must survive promotion');
+  assert.equal(JSON.parse(successfulConflict.db.native.prepare('SELECT value FROM ledger_v7_meta WHERE key=?').get(successfulConflict.intentKey).value).status, 'local_promoted_pending_activation');
+  successfulConflict.db.native.close();
+
+  const damagedCheckpoint = createConflictPromotionFixture('user:phase12d-conflict-checkpoint-damaged');
+  const receipt = JSON.parse(damagedCheckpoint.db.native.prepare('SELECT value FROM ledger_v7_meta WHERE key=?').get(`financial_v2_conflict_checkpoint_v1:${damagedCheckpoint.fixture.namespace}:checkpoint-1`).value);
+  receipt.counts.workspace = 2;
+  damagedCheckpoint.db.native.prepare('UPDATE ledger_v7_meta SET value=? WHERE key=?').run(JSON.stringify(receipt), `financial_v2_conflict_checkpoint_v1:${damagedCheckpoint.fixture.namespace}:checkpoint-1`);
+  const damagedCheckpointResult = await damagedCheckpoint.promote(damagedCheckpoint.args);
+  assert.equal(damagedCheckpointResult.ok, false);
+  assert.equal(damagedCheckpointResult.reason, 'financial_v2_conflict_recovery_promotion_checkpoint_incomplete');
+  assert.equal(damagedCheckpoint.db.native.prepare('SELECT COUNT(*) AS n FROM ledger_outbox_v3 WHERE ledger_id=?').get(damagedCheckpoint.fixture.oldLedger).n, 1, 'checkpoint rejection must not discard the prepared outbox row');
+  damagedCheckpoint.db.native.close();
+
+  const addedMutation = createConflictPromotionFixture('user:phase12d-conflict-extra-mutation');
+  addedMutation.db.native.prepare('INSERT INTO ledger_outbox_v3(namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,operation,revision,base_revision,protocol_version,minimum_supported_version,payload_schema_version,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(addedMutation.fixture.namespace, addedMutation.fixture.oldLedger, 1, 'unexpected-workspace', 'cmd-unexpected', 'workspace', 'workspace', 'upsert', 2, 1, 2, 2, 1, '{}', '2026-09-01T03:00:01.000Z');
+  const addedMutationResult = await addedMutation.promote(addedMutation.args);
+  assert.equal(addedMutationResult.ok, false);
+  assert.equal(addedMutationResult.reason, 'financial_v2_conflict_recovery_promotion_pending_state_changed');
+  assert.equal(addedMutation.db.native.prepare('SELECT COUNT(*) AS n FROM ledger_outbox_v3 WHERE ledger_id=?').get(addedMutation.fixture.oldLedger).n, 2, 'extra mutation rejection must not discard either outbox row');
+  addedMutation.db.native.close();
+
+  const changedMutation = createConflictPromotionFixture('user:phase12d-conflict-changed-mutation');
+  changedMutation.db.native.prepare('UPDATE ledger_outbox_v3 SET revision=?,base_revision=? WHERE namespace=? AND mutation_id=?').run(3, 2, changedMutation.fixture.namespace, 'stale-workspace');
+  const changedMutationResult = await changedMutation.promote(changedMutation.args);
+  assert.equal(changedMutationResult.ok, false);
+  assert.equal(changedMutationResult.reason, 'financial_v2_conflict_recovery_promotion_pending_state_changed');
+  assert.equal(changedMutation.db.native.prepare('SELECT COUNT(*) AS n FROM ledger_outbox_v3 WHERE ledger_id=?').get(changedMutation.fixture.oldLedger).n, 1, 'content-change rejection must not discard the outbox row');
+  changedMutation.db.native.close();
   console.log('MYFI P20 PHASE 12-D ATOMIC BOOTSTRAP + ARCHIVE PROMOTION SQLITE RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });
