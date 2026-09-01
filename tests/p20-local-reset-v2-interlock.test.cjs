@@ -10,12 +10,14 @@ const gate = fs.readFileSync(path.join(root, 'tests/run-quality-gate.cjs'), 'utf
 
 assert.match(data, /inspectLocalFinancialResetSafetyV8/);
 assert.match(data, /local_reset_requires_complete_v2_recovery/);
+assert.match(data, /clearLocalFinancialDataForCloudRecoveryV8/);
+assert.match(data, /local_reset_cloud_sync_required/);
 const resetStart = data.indexOf('resetAll: async');
 const resetEnd = data.indexOf('restoreLastBackupRollback: async', resetStart);
 const resetBody = data.slice(resetStart, resetEnd);
 assert.ok(
-  resetBody.indexOf('const localResetSafety') < resetBody.indexOf('const wallets = normalizeWallets'),
-  'V2 local-reset safety must run before the reset creates a fresh setup wallet',
+  resetBody.indexOf('const signedInCloudWorkspace') < resetBody.indexOf('const localResetSafety'),
+  'signed-in cloud deletion must branch before the legacy reset path',
 );
 for (const token of [
   'ledger_sync_identity_v8',
@@ -24,8 +26,12 @@ for (const token of [
   'ledger_v7_meta',
   'local_reset_requires_complete_v2_recovery',
 ]) assert.ok(repo.includes(token), `missing V2 reset-safety evidence: ${token}`);
-assert.match(settings, /Local deletion is not available yet/);
-assert.match(settings, /حذف البيانات غير متاح الآن/);
+for (const token of [
+  'Delete this device',
+  'حذف بيانات هذا الجهاز',
+  'restoreLocalDataFromCloud',
+  'استعادة بياناتي من السحابة',
+]) assert.ok(settings.includes(token), `missing signed-in local-delete UX: ${token}`);
 assert.ok(gate.includes('p20-local-reset-v2-interlock.test.cjs'));
 assert.ok(gate.includes('run-p20-local-reset-v2-interlock.cjs'));
 

@@ -127,6 +127,7 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'automatic_sync_interaction_hold', 'run-automatic-sync-interaction-hold.cjs'],
   ['UNIT_RUNTIME', 'p20_g01_d2_restore_epoch_activation', 'run-p20-g01-d2-restore-epoch-activation.cjs'],
   ['SQLITE_RUNTIME', 'p20_local_reset_v2_interlock', 'run-p20-local-reset-v2-interlock.cjs'],
+  ['SQLITE_RUNTIME', 'p20_local_reset_cloud_recovery', 'run-p20-local-reset-cloud-recovery.cjs'],
   ['UNIT_RUNTIME', 'p20_phase12a_archive_readback', 'run-p20-phase12a-archive-readback.cjs'],
   ['SQLITE_RUNTIME', 'p20_phase12c_bootstrap_recovery_session', 'run-p20-phase12c-bootstrap-recovery-session.cjs'],
   ['UNIT_RUNTIME', 'p20_phase12c_bootstrap_recovery_stage', 'run-p20-phase12c-bootstrap-recovery-stage.cjs'],

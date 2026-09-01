@@ -61,6 +61,7 @@ import { syncFinancialMutationsV7 } from '../../lib/financialMutationSync';
 import { syncFinancialMutationsV2 } from '../../lib/financialMutationSyncV2';
 import { bootstrapFinancialLedgerV2 } from '../../lib/financialBootstrapV2';
 import { fetchVerifiedFinancialCloudRecoverySourceV2 } from '../../lib/financialCloudRecoveryV2';
+import { recoverVerifiedBootstrapWithArchiveV2 } from '../../lib/financialBootstrapRecoveryCoordinatorV2';
 import {
   GUEST_NAMESPACE,
   clearVaultSnapshot,
@@ -622,6 +623,7 @@ const runVerifiedEmptyShellCloudRecoveryV2 = async ({
   workspaceNamespace,
   ledgerNamespace,
   syncUserId,
+  allowVerifiedBootstrapImport = false,
   onExclusiveTransition = null,
 } = {}) => {
   let exclusivePresentationRequested = false;
@@ -745,10 +747,75 @@ const runVerifiedEmptyShellCloudRecoveryV2 = async ({
   // Never reinterpret it through user_data and never register/bootstrap the
   // current empty shell over it.
   if (source.mode === 'v2_bootstrap') {
+    if (allowVerifiedBootstrapImport) {
+      presentExclusiveOperation();
+      set({
+        financialCloudRecoveryV2: {
+          status: 'restoring_verified_v2_bootstrap',
+          workspaceNamespace,
+          ledgerNamespace,
+          ledgerId: source.ledgerId,
+          restoreEpoch: source.restoreEpoch,
+          bootstrapId: source.bootstrapId,
+          error: null,
+        },
+      });
+      const recovery = await recoverVerifiedBootstrapWithArchiveV2({
+        supabase,
+        namespace: ledgerNamespace,
+        accountId: syncUserId,
+      });
+      if (!recovery?.ok) {
+        const reason = String(recovery?.reason || 'financial_v2_bootstrap_recovery_failed');
+        set({
+          financialCloudRecoveryV2: {
+            status: 'failed_v2_bootstrap_recovery',
+            workspaceNamespace,
+            ledgerNamespace,
+            ledgerId: source.ledgerId,
+            restoreEpoch: source.restoreEpoch,
+            bootstrapId: source.bootstrapId,
+            error: reason,
+          },
+        });
+        return { attempted: true, ok: false, blocked: true, reason, source, recovery };
+      }
+      await get().loadLocal(workspaceNamespace, { allowLegacy: false, maintenanceOwned: true });
+      await writeResetMarker(workspaceNamespace, {
+        pendingCloudSync: false,
+        localCloudRecoveryRequired: false,
+        localCloudRecoveryAccountId: null,
+        cloudRecoveryMode: 'v2_bootstrap',
+        cloudLedgerId: recovery.ledgerId,
+        cloudRestoreEpoch: recovery.restoreEpoch,
+      });
+      set({
+        financialCloudRecoveryV2: {
+          status: 'recovered_v2_bootstrap_pending_activation',
+          workspaceNamespace,
+          ledgerNamespace,
+          ledgerId: recovery.ledgerId,
+          restoreEpoch: recovery.restoreEpoch,
+          restoredAt: new Date().toISOString(),
+          error: null,
+        },
+      });
+      return {
+        attempted: true,
+        ok: true,
+        recovered: true,
+        requireV2: true,
+        mode: 'v2_bootstrap',
+        source,
+        recovery,
+      };
+    }
     const reason = 'financial_v2_bootstrap_import_required';
+    const manualReset = cutoverMarker?.localCloudRecoveryRequired === true
+      && String(cutoverMarker?.localCloudRecoveryAccountId || '') === String(syncUserId);
     set({
       financialCloudRecoveryV2: {
-        status: 'blocked_v2_bootstrap_import',
+        status: manualReset ? 'local_data_deleted_pending_recovery' : 'blocked_v2_bootstrap_import',
         workspaceNamespace,
         ledgerNamespace,
         ledgerId: source.ledgerId,
@@ -1465,6 +1532,47 @@ export const createSyncSlice = (set, get) => ({
     } finally {
       report();
     }
+  },
+
+  // Deliberate follow-up to "delete this device's data". It never runs as a
+  // background login recovery: the user requested the local deletion, so they
+  // explicitly choose when to bring their preserved cloud copy back.
+  restoreLocalDataFromCloud: async () => {
+    const initial = get();
+    if (!initial.user || initial.cfg?.demoMode || !initial.workspaceReady) {
+      return { ok: false, reason: 'local_recovery_signin_required' };
+    }
+    if (!initial.online || initial.syncing) {
+      return { ok: false, reason: !initial.online ? 'local_recovery_offline' : 'local_recovery_sync_in_progress' };
+    }
+    const workspaceNamespace = initial.workspaceNamespace || workspaceNamespaceForSession({ user: initial.user });
+    const marker = await readResetMarker(workspaceNamespace);
+    if (marker?.localCloudRecoveryRequired !== true
+        || String(marker?.localCloudRecoveryAccountId || '') !== String(initial.user.id)) {
+      return { ok: false, reason: 'local_recovery_not_requested' };
+    }
+    const recovery = await get().runFinancialMaintenance(
+      'manual_cloud_recovery_after_local_delete',
+      () => runVerifiedEmptyShellCloudRecoveryV2({
+        get,
+        set,
+        workspaceNamespace,
+        ledgerNamespace: getLedgerNamespace(workspaceNamespace, get().cfg),
+        syncUserId: initial.user.id,
+        allowVerifiedBootstrapImport: true,
+        onExclusiveTransition: promoteActiveFinancialMaintenancePresentation,
+      }),
+      { resumeSync: false },
+    );
+    if (!recovery?.ok || !recovery?.recovered) return recovery || { ok: false, reason: 'local_recovery_failed' };
+
+    // Promotion deliberately leaves protocol activation to the normal, proven
+    // sync path. The maintenance fence has now released and the local data was
+    // reloaded, so this call can bootstrap/activate without inventing a second
+    // recovery protocol.
+    const synced = await get().syncCloud({ reason: 'manual_cloud_recovery_activation' });
+    if (!synced) return { ok: false, reason: get().lastSyncError || 'local_recovery_activation_failed', recovery };
+    return { ok: true, recovered: true, recovery };
   },
 
   previewNormalizedCloud: async ({ baseline } = {}) => {

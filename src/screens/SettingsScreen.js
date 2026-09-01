@@ -171,8 +171,14 @@ const pageCopy = (lang = 'ar') => {
     importBackupSub: ar ? 'راجع النسخة ثم استعدها بأمان' : 'Review the backup, then restore it safely',
     archive: ar ? 'الأرشيف الشهري' : 'Monthly archive',
     archiveSub: ar ? 'الوصول إلى الأشهر المؤرشفة' : 'Access archived months',
-    deleteLocal: ar ? 'حذف جميع البيانات المحلية' : 'Delete all local data',
-    deleteLocalSub: ar ? 'عملية حساسة ولا يمكن التراجع عنها.' : 'Sensitive action that cannot be undone.',
+    deleteLocal: ar ? 'حذف بيانات هذا الجهاز' : 'Delete this device’s data',
+    deleteLocalSub: ar ? 'بياناتك السحابية تبقى محفوظة. سنكمل المزامنة أولاً ثم نحذف نسخة هذا الجهاز فقط.' : 'Your cloud copy stays safe. MYFI syncs first, then removes this device’s copy only.',
+    cloudRecoveryReady: ar ? 'نسختك السحابية جاهزة' : 'Your cloud copy is ready',
+    cloudRecoveryReadySub: ar ? 'حُذفت بيانات هذا الجهاز فقط. اضغط لاستعادة بياناتك المحفوظة.' : 'Only this device was cleared. Restore your saved data when you are ready.',
+    restoreCloudData: ar ? 'استعادة بياناتي من السحابة' : 'Restore my cloud data',
+    localDeleteComplete: ar ? 'تم حذف بيانات هذا الجهاز. النسخة السحابية لم تتغير.' : 'This device’s data was deleted. Your cloud copy was not changed.',
+    localDeleteSyncRequired: ar ? 'تعذر الحذف لأن MYFI لم ينهِ المزامنة الآمنة. لم نحذف أي بيانات.' : 'MYFI could not complete a safe sync, so nothing was deleted.',
+    localRecoveryFailed: ar ? 'تعذر استعادة النسخة السحابية الآن. بقيت بيانات السحابة آمنة ويمكنك المحاولة لاحقًا.' : 'Your cloud copy could not be restored now. It remains safe; try again later.',
     protectBackup: ar ? 'حماية النسخة الاحتياطية' : 'Protect backup',
     encrypted: ar ? 'تشفير بكلمة مرور' : 'Encrypt with password',
     unencrypted: ar ? 'بدون كلمة مرور' : 'Without password',
@@ -319,6 +325,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
     setUser,
     disconnectCloudSession,
     resetAll,
+    restoreLocalDataFromCloud,
     syncing,
     online,
     lastSyncError,
@@ -376,6 +383,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false);
   const [restoreResultOpen, setRestoreResultOpen] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
+  const [localCloudRecoveryBusy, setLocalCloudRecoveryBusy] = useState(false);
   const [testDataBusy, setTestDataBusy] = useState(false);
   const [localSqliteDiagnosticBusy, setLocalSqliteDiagnosticBusy] = useState(false);
   const [localSqliteDiagnostic, setLocalSqliteDiagnostic] = useState('');
@@ -1090,18 +1098,47 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
         text: isAr ? 'حذف' : 'Delete',
         style: 'destructive',
         onPress: async () => {
+          const signedInCloudWorkspace = !!(user && financialLedgerV7Cutover);
           const ok = await resetAll();
+          if (ok && signedInCloudWorkspace) {
+            Alert.alert(
+              T.localDeleteComplete,
+              isAr
+                ? 'لن نعيد بياناتك تلقائيًا. يمكنك استعادتها الآن أو لاحقًا من هذه الصفحة.'
+                : 'MYFI will not restore data automatically. You can restore it now or later from this page.',
+              [
+                { text: T.later, style: 'cancel' },
+                { text: T.restoreCloudData, onPress: () => restoreCloudData() },
+              ],
+            );
+            return;
+          }
           if (!ok) {
             Alert.alert(
-              isAr ? 'حذف البيانات غير متاح الآن' : 'Local deletion is not available yet',
-              isAr
-                ? 'نحتاج إكمال استعادة النسخة السحابية بأمان قبل السماح بحذف هذه البيانات من الجهاز.'
-                : 'MYFI must complete a safe cloud recovery before local data can be deleted.',
+              isAr ? 'تعذر حذف بيانات الجهاز' : 'Could not delete device data',
+              signedInCloudWorkspace ? T.localDeleteSyncRequired : (
+                isAr
+                  ? 'نحتاج إكمال استعادة النسخة السحابية بأمان قبل السماح بحذف هذه البيانات من الجهاز.'
+                  : 'MYFI must complete a safe cloud recovery before local data can be deleted.'
+              ),
             );
           }
         },
       },
     ]);
+  };
+
+  const restoreCloudData = async () => {
+    if (localCloudRecoveryBusy) return;
+    setLocalCloudRecoveryBusy(true);
+    try {
+      const result = await restoreLocalDataFromCloud();
+      if (!result?.ok) Alert.alert('', T.localRecoveryFailed);
+    } catch {
+      Alert.alert('', T.localRecoveryFailed);
+    } finally {
+      setLocalCloudRecoveryBusy(false);
+    }
   };
 
   const screenTitle = page === 'account' ? T.account
@@ -1275,6 +1312,9 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
             onRestore={restoreImport}
             onClearImport={() => setImportPackage(null)}
             onReset={confirmReset}
+            onRestoreCloudData={restoreCloudData}
+            localCloudRecoveryBusy={localCloudRecoveryBusy}
+            financialCloudRecoveryV2={financialCloudRecoveryV2}
             cfg={cfg}
             testDataBusy={testDataBusy}
             onActivateTestTier={activatePerformanceTier}
@@ -1884,7 +1924,7 @@ function AboutPage({ th, isAr, T }) {
   );
 }
 
-function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview, onExport, onPickImport, onRestore, onClearImport, onReset, cfg, testDataBusy, onActivateTestTier, onExitTestData, dataHealth, onRefreshDataHealth, financialLedgerV7Cutover, financialMutationSync }) {
+function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview, onExport, onPickImport, onRestore, onClearImport, onReset, onRestoreCloudData, localCloudRecoveryBusy, financialCloudRecoveryV2, cfg, testDataBusy, onActivateTestTier, onExitTestData, dataHealth, onRefreshDataHealth, financialLedgerV7Cutover, financialMutationSync }) {
   const activeTier = cfg?.demoMode ? String(cfg?.performanceTestTier || '') : '';
   return (
     <>
@@ -1985,6 +2025,17 @@ function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview,
         <>
           <SectionLabel th={th} isAr={isAr} text={isAr ? 'منطقة حساسة' : 'Sensitive area'} />
           <MenuGroup th={th}>
+            {financialCloudRecoveryV2?.status === 'local_data_deleted_pending_recovery' ? (
+              <MenuRow
+                th={th}
+                isAr={isAr}
+                icon="cloud-download-outline"
+                iconColor={th.primary}
+                title={T.cloudRecoveryReady}
+                subtitle={localCloudRecoveryBusy ? (isAr ? 'جارٍ التحقق والاستعادة بأمان…' : 'Verifying and restoring safely…') : T.cloudRecoveryReadySub}
+                onPress={localCloudRecoveryBusy ? null : onRestoreCloudData}
+              />
+            ) : null}
             <MenuRow th={th} isAr={isAr} icon="trash-outline" iconColor={th.exp} title={T.deleteLocal} subtitle={T.deleteLocalSub} danger onPress={onReset} last />
           </MenuGroup>
         </>

@@ -5063,6 +5063,135 @@ export const clearFinancialWorkspaceV7 = async ({ namespace = 'guest', database 
   return true;
 };
 
+// The signed-in "delete this device's data" path is intentionally different
+// from a normal workspace reset. It may run only after the caller has finished
+// a successful cloud sync. We erase every local financial/transport/cache row
+// atomically, but retain the opaque local identity row solely as the CAS anchor
+// for Phase 12's verified cloud-recovery promotion. It contains no financial
+// payload and is replaced by the verified cloud identity during promotion.
+// Keeping that anchor prevents a reset device from inventing a new ledger and
+// accidentally treating the cloud ledger as a conflict on recovery.
+export const clearLocalFinancialDataForCloudRecoveryV8 = async ({
+  namespace = 'guest', database = null,
+} = {}) => {
+  const target = String(namespace || '').trim();
+  if (!target) return { supported: true, ok: false, reason: 'local_reset_namespace_invalid' };
+
+  try {
+    return await runFinancialRestorePromotionTransactionV8({ database, task: async actions => {
+      const db = actions.database;
+      const identity = await db.getFirstAsync(
+        `SELECT namespace,ledger_id,restore_epoch FROM ledger_sync_identity_v8
+          WHERE namespace=? LIMIT 1`,
+        target,
+      );
+      if (!identity?.ledger_id || !Number.isSafeInteger(Number(identity.restore_epoch)) || Number(identity.restore_epoch) < 1) {
+        throw new Error('local_reset_cloud_identity_missing');
+      }
+      const [syncState, pending, restoreIntent, activeBootstrapRecovery, activeArchiveRecovery] = await Promise.all([
+        db.getFirstAsync(
+          `SELECT activated_at FROM ledger_sync_state_v8
+            WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+          String(identity.ledger_id), Number(identity.restore_epoch),
+        ),
+        db.getFirstAsync(
+          `SELECT COUNT(*) AS n FROM ledger_outbox_v3
+            WHERE namespace=? AND ledger_id=? AND restore_epoch=?
+              AND acknowledged_at IS NULL AND superseded_by_bootstrap_id IS NULL`,
+          target, String(identity.ledger_id), Number(identity.restore_epoch),
+        ),
+        db.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, restoreIntentMetaKey(target)),
+        db.getFirstAsync(
+          `SELECT session_id FROM ledger_bootstrap_recovery_import_v9
+            WHERE namespace=? AND status IN ('downloading','verifying','ready') LIMIT 1`,
+          target,
+        ),
+        db.getFirstAsync(
+          `SELECT session_id FROM ledger_archive_recovery_import_v11
+            WHERE namespace=? AND status IN ('downloading','verifying','ready') LIMIT 1`,
+          target,
+        ),
+      ]);
+      if (!syncState?.activated_at) throw new Error('local_reset_cloud_sync_not_active');
+      if (Number(pending?.n || 0) > 0) throw new Error('local_reset_cloud_sync_pending');
+      if (restoreIntent?.value) throw new Error('local_reset_restore_in_progress');
+      if (activeBootstrapRecovery?.session_id || activeArchiveRecovery?.session_id) {
+        throw new Error('local_reset_recovery_in_progress');
+      }
+
+      // Failed/aborted attempts can still own private stage namespaces. Remove
+      // them in this same transaction so a later manual recovery starts from a
+      // known-empty device instead of reusing stale receipts.
+      const [bootstrapStages, archiveStages] = await Promise.all([
+        db.getAllAsync(
+          `SELECT stage_namespace FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=?`, target,
+        ),
+        db.getAllAsync(
+          `SELECT stage_namespace FROM ledger_archive_recovery_import_v11 WHERE namespace=?`, target,
+        ),
+      ]);
+
+      await actions.clearFinancialNamespace(target);
+      await actions.clearColdArchiveNamespace(target);
+      for (const row of bootstrapStages) {
+        const stage = String(row?.stage_namespace || '').trim();
+        if (stage) await actions.clearFinancialNamespace(stage);
+      }
+      for (const row of archiveStages) {
+        const stage = String(row?.stage_namespace || '').trim();
+        if (stage) await actions.clearColdArchiveNamespace(stage);
+      }
+
+      await db.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=?`, target);
+      await db.runAsync(`DELETE FROM ledger_inbox_v2 WHERE namespace=?`, target);
+      await db.runAsync(`DELETE FROM ledger_sync_state_v7 WHERE namespace=?`, target);
+      await db.runAsync(`DELETE FROM ledger_migration_audits_v7 WHERE namespace=?`, target);
+      await db.runAsync(`DELETE FROM ledger_outbox_v3 WHERE ledger_id=?`, String(identity.ledger_id));
+      await db.runAsync(`DELETE FROM ledger_inbox_v3 WHERE ledger_id=?`, String(identity.ledger_id));
+      await db.runAsync(`DELETE FROM ledger_bootstrap_state_v8 WHERE ledger_id=?`, String(identity.ledger_id));
+      await db.runAsync(`DELETE FROM ledger_bootstrap_import_state_v8 WHERE ledger_id=?`, String(identity.ledger_id));
+      await db.runAsync(`DELETE FROM ledger_sync_state_v8 WHERE ledger_id=?`, String(identity.ledger_id));
+      await db.runAsync(`DELETE FROM ledger_bootstrap_recovery_rows_v10 WHERE namespace=?`, target);
+      await db.runAsync(`DELETE FROM ledger_bootstrap_recovery_import_v9 WHERE namespace=?`, target);
+      await db.runAsync(`DELETE FROM ledger_archive_recovery_rows_v12 WHERE namespace=?`, target);
+      await db.runAsync(`DELETE FROM ledger_archive_recovery_import_v11 WHERE namespace=?`, target);
+
+      // These keys are all namespaced. Preserve global schema metadata only.
+      for (const key of [
+        cleanV2AdoptionMetaKey(target),
+        restoreIntentMetaKey(target),
+        `active_sync_protocol:${target}`,
+        `sync_v2_activation_evidence:${target}`,
+        `bootstrap_recovery_promotion_v1:${target}`,
+        `financial_live_generation_v13:${target}`,
+      ]) await db.runAsync(`DELETE FROM ledger_v7_meta WHERE key=?`, key);
+      for (const pattern of [
+        `sync_v2_activation_evidence:${target}:%`,
+        `sync_v2_epoch_activation_pending:${target}:%`,
+        `canonical_restore_%:${target}:%`,
+        `canonical_restore_%:${target}`,
+      ]) await db.runAsync(`DELETE FROM ledger_v7_meta WHERE key LIKE ?`, pattern);
+
+      const foreignKeys = await db.getAllAsync('PRAGMA foreign_key_check');
+      if (foreignKeys.length) throw new Error('local_reset_foreign_key_failed');
+      const quick = await db.getFirstAsync('PRAGMA quick_check');
+      if (String(quick ? Object.values(quick)[0] : '').toLowerCase() !== 'ok') {
+        throw new Error('local_reset_quick_check_failed');
+      }
+      return {
+        supported: true,
+        ok: true,
+        namespace: target,
+        retainedLedgerId: String(identity.ledger_id),
+        retainedRestoreEpoch: Number(identity.restore_epoch),
+        recoveryRequired: true,
+      };
+    }});
+  } catch (error) {
+    return { supported: true, ok: false, reason: String(error?.message || 'local_reset_cloud_recovery_failed') };
+  }
+};
+
 async function insertCommandWithoutOutbox(db, command) {
   for (const currency of command.currencies || []) await insertCurrency(db, currency);
   for (const account of command.accounts || []) await upsertAccount(db, account);

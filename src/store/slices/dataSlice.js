@@ -22,7 +22,12 @@ import { clearPerformanceSnapshot, flushScheduledPerformanceSnapshot } from '../
 import { clearColdArchives, exportColdArchives, getColdArchiveNamespace, replaceColdArchives, storeColdArchiveYear, storeColdArchiveYears } from '../../lib/localArchiveRepository';
 import { compareTransactionsNewestFirst } from '../../lib/transactionIndex';
 import { activeLedgerSupported, clearLedgerNamespace, getLedgerNamespace, replaceLedgerSnapshot } from '../../lib/activeLedgerRepository';
-import { archiveFinancialTransactionsV7, clearFinancialWorkspaceV7, inspectLocalFinancialResetSafetyV8 } from '../../lib/financialLedgerV7Repository';
+import {
+  archiveFinancialTransactionsV7,
+  clearFinancialWorkspaceV7,
+  clearLocalFinancialDataForCloudRecoveryV8,
+  inspectLocalFinancialResetSafetyV8,
+} from '../../lib/financialLedgerV7Repository';
 import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
 import { createCanonicalBackupV11 } from '../../lib/financialBackupV11';
 import { decodeCanonicalBackupV11 } from '../../lib/financialBackupV11Decoder';
@@ -209,15 +214,142 @@ export const createDataSlice = (set, get) => ({
   },
 
   resetAll: async (options = {}) => {
-    // P19-015A2: destructive local reset owns the maintenance barrier.
+    // P19-015A2: destructive local reset owns the maintenance barrier. A
+    // signed-in V2 workspace is a separate operation from "start fresh".
+    // First finish its cloud sync while normal writes are still allowed; only
+    // then enter maintenance and clear this device for an explicit recovery.
     if (!options?.maintenanceOwned) {
+      const before = get();
+      const signedInCloudWorkspace = !!(
+        before.user && before.financialLedgerV7Cutover && activeLedgerSupported() && !before.cfg?.demoMode
+      );
+      if (signedInCloudWorkspace) {
+        if (!before.online || before.syncing) {
+          set({
+            lastSyncError: 'local_reset_cloud_sync_required',
+            restoreSafety: {
+              status: 'local_delete_sync_required',
+              operation: 'delete_local_data',
+              checkedAt: new Date().toISOString(),
+              reason: !before.online ? 'offline' : 'sync_in_progress',
+            },
+          });
+          return false;
+        }
+        const synced = await get().syncCloud({ reason: 'local_device_data_delete' });
+        const afterSync = get();
+        if (!synced || !afterSync.user || afterSync.user.id !== before.user.id || afterSync.dirty) {
+          set({
+            lastSyncError: 'local_reset_cloud_sync_required',
+            restoreSafety: {
+              status: 'local_delete_sync_required',
+              operation: 'delete_local_data',
+              checkedAt: new Date().toISOString(),
+              reason: !synced ? 'cloud_sync_failed' : 'local_state_changed_during_sync',
+            },
+          });
+          return false;
+        }
+      }
       return get().runFinancialMaintenance(
         'local_financial_reset',
         () => get().resetAll({ maintenanceOwned: true }),
+        { resumeSync: false },
       );
     }
     const current = get();
     const namespace = current.workspaceNamespace || 'guest';
+    const signedInCloudWorkspace = !!(
+      current.user && current.financialLedgerV7Cutover && activeLedgerSupported() && !current.cfg?.demoMode
+    );
+    if (signedInCloudWorkspace) {
+      const deviceReset = await clearLocalFinancialDataForCloudRecoveryV8({
+        namespace: getLedgerNamespace(namespace, current.cfg),
+      });
+      if (!deviceReset?.ok) {
+        set({
+          lastSyncError: String(deviceReset?.reason || 'local_reset_cloud_recovery_failed'),
+          restoreSafety: {
+            status: 'local_delete_blocked',
+            operation: 'delete_local_data',
+            checkedAt: new Date().toISOString(),
+            reason: String(deviceReset?.reason || 'local_reset_cloud_recovery_failed'),
+          },
+        });
+        return false;
+      }
+
+      const resetAt = new Date().toISOString();
+      const resetCfg = {
+        ...stripPerformanceCfg(current.cfg),
+        demoMode: false,
+        defaultWalletId: null,
+        archiveSummaries: [],
+        categoryBudgets: {},
+      };
+      try {
+        // This signed-in path deliberately clears only the current account's
+        // device namespace. A separate unsigned/guest workspace must never be
+        // silently destroyed as a side effect of this account action.
+        await clearVaultSnapshot(namespace);
+        await clearVaultSnapshot(syncBaseNamespace(namespace));
+        await clearColdArchives(getColdArchiveNamespace(namespace, current.cfg));
+        await clearColdArchives(getColdArchiveNamespace(namespace, { ...current.cfg, performanceTestMode: true }));
+        await clearPerformanceSnapshot();
+        if (activeLedgerSupported()) {
+          await clearLedgerNamespace(getLedgerNamespace(namespace, current.cfg));
+          await clearLedgerNamespace(getLedgerNamespace(namespace, { ...current.cfg, performanceTestMode: true }));
+        }
+        await AsyncStorage.multiRemove([
+          STORAGE.DATA, STORAGE.CATS, STORAGE.ROLLBACK, STORAGE.DEMO_REAL, STORAGE.DEMO_DATA, STORAGE.DEMO_ACTIVE,
+          ...Object.values(LEGACY_STORAGE_KEYS).flat(),
+        ]);
+        await AsyncStorage.setItem(resetMarkerKey(namespace), JSON.stringify({
+          legacyRecoveryDisabled: true,
+          pendingCloudSync: false,
+          localCloudRecoveryRequired: true,
+          localCloudRecoveryAccountId: String(current.user.id),
+          resetAt,
+        }));
+      } catch (error) {
+        // The authoritative V7 ledger has already been atomically cleared.
+        // Fail visibly and keep the pending-recovery marker so the app never
+        // mistakes a partially cleaned device for a fresh cloud conflict.
+        console.error('[STORE] local cloud reset cache cleanup', error);
+        set({
+          lastSyncError: 'local_reset_device_cache_cleanup_failed',
+          financialCloudRecoveryV2: {
+            status: 'local_data_deleted_pending_recovery',
+            workspaceNamespace: namespace,
+            ledgerNamespace: getLedgerNamespace(namespace, current.cfg),
+            error: 'local_reset_device_cache_cleanup_failed',
+            resetAt,
+          },
+        });
+        return false;
+      }
+
+      set({
+        trans: [], debts: [], goals: [], wallets: [], commitments: [], trackerTypes: [], trackerItems: [],
+        cats: DEF_CATS, cfg: resetCfg, syncConflict: null, lastSyncError: null, dirty: false,
+        cloudRevision: 0, lastSyncedAt: null,
+        financialLedgerV7Ready: true, financialLedgerV7Cutover: true,
+        financialCloudRecoveryV2: {
+          status: 'local_data_deleted_pending_recovery',
+          workspaceNamespace: namespace,
+          ledgerNamespace: getLedgerNamespace(namespace, current.cfg),
+          resetAt,
+          error: null,
+        },
+        restoreSafety: {
+          status: 'local_delete_ready_for_manual_recovery',
+          operation: 'delete_local_data',
+          checkedAt: resetAt,
+          reason: 'cloud_copy_preserved',
+        },
+      });
+      return true;
+    }
     const localResetSafety = activeLedgerSupported()
       ? await inspectLocalFinancialResetSafetyV8({ namespace: getLedgerNamespace(namespace, current.cfg) })
       : { blocked: false, reason: 'active_ledger_unsupported' };

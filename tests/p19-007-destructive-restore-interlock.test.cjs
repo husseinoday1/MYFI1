@@ -21,17 +21,19 @@ assert(restoreBody.includes('resetPendingOutbox: true'),
 const resetStart = data.indexOf('resetAll: async');
 const resetEnd = data.indexOf('restoreLastBackupRollback: async', resetStart);
 const resetBody = data.slice(resetStart, resetEnd);
-assert(resetBody.includes('local_reset_requires_protocol_v2'),
-  'signed-in destructive local reset is not fail-closed before V2 epoch activation');
+assert(resetBody.includes('clearLocalFinancialDataForCloudRecoveryV8'),
+  'signed-in local deletion must use the verified-cloud-recovery reset path');
+assert(resetBody.includes("syncCloud({ reason: 'local_device_data_delete' })"),
+  'signed-in local deletion must finish a cloud sync before maintenance clears this device');
 assert(resetBody.includes('local_reset_requires_complete_v2_recovery'),
-  'signed-out V2 destructive local reset must be fail-closed too');
+  'unsigned/legacy V2 destructive reset must remain fail-closed');
 const resetInterlockStart = resetBody.indexOf('const localResetSafety');
 const resetDestructiveStart = resetBody.indexOf('const wallets = normalizeWallets');
 const resetInterlockReturn = resetBody.indexOf('return false;', resetInterlockStart);
 assert(resetInterlockStart >= 0 && resetDestructiveStart > resetInterlockStart,
-  'reset interlock must be installed before destructive reset setup begins');
+  'legacy reset interlock must be installed before destructive reset setup begins');
 assert(resetInterlockReturn > resetInterlockStart && resetInterlockReturn < resetDestructiveStart,
-  'signed-in reset interlock must return before any destructive reset setup');
+  'legacy reset interlock must return before any destructive reset setup');
 
 const importStart = data.indexOf('importBackup: async');
 const importEnd = data.indexOf('\n  },\n});', importStart);
