@@ -13,6 +13,8 @@ assert.match(data, /inspectLocalFinancialResetSafetyV8/);
 assert.match(data, /local_reset_requires_complete_v2_recovery/);
 assert.match(data, /clearLocalFinancialDataForCloudRecoveryV8/);
 assert.match(data, /local_reset_cloud_sync_required/);
+assert.match(data, /isPendingLocalCloudRecoveryForUser/);
+assert.match(data, /local_reset_recovery_pending/);
 const resetStart = data.indexOf('resetAll: async');
 const resetEnd = data.indexOf('restoreLastBackupRollback: async', resetStart);
 const resetBody = data.slice(resetStart, resetEnd);
@@ -23,6 +25,16 @@ assert.ok(
 assert.ok(
   resetBody.indexOf('local_reset_recovery_marker_write_failed') < resetBody.indexOf('clearLocalFinancialDataForCloudRecoveryV8'),
   'the durable recovery marker must be written before the local ledger is cleared',
+);
+assert.ok(
+  resetBody.indexOf('const pendingRecoveryMarker = await readResetMarker(beforeNamespace)')
+    < resetBody.indexOf('const signedInCloudWorkspace'),
+  'a second device delete must stop before it attempts another cloud sync',
+);
+assert.ok(
+  resetBody.indexOf('const pendingRecoveryMarker = await readResetMarker(namespace)')
+    < resetBody.indexOf('const signedInCloudWorkspace', resetBody.indexOf('const pendingRecoveryMarker = await readResetMarker(namespace)')),
+  'the maintenance-owned path must not bypass the pending-recovery guard',
 );
 for (const token of [
   'ledger_sync_identity_v8',

@@ -44,6 +44,18 @@ const RESET_MARKER_PREFIX = 'MYFI_INTENTIONAL_RESET_V1';
 const syncBaseNamespace = namespace => `sync-base:${String(namespace || GUEST_NAMESPACE)}`;
 const backupRestoreRollbackNamespace = namespace => `backup-restore-rollback:${String(namespace || GUEST_NAMESPACE)}`;
 const resetMarkerKey = namespace => `${RESET_MARKER_PREFIX}:${String(namespace || GUEST_NAMESPACE)}`;
+const readResetMarker = async namespace => {
+  try {
+    const raw = await AsyncStorage.getItem(resetMarkerKey(namespace));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    // A malformed intent must not be interpreted as permission to run a
+    // destructive reset. The caller can still report the blocked action.
+    return { unreadable: true };
+  }
+};
+const isPendingLocalCloudRecoveryForUser = (marker, userId) => marker?.localCloudRecoveryRequired === true
+  && String(marker?.localCloudRecoveryAccountId || '') === String(userId || '');
 const canonicalBackupCandidate = value => value?.kind === 'myfi_canonical_financial_backup';
 const withRestoreNetworkTimeout = async (promise, code, timeoutMs = 10000) => {
   let timer = null;
@@ -220,6 +232,25 @@ export const createDataSlice = (set, get) => ({
     // then enter maintenance and clear this device for an explicit recovery.
     if (!options?.maintenanceOwned) {
       const before = get();
+      const beforeNamespace = before.workspaceNamespace || GUEST_NAMESPACE;
+      const pendingRecoveryMarker = await readResetMarker(beforeNamespace);
+      if (isPendingLocalCloudRecoveryForUser(pendingRecoveryMarker, before.user?.id)) {
+        set({
+          lastSyncError: 'local_reset_recovery_pending',
+          financialCloudRecoveryV2: {
+            status: 'local_data_deleted_pending_recovery',
+            workspaceNamespace: beforeNamespace,
+            error: null,
+          },
+          restoreSafety: {
+            status: 'local_delete_recovery_pending',
+            operation: 'delete_local_data',
+            checkedAt: new Date().toISOString(),
+            reason: 'restore_cloud_data_before_next_local_delete',
+          },
+        });
+        return false;
+      }
       const signedInCloudWorkspace = !!(
         before.user && before.financialLedgerV7Cutover && activeLedgerSupported() && !before.cfg?.demoMode
       );
@@ -259,6 +290,24 @@ export const createDataSlice = (set, get) => ({
     }
     const current = get();
     const namespace = current.workspaceNamespace || 'guest';
+    const pendingRecoveryMarker = await readResetMarker(namespace);
+    if (isPendingLocalCloudRecoveryForUser(pendingRecoveryMarker, current.user?.id)) {
+      set({
+        lastSyncError: 'local_reset_recovery_pending',
+        financialCloudRecoveryV2: {
+          status: 'local_data_deleted_pending_recovery',
+          workspaceNamespace: namespace,
+          error: null,
+        },
+        restoreSafety: {
+          status: 'local_delete_recovery_pending',
+          operation: 'delete_local_data',
+          checkedAt: new Date().toISOString(),
+          reason: 'restore_cloud_data_before_next_local_delete',
+        },
+      });
+      return false;
+    }
     const signedInCloudWorkspace = !!(
       current.user && current.financialLedgerV7Cutover && activeLedgerSupported() && !current.cfg?.demoMode
     );
