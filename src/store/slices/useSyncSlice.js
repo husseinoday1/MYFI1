@@ -2022,6 +2022,21 @@ export const createSyncSlice = (set, get) => ({
       : namespace === GUEST_NAMESPACE;
     try {
       const resetMarker = await readResetMarker(namespace);
+      // A signed-in user may close the app between removing this device's
+      // local copy and choosing "Restore from cloud". Rehydrate the durable
+      // intent before reading the empty shell so Settings can always offer
+      // the explicit recovery action after a restart.
+      const pendingLocalCloudRecovery = resetMarker?.localCloudRecoveryRequired === true
+        && String(resetMarker?.localCloudRecoveryAccountId || '') === String(get().user?.id || '');
+      if (pendingLocalCloudRecovery) {
+        set({
+          financialCloudRecoveryV2: {
+            status: 'local_data_deleted_pending_recovery',
+            workspaceNamespace: namespace,
+            error: null,
+          },
+        });
+      }
       const demoSnapshot = resetMarker?.legacyRecoveryDisabled
         ? null
         : await readPerformanceSnapshot(namespace);

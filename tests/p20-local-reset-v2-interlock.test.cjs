@@ -6,6 +6,7 @@ const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const data = fs.readFileSync(path.join(root, 'src/store/slices/dataSlice.js'), 'utf8');
 const repo = fs.readFileSync(path.join(root, 'src/lib/financialLedgerV7Repository.js'), 'utf8');
 const settings = fs.readFileSync(path.join(root, 'src/screens/SettingsScreen.js'), 'utf8');
+const sync = fs.readFileSync(path.join(root, 'src/store/slices/useSyncSlice.js'), 'utf8');
 const gate = fs.readFileSync(path.join(root, 'tests/run-quality-gate.cjs'), 'utf8');
 
 assert.match(data, /inspectLocalFinancialResetSafetyV8/);
@@ -36,6 +37,8 @@ for (const token of [
   'restoreLocalDataFromCloud',
   'استعادة بياناتي من السحابة',
 ]) assert.ok(settings.includes(token), `missing signed-in local-delete UX: ${token}`);
+assert.match(sync, /const pendingLocalCloudRecovery = resetMarker\?\.localCloudRecoveryRequired === true/);
+assert.match(sync, /status: 'local_data_deleted_pending_recovery'/);
 assert.ok(gate.includes('p20-local-reset-v2-interlock.test.cjs'));
 assert.ok(gate.includes('run-p20-local-reset-v2-interlock.cjs'));
 
