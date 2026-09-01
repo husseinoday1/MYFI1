@@ -263,10 +263,44 @@ export const createDataSlice = (set, get) => ({
       current.user && current.financialLedgerV7Cutover && activeLedgerSupported() && !current.cfg?.demoMode
     );
     if (signedInCloudWorkspace) {
+      const resetAt = new Date().toISOString();
+      // Persist the recovery intention before the authoritative SQLite delete.
+      // AsyncStorage is a different durability boundary, so this ordering means
+      // an app/process interruption can never leave a cleared ledger without a
+      // durable, account-bound route back to the cloud copy.
+      try {
+        await AsyncStorage.setItem(resetMarkerKey(namespace), JSON.stringify({
+          legacyRecoveryDisabled: true,
+          pendingCloudSync: false,
+          localCloudRecoveryRequired: true,
+          localCloudRecoveryAccountId: String(current.user.id),
+          resetAt,
+        }));
+      } catch (error) {
+        set({
+          lastSyncError: 'local_reset_recovery_marker_write_failed',
+          restoreSafety: {
+            status: 'local_delete_blocked',
+            operation: 'delete_local_data',
+            checkedAt: resetAt,
+            reason: 'local_reset_recovery_marker_write_failed',
+          },
+        });
+        return false;
+      }
       const deviceReset = await clearLocalFinancialDataForCloudRecoveryV8({
         namespace: getLedgerNamespace(namespace, current.cfg),
       });
       if (!deviceReset?.ok) {
+        try {
+          await AsyncStorage.setItem(resetMarkerKey(namespace), JSON.stringify({
+            legacyRecoveryDisabled: true,
+            pendingCloudSync: false,
+            localCloudRecoveryRequired: false,
+            localCloudRecoveryAccountId: null,
+            resetAt,
+          }));
+        } catch {}
         set({
           lastSyncError: String(deviceReset?.reason || 'local_reset_cloud_recovery_failed'),
           restoreSafety: {
@@ -279,7 +313,6 @@ export const createDataSlice = (set, get) => ({
         return false;
       }
 
-      const resetAt = new Date().toISOString();
       const resetCfg = {
         ...stripPerformanceCfg(current.cfg),
         demoMode: false,

@@ -19,6 +19,10 @@ assert.ok(
   resetBody.indexOf('const signedInCloudWorkspace') < resetBody.indexOf('const localResetSafety'),
   'signed-in cloud deletion must branch before the legacy reset path',
 );
+assert.ok(
+  resetBody.indexOf('local_reset_recovery_marker_write_failed') < resetBody.indexOf('clearLocalFinancialDataForCloudRecoveryV8'),
+  'the durable recovery marker must be written before the local ledger is cleared',
+);
 for (const token of [
   'ledger_sync_identity_v8',
   'ledger_sync_state_v8',
