@@ -58,6 +58,21 @@ for (const token of [
 ]) assert(sync.includes(token), `missing controlled activation token: ${token}`);
 
 assert.match(sync,/for \(let pass = 1; pass <= 3; pass \+= 1\)/);
+
+// Every attempt starts from a clean validation slate: a previous attempt's
+// shadow cursor and its 'conflict' inbox rows would otherwise lock this one out
+// before preflight even runs. The reset carries its own guards, so a refusal
+// means there was nothing to reset and must never abort the activation.
+{
+  const activation = sync.slice(sync.indexOf('const runControlledFinancialV2Activation'));
+  const reset = activation.indexOf('resetFinancialV2ShadowValidationStateV8');
+  const shadowLoop = activation.indexOf('for (let pass = 1; pass <= 3; pass += 1)');
+  assert(reset > 0 && reset < shadowLoop,
+    'shadow validation state must be reset before the shadow passes');
+  assert.match(activation.slice(reset - 200, shadowLoop),
+    /try \{[\s\S]*resetFinancialV2ShadowValidationStateV8[\s\S]*\} catch/,
+    'a failed reset must not abort the activation');
+}
 assert.match(sync,/pendingAfterSync[\s\S]*uploaded[\s\S]*downloaded[\s\S]*hasMore/);
 assert.match(sync,/readbackVerifiedAt:\s*readback\.verifiedAt/);
 assert.match(sync,/shadowValidatedAt/);

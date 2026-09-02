@@ -52,6 +52,7 @@ import {
   persistFinancialLocalPreferencesV7,
   activateFinancialSyncProtocolV2V8,
   readFinancialSyncProtocolV8,
+  resetFinancialV2ShadowValidationStateV8,
   inspectFinancialEmptyShellV8,
   recordFinancialCloudRecoveryV8,
   adoptUnbootstrappedCloudLedgerIdentityV8,
@@ -1185,6 +1186,27 @@ const runControlledFinancialV2Activation = async ({
       expectedRowCount: bootstrap.expectedRowCount,
       readbackVerifiedAt: readback.verifiedAt,
       error: null,
+    },
+  }));
+
+  // A previous attempt can leave a shadow cursor above commands it never
+  // applied, and a 'conflict' inbox row that is checked before preflight and
+  // never cleared anywhere -- together they lock every later attempt out. Start
+  // this one from a clean validation slate. Its own guards make it a no-op on an
+  // activated ledger or one already syncing production, so a refusal here simply
+  // means there was nothing to reset and must never stop the activation.
+  let shadowValidationReset = null;
+  try {
+    shadowValidationReset = await resetFinancialV2ShadowValidationStateV8({ namespace: ledgerNamespace });
+  } catch (error) {
+    shadowValidationReset = { ok: false, reason: String(error?.message || error) };
+  }
+  // Recorded on the activation state so a later diagnosis can tell an attempt
+  // that started clean from one that inherited a previous attempt's leftovers.
+  set(state => ({
+    financialSyncV2Activation: {
+      ...(state.financialSyncV2Activation || {}),
+      shadowValidationReset,
     },
   }));
 
