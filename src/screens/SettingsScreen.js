@@ -1178,8 +1178,8 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
             const result = await confirmV2ConflictRecovery();
             if (!result?.ok) {
               Alert.alert(isAr ? 'لم يكتمل الاستبدال' : 'Replacement was not completed', isAr
-                ? 'بقيت نقطة الرجوع المحلية محفوظة ولم نغيّر السحابة.'
-                : 'The local restore point remains and the cloud was not changed.');
+                ? 'بقيت نسخة الأمان المحلية للدعم محفوظة ولم نغيّر السحابة.'
+                : 'The local safety copy for support remains and the cloud was not changed.');
             }
           } finally { setConflictRecoveryBusy(false); }
         } },
