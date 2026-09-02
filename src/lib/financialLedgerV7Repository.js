@@ -2844,6 +2844,92 @@ export const activateFinancialSyncProtocolV2V8 = async ({
   }));
 };
 
+/**
+ * Clears the validation state one activation attempt left behind, so the next
+ * attempt starts from a clean slate rather than resuming a partial one.
+ *
+ * Two things outlive a failed attempt. The shadow cursor sits above commands
+ * shadow validated but never applied, so a later attempt resumes mid-chain with
+ * nothing to rebuild its projection from. And a preflight failure records the
+ * command in ledger_inbox_v3 as 'conflict', which is checked before preflight
+ * and preserved by every writer — so a command that failed once can never be
+ * revalidated, even after the reason it failed has been fixed.
+ *
+ * Neither carries data: 'conflict' means only "this could not be applied here".
+ * Clearing them forces an honest revalidation, and a real conflict is simply
+ * recorded again. 'applied' rows are the opposite — they record mutations that
+ * really did land and are what stops a double apply, so they are never touched
+ * and that is asserted here rather than assumed. An already-activated ledger,
+ * or one whose production cursor has moved, is refused outright.
+ */
+export const resetFinancialV2ShadowValidationStateV8 = async ({
+  namespace = 'guest', database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
+  await ensureFinancialLedgerV7(db);
+  const identity = await ensureLedgerSyncIdentityV8({ namespace, database: db });
+  if (!identity?.ledgerId) return { supported: true, ok: false, reason: 'financial_v2_shadow_reset_identity_missing' };
+
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    const state = await txn.getFirstAsync(
+      `SELECT activated_at,shadow_last_server_sequence,last_server_sequence
+         FROM ledger_sync_state_v8 WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+      identity.ledgerId, identity.restoreEpoch,
+    );
+    if (state?.activated_at) {
+      return { supported: true, ok: false, reason: 'financial_v2_shadow_reset_already_activated' };
+    }
+    if (Math.max(0, Number(state?.last_server_sequence || 0)) > 0) {
+      return { supported: true, ok: false, reason: 'financial_v2_shadow_reset_production_cursor_present' };
+    }
+
+    const appliedBefore = await txn.getFirstAsync(
+      `SELECT COUNT(*) AS n FROM ledger_inbox_v3
+        WHERE ledger_id=? AND restore_epoch=? AND apply_status='applied'`,
+      identity.ledgerId, identity.restoreEpoch,
+    );
+    const cleared = await txn.runAsync(
+      `DELETE FROM ledger_inbox_v3
+        WHERE ledger_id=? AND restore_epoch=? AND apply_status='conflict'`,
+      identity.ledgerId, identity.restoreEpoch,
+    );
+    const appliedAfter = await txn.getFirstAsync(
+      `SELECT COUNT(*) AS n FROM ledger_inbox_v3
+        WHERE ledger_id=? AND restore_epoch=? AND apply_status='applied'`,
+      identity.ledgerId, identity.restoreEpoch,
+    );
+    if (Number(appliedBefore?.n || 0) !== Number(appliedAfter?.n || 0)) {
+      throw new Error('financial_v2_shadow_reset_applied_inbox_touched');
+    }
+
+    // The guards are repeated in the WHERE clause so the write cannot land on a
+    // ledger that changed between the read above and this statement.
+    const shadowCursorBefore = Math.max(0, Number(state?.shadow_last_server_sequence || 0));
+    if (state) {
+      const updated = await txn.runAsync(
+        `UPDATE ledger_sync_state_v8
+            SET shadow_last_server_sequence=0,last_shadow_success_at=NULL,updated_at=?
+          WHERE ledger_id=? AND restore_epoch=? AND activated_at IS NULL AND last_server_sequence=0`,
+        new Date().toISOString(), identity.ledgerId, identity.restoreEpoch,
+      );
+      if (Number(updated?.changes || 0) !== 1) {
+        throw new Error('financial_v2_shadow_reset_compare_and_set_failed');
+      }
+    }
+    return {
+      supported: true,
+      ok: true,
+      namespace: identity.namespace,
+      ledgerId: identity.ledgerId,
+      restoreEpoch: identity.restoreEpoch,
+      shadowCursorBefore,
+      clearedConflictRows: Number(cleared?.changes || 0),
+      preservedAppliedRows: Number(appliedAfter?.n || 0),
+    };
+  }));
+};
+
 export const readPendingLedgerMutationsV8 = async ({
   namespace = 'guest', ledgerId, restoreEpoch, limit = 100, database = null,
 } = {}) => {
