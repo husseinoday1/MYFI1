@@ -1464,6 +1464,29 @@ const runControlledFinancialV2Activation = async ({
 
 };
 
+const rehydratePreparedV2ConflictRecovery = async ({ set, namespace, accountId, cfg }) => {
+  const conflictRecoveryAccountId = String(accountId || '').trim();
+  if (!conflictRecoveryAccountId) return null;
+  try {
+    const resumedConflictRecovery = await resumePreparedCloudConflictRecoveryV1({
+      namespace: getLedgerNamespace(namespace, cfg || DEF_CFG),
+      accountId: conflictRecoveryAccountId,
+    });
+    if (resumedConflictRecovery?.found) {
+      set({
+        restoreSafety: {
+          status: resumedConflictRecovery?.ok ? 'financial_v2_conflict_recovery_ready' : 'financial_v2_conflict_recovery_blocked',
+          operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString(),
+          checkpointId: resumedConflictRecovery?.intent?.local?.checkpointId || null,
+          reason: resumedConflictRecovery?.ok ? null : String(resumedConflictRecovery?.reason || 'resume_failed'),
+        },
+      });
+    }
+    return resumedConflictRecovery;
+  } catch {}
+  return null;
+};
+
 export const createSyncSlice = (set, get) => ({
   // P19-015A2: shared store-level maintenance owner. Requests become pending
   // synchronously, scheduled sync is cancelled, in-flight sync is drained,
@@ -1882,6 +1905,12 @@ export const createSyncSlice = (set, get) => ({
         syncConflict: null,
         lastSyncError: null,
       });
+      await rehydratePreparedV2ConflictRecovery({
+        set,
+        namespace: currentNamespace,
+        accountId: user.id,
+        cfg: get().cfg || DEF_CFG,
+      });
       await writeActiveLocalLedgerContext({
         namespace: currentNamespace,
         linkedUserId: nextUserId,
@@ -2116,25 +2145,12 @@ export const createSyncSlice = (set, get) => ({
           },
         });
       }
-      const conflictRecoveryAccountId = String(get().user?.id || '').trim();
-      if (conflictRecoveryAccountId) {
-        try {
-          const resumedConflictRecovery = await resumePreparedCloudConflictRecoveryV1({
-            namespace: getLedgerNamespace(namespace, get().cfg || DEF_CFG),
-            accountId: conflictRecoveryAccountId,
-          });
-          if (resumedConflictRecovery?.found) {
-            set({
-              restoreSafety: {
-                status: resumedConflictRecovery?.ok ? 'financial_v2_conflict_recovery_ready' : 'financial_v2_conflict_recovery_blocked',
-                operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString(),
-                checkpointId: resumedConflictRecovery?.intent?.local?.checkpointId || null,
-                reason: resumedConflictRecovery?.ok ? null : String(resumedConflictRecovery?.reason || 'resume_failed'),
-              },
-            });
-          }
-        } catch {}
-      }
+      await rehydratePreparedV2ConflictRecovery({
+        set,
+        namespace,
+        accountId: get().user?.id,
+        cfg: get().cfg || DEF_CFG,
+      });
       const demoSnapshot = resetMarker?.legacyRecoveryDisabled
         ? null
         : await readPerformanceSnapshot(namespace);

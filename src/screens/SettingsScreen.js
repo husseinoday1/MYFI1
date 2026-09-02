@@ -1568,7 +1568,8 @@ function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accou
       <MenuGroup th={th}>
         <MenuRow th={th} isAr={isAr} icon="apps-outline" iconColor={th.primary} title={T.featureVisibility} subtitle={T.featureVisibilitySub} onPress={() => onOpen('features')} />
         <MenuRow th={th} isAr={isAr} icon="notifications-outline" iconColor={th.warn} title={T.notifications} subtitle={T.notificationsSub} onPress={() => onOpen('notifications')} />
-        <MenuRow th={th} isAr={isAr} icon="book-outline" iconColor={th.transfer} title={T.guide} subtitle={T.guideProfessionalSub} onPress={() => onOpen('guide')} last />
+        <MenuRow th={th} isAr={isAr} icon="book-outline" iconColor={th.transfer} title={T.guide} subtitle={T.guideProfessionalSub} onPress={() => onOpen('guide')} />
+        <MenuRow th={th} isAr={isAr} icon="information-circle-outline" iconColor={th.sub} title={T.about} subtitle={T.aboutSub} onPress={() => onOpen('about')} last />
       </MenuGroup>
 
       <SectionLabel th={th} isAr={isAr} text={isAr ? 'الخصوصية والأمان' : 'Privacy & Security'} />

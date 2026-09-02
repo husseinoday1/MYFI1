@@ -162,6 +162,21 @@ const resume = fixture => recovery.resumePreparedCloudConflictRecoveryV1({
   namespace: fixture.namespace, accountId: 'account-1', database: fixture.db,
 });
 
+const buildSliceRehydrator = ({ source, set, fixture }) => {
+  const start = source.indexOf('const rehydratePreparedV2ConflictRecovery = async');
+  const end = source.indexOf('\n\nexport const createSyncSlice', start);
+  assert.ok(start >= 0 && end > start, 'shared conflict-recovery rehydration helper is missing');
+  const helper = source.slice(start, end);
+  return new Function(
+    'resumePreparedCloudConflictRecoveryV1', 'getLedgerNamespace', 'DEF_CFG',
+    `${helper}\nreturn rehydratePreparedV2ConflictRecovery;`,
+  )(
+    input => recovery.resumePreparedCloudConflictRecoveryV1({ ...input, database: fixture.db }),
+    namespace => namespace,
+    {},
+  );
+};
+
 const testSliceResumeRouting = async () => {
   const source = fs.readFileSync(sliceTarget, 'utf8');
   const start = source.indexOf('prepareV2ConflictRecovery: async () => {');
@@ -210,19 +225,18 @@ const testSliceRestartRehydration = async fixture => {
   handler = handler.trim().replace(/^loadLocal:\s*/, '');
   const build = new Function(
     'get', 'set', 'readActiveLocalLedgerNamespace', 'GUEST_NAMESPACE', 'readResetMarker',
-    'resumePreparedCloudConflictRecoveryV1', 'getLedgerNamespace', 'DEF_CFG', `return (${handler});`,
+    'rehydratePreparedV2ConflictRecovery', `return (${handler});`,
   );
   for (const lastSyncError of [null, 'ledger_queue_reentrant_from_read_transaction']) {
     const state = { user: { id: 'account-1' }, cfg: {}, restoreSafety: null, lastSyncError };
+    const set = patch => Object.assign(state, patch);
     const action = build(
       () => state,
-      patch => Object.assign(state, patch),
+      set,
       async () => fixture.namespace,
       'guest',
       async namespace => { assert.equal(namespace, fixture.namespace); return {}; },
-      input => recovery.resumePreparedCloudConflictRecoveryV1({ ...input, database: fixture.db }),
-      namespace => namespace,
-      {},
+      buildSliceRehydrator({ source, set, fixture }),
     );
     assert.equal(await action(fixture.namespace, { maintenanceOwned: true }), true);
     assert.equal(state.restoreSafety?.status, 'financial_v2_conflict_recovery_ready');
@@ -234,6 +248,50 @@ const testSliceRestartRehydration = async fixture => {
   assert.match(settings, /restoreSafety\?\.operation === 'financial_v2_conflict_recovery'/);
 };
 
+const testSlicePreserveCurrentRehydration = async fixture => {
+  const source = fs.readFileSync(sliceTarget, 'utf8');
+  const start = source.indexOf('    if (transition.preserveCurrent && transition.namespace === currentNamespace && current.workspaceReady) {');
+  const end = source.indexOf('\n\n    if (current.user && current.workspaceReady', start);
+  assert.ok(start >= 0 && end > start, 'preserveCurrent branch is missing');
+  const branch = source.slice(start, end);
+  const build = new Function(
+    'set', 'get', 'rehydratePreparedV2ConflictRecovery', 'writeActiveLocalLedgerContext', 'hydrateProfileWhenSafe',
+    `return async ({ transition, currentNamespace, current, user, nextUserId, priorIdentity }) => {${branch}\nreturn null; };`,
+  );
+  const state = { cfg: {}, workspaceReady: true, restoreSafety: null, loadLocal: async () => { throw new Error('loadLocal must not run'); } };
+  const set = patch => Object.assign(state, patch);
+  let rehydrateCalls = 0;
+  let loadLocalCalls = 0;
+  state.loadLocal = async () => { loadLocalCalls += 1; };
+  const rehydrate = buildSliceRehydrator({ source, set, fixture });
+  const action = build(
+    set,
+    () => state,
+    async input => { rehydrateCalls += 1; return rehydrate(input); },
+    async () => {},
+    async () => {},
+  );
+  const result = await action({
+    transition: { preserveCurrent: true, namespace: fixture.namespace },
+    currentNamespace: fixture.namespace,
+    current: { workspaceReady: true },
+    user: { id: 'account-1' },
+    nextUserId: 'account-1',
+    priorIdentity: null,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(rehydrateCalls, 1, 'preserveCurrent must rehydrate the durable intent once');
+  assert.equal(loadLocalCalls, 0, 'preserveCurrent must not reload the mounted ledger');
+  assert.equal(state.restoreSafety?.status, 'financial_v2_conflict_recovery_ready');
+  assert.equal(state.restoreSafety?.checkpointId, fixture.checkpointId);
+
+  const settings = fs.readFileSync(settingsTarget, 'utf8');
+  const rootStart = settings.indexOf('function RootSettings(');
+  const rootEnd = settings.indexOf('\n\nfunction AccountPage(', rootStart);
+  const rootSettings = settings.slice(rootStart, rootEnd);
+  assert.match(rootSettings, /title=\{T\.about\}[\s\S]*onPress=\{\(\) => onOpen\('about'\)\}/, 'RootSettings must expose an About MYFI route');
+};
+
 (async () => {
   const basic = createFixture();
   const prepared = await prepare(basic);
@@ -242,6 +300,7 @@ const testSliceRestartRehydration = async fixture => {
   assert.equal(resumed.intent.local.checkpointId, prepared.intent.local.checkpointId);
   assert.equal(basic.db.native.prepare("SELECT COUNT(*) AS n FROM ledger_v7_meta WHERE key LIKE 'financial_v2_conflict_checkpoint_v1:%'").get().n, 1, 'resume must not create a second checkpoint');
   await testSliceRestartRehydration(basic);
+  await testSlicePreserveCurrentRehydration(basic);
 
   const wrongAccount = await recovery.resumePreparedCloudConflictRecoveryV1({ namespace: basic.namespace, accountId: 'another-account', database: basic.db });
   assert.equal(wrongAccount.ok, false);
