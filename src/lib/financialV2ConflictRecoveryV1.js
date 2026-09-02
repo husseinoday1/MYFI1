@@ -59,7 +59,9 @@ const containsFinancialData = (value, depth = 0) => {
 // The whitelist is deliberately smaller than a normal workspace payload. A
 // recovery may quarantine only setup metadata; a financial value makes this
 // path fail closed and leaves all data untouched for manual recovery.
-const staleWorkspaceCommand = (row, cloudWorkspaceRevision) => {
+// Exported so the narrow repair path proves staleness with this exact
+// definition rather than a second copy of it: the two must never drift.
+export const staleWorkspaceCommand = (row, cloudWorkspaceRevision) => {
   const envelope = parse(row?.payload_json);
   const payload = object(envelope?.payload) ? envelope.payload : null;
   const revision = Number(row?.revision);
