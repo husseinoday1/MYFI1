@@ -64,6 +64,7 @@ import { fetchVerifiedFinancialCloudRecoverySourceV2 } from '../../lib/financial
 import { recoverVerifiedBootstrapWithArchiveV2 } from '../../lib/financialBootstrapRecoveryCoordinatorV2';
 import {
   confirmPreparedCloudConflictRecoveryV1,
+  hasActiveV2ConflictRecoveryIntentV1,
   prepareVerifiedCloudConflictRecoveryV1,
   resumePreparedCloudConflictRecoveryV1,
 } from '../../lib/financialV2ConflictRecoveryV1';
@@ -2565,6 +2566,14 @@ export const createSyncSlice = (set, get) => ({
 
       try {
         const namespace = initial.workspaceNamespace || workspaceNamespaceForSession({ user: initial.user });
+        if (activeLedgerSupported() && initial.financialLedgerV7Cutover) {
+          const conflictRecoveryNamespace = getLedgerNamespace(namespace, initial.cfg);
+          const activeConflictRecovery = await hasActiveV2ConflictRecoveryIntentV1({
+            namespace: conflictRecoveryNamespace,
+            accountId: syncUserId,
+          });
+          if (activeConflictRecovery) throw new Error('financial_v2_conflict_recovery_active');
+        }
         let cloudRecovery = null;
         if (activeLedgerSupported() && initial.financialLedgerV7Cutover) {
           // A normal sync proves its local V2 state first. Only an actually empty

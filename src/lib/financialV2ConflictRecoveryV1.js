@@ -22,6 +22,10 @@ const text = value => String(value ?? '').trim();
 const parse = value => { try { return JSON.parse(String(value ?? '')); } catch { return null; } };
 const intentKey = namespace => `financial_v2_conflict_recovery_intent_v1:${text(namespace)}`;
 const checkpointKey = (namespace, id) => `financial_v2_conflict_checkpoint_v1:${text(namespace)}:${text(id)}`;
+const ACTIVE_CONFLICT_RECOVERY_INTENT_STATUSES = new Set([
+  'ready_for_explicit_cloud_replacement',
+  'local_promoted_pending_activation',
+]);
 const failure = (reason, extra = {}) => ({
   supported: true, ok: false, reason: text(reason) || 'financial_v2_conflict_recovery_prepare_failed', ...extra,
 });
@@ -135,6 +139,28 @@ const inspectCandidate = async ({ db, namespace, cloudSource }) => {
       revision: Number(row.revision), baseRevision: Number(row.base_revision), payloadJson: text(row.payload_json),
     })),
   });
+};
+
+// This intentionally narrow read gate is used before an ordinary cloud sync
+// starts. It does not resume, validate, or mutate recovery state: its only job
+// is to keep every automatic sync path outside a still-active recovery.
+export const hasActiveV2ConflictRecoveryIntentV1 = async ({
+  namespace = 'guest', accountId, database = null,
+} = {}) => {
+  const target = text(namespace);
+  const owner = text(accountId);
+  const db = database || await getLedgerDb();
+  if (!db || !target || !owner) return false;
+  try {
+    const row = await db.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, intentKey(target),
+    );
+    const intent = parse(row?.value);
+    return text(intent?.accountId) === owner
+      && ACTIVE_CONFLICT_RECOVERY_INTENT_STATUSES.has(text(intent?.status));
+  } catch {
+    return false;
+  }
 };
 
 /**
