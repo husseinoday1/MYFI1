@@ -575,6 +575,67 @@ export const restoreFinancialConflictRecoveryCheckpointV1 = async ({
   }
 };
 
+/**
+ * The one way a conflict-recovery intent stops blocking sync. The gate stays
+ * closed through preparation, promotion and rollback because the V2 conflict is
+ * still open in all of them; it may only open once the ledger is genuinely
+ * activated on V2 again.
+ *
+ * That proof is read here from ledger_sync_state_v8 rather than taken from the
+ * caller, so no UI can retire an intent by claiming success. The record is kept
+ * and re-stated, never deleted.
+ */
+export const retireConflictRecoveryIntentAfterActivationV1 = async ({
+  namespace = 'guest', database = null,
+} = {}) => {
+  const target = text(namespace);
+  if (!target) return failure('financial_v2_conflict_recovery_retire_input_invalid');
+
+  try {
+    return await runFinancialRestorePromotionTransactionV8({ database, task: async actions => {
+      const db = actions.database;
+      const [identity, intentRow] = await Promise.all([
+        db.getFirstAsync(`SELECT * FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`, target),
+        db.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, conflictRecoveryIntentKey(target)),
+      ]);
+      if (!identity?.ledger_id) throw new Error('financial_v2_conflict_recovery_retire_identity_missing');
+      const intent = parse(intentRow?.value);
+      if (!intent || intent.version !== 1 || text(intent.namespace) !== target
+          || text(intent.status) !== 'rolled_back_after_activation_failure') {
+        throw new Error('financial_v2_conflict_recovery_retire_intent_not_eligible');
+      }
+      const state = await db.getFirstAsync(
+        `SELECT activated_at FROM ledger_sync_state_v8 WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+        text(identity.ledger_id), Number(identity.restore_epoch),
+      );
+      if (!state?.activated_at) throw new Error('financial_v2_conflict_recovery_retire_not_activated');
+
+      const now = new Date().toISOString();
+      const retired = {
+        ...intent,
+        status: 'retired_after_reviewed_repair',
+        retiredAt: now,
+        retiredEvidence: {
+          ledgerId: text(identity.ledger_id),
+          restoreEpoch: Number(identity.restore_epoch),
+          activatedAt: String(state.activated_at),
+        },
+      };
+      const updated = await db.runAsync(
+        `UPDATE ledger_v7_meta SET value=?,updated_at=? WHERE key=? AND value=?`,
+        JSON.stringify(retired), now, conflictRecoveryIntentKey(target), String(intentRow.value),
+      );
+      if (Number(updated?.changes || 0) !== 1) throw new Error('financial_v2_conflict_recovery_retire_compare_and_swap_failed');
+      return {
+        supported: true, ok: true, namespace: target, status: retired.status,
+        activatedAt: String(state.activated_at),
+      };
+    }});
+  } catch (error) {
+    return failure(error?.message);
+  }
+};
+
 // The same allow-list the V2 adoption and empty-shell classifications already
 // use: setup metadata only. A financial row must never fall inside a discard.
 const setupOnlyLegacyRow = row => (

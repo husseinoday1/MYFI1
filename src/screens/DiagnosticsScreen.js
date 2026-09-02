@@ -2,11 +2,14 @@
 // chain (see src/dev/p12ConflictRecoveryDiagnostics.js). The whole reading side
 // is read-only: no SQLite write, no network, no Supabase call.
 //
-// It carries exactly one action, and only in one state: when a conflict
-// recovery was promoted locally but never activated, the owner can put the
-// checkpoint back. It is rendered only while that state actually holds, runs
-// only after an explicit confirmation, and never repeats itself. The reading
-// collector stays write-free — the action calls the recovery library directly.
+// It carries three actions, each offered only in the single state it repairs,
+// in the order the repair has to happen: put the checkpoint back, drop the
+// pending changes the failed attempt left behind, then turn sync back on. Each
+// is rendered only while its state actually holds, runs only after an explicit
+// confirmation, and disappears once it has succeeded. Turning sync on is the
+// ordinary activation path with no special casing — the conflict is repaired by
+// the same code every user runs. The reading collector stays write-free; the
+// actions call the recovery library and the store action directly.
 //
 // Reachable only from About > version number (five taps) — not a normal
 // user-facing entry point.
@@ -19,7 +22,11 @@ import { useTheme } from '../lib/useTheme';
 import { AppButton, ScreenScroll, SectionTitle, SurfaceCard, rowDirection, textAlign } from '../components/AppPrimitives';
 import { SPACE, weight } from '../lib/tokens';
 import { collectP12ConflictRecoveryDiagnostics } from '../dev/p12ConflictRecoveryDiagnostics';
-import { restoreFinancialConflictRecoveryCheckpointV1 } from '../lib/financialBootstrapRecoveryPromotionV2';
+import {
+  discardLegacyOutboxAfterCheckpointRestoreV1,
+  restoreFinancialConflictRecoveryCheckpointV1,
+  retireConflictRecoveryIntentAfterActivationV1,
+} from '../lib/financialBootstrapRecoveryPromotionV2';
 
 const j = value => (value === null || value === undefined ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value));
 
@@ -54,13 +61,13 @@ export default function DiagnosticsScreen() {
   const {
     lastSyncError, online, syncing, restoreSafety,
     financialCloudRecoveryV2, financialSyncV2Activation,
-    workspaceNamespace, user,
+    workspaceNamespace, user, activateFinancialSyncV2,
   } = useStore();
 
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [restoreBusy, setRestoreBusy] = useState(false);
-  const [restoreResult, setRestoreResult] = useState(null);
+  const [busyAction, setBusyAction] = useState(null);
+  const [actionResults, setActionResults] = useState({});
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -83,7 +90,7 @@ export default function DiagnosticsScreen() {
 
   const copyAll = async () => {
     if (!snapshot) return;
-    await Clipboard.setStringAsync(JSON.stringify({ ...snapshot, restore: restoreResult }, null, 2));
+    await Clipboard.setStringAsync(JSON.stringify({ ...snapshot, actions: actionResults }, null, 2));
     Alert.alert('', isAr ? 'تم نسخ كل بيانات التشخيص.' : 'All diagnostic data copied.');
   };
 
@@ -98,8 +105,41 @@ export default function DiagnosticsScreen() {
     && !!ledger.intent?.checkpointId
     && !!ledger.activeNamespace;
 
+  // Each step is offered only in the state it repairs, and only after the one
+  // before it is done. The library refuses anything else anyway, so a button
+  // outside its state would only be a trap.
+  const canDiscard = ledger?.ok === true
+    && ledger.intent?.status === 'rolled_back_after_activation_failure'
+    && Number(ledger.outboxV2PendingCount || 0) > 0
+    && !!ledger.activeNamespace;
+
+  // The conflict is repaired by an ordinary activation; nothing here is special
+  // cased. It runs only once the ledger is genuinely quiet: the rollback done,
+  // and both outboxes empty.
+  const canActivate = ledger?.ok === true
+    && ledger.intent?.status === 'rolled_back_after_activation_failure'
+    && Number(ledger.outboxV3PendingCount || 0) === 0
+    && Number(ledger.outboxV2PendingCount || 0) === 0;
+
+  // Activation reports its own result plus the intent it retired, so success is
+  // read from either shape rather than assumed to be a bare ok flag.
+  const succeeded = entry => !!(entry?.result?.ok || entry?.result?.activation?.ok);
+
+  const finish = (key, result, title, message) => {
+    setActionResults(current => ({ ...current, [key]: { finishedAt: new Date().toISOString(), result } }));
+    setBusyAction(null);
+    Alert.alert(title, message);
+  };
+
+  const restartNotice = isAr
+    ? 'أغلق التطبيق كليًا الآن ثم افتحه من جديد قبل أي استخدام آخر.'
+    : 'Close the app completely now and reopen it before using it again.';
+  const failureNotice = result => (isAr
+    ? `لم يتغير شيء. السبب: ${result?.reason || 'غير معروف'}`
+    : `Nothing changed. Reason: ${result?.reason || 'unknown'}`);
+
   const runRestore = async () => {
-    setRestoreBusy(true);
+    setBusyAction('restore');
     let result;
     try {
       result = await restoreFinancialConflictRecoveryCheckpointV1({
@@ -109,36 +149,119 @@ export default function DiagnosticsScreen() {
     } catch (error) {
       result = { ok: false, reason: `restore_threw:${String(error?.message || error)}` };
     }
-    setRestoreResult({ finishedAt: new Date().toISOString(), result });
-    setRestoreBusy(false);
     // The store still holds the projection the failed promotion installed. It is
     // deliberately not reloaded here: a full restart is the one path that cannot
     // write stale in-memory data back over what was just restored.
-    Alert.alert(
-      result?.ok ? (isAr ? 'تمت الاستعادة' : 'Restored')
-        : (isAr ? 'لم تتم الاستعادة' : 'Not restored'),
+    finish('restore', result,
+      result?.ok ? (isAr ? 'تمت الاستعادة' : 'Restored') : (isAr ? 'لم تتم الاستعادة' : 'Not restored'),
       result?.ok
-        ? (isAr
-          ? 'عادت بياناتك المالية إلى ما كانت عليه قبل محاولة الاستبدال. أغلق التطبيق كليًا الآن ثم افتحه من جديد قبل أي استخدام آخر.'
-          : 'Your financial data is back to what it was before the replacement attempt. Close the app completely now and reopen it before using it again.')
-        : (isAr
-          ? `لم يتغير شيء. السبب: ${result?.reason || 'غير معروف'}`
-          : `Nothing changed. Reason: ${result?.reason || 'unknown'}`),
-    );
+        ? `${isAr ? 'عادت بياناتك المالية إلى ما كانت عليه قبل محاولة الاستبدال. ' : 'Your financial data is back to what it was before the replacement attempt. '}${restartNotice}`
+        : failureNotice(result));
   };
 
-  const confirmRestore = () => {
-    Alert.alert(
-      isAr ? 'استعادة بياناتك المحفوظة' : 'Restore your saved data',
-      isAr
-        ? 'ستعود بياناتك المالية إلى ما كانت عليه قبل محاولة الاستبدال، وتبقى المزامنة متوقفة بعدها. عند النجاح أغلق التطبيق كليًا ثم افتحه من جديد قبل أي استخدام آخر.'
-        : 'Your financial data returns to what it was before the replacement attempt, and sync stays stopped afterwards. When it succeeds, close the app completely and reopen it before using it again.',
-      [
-        { text: isAr ? 'إلغاء' : 'Cancel', style: 'cancel' },
-        { text: isAr ? 'استعادة' : 'Restore', style: 'destructive', onPress: runRestore },
-      ],
-    );
+  const runDiscard = async () => {
+    setBusyAction('discard');
+    let result;
+    try {
+      result = await discardLegacyOutboxAfterCheckpointRestoreV1({ namespace: ledger.activeNamespace });
+    } catch (error) {
+      result = { ok: false, reason: `discard_threw:${String(error?.message || error)}` };
+    }
+    finish('discard', result,
+      result?.ok ? (isAr ? 'تم التنظيف' : 'Cleaned up') : (isAr ? 'لم يتم التنظيف' : 'Not cleaned up'),
+      result?.ok
+        ? (isAr
+          ? `أُزيلت ${Number(result.discarded || 0)} من التعديلات المعلّقة التي خلّفتها المحاولة الفاشلة. بياناتك المالية لم تتغيّر.`
+          : `Removed ${Number(result.discarded || 0)} pending changes left by the failed attempt. Your financial data is unchanged.`)
+        : failureNotice(result));
+    if (result?.ok) refresh();
   };
+
+  const runActivate = async () => {
+    setBusyAction('activate');
+    let result;
+    let retired = null;
+    try {
+      result = await activateFinancialSyncV2();
+      // The gate opens only against proof read from the database itself, and
+      // only after the activation this attempt actually achieved.
+      if (result?.ok) {
+        retired = await retireConflictRecoveryIntentAfterActivationV1({ namespace: ledger.activeNamespace });
+      }
+    } catch (error) {
+      result = { ok: false, reason: `activate_threw:${String(error?.message || error)}` };
+    }
+    finish('activate', { activation: result, intentRetired: retired },
+      result?.ok ? (isAr ? 'تم تفعيل المزامنة' : 'Sync activated') : (isAr ? 'لم يتم التفعيل' : 'Not activated'),
+      result?.ok
+        ? `${isAr ? 'عادت المزامنة للعمل ونزلت تعديلات السحابة. ' : 'Sync is working again and the cloud changes came down. '}${restartNotice}`
+        : failureNotice(result));
+  };
+
+  const confirm = (title, message, action, onPress) => Alert.alert(title, message, [
+    { text: isAr ? 'إلغاء' : 'Cancel', style: 'cancel' },
+    { text: action, style: 'destructive', onPress },
+  ]);
+
+  const confirmRestore = () => confirm(
+    isAr ? 'استعادة بياناتك المحفوظة' : 'Restore your saved data',
+    isAr
+      ? 'ستعود بياناتك المالية إلى ما كانت عليه قبل محاولة الاستبدال، وتبقى المزامنة متوقفة بعدها. عند النجاح أغلق التطبيق كليًا ثم افتحه من جديد قبل أي استخدام آخر.'
+      : 'Your financial data returns to what it was before the replacement attempt, and sync stays stopped afterwards. When it succeeds, close the app completely and reopen it before using it again.',
+    isAr ? 'استعادة' : 'Restore', runRestore);
+
+  const confirmDiscard = () => confirm(
+    isAr ? 'إزالة التعديلات المعلّقة' : 'Remove the pending changes',
+    isAr
+      ? 'ستُزال تعديلات معلّقة خلّفتها المحاولة الفاشلة ولا يمكن للسحابة قبولها. بياناتك المالية لن تتغيّر، وأي تعديل أقدم من نسختك المحفوظة لن يُمَس.'
+      : 'This removes pending changes left by the failed attempt that the cloud can never accept. Your financial data does not change, and nothing older than your saved copy is touched.',
+    isAr ? 'إزالة' : 'Remove', runDiscard);
+
+  const confirmActivate = () => confirm(
+    isAr ? 'إعادة تشغيل المزامنة' : 'Turn sync back on',
+    isAr
+      ? 'ستُنزَّل تعديلات السحابة التي فات الجهاز استقبالها وتُطبَّق على بياناتك. نسختك المحفوظة تبقى كما هي. عند النجاح أغلق التطبيق كليًا ثم افتحه من جديد.'
+      : 'The cloud changes this device missed will be downloaded and applied to your data. Your saved copy stays as it is. When it succeeds, close the app completely and reopen it.',
+    isAr ? 'تشغيل' : 'Turn on', runActivate);
+
+  const ACTIONS = [
+    {
+      key: 'restore',
+      show: canRestore,
+      icon: 'arrow-undo-outline',
+      title: isAr ? 'استعادة بياناتك المحفوظة' : 'Restore your saved data',
+      body: isAr
+        ? 'محاولة استبدال سابقة اكتملت محليًا ولم تُفعَّل. بياناتك الحقيقية محفوظة كما هي، ويمكن إعادتها إلى مكانها. المزامنة تبقى متوقفة بعد ذلك.'
+        : 'An earlier replacement completed locally but was never activated. Your real data is still preserved and can be put back. Sync stays stopped afterwards.',
+      label: isAr ? 'استعادة بياناتي' : 'Restore my data',
+      busyLabel: isAr ? 'جارٍ الاستعادة…' : 'Restoring…',
+      onPress: confirmRestore,
+    },
+    {
+      key: 'discard',
+      show: canDiscard,
+      icon: 'trash-outline',
+      title: isAr ? 'إزالة التعديلات المعلّقة' : 'Remove the pending changes',
+      body: isAr
+        ? `بقيت ${Number(ledger?.outboxV2PendingCount || 0)} تعديلات معلّقة من المحاولة الفاشلة، لا يمكن للسحابة قبولها. إزالتها لا تمسّ أي بيانات مالية.`
+        : `${Number(ledger?.outboxV2PendingCount || 0)} pending changes remain from the failed attempt and the cloud can never accept them. Removing them touches no financial data.`,
+      label: isAr ? 'إزالة المعلّق' : 'Remove them',
+      busyLabel: isAr ? 'جارٍ الإزالة…' : 'Removing…',
+      onPress: confirmDiscard,
+    },
+    {
+      key: 'activate',
+      show: canActivate,
+      icon: 'sync-outline',
+      title: isAr ? 'إعادة تشغيل المزامنة' : 'Turn sync back on',
+      body: isAr
+        ? 'الجهاز الآن نظيف ولا تعديلات معلّقة عليه. تشغيل المزامنة سيُنزّل ما فاته من السحابة عبر المسار العادي.'
+        : 'The device is clean now, with nothing pending. Turning sync on downloads what it missed through the ordinary path.',
+      label: isAr ? 'تشغيل المزامنة' : 'Turn sync on',
+      busyLabel: isAr ? 'جارٍ التفعيل…' : 'Activating…',
+      onPress: confirmActivate,
+    },
+  ];
 
   return (
     <ScreenScroll th={th}>
@@ -151,33 +274,25 @@ export default function DiagnosticsScreen() {
         <Text style={{ color: th.sub, textAlign: textAlign(lang) }}>{isAr ? 'جارٍ القراءة…' : 'Reading…'}</Text>
       ) : null}
 
-      {canRestore && !restoreResult?.result?.ok ? (
-        <SurfaceCard th={th} style={{ marginBottom: 12, gap: 8, borderColor: th.warn, borderWidth: 1 }}>
-          <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: textAlign(lang) }}>
-            {isAr ? 'استعادة بياناتك المحفوظة' : 'Restore your saved data'}
-          </Text>
-          <Text style={{ color: th.sub, fontSize: 12, textAlign: textAlign(lang) }}>
-            {isAr
-              ? 'محاولة استبدال سابقة اكتملت محليًا ولم تُفعَّل. بياناتك الحقيقية محفوظة كما هي، ويمكن إعادتها إلى مكانها. المزامنة تبقى متوقفة بعد ذلك.'
-              : 'An earlier replacement completed locally but was never activated. Your real data is still preserved and can be put back. Sync stays stopped afterwards.'}
-          </Text>
+      {ACTIONS.map(action => (action.show && !succeeded(actionResults[action.key]) ? (
+        <SurfaceCard key={action.key} th={th} style={{ marginBottom: 12, gap: 8, borderColor: th.warn, borderWidth: 1 }}>
+          <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: textAlign(lang) }}>{action.title}</Text>
+          <Text style={{ color: th.sub, fontSize: 12, textAlign: textAlign(lang) }}>{action.body}</Text>
           <AppButton
-            th={th} lang={lang} tone="danger" icon="arrow-undo-outline"
-            label={restoreBusy ? (isAr ? 'جارٍ الاستعادة…' : 'Restoring…') : (isAr ? 'استعادة بياناتي' : 'Restore my data')}
-            onPress={confirmRestore} disabled={restoreBusy}
+            th={th} lang={lang} tone="danger" icon={action.icon}
+            label={busyAction === action.key ? action.busyLabel : action.label}
+            onPress={action.onPress} disabled={!!busyAction}
           />
         </SurfaceCard>
-      ) : null}
+      ) : null))}
 
-      {restoreResult ? (
-        <Section th={th} lang={lang} isAr={isAr} icon="arrow-undo-outline" title="restoreFinancialConflictRecoveryCheckpointV1">
-          <Row th={th} lang={lang} label="ok" value={restoreResult.result?.ok} />
-          <Row th={th} lang={lang} label="reason" value={restoreResult.result?.reason} />
-          <Row th={th} lang={lang} label="finishedAt" value={restoreResult.finishedAt} />
+      {Object.entries(actionResults).map(([key, entry]) => (
+        <Section key={key} th={th} lang={lang} isAr={isAr} icon="receipt-outline" title={key}>
+          <Row th={th} lang={lang} label="finishedAt" value={entry.finishedAt} />
           <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', marginTop: 4, textAlign: textAlign(lang) }} selectable>
-            {j(restoreResult.result)}
+            {j(entry.result)}
           </Text>
-          {restoreResult.result?.ok ? (
+          {succeeded(entry) ? (
             <Text style={{ color: th.warn, fontSize: 12, ...weight('700'), marginTop: 6, textAlign: textAlign(lang) }}>
               {isAr
                 ? 'أغلق التطبيق كليًا ثم افتحه من جديد قبل أي استخدام آخر.'
@@ -185,7 +300,7 @@ export default function DiagnosticsScreen() {
             </Text>
           ) : null}
         </Section>
-      ) : null}
+      ))}
 
       {snapshot ? (
         <>
