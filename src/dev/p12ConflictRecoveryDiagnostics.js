@@ -158,6 +158,23 @@ export async function collectP12ConflictRecoveryDiagnostics({
     params: [activeNamespace],
   });
 
+  // The legacy V1 outbox is written again whenever V2 is not activated, so rows
+  // can survive a recovery that only cleared V3. A count alone cannot say what
+  // they carry: payload_json here is the whole entity envelope, and after a
+  // checkpoint restore it may be the last local copy of something the owner
+  // created. Read them in full. The bounded limit is intentional — compare
+  // rows.length against outboxV2PendingCount to detect a truncated list.
+  const outboxV2PendingRows = await readRows({
+    db, present, table: 'ledger_outbox_v2',
+    sql: `SELECT sequence_id,namespace,mutation_id,entity_type,entity_id,operation,
+                 entity_revision,payload_version,payload_json,created_at,
+                 attempts,next_attempt_at,acknowledged_at,last_error
+            FROM ledger_outbox_v2
+           WHERE namespace=? AND acknowledged_at IS NULL
+           ORDER BY sequence_id ASC LIMIT 50`,
+    params: [activeNamespace],
+  });
+
   // resumePreparedCloudConflictRecoveryV1 is called exactly as shipped, with
   // the already-open handle passed in explicitly so it never calls
   // getLedgerDb() itself and cannot trigger a database open from here.
@@ -190,12 +207,16 @@ export async function collectP12ConflictRecoveryDiagnostics({
       checkpointNamespace: checkpoint.checkpointNamespace || null,
       sourceGeneration: checkpoint.sourceGeneration ?? null,
       counts: checkpoint.counts || null,
+      // The moment the owner's data was preserved: the only evidence-backed
+      // boundary between rows that predate this incident and rows it produced.
+      createdAt: checkpoint.createdAt || null,
     } : null,
     bootstrapImports: bootstrapImports.rows || [],
     archiveImports: archiveImports.rows || [],
     outboxV3PendingCount: Number(outboxV3Pending.rows?.[0]?.row_count || 0),
     outboxV3PendingRows: outboxV3PendingRows.rows || [],
     outboxV2PendingCount: Number(outboxV2Pending.rows?.[0]?.row_count || 0),
+    outboxV2PendingRows: outboxV2PendingRows.rows || [],
     resume,
   };
 }

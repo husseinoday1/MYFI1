@@ -250,6 +250,7 @@ export default function DiagnosticsScreen() {
                 {ledger.checkpoint ? (
                   <>
                     <Row th={th} lang={lang} label="checkpointId" value={ledger.checkpoint.checkpointId} mono />
+                    <Row th={th} lang={lang} label="createdAt" value={ledger.checkpoint.createdAt} />
                     <Row th={th} lang={lang} label="sourceGeneration" value={ledger.checkpoint.sourceGeneration} />
                     <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', marginTop: 4, textAlign: textAlign(lang) }} selectable>
                       counts: {j(ledger.checkpoint.counts)}
@@ -282,6 +283,9 @@ export default function DiagnosticsScreen() {
                 <Row th={th} lang={lang} label="ledger_outbox_v2 pending" value={ledger.outboxV2PendingCount} />
                 <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', marginTop: 4, textAlign: textAlign(lang) }} selectable>
                   ledger_outbox_v3 rows: {j(ledger.outboxV3PendingRows)}
+                </Text>
+                <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', marginTop: 4, textAlign: textAlign(lang) }} selectable>
+                  ledger_outbox_v2 rows: {j(ledger.outboxV2PendingRows)}
                 </Text>
               </Section>
 
