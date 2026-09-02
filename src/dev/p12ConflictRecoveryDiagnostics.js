@@ -135,6 +135,23 @@ export async function collectP12ConflictRecoveryDiagnostics({
     params: [activeNamespace],
   });
 
+  const identityLedgerId = text(identity.rows?.[0]?.ledger_id);
+  const identityRestoreEpoch = Number(identity.rows?.[0]?.restore_epoch || 0);
+  let outboxV3PendingRows = { available: present.has('ledger_outbox_v3'), rows: [] };
+  if (identityLedgerId && identityRestoreEpoch > 0) {
+    outboxV3PendingRows = await readRows({
+      db, present, table: 'ledger_outbox_v3',
+      sql: `SELECT sequence_id,mutation_id,command_id,namespace,ledger_id,restore_epoch,
+                   entity_type,entity_id,operation,revision,base_revision,payload_json,
+                   created_at,acknowledged_at,superseded_by_bootstrap_id
+              FROM ledger_outbox_v3
+             WHERE ledger_id=? AND restore_epoch=?
+               AND acknowledged_at IS NULL AND superseded_by_bootstrap_id IS NULL
+             ORDER BY sequence_id ASC`,
+      params: [identityLedgerId, identityRestoreEpoch],
+    });
+  }
+
   const outboxV2Pending = await readRows({
     db, present, table: 'ledger_outbox_v2',
     sql: `SELECT COUNT(*) AS row_count FROM ledger_outbox_v2 WHERE namespace=? AND acknowledged_at IS NULL`,
@@ -177,6 +194,7 @@ export async function collectP12ConflictRecoveryDiagnostics({
     bootstrapImports: bootstrapImports.rows || [],
     archiveImports: archiveImports.rows || [],
     outboxV3PendingCount: Number(outboxV3Pending.rows?.[0]?.row_count || 0),
+    outboxV3PendingRows: outboxV3PendingRows.rows || [],
     outboxV2PendingCount: Number(outboxV2Pending.rows?.[0]?.row_count || 0),
     resume,
   };

@@ -183,6 +183,9 @@ export default function DiagnosticsScreen() {
               <Section th={th} lang={lang} isAr={isAr} icon="file-tray-full-outline" title={isAr ? 'الصفوف المعلّقة' : 'Pending rows'}>
                 <Row th={th} lang={lang} label="ledger_outbox_v3 pending" value={ledger.outboxV3PendingCount} />
                 <Row th={th} lang={lang} label="ledger_outbox_v2 pending" value={ledger.outboxV2PendingCount} />
+                <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', marginTop: 4, textAlign: textAlign(lang) }} selectable>
+                  ledger_outbox_v3 rows: {j(ledger.outboxV3PendingRows)}
+                </Text>
               </Section>
 
               <SectionTitle th={th} lang={lang}>resumePreparedCloudConflictRecoveryV1</SectionTitle>
