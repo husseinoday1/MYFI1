@@ -175,6 +175,12 @@ export const syncFinancialMutationsV2 = async ({
   let downloaded = 0;
   let pages = 0;
   let hasMore = false;
+  // Shadow validates a chain it never applies, so its notion of "where each
+  // entity stands" has to survive the page boundaries of this one run. Without
+  // it, page two reseeds from a ledger shadow left untouched and a long
+  // catch-up can never validate. Production apply advances the ledger itself
+  // and must keep reading it, so it gets no projection.
+  const shadowProjection = allowProductionApply !== true ? new Map() : null;
   const pageBudget = Math.max(1, Math.min(200, Number(maxPages) || 200));
 
   try {
@@ -230,6 +236,7 @@ export const syncFinancialMutationsV2 = async ({
         deviceId,
         allowProductionApply,
         database,
+        projectedRevisions: shadowProjection,
       });
       if (!applied.ok) {
         return {

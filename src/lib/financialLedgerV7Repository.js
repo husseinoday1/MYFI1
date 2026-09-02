@@ -3402,7 +3402,7 @@ const v2WriteConflictInbox = async (db, identity, group) => {
 
 export const applyRemoteLedgerMutationsV8 = async ({
   namespace = 'guest', ledgerId, restoreEpoch, mutations = [], deviceId = '',
-  allowProductionApply = false, database = null,
+  allowProductionApply = false, database = null, projectedRevisions = null,
 } = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return { supported:false,ok:false,reason:'sqlite_unavailable' };
@@ -3507,8 +3507,10 @@ export const applyRemoteLedgerMutationsV8 = async ({
   return enqueueWrite(async () => {
     let applied = 0;
     let processed = 0;
-    // Only shadow needs a projection; see v2ResolveCurrentRevision.
-    const projectedRevisions = shadowMode ? new Map() : null;
+    // Only shadow needs a projection; see v2ResolveCurrentRevision. A chain
+    // longer than one page arrives as several calls within one sync run, so the
+    // caller may pass its own map to carry the chain across those pages.
+    const projection = shadowMode ? (projectedRevisions instanceof Map ? projectedRevisions : new Map()) : null;
     const orderedGroups = [...commandGroups.values()].sort((a,b) => (
       a[0].commandSequence - b[0].commandSequence
     ));
@@ -3548,7 +3550,7 @@ export const applyRemoteLedgerMutationsV8 = async ({
 
       const plans = [];
       try {
-        for (const item of group) plans.push(await v2PreflightMutation(db, identity, item, projectedRevisions));
+        for (const item of group) plans.push(await v2PreflightMutation(db, identity, item, projection));
       } catch (error) {
         await v2WriteConflictInbox(db, identity, group);
         const conflict = error?.conflict || v2RemoteConflict(error?.message || 'financial_v2_remote_cas_conflict', group[0]);
@@ -3574,7 +3576,7 @@ export const applyRemoteLedgerMutationsV8 = async ({
         });
         // The command validated, so the chain has moved on even though the
         // ledger has not. Later commands for these entities compare against it.
-        for (const item of group) projectedRevisions.set(v2EntityKey(item), item.revision);
+        for (const item of group) projection.set(v2EntityKey(item), item.revision);
         processed += group.length;
         cursor = Math.max(cursor, commandSequence);
         continue;

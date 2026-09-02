@@ -119,9 +119,10 @@ const createDb = ({ localRevision = 2 } = {}) => {
   return db;
 };
 
-const shadow = (db, mutations) => applyRemoteLedgerMutationsV8({
+const shadow = (db, mutations, projectedRevisions = null) => applyRemoteLedgerMutationsV8({
   namespace: NS, ledgerId: LEDGER, restoreEpoch: EPOCH,
   mutations, deviceId: 'device-test', allowProductionApply: false, database: db,
+  projectedRevisions,
 });
 
 const entityRevision = db => Number(db.native.prepare('SELECT revision FROM ledger_entities_v7 WHERE namespace=? AND entity_type=? AND id=?').get(NS, 'workspace', 'workspace').revision);
@@ -181,6 +182,30 @@ const inboxStatuses = db => db.native.prepare('SELECT apply_status FROM ledger_i
     'production apply must still demand activation first');
   assert.equal(entityRevision(production), 2);
   production.native.close();
+
+  // 6) A chain longer than one page arrives as several calls inside one sync
+  //    run. The projection must span them, or the second page reseeds from a
+  //    ledger that shadow never advanced and the same lock returns.
+  const paged = createDb();
+  const runProjection = new Map();
+  const firstPage = await shadow(paged, CHAIN.slice(0, 3), runProjection);
+  assert.equal(firstPage.ok, true, JSON.stringify(firstPage));
+  const secondPage = await shadow(paged, CHAIN.slice(3), runProjection);
+  assert.equal(secondPage.ok, true, `the chain must survive a page boundary: ${JSON.stringify(secondPage)}`);
+  assert.equal(secondPage.processed, 2);
+  assert.equal(entityRevision(paged), 2, 'paging must not make shadow apply anything');
+  assert.equal(syncState(paged).last_server_sequence, 0);
+  assert.equal(syncState(paged).shadow_last_server_sequence, 241);
+  paged.native.close();
+
+  // 7) A shared projection must not weaken the check across pages either.
+  const pagedGap = createDb();
+  const gapProjection = new Map();
+  assert.equal((await shadow(pagedGap, CHAIN.slice(0, 2), gapProjection)).ok, true);
+  const pagedGapResult = await shadow(pagedGap, [workspaceCommand(7, 241)], gapProjection);
+  assert.equal(pagedGapResult.ok, false, 'a gap across a page boundary must still conflict');
+  assert.equal(pagedGapResult.reason, 'financial_v2_remote_cas_conflict');
+  pagedGap.native.close();
 
   console.log('MYFI P20 V2 SHADOW SEQUENTIAL COMMANDS RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });
