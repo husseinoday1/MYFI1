@@ -9,12 +9,13 @@ const target = path.join(root, 'src/lib/financialArchiveRecoveryImportV2.js');
 const sha = value => crypto.createHash('sha256').update(String(value)).digest('hex');
 const row = { ordinal: 1, rowType: 'archive_year', rowKey: '["personal",2025]', rowHash: 'a'.repeat(64), payloadText: '{"scope":"personal","year":2025,"summary":{},"metadata":{}}' };
 const calls = { begin: 0, write: 0, mark: 0, fail: 0 };
+let beginStatus = 'downloading';
 const archiveMock = {
   readFinancialArchiveHeadV2: async () => ({ ok: true, ledgerId: 'ledger-archive-stage', restoreEpoch: 5, archivePresent: true, archiveGeneration: 1, snapshotId: 'snapshot-archive-stage', manifestHash: 'f'.repeat(64), expectedRowCount: 1 }),
   verifyFinancialArchiveSnapshotReadbackV2: async input => { await input.onVerifiedRow(row); return { ok: true, readBackRowCount: 1 }; },
 };
 const repoMock = {
-  beginFinancialArchiveRecoveryImportV11: async input => { calls.begin += 1; assert.equal(input.sourceLedgerId, 'ledger-archive-stage'); return { session_id: 'archive-stage-session', status: 'downloading' }; },
+  beginFinancialArchiveRecoveryImportV11: async input => { calls.begin += 1; assert.equal(input.sourceLedgerId, 'ledger-archive-stage'); return { session_id: 'archive-stage-session', status: beginStatus, proof_digest: 'd'.repeat(64) }; },
   writeFinancialArchiveRecoveryStageRowV12: async () => { calls.write += 1; },
   inspectFinancialArchiveRecoveryStageV12: async () => ({ ok: true, receipts: [{ ordinal: 1, row_hash: row.rowHash }] }),
   markFinancialArchiveRecoveryImportReadyV11: async input => { calls.mark += 1; assert.match(input.proofDigest, /^[0-9a-f]{64}$/); return { session_id: input.sessionId, status: 'ready' }; },
@@ -37,6 +38,13 @@ const { stageFinancialArchiveRecoveryImportV2 } = compiled.exports;
   const staged = await stageFinancialArchiveRecoveryImportV2({ supabase: { rpc: async () => ({}) }, namespace: 'user:archive-stage', accountId: 'account-1', bootstrapSource: { ledgerId: 'ledger-archive-stage', restoreEpoch: 5 } });
   assert.equal(staged.ok, true); assert.equal(staged.session.status, 'ready');
   assert.deepEqual(calls, { begin: 1, write: 1, mark: 1, fail: 0 });
+  beginStatus = 'ready';
+  const beforeReady = { write: calls.write, mark: calls.mark, fail: calls.fail };
+  const ready = await stageFinancialArchiveRecoveryImportV2({ supabase: { rpc: async () => ({}) }, namespace: 'user:archive-stage', accountId: 'account-1', bootstrapSource: { ledgerId: 'ledger-archive-stage', restoreEpoch: 5 } });
+  assert.equal(ready.ok, true); assert.equal(ready.session.session_id, 'archive-stage-session');
+  assert.equal(ready.readback, null); assert.equal(ready.proofDigest, 'd'.repeat(64));
+  assert.equal(calls.write, beforeReady.write); assert.equal(calls.mark, beforeReady.mark); assert.equal(calls.fail, beforeReady.fail);
+  beginStatus = 'downloading';
   const missing = await stageFinancialArchiveRecoveryImportV2({ supabase: { rpc: async () => ({}) }, namespace: 'user:archive-stage', accountId: '', bootstrapSource: { ledgerId: 'ledger-archive-stage', restoreEpoch: 5 } });
   assert.equal(missing.reason, 'financial_archive_recovery_account_missing');
   const absentCalls = { begin: 0, readback: 0 };

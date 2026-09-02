@@ -54,6 +54,16 @@ export const stageFinancialBootstrapRecoveryImportV2 = async ({
     if (!session?.session_id) {
       return { supported: true, ok: false, reason: 'financial_v2_bootstrap_recovery_session_invalid' };
     }
+    if (session.status === 'ready') {
+      return {
+        supported: true,
+        ok: true,
+        session,
+        source: normalized,
+        readback: null,
+        proofDigest: String(session.proof_digest || ''),
+      };
+    }
     const readback = await verifyFinancialBootstrapReadbackV2({
       supabase,
       ledgerId: normalized.ledgerId,

@@ -16,11 +16,17 @@ const source = {
 };
 
 const calls = { begin: 0, write: [], mark: 0, fail: 0 };
+let beginStatus = 'downloading';
 const repoMock = {
   beginFinancialBootstrapRecoveryImportV9: async input => {
     calls.begin += 1;
     assert.equal(input.sourceLedgerId, source.ledgerId);
-    return { session_id: 'session-phase12c', stage_namespace: 'bootstrap-recovery-stage:session-phase12c' };
+    return {
+      session_id: 'session-phase12c',
+      stage_namespace: 'bootstrap-recovery-stage:session-phase12c',
+      status: beginStatus,
+      proof_digest: 'd'.repeat(64),
+    };
   },
   writeFinancialBootstrapRecoveryStageRowV10: async input => { calls.write.push(input.row); },
   inspectFinancialBootstrapRecoveryStageV10: async () => ({
@@ -82,6 +88,55 @@ const { stageFinancialBootstrapRecoveryImportV2 } = compiled.exports;
   assert.equal(calls.write.length, 1);
   assert.equal(calls.mark, 1);
 
+  beginStatus = 'ready';
+  const beforeReady = { write: calls.write.length, mark: calls.mark, fail: calls.fail };
+  const ready = await stageFinancialBootstrapRecoveryImportV2({
+    supabase: { rpc: async () => ({}) }, namespace: 'user:phase12c', accountId: 'account-phase12c', source,
+  });
+  assert.equal(ready.ok, true);
+  assert.equal(ready.session.session_id, 'session-phase12c');
+  assert.equal(ready.readback, null);
+  assert.equal(ready.proofDigest, 'd'.repeat(64));
+  assert.equal(calls.write.length, beforeReady.write);
+  assert.equal(calls.mark, beforeReady.mark);
+  assert.equal(calls.fail, beforeReady.fail);
+
+  const coordinatorTarget = path.join(root, 'src/lib/financialBootstrapRecoveryCoordinatorV2.js');
+  const coordinatorLoad = Module._load;
+  Module._load = function(request, parent, isMain) {
+    if (parent?.filename === coordinatorTarget && request === './financialCloudRecoveryV2') return {
+      fetchVerifiedFinancialCloudRecoverySourceV2: async () => ({ ok: true, mode: 'v2_bootstrap', ...source }),
+    };
+    if (parent?.filename === coordinatorTarget && request === './financialArchiveSnapshotV2') return {
+      readFinancialArchiveHeadV2: async () => ({ ok: true, ledgerId: source.ledgerId, restoreEpoch: source.restoreEpoch, archivePresent: false, archiveGeneration: 0, snapshotId: '', manifestHash: '', expectedRowCount: 0 }),
+    };
+    if (parent?.filename === coordinatorTarget && request === './financialBootstrapRecoveryImportV2') return { stageFinancialBootstrapRecoveryImportV2 };
+    if (parent?.filename === coordinatorTarget && request === './financialArchiveRecoveryImportV2') return {
+      stageFinancialArchiveRecoveryImportV2: async () => ({ ok: true, head: { ledgerId: source.ledgerId, restoreEpoch: source.restoreEpoch, archivePresent: false, archiveGeneration: 0, snapshotId: '', manifestHash: '', expectedRowCount: 0 }, session: { session_id: 'archive-ready' } }),
+    };
+    if (parent?.filename === coordinatorTarget && request === './financialBootstrapRecoveryPromotionV2') return {};
+    return coordinatorLoad.call(this, request, parent, isMain);
+  };
+  const coordinatorCompiled = new Module(coordinatorTarget, module);
+  coordinatorCompiled.filename = coordinatorTarget;
+  coordinatorCompiled.paths = Module._nodeModulePaths(path.dirname(coordinatorTarget));
+  coordinatorCompiled._compile(babel.transformFileSync(coordinatorTarget, {
+    babelrc: false, configFile: false, plugins: ['@babel/plugin-transform-modules-commonjs'],
+  }).code, coordinatorTarget);
+  Module._load = coordinatorLoad;
+  const firstCoordinated = await coordinatorCompiled.exports.stageVerifiedBootstrapWithArchiveV2({
+    supabase: { rpc: async () => ({}) }, namespace: 'user:phase12c', accountId: 'account-phase12c',
+  });
+  const secondCoordinated = await coordinatorCompiled.exports.stageVerifiedBootstrapWithArchiveV2({
+    supabase: { rpc: async () => ({}) }, namespace: 'user:phase12c', accountId: 'account-phase12c',
+  });
+  assert.equal(firstCoordinated.ok, true);
+  assert.equal(secondCoordinated.ok, true);
+  assert.equal(calls.write.length, beforeReady.write);
+  assert.equal(calls.mark, beforeReady.mark);
+  assert.equal(calls.fail, beforeReady.fail);
+
+  beginStatus = 'downloading';
   const bad = await stageFinancialBootstrapRecoveryImportV2({
     supabase: { rpc: async () => ({}) }, namespace: 'user:phase12c', accountId: '', source,
   });

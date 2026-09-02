@@ -45,6 +45,17 @@ export const stageFinancialArchiveRecoveryImportV2 = async ({
     if (!head.archivePresent) {
       return { supported: true, ok: true, source, head, session, proofDigest: String(session.proof_digest) };
     }
+    if (session.status === 'ready') {
+      return {
+        supported: true,
+        ok: true,
+        source,
+        head,
+        session,
+        readback: null,
+        proofDigest: String(session.proof_digest || ''),
+      };
+    }
     const readback = await verifyFinancialArchiveSnapshotReadbackV2({
       supabase, ledgerId: source.ledgerId, restoreEpoch: source.restoreEpoch,
       archiveGeneration: head.archiveGeneration, snapshotId: head.snapshotId,
