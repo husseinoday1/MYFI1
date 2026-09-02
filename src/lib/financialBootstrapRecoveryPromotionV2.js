@@ -171,6 +171,23 @@ const assertMaterializedStages = async (db, namespace, hotSession, coldSession) 
   }
 };
 
+// Every table a conflict checkpoint carries. The checkpoint receipt counts one
+// entry per key, so a checkpoint may be trusted only while all nine still match.
+const CONFLICT_CHECKPOINT_TABLES = {
+  accounts: 'ledger_accounts_v7', exchangeRates: 'ledger_exchange_rates_v7',
+  transactions: 'ledger_financial_transactions_v7', postings: 'ledger_postings_v7',
+  links: 'ledger_transaction_links_v7', entities: 'ledger_entities_v7', workspace: 'ledger_workspace_state_v7',
+  coldArchiveYears: 'cold_archive_years', coldArchiveTransactions: 'cold_archive_transactions',
+};
+
+const assertCheckpointCounts = async (db, namespace, counts, reason) => {
+  for (const [key, table] of Object.entries(CONFLICT_CHECKPOINT_TABLES)) {
+    if (await count(db, `SELECT COUNT(*) AS n FROM ${table} WHERE namespace=?`, namespace) !== Number(counts?.[key] || 0)) {
+      throw new Error(reason);
+    }
+  }
+};
+
 const exactConflictIntent = ({ value, namespace, accountId, hot, cold, checkpointId }) => (
   value && value.version === 1 && value.status === 'ready_for_explicit_cloud_replacement'
   && text(value.namespace) === namespace && text(value.accountId) === accountId
@@ -204,17 +221,10 @@ export const assertConflictCheckpoint = async (db, namespace, checkpointId, iden
   if (Number(generation.generation) !== Number(checkpoint.sourceGeneration)) {
     throw new Error('financial_v2_conflict_recovery_promotion_generation_changed');
   }
-  const tables = {
-    accounts: 'ledger_accounts_v7', exchangeRates: 'ledger_exchange_rates_v7',
-    transactions: 'ledger_financial_transactions_v7', postings: 'ledger_postings_v7',
-    links: 'ledger_transaction_links_v7', entities: 'ledger_entities_v7', workspace: 'ledger_workspace_state_v7',
-    coldArchiveYears: 'cold_archive_years', coldArchiveTransactions: 'cold_archive_transactions',
-  };
-  for (const [key, table] of Object.entries(tables)) {
-    if (await count(db, `SELECT COUNT(*) AS n FROM ${table} WHERE namespace=?`, checkpoint.checkpointNamespace) !== Number(checkpoint.counts?.[key] || 0)) {
-      throw new Error('financial_v2_conflict_recovery_promotion_checkpoint_incomplete');
-    }
-  }
+  await assertCheckpointCounts(
+    db, checkpoint.checkpointNamespace, checkpoint.counts,
+    'financial_v2_conflict_recovery_promotion_checkpoint_incomplete',
+  );
   return checkpoint;
 };
 
@@ -457,6 +467,107 @@ export const promotePreparedCloudConflictRecoveryV1 = async ({
       return {
         supported: true, ok: true, namespace: target, ledgerId: hot.ledgerId, restoreEpoch: hot.restoreEpoch,
         checkpointId: checkpoint, activationState: 'pending',
+      };
+    }});
+  } catch (error) {
+    return failure(error?.message);
+  }
+};
+
+// A checkpoint receipt is only as trustworthy as its own shape. Restoring reads
+// the live namespace back *from* these numbers, so an absent or malformed key
+// must fail closed instead of silently meaning "expect zero rows".
+const exactCheckpointCounts = value => (
+  !!value && typeof value === 'object' && !Array.isArray(value)
+  && Object.keys(value).length === Object.keys(CONFLICT_CHECKPOINT_TABLES).length
+  && Object.keys(CONFLICT_CHECKPOINT_TABLES).every(key => nonNegativeInt(value[key]))
+);
+
+/**
+ * The inverse of the promotion above: it copies the private checkpoint that
+ * promotion preserved back over the live namespace after an activation that
+ * never completed. It is deliberately not a general "undo my ledger" tool — it
+ * refuses unless the recorded intent is exactly `local_promoted_pending_
+ * activation`, and it proves the checkpoint is complete *before* clearing any
+ * live row, so a damaged checkpoint leaves the current data untouched. The
+ * checkpoint itself is never deleted.
+ */
+export const restoreFinancialConflictRecoveryCheckpointV1 = async ({
+  namespace = 'guest', checkpointId, database = null,
+} = {}) => {
+  const target = text(namespace);
+  const checkpoint = text(checkpointId);
+  if (!target || !checkpoint) return failure('financial_v2_conflict_recovery_restore_input_invalid');
+
+  try {
+    return await runFinancialRestorePromotionTransactionV8({ database, task: async actions => {
+      const db = actions.database;
+      const [identity, restoreIntent, intentRow, receiptRow] = await Promise.all([
+        db.getFirstAsync(`SELECT * FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`, target),
+        db.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, restoreIntentKey(target)),
+        db.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, conflictRecoveryIntentKey(target)),
+        db.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, conflictRecoveryCheckpointKey(target, checkpoint)),
+      ]);
+      if (restoreIntent?.value) throw new Error('financial_v2_conflict_recovery_restore_restore_intent_active');
+      if (!identity?.ledger_id) throw new Error('financial_v2_conflict_recovery_restore_identity_missing');
+
+      // The single safety gate. Any other status — prepared but not promoted,
+      // already rolled back, or activated — means the live namespace is not the
+      // failed promotion's output and must never be overwritten from here.
+      const intent = parse(intentRow?.value);
+      if (!intent || intent.version !== 1 || text(intent.status) !== 'local_promoted_pending_activation'
+          || text(intent.namespace) !== target || text(intent.local?.checkpointId) !== checkpoint) {
+        throw new Error('financial_v2_conflict_recovery_restore_intent_not_restorable');
+      }
+      const receipt = parse(receiptRow?.value);
+      const stage = text(receipt?.checkpointNamespace);
+      if (!receipt || receipt.version !== 1 || text(receipt.checkpointId) !== checkpoint
+          || text(receipt.namespace) !== target || !stage || stage === target
+          || text(receipt.ledgerId) !== text(identity.ledger_id)
+          || Number(receipt.restoreEpoch) !== Number(identity.restore_epoch)
+          || !exactCheckpointCounts(receipt.counts) || Number(receipt.counts.workspace) < 1) {
+        throw new Error('financial_v2_conflict_recovery_restore_checkpoint_invalid');
+      }
+      await assertCheckpointCounts(db, stage, receipt.counts, 'financial_v2_conflict_recovery_restore_checkpoint_incomplete');
+
+      const now = new Date().toISOString();
+      // Every precondition is accepted above. From here the checkpoint either
+      // replaces the promoted projection completely, or nothing changes at all.
+      await actions.clearFinancialNamespace(target);
+      await actions.clearColdArchiveNamespace(target);
+      await actions.copyFinancialNamespaceFromStage({
+        namespace: target, stageNamespace: stage, includeWorkspaceState: true,
+      });
+      await actions.replaceColdArchiveNamespaceFromStage({ namespace: target, stageNamespace: stage });
+      await assertCheckpointCounts(db, target, receipt.counts, 'financial_v2_conflict_recovery_restore_counts_mismatch');
+      // The outbox rows of this epoch are all rejected retries produced *by* the
+      // failed recovery; they can never be accepted by the cloud and would keep
+      // accumulating. The restored ledger re-uploads through a normal sync.
+      await db.runAsync(
+        `DELETE FROM ledger_outbox_v3 WHERE ledger_id=? AND restore_epoch=?`,
+        text(identity.ledger_id), Number(identity.restore_epoch),
+      );
+      const rolledBack = {
+        ...intent,
+        status: 'rolled_back_after_activation_failure',
+        restoredAt: now,
+        restoredFrom: { checkpointId: checkpoint, checkpointNamespace: stage, counts: receipt.counts },
+      };
+      const updated = await db.runAsync(
+        `UPDATE ledger_v7_meta SET value=?,updated_at=? WHERE key=? AND value=?`,
+        JSON.stringify(rolledBack), now, conflictRecoveryIntentKey(target), String(intentRow.value),
+      );
+      if (Number(updated?.changes || 0) !== 1) throw new Error('financial_v2_conflict_recovery_restore_intent_compare_and_swap_failed');
+      const foreignKeys = await db.getAllAsync('PRAGMA foreign_key_check');
+      if (foreignKeys.length) throw new Error('financial_v2_conflict_recovery_restore_foreign_key_failed');
+      const quick = await db.getFirstAsync('PRAGMA quick_check');
+      if (String(quick ? Object.values(quick)[0] : '').toLowerCase() !== 'ok') {
+        throw new Error('financial_v2_conflict_recovery_restore_quick_check_failed');
+      }
+      return {
+        supported: true, ok: true, namespace: target, checkpointId: checkpoint,
+        ledgerId: text(identity.ledger_id), restoreEpoch: Number(identity.restore_epoch),
+        status: rolledBack.status, counts: receipt.counts,
       };
     }});
   } catch (error) {
