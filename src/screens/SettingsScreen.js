@@ -53,6 +53,7 @@ import { collectP19LocalSqliteDiagnostics } from '../dev/p19LocalSqliteDiagnosti
 import { P19_RESTORE_EPOCH_DEVICE_GATE_ENABLED, runP19RestoreEpochDeviceGate } from '../dev/p19RestoreEpochDeviceGate';
 import { PHASE10_RESTORE_BENCHMARK_ENABLED, runPhase10RestoreBenchmarkHarness } from '../dev/phase10RestoreBenchmarkHarness';
 import { readStartupTiming } from '../lib/startupTiming';
+import DiagnosticsScreen from './DiagnosticsScreen';
 import { resolveSystemNumberInputFormat } from '../lib/numberInput';
 
 const pageCopy = (lang = 'ar') => {
@@ -1197,7 +1198,8 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
               : page === 'guide' ? T.guide
                 : page === 'contact' ? T.contactCenter
                   : page === 'about' ? T.about
-                    : T.settings;
+                    : page === 'diagnostics' ? (isAr ? 'تشخيص الاستعادة' : 'Recovery diagnostics')
+                      : T.settings;
 
   const root = page === 'root';
 
@@ -1340,7 +1342,11 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
         ) : null}
 
         {page === 'about' ? (
-          <AboutPage th={th} isAr={isAr} T={T} />
+          <AboutPage th={th} isAr={isAr} T={T} onOpenDiagnostics={() => openPage('diagnostics')} />
+        ) : null}
+
+        {page === 'diagnostics' ? (
+          <DiagnosticsScreen />
         ) : null}
 
         {page === 'data' ? (
@@ -1948,18 +1954,34 @@ function DiagnosticRow({ th, isAr, label, value, last = false }) {
   return <View style={[s.diagnosticRow, { borderBottomColor: last ? 'transparent' : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}><Text style={[s.diagnosticLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{label}</Text><Text style={[s.diagnosticValue, { color: th.text }]}>{value}</Text></View>;
 }
 
-function AboutPage({ th, isAr, T }) {
+function AboutPage({ th, isAr, T, onOpenDiagnostics }) {
   const version = process.env.EXPO_PUBLIC_MYFI_VERSION || '1.0.0';
   const privacyUrl = process.env.EXPO_PUBLIC_MYFI_PRIVACY_URL || '';
   const termsUrl = process.env.EXPO_PUBLIC_MYFI_TERMS_URL || '';
   const platform = Platform.OS === 'ios' ? 'iOS' : Platform.OS === 'android' ? 'Android' : Platform.OS;
+  // Five taps on the version pill — an inconspicuous entry, not a visible menu
+  // item, per Planning & Audit's instruction to keep this hidden from normal users.
+  const versionTapCount = useRef(0);
+  const versionTapTimer = useRef(null);
+  const onVersionTap = () => {
+    versionTapCount.current += 1;
+    if (versionTapTimer.current) clearTimeout(versionTapTimer.current);
+    if (versionTapCount.current >= 5) {
+      versionTapCount.current = 0;
+      onOpenDiagnostics?.();
+      return;
+    }
+    versionTapTimer.current = setTimeout(() => { versionTapCount.current = 0; }, 1500);
+  };
   return (
     <>
       <View style={[s.aboutHero, { backgroundColor: th.card, borderColor: th.border }]}>
         <View style={[s.aboutLogo, { backgroundColor: th.primSoft }]}><Ionicons name="layers" size={32} color={th.primary} /></View>
         <Text style={[s.aboutBrand, { color: th.text }]}>MYFI</Text>
         <Text style={[s.aboutTagline, { color: th.sub }]}>{T.aboutTagline}</Text>
-        <View style={[s.versionPill, { backgroundColor: th.cardHigh }]}><Text style={[s.versionPillText, { color: th.sub }]}>{T.versionLabel} {version} · {platform}</Text></View>
+        <TouchableOpacity onPress={onVersionTap} activeOpacity={0.8}>
+          <View style={[s.versionPill, { backgroundColor: th.cardHigh }]}><Text style={[s.versionPillText, { color: th.sub }]}>{T.versionLabel} {version} · {platform}</Text></View>
+        </TouchableOpacity>
       </View>
       <View style={[s.aboutStatement, { backgroundColor: th.card, borderColor: th.border }]}><Text style={[s.aboutStatementTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'لماذا MYFI؟' : 'Why MYFI?'}</Text><Text style={[s.aboutPurpose, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.aboutPurpose}</Text></View>
       <SectionLabel th={th} isAr={isAr} text={isAr ? 'مبادئ المنتج' : 'Product principles'} />
