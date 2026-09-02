@@ -119,11 +119,16 @@ export default function DiagnosticsScreen() {
   const canActivate = ledger?.ok === true
     && ledger.intent?.status === 'rolled_back_after_activation_failure'
     && Number(ledger.outboxV3PendingCount || 0) === 0
-    && Number(ledger.outboxV2PendingCount || 0) === 0;
+    && Number(ledger.outboxV2PendingCount || 0) === 0
+    && !!ledger.activeNamespace;
 
-  // Activation reports its own result plus the intent it retired, so success is
-  // read from either shape rather than assumed to be a bare ok flag.
-  const succeeded = entry => !!(entry?.result?.ok || entry?.result?.activation?.ok);
+  // Activation is only finished when the ledger activated *and* the intent that
+  // holds the sync gate shut was retired. Reporting on activation alone would
+  // tell the owner sync is back while every later sync still refuses.
+  const succeeded = entry => !!(
+    entry?.result?.ok
+    || (entry?.result?.activation?.ok && entry?.result?.intentRetired?.ok)
+  );
 
   const finish = (key, result, title, message) => {
     setActionResults(current => ({ ...current, [key]: { finishedAt: new Date().toISOString(), result } }));
@@ -191,11 +196,18 @@ export default function DiagnosticsScreen() {
     } catch (error) {
       result = { ok: false, reason: `activate_threw:${String(error?.message || error)}` };
     }
-    finish('activate', { activation: result, intentRetired: retired },
-      result?.ok ? (isAr ? 'تم تفعيل المزامنة' : 'Sync activated') : (isAr ? 'لم يتم التفعيل' : 'Not activated'),
-      result?.ok
+    const entry = { activation: result, intentRetired: retired };
+    finish('activate', entry,
+      succeeded({ result: entry }) ? (isAr ? 'تم تفعيل المزامنة' : 'Sync activated') : (isAr ? 'لم يتم التفعيل' : 'Not activated'),
+      succeeded({ result: entry })
         ? `${isAr ? 'عادت المزامنة للعمل ونزلت تعديلات السحابة. ' : 'Sync is working again and the cloud changes came down. '}${restartNotice}`
-        : failureNotice(result));
+        : result?.ok
+          // Activated, but the gate is still shut. Saying "done" here would be
+          // a lie the owner only discovers when the next sync refuses.
+          ? (isAr
+            ? `تم التفعيل لكن حاجز المزامنة لم يُرفع. السبب: ${retired?.reason || 'غير معروف'}`
+            : `Activated, but the sync block was not lifted. Reason: ${retired?.reason || 'unknown'}`)
+          : failureNotice(result));
   };
 
   const confirm = (title, message, action, onPress) => Alert.alert(title, message, [
