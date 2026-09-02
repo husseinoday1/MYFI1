@@ -22,9 +22,15 @@ const text = value => String(value ?? '').trim();
 const parse = value => { try { return JSON.parse(String(value ?? '')); } catch { return null; } };
 const intentKey = namespace => `financial_v2_conflict_recovery_intent_v1:${text(namespace)}`;
 const checkpointKey = (namespace, id) => `financial_v2_conflict_checkpoint_v1:${text(namespace)}:${text(id)}`;
+// A rolled-back recovery is finished as an *operation*, but the V2 conflict it
+// was meant to repair is still there: the restored ledger sits at its old
+// revision while the cloud has moved on. Releasing the gate here would let the
+// V1 fallback resume writing the same rejected workspace commands that made
+// this recovery necessary, so the block stays until a reviewed path ends it.
 const ACTIVE_CONFLICT_RECOVERY_INTENT_STATUSES = new Set([
   'ready_for_explicit_cloud_replacement',
   'local_promoted_pending_activation',
+  'rolled_back_after_activation_failure',
 ]);
 const failure = (reason, extra = {}) => ({
   supported: true, ok: false, reason: text(reason) || 'financial_v2_conflict_recovery_prepare_failed', ...extra,

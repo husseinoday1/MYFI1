@@ -67,11 +67,14 @@ const testIntentGate = async () => {
   for (const status of [
     'ready_for_explicit_cloud_replacement',
     'local_promoted_pending_activation',
+    // A rollback ends the operation but not the underlying V2 conflict, so the
+    // gate must stay closed until a reviewed path retires the intent.
+    'rolled_back_after_activation_failure',
   ]) {
     assert.equal(await hasActiveIntent({ accountId, status }), true, `${status} must block automatic sync`);
   }
-  assert.equal(await hasActiveIntent({ accountId, status: 'rolled_back_after_activation_failure' }), false,
-    'a finished intent must not block ordinary sync');
+  assert.equal(await hasActiveIntent({ accountId, status: 'retired_after_reviewed_repair' }), false,
+    'an unrecognised, non-active status must not block ordinary sync');
   assert.equal(await hasActiveIntent({ accountId: 'another-account', status: 'ready_for_explicit_cloud_replacement' }), false,
     'an intent owned by another account must not block this account');
   assert.equal(await hasActiveIntent(null), false, 'an absent intent must not block ordinary sync');
@@ -155,6 +158,7 @@ const testSyncInterlock = async () => {
   for (const status of [
     'ready_for_explicit_cloud_replacement',
     'local_promoted_pending_activation',
+    'rolled_back_after_activation_failure',
   ]) {
     assert.equal(await hasActiveIntent({ accountId, status }), true);
     const blocked = await runSyncCloud(true);
@@ -167,7 +171,7 @@ const testSyncInterlock = async () => {
     assert.equal(blocked.v2SyncCalls, 0);
   }
 
-  for (const intent of [null, { accountId, status: 'rolled_back_after_activation_failure' }]) {
+  for (const intent of [null, { accountId, status: 'retired_after_reviewed_repair' }]) {
     assert.equal(await hasActiveIntent(intent), false);
     const normal = await runSyncCloud(false);
     assert.equal(normal.gateCalls, 1);
