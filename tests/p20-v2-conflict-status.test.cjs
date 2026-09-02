@@ -11,7 +11,9 @@ const failurePath = source.slice(start, end);
 assert.ok(start >= 0 && end > start, 'V2 sync failure handling is missing');
 assert.match(failurePath, /const syncReason = String\(e\?\.message \|\| 'sync_failed'\)/);
 assert.match(failurePath, /const revisionConflict = syncReason === 'financial_v2_revision_conflict'/);
-assert.match(failurePath, /online: revisionConflict/);
-assert.match(failurePath, /lastSyncError: syncReason/);
+assert.match(failurePath, /const preserveRevisionConflict = syncReason === 'ledger_queue_reentrant_from_read_transaction'/);
+assert.match(failurePath, /String\(get\(\)\.lastSyncError \|\| ''\) === 'financial_v2_revision_conflict'/);
+assert.match(failurePath, /online: revisionConflict \|\| preserveRevisionConflict/);
+assert.match(failurePath, /lastSyncError: preserveRevisionConflict \? 'financial_v2_revision_conflict' : syncReason/);
 
 console.log('MYFI P20 V2 CONFLICT STATUS CONTRACT: PASSED');

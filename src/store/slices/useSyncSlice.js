@@ -3044,9 +3044,14 @@ export const createSyncSlice = (set, get) => ({
           // not a network outage. Keeping the device online makes the account
           // screen truthful and leaves recovery actions available.
           const revisionConflict = syncReason === 'financial_v2_revision_conflict';
+          // A queued Home/read snapshot can overlap the startup sync and trip the
+          // read-transaction reentrancy guard. It is logged above, but must not
+          // conceal a previously authenticated V2 conflict and its repair action.
+          const preserveRevisionConflict = syncReason === 'ledger_queue_reentrant_from_read_transaction'
+            && String(get().lastSyncError || '') === 'financial_v2_revision_conflict';
           set({
-            online: revisionConflict,
-            lastSyncError: syncReason,
+            online: revisionConflict || preserveRevisionConflict,
+            lastSyncError: preserveRevisionConflict ? 'financial_v2_revision_conflict' : syncReason,
           });
         }
         if (!transientRetryScheduled && !isTransientCloudSyncError(e)) {
