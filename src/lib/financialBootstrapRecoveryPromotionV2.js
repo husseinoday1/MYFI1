@@ -189,7 +189,7 @@ const exactConflictIntent = ({ value, namespace, accountId, hot, cold, checkpoin
   && value.local.staleWorkspaceMutations.length === value.local.staleWorkspaceMutationIds.length
 );
 
-const assertConflictCheckpoint = async (db, namespace, checkpointId, identity, intent) => {
+export const assertConflictCheckpoint = async (db, namespace, checkpointId, identity, intent) => {
   const receiptRow = await db.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, conflictRecoveryCheckpointKey(namespace, checkpointId));
   const checkpoint = parse(receiptRow?.value);
   if (!checkpoint || checkpoint.version !== 1 || checkpoint.checkpointId !== checkpointId
@@ -218,7 +218,7 @@ const assertConflictCheckpoint = async (db, namespace, checkpointId, identity, i
   return checkpoint;
 };
 
-const assertOnlyPreparedWorkspaceMutations = async (db, namespace, identity, intent) => {
+export const assertOnlyPreparedWorkspaceMutations = async (db, namespace, identity, intent) => {
   const rows = await db.getAllAsync(
     `SELECT sequence_id,mutation_id,command_id,entity_type,entity_id,operation,revision,base_revision,payload_json
        FROM ledger_outbox_v3 WHERE namespace=? AND ledger_id=? AND restore_epoch=?

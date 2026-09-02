@@ -11,7 +11,11 @@ import {
 } from './financialLedgerV7Repository';
 import { readLiveGenerationInTransactionV13 } from './financialLiveGenerationV13';
 import { stageVerifiedBootstrapWithArchiveV2 } from './financialBootstrapRecoveryCoordinatorV2';
-import { promotePreparedCloudConflictRecoveryV1 } from './financialBootstrapRecoveryPromotionV2';
+import {
+  assertConflictCheckpoint,
+  assertOnlyPreparedWorkspaceMutations,
+  promotePreparedCloudConflictRecoveryV1,
+} from './financialBootstrapRecoveryPromotionV2';
 import { createSecureUuidV4 } from './secureUuid';
 
 const text = value => String(value ?? '').trim();
@@ -221,6 +225,51 @@ export const prepareVerifiedCloudConflictRecoveryV1 = async ({
     }});
   } catch (error) {
     return failure(error?.message);
+  }
+};
+
+// A process restart can discard the in-memory UI state after preparation while
+// leaving its intentionally durable checkpoint and intent intact. This is only
+// an advisory read path: confirm still re-downloads cloud data and repeats all
+// destructive preconditions inside its one atomic local transaction.
+export const resumePreparedCloudConflictRecoveryV1 = async ({
+  namespace = 'guest', accountId, database = null,
+} = {}) => {
+  const target = text(namespace);
+  const owner = text(accountId);
+  const db = database || await getLedgerDb();
+  if (!db) return { supported: false, ok: false, found: false, reason: 'sqlite_unavailable' };
+  if (!target || !owner) return failure('financial_v2_conflict_recovery_input_invalid', { found: false });
+
+  try {
+    const restoreIntent = await db.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, `restore_intent:${target}`,
+    );
+    if (restoreIntent?.value) {
+      return failure('financial_v2_conflict_recovery_resume_restore_intent_active', { found: true });
+    }
+    const intentRow = await db.getFirstAsync(
+      `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, intentKey(target),
+    );
+    if (!intentRow?.value) return { supported: true, ok: false, found: false };
+    const intent = parse(intentRow.value);
+    if (!intent || intent.version !== 1 || intent.status !== 'ready_for_explicit_cloud_replacement'
+        || intent.namespace !== target || intent.accountId !== owner) {
+      return failure('financial_v2_conflict_recovery_resume_intent_invalid', { found: true });
+    }
+    const identity = await db.getFirstAsync(
+      `SELECT namespace,ledger_id,restore_epoch FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`, target,
+    );
+    if (!identity?.ledger_id || text(identity.namespace) !== target
+        || text(identity.ledger_id) !== text(intent.cloud?.ledgerId)
+        || Number(identity.restore_epoch) !== Number(intent.cloud?.restoreEpoch)) {
+      return failure('financial_v2_conflict_recovery_resume_identity_changed', { found: true });
+    }
+    await assertConflictCheckpoint(db, target, text(intent.local?.checkpointId), identity, intent);
+    await assertOnlyPreparedWorkspaceMutations(db, target, identity, intent);
+    return { supported: true, ok: true, found: true, resumed: true, intent };
+  } catch (error) {
+    return failure(error?.message, { found: true });
   }
 };
 

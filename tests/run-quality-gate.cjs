@@ -130,6 +130,7 @@ const runtimeTests = [
   ['SQLITE_RUNTIME', 'p20_local_reset_v2_interlock', 'run-p20-local-reset-v2-interlock.cjs'],
   ['SQLITE_RUNTIME', 'p20_local_reset_cloud_recovery', 'run-p20-local-reset-cloud-recovery.cjs'],
   ['SQLITE_RUNTIME', 'p20_v2_conflict_recovery_checkpoint', 'run-p20-v2-conflict-checkpoint.cjs'],
+  ['SQLITE_RUNTIME', 'p20_v2_conflict_recovery_resume', 'run-p20-v2-conflict-recovery-resume.cjs'],
   ['RUNTIME', 'p20_v2_conflict_recovery_prepare', 'run-p20-v2-conflict-recovery-prepare.cjs'],
   ['UNIT_RUNTIME', 'p20_phase12a_archive_readback', 'run-p20-phase12a-archive-readback.cjs'],
   ['SQLITE_RUNTIME', 'p20_phase12c_bootstrap_recovery_session', 'run-p20-phase12c-bootstrap-recovery-session.cjs'],

@@ -65,6 +65,7 @@ import { recoverVerifiedBootstrapWithArchiveV2 } from '../../lib/financialBootst
 import {
   confirmPreparedCloudConflictRecoveryV1,
   prepareVerifiedCloudConflictRecoveryV1,
+  resumePreparedCloudConflictRecoveryV1,
 } from '../../lib/financialV2ConflictRecoveryV1';
 import {
   GUEST_NAMESPACE,
@@ -1593,9 +1594,12 @@ export const createSyncSlice = (set, get) => ({
     const workspaceNamespace = current.workspaceNamespace || workspaceNamespaceForSession({ user: current.user });
     const result = await get().runFinancialMaintenance(
       'financial_v2_conflict_recovery_prepare',
-      () => prepareVerifiedCloudConflictRecoveryV1({
-        supabase, namespace: getLedgerNamespace(workspaceNamespace, get().cfg), accountId: current.user.id,
-      }),
+      async () => {
+        const namespace = getLedgerNamespace(workspaceNamespace, get().cfg);
+        const resumed = await resumePreparedCloudConflictRecoveryV1({ namespace, accountId: current.user.id });
+        if (resumed.found) return resumed;
+        return prepareVerifiedCloudConflictRecoveryV1({ supabase, namespace, accountId: current.user.id });
+      },
       { resumeSync: false, presentation: 'blocking' },
     );
     set({
