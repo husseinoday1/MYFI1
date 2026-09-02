@@ -1625,6 +1625,7 @@ export const createSyncSlice = (set, get) => ({
       { resumeSync: false, presentation: 'blocking' },
     );
     if (!result?.ok) {
+      console.warn('[V2_CONFLICT_CONFIRM_REJECTED]', JSON.stringify(result));
       set({ restoreSafety: { status: 'financial_v2_conflict_recovery_blocked', operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString(), reason: String(result?.reason || 'promotion_failed') } });
       return result;
     }
@@ -1634,6 +1635,7 @@ export const createSyncSlice = (set, get) => ({
     await get().loadLocal(workspaceNamespace, { allowLegacy: false, maintenanceOwned: true });
     const activation = await get().activateFinancialSyncV2();
     if (!activation?.ok) {
+      console.warn('[V2_CONFLICT_ACTIVATION_FAILED]', JSON.stringify(activation));
       set({ lastSyncError: activation?.reason || 'financial_v2_conflict_recovery_activation_required', restoreSafety: { status: 'financial_v2_conflict_recovery_activation_required', operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString() } });
       return { ...result, ok: false, pending: true, reason: activation?.reason || 'financial_v2_conflict_recovery_activation_required' };
     }
