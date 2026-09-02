@@ -184,21 +184,27 @@ const testSliceResumeRouting = async () => {
   assert.ok(start >= 0 && end > start, 'prepareV2ConflictRecovery source is missing');
   let handler = source.slice(start, end).trim().replace(/^prepareV2ConflictRecovery:\s*/, '');
   if (handler.endsWith(',')) handler = handler.slice(0, -1);
-  const build = new Function('get', 'set', 'supabase', 'workspaceNamespaceForSession', 'getLedgerNamespace', 'resumePreparedCloudConflictRecoveryV1', 'prepareVerifiedCloudConflictRecoveryV1', `return (${handler});`);
-  const run = async ({ resumed, lastSyncError = 'financial_v2_revision_conflict', online = true, syncing = false }) => {
-    let resumeCalls = 0; let prepareCalls = 0;
+  const build = new Function('get', 'set', 'supabase', 'workspaceNamespaceForSession', 'getLedgerNamespace', 'resumePreparedCloudConflictRecoveryV1', 'prepareVerifiedCloudConflictRecoveryV1', 'cloudWorkspaceRevisionFromConflictsV1', 'inspectStaleWorkspaceConflictV1', `return (${handler});`);
+  const run = async ({
+    resumed, lastSyncError = 'financial_v2_revision_conflict', online = true, syncing = false,
+    conflicts = null, narrowEligible = false,
+  }) => {
+    let resumeCalls = 0; let prepareCalls = 0; let inspectCalls = 0;
     const state = {
       user: { id: 'account-1' }, cfg: {}, workspaceReady: true, online, syncing,
       lastSyncError, workspaceNamespace: 'user:store-test',
+      financialV2Conflicts: conflicts ? { conflicts } : null,
       runFinancialMaintenance: async (_name, task) => task(),
     };
     const action = build(
       () => state, patch => Object.assign(state, patch), {}, () => state.workspaceNamespace, namespace => namespace,
       async () => { resumeCalls += 1; return resumed; },
       async () => { prepareCalls += 1; return { ok: true, intent: { local: { checkpointId: 'new-checkpoint' } } }; },
+      rows => (Array.isArray(rows) && rows.length ? 7 : 0),
+      async () => { inspectCalls += 1; return narrowEligible ? { ok: true, commands: [{ sequenceId: 74 }] } : { ok: false, reason: 'not_stale' }; },
     );
     const result = await action();
-    return { result, resumeCalls, prepareCalls, state };
+    return { result, resumeCalls, prepareCalls, inspectCalls, state };
   };
   const resumed = await run({
     resumed: { ok: true, found: true, resumed: true, intent: { local: { checkpointId: 'existing-checkpoint' } } },
@@ -214,6 +220,36 @@ const testSliceResumeRouting = async () => {
   assert.equal(absent.result.reason, 'financial_v2_conflict_recovery_not_eligible');
   const normalPreparation = await run({ resumed: { ok: false, found: false } });
   assert.equal(normalPreparation.prepareCalls, 1, 'normal preparation must run only when no prepared intent exists and the conflict is live');
+
+  // The narrow repair is preferred when the conflict proves it applies: it
+  // replaces nothing, so it can never carry a frozen snapshot over live data.
+  const narrow = await run({
+    resumed: { ok: false, found: false },
+    conflicts: [{ entityId: 'workspace', currentRevision: 7 }],
+    narrowEligible: true,
+  });
+  assert.equal(narrow.inspectCalls, 1);
+  assert.equal(narrow.prepareCalls, 0, 'an eligible narrow repair must not download a bootstrap');
+  assert.equal(narrow.result.path, 'stale_workspace_discard');
+  assert.equal(narrow.state.restoreSafety.path, 'stale_workspace_discard');
+  assert.equal(narrow.state.restoreSafety.status, 'financial_v2_conflict_recovery_ready');
+  assert.equal(narrow.state.restoreSafety.cloudWorkspaceRevision, 7);
+
+  // Anything the narrow path cannot prove falls through to the existing one.
+  const wider = await run({
+    resumed: { ok: false, found: false },
+    conflicts: [{ entityId: 'workspace', currentRevision: 7 }],
+    narrowEligible: false,
+  });
+  assert.equal(wider.inspectCalls, 1);
+  assert.equal(wider.prepareCalls, 1, 'an ineligible narrow repair must fall back to cloud replacement');
+  assert.equal(wider.state.restoreSafety.path, undefined);
+
+  // With no conflict detail there is nothing to prove staleness against, so the
+  // narrow path is not even attempted.
+  const noConflictDetail = await run({ resumed: { ok: false, found: false }, conflicts: null });
+  assert.equal(noConflictDetail.inspectCalls, 0);
+  assert.equal(noConflictDetail.prepareCalls, 1);
 };
 
 const testSliceRestartRehydration = async fixture => {

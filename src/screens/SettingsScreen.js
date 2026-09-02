@@ -2112,8 +2112,12 @@ function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview,
             {restoreSafety?.status === 'financial_v2_conflict_recovery_ready' ? (
               <MenuRow
                 th={th} isAr={isAr} icon="cloud-done-outline" iconColor={th.primary}
-                title={isAr ? 'استبدال النسخة المحلية المتعارضة' : 'Replace the conflicting local copy'}
-                subtitle={conflictRecoveryBusy ? (isAr ? 'جارٍ التحقق والاستبدال بأمان…' : 'Verifying and replacing safely…') : (isAr ? 'تم حفظ نسخة أمان محلية للدعم؛ اضغط لتثبيت النسخة السحابية الموثقة.' : 'A local safety copy is saved for support. Install the verified cloud copy.')}
+                title={restoreSafety?.path === 'stale_workspace_discard'
+                  ? (isAr ? 'إزالة تعديل الإعدادات العالق' : 'Remove the stuck settings change')
+                  : (isAr ? 'استبدال النسخة المحلية المتعارضة' : 'Replace the conflicting local copy')}
+                subtitle={conflictRecoveryBusy ? (isAr ? 'جارٍ التحقق والاستبدال بأمان…' : 'Verifying and replacing safely…') : (restoreSafety?.path === 'stale_workspace_discard'
+                  ? (isAr ? 'تعديل إعدادات واحد عالق سيُحذف وتحل نسخة السحابة محله. حركاتك وأرصدتك لا تتغيّر.' : 'One stuck settings change will be dropped and the cloud version replaces it. Your transactions and balances do not change.')
+                  : (isAr ? 'تم حفظ نسخة أمان محلية للدعم؛ اضغط لتثبيت النسخة السحابية الموثقة.' : 'A local safety copy is saved for support. Install the verified cloud copy.'))}
                 onPress={conflictRecoveryBusy ? null : onConfirmConflictRecovery}
               />
             ) : null}

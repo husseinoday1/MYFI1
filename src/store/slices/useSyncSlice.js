@@ -70,6 +70,11 @@ import {
   resumePreparedCloudConflictRecoveryV1,
 } from '../../lib/financialV2ConflictRecoveryV1';
 import {
+  cloudWorkspaceRevisionFromConflictsV1,
+  discardStaleWorkspaceCommandsV1,
+  inspectStaleWorkspaceConflictV1,
+} from '../../lib/financialV2StaleCommandRecoveryV1';
+import {
   GUEST_NAMESPACE,
   clearVaultSnapshot,
   getOrCreateDeviceId,
@@ -1650,6 +1655,31 @@ export const createSyncSlice = (set, get) => ({
     if (!current.online || current.syncing || String(current.lastSyncError || '') !== 'financial_v2_revision_conflict') {
       return { ok: false, reason: 'financial_v2_conflict_recovery_not_eligible' };
     }
+
+    // The narrow repair comes first, because it is the one that fits the only
+    // conflict seen in practice: a single stale workspace command the cloud has
+    // moved past. It replaces nothing, so it cannot carry a frozen snapshot back
+    // over a live device. Anything wider falls through to the verified
+    // cloud-replacement path below, unchanged.
+    const cloudWorkspaceRevision = cloudWorkspaceRevisionFromConflictsV1(current.financialV2Conflicts?.conflicts);
+    if (cloudWorkspaceRevision > 0) {
+      const narrow = await inspectStaleWorkspaceConflictV1({
+        namespace, accountId: current.user.id, cloudWorkspaceRevision,
+      });
+      if (narrow?.ok) {
+        set({
+          restoreSafety: {
+            status: 'financial_v2_conflict_recovery_ready',
+            path: 'stale_workspace_discard',
+            operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString(),
+            checkpointId: null, reason: null,
+            cloudWorkspaceRevision, staleCommandCount: narrow.commands.length,
+          },
+        });
+        return { ok: true, path: 'stale_workspace_discard', ...narrow };
+      }
+    }
+
     const result = await get().runFinancialMaintenance(
       'financial_v2_conflict_recovery_prepare',
       () => prepareVerifiedCloudConflictRecoveryV1({ supabase, namespace, accountId: current.user.id }),
@@ -1674,6 +1704,35 @@ export const createSyncSlice = (set, get) => ({
       return { ok: false, reason: 'financial_v2_conflict_recovery_confirmation_not_ready' };
     }
     const workspaceNamespace = current.workspaceNamespace || workspaceNamespaceForSession({ user: current.user });
+
+    // The narrow repair prepared by the branch above. It discards the proven
+    // stale command and then lets an ordinary sync bring the device forward --
+    // there is no promotion, no checkpoint and no activation step, because
+    // nothing was replaced.
+    if (current.restoreSafety?.path === 'stale_workspace_discard') {
+      const discarded = await get().runFinancialMaintenance(
+        'financial_v2_stale_command_repair',
+        () => discardStaleWorkspaceCommandsV1({
+          namespace: getLedgerNamespace(workspaceNamespace, get().cfg),
+          accountId: current.user.id,
+          cloudWorkspaceRevision: Number(current.restoreSafety?.cloudWorkspaceRevision || 0),
+          confirmed: true,
+        }),
+        { resumeSync: false, presentation: 'blocking' },
+      );
+      if (!discarded?.ok) {
+        console.warn('[V2_STALE_COMMAND_REPAIR_REJECTED]', JSON.stringify(discarded));
+        set({ restoreSafety: { status: 'financial_v2_conflict_recovery_blocked', operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString(), reason: String(discarded?.reason || 'stale_command_repair_failed') } });
+        return discarded;
+      }
+      set({ lastSyncError: null, financialV2Conflicts: null, restoreSafety: null });
+      const synced = await get().syncCloud({ reason: 'financial_v2_stale_command_repair' });
+      return {
+        ...discarded, path: 'stale_workspace_discard', synced: !!synced,
+        ...(synced ? {} : { pending: true, reason: get().lastSyncError || 'stale_command_repair_sync_pending' }),
+      };
+    }
+
     const result = await get().runFinancialMaintenance(
       'financial_v2_conflict_recovery_confirm',
       () => confirmPreparedCloudConflictRecoveryV1({
@@ -2871,6 +2930,20 @@ export const createSyncSlice = (set, get) => ({
                     deviceId,
                   });
               if (!bridged?.ok) {
+                // The server's conflict answer carries the cloud's current
+                // revision for the entity it refused. That is the one fact the
+                // narrow repair needs to prove a queued command is stale, and
+                // this response is the only place it appears -- keep it rather
+                // than reducing the whole failure to an error string.
+                if (Array.isArray(bridged?.conflicts) && bridged.conflicts.length) {
+                  set({
+                    financialV2Conflicts: {
+                      conflicts: bridged.conflicts,
+                      reason: String(bridged.reason || ''),
+                      observedAt: new Date().toISOString(),
+                    },
+                  });
+                }
                 throw new Error(bridged?.reason || (
                   financialV2Active ? 'financial_v2_bridge_sync_failed' : 'financial_v1_bridge_sync_failed'
                 ));
