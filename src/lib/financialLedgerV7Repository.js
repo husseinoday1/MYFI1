@@ -3181,9 +3181,27 @@ const v2ValidateDomainEntityPayload = (item) => {
   return { kind: 'domain_entity', source };
 };
 
-const v2PreflightMutation = async (db, identity, item) => {
+const v2EntityKey = item => `${item.entityType}:${item.entityId}`;
+
+// Shadow validation never applies, so after the first command the live tables
+// can no longer answer "what would this command land on". Asking them anyway
+// made every device more than one revision behind fail preflight on the second
+// command of a chain, and therefore fail activation permanently. The projection
+// carries the chain forward instead: seeded from the live row, then advanced by
+// each validated command. Production passes null — there the live tables really
+// do advance, so they remain the only authority.
+const v2ResolveCurrentRevision = async (db, namespace, item, projected) => {
+  if (!projected) return v2CurrentRevision(db, namespace, item);
+  const key = v2EntityKey(item);
+  if (projected.has(key)) return projected.get(key);
+  const current = await v2CurrentRevision(db, namespace, item);
+  projected.set(key, current);
+  return current;
+};
+
+const v2PreflightMutation = async (db, identity, item, projected = null) => {
   if (await v2ExactLocalEcho(db, identity, item)) {
-    const currentRevision = await v2CurrentRevision(db, identity.namespace, item);
+    const currentRevision = await v2ResolveCurrentRevision(db, identity.namespace, item, projected);
     if (currentRevision < item.revision) {
       throw Object.assign(new Error('financial_v2_exact_echo_local_state_missing'), {
         conflict: v2RemoteConflict('financial_v2_exact_echo_local_state_missing', item, { currentRevision }),
@@ -3191,7 +3209,7 @@ const v2PreflightMutation = async (db, identity, item) => {
     }
     return { item, kind: 'exact_local_echo', echo: true, currentRevision };
   }
-  const currentRevision = await v2CurrentRevision(db, identity.namespace, item);
+  const currentRevision = await v2ResolveCurrentRevision(db, identity.namespace, item, projected);
   if (currentRevision !== item.baseRevision) {
     throw Object.assign(new Error('financial_v2_remote_cas_conflict'), {
       conflict: v2RemoteConflict('financial_v2_remote_cas_conflict', item, { currentRevision }),
@@ -3489,6 +3507,8 @@ export const applyRemoteLedgerMutationsV8 = async ({
   return enqueueWrite(async () => {
     let applied = 0;
     let processed = 0;
+    // Only shadow needs a projection; see v2ResolveCurrentRevision.
+    const projectedRevisions = shadowMode ? new Map() : null;
     const orderedGroups = [...commandGroups.values()].sort((a,b) => (
       a[0].commandSequence - b[0].commandSequence
     ));
@@ -3528,7 +3548,7 @@ export const applyRemoteLedgerMutationsV8 = async ({
 
       const plans = [];
       try {
-        for (const item of group) plans.push(await v2PreflightMutation(db, identity, item));
+        for (const item of group) plans.push(await v2PreflightMutation(db, identity, item, projectedRevisions));
       } catch (error) {
         await v2WriteConflictInbox(db, identity, group);
         const conflict = error?.conflict || v2RemoteConflict(error?.message || 'financial_v2_remote_cas_conflict', group[0]);
@@ -3552,6 +3572,9 @@ export const applyRemoteLedgerMutationsV8 = async ({
             identity.ledgerId, identity.restoreEpoch, commandSequence, now, String(deviceId || ''), now,
           );
         });
+        // The command validated, so the chain has moved on even though the
+        // ledger has not. Later commands for these entities compare against it.
+        for (const item of group) projectedRevisions.set(v2EntityKey(item), item.revision);
         processed += group.length;
         cursor = Math.max(cursor, commandSequence);
         continue;
