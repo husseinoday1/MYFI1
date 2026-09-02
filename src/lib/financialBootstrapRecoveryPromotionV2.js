@@ -574,3 +574,141 @@ export const restoreFinancialConflictRecoveryCheckpointV1 = async ({
     return failure(error?.message);
   }
 };
+
+// The same allow-list the V2 adoption and empty-shell classifications already
+// use: setup metadata only. A financial row must never fall inside a discard.
+const setupOnlyLegacyRow = row => (
+  text(row?.operation) === 'upsert'
+  && (
+    (text(row?.entity_type) === 'workspace' && text(row?.entity_id) === 'workspace')
+    || ['wallet', 'category'].includes(text(row?.entity_type))
+  )
+);
+
+const isoAfter = (value, boundary) => {
+  const at = Date.parse(text(value));
+  const from = Date.parse(text(boundary));
+  return Number.isFinite(at) && Number.isFinite(from) && at > from;
+};
+
+const MAX_DISCARDABLE_LEGACY_ROWS = 32;
+
+/**
+ * A checkpoint restore rewinds the financial tables but cannot rewind the
+ * legacy V1 outbox, which is written again whenever V2 is not activated. The
+ * rows left above the checkpoint's own timestamp were produced by the failed
+ * recovery, and are not inert: the V1 sync serializes straight from their
+ * payload_json without consulting the live tables, so they would re-upload
+ * entities the restore just removed.
+ *
+ * The checkpoint receipt's `createdAt` is the one evidence-backed boundary
+ * between those rows and anything that legitimately predates the incident, so
+ * nothing at or below it is ever touched. Row types are proven here, inside
+ * the transaction, against the live table — never from an earlier snapshot —
+ * and a single financial row makes the whole call fail closed. Every discarded
+ * row is copied verbatim into the intent first, so the evidence outlives it.
+ */
+export const discardLegacyOutboxAfterCheckpointRestoreV1 = async ({
+  namespace = 'guest', database = null,
+} = {}) => {
+  const target = text(namespace);
+  if (!target) return failure('financial_v2_legacy_outbox_discard_input_invalid');
+
+  try {
+    return await runFinancialRestorePromotionTransactionV8({ database, task: async actions => {
+      const db = actions.database;
+      const [identity, restoreIntent, intentRow] = await Promise.all([
+        db.getFirstAsync(`SELECT * FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`, target),
+        db.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, restoreIntentKey(target)),
+        db.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, conflictRecoveryIntentKey(target)),
+      ]);
+      if (restoreIntent?.value) throw new Error('financial_v2_legacy_outbox_discard_restore_intent_active');
+      if (!identity?.ledger_id) throw new Error('financial_v2_legacy_outbox_discard_identity_missing');
+
+      // Bound to the state a completed rollback leaves behind. Before the
+      // restore these rows may still be the owner's only copy of real work.
+      const intent = parse(intentRow?.value);
+      if (!intent || intent.version !== 1 || text(intent.status) !== 'rolled_back_after_activation_failure'
+          || text(intent.namespace) !== target) {
+        throw new Error('financial_v2_legacy_outbox_discard_intent_not_eligible');
+      }
+      const checkpointId = text(intent.local?.checkpointId);
+      const receipt = parse((await db.getFirstAsync(
+        `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, conflictRecoveryCheckpointKey(target, checkpointId),
+      ))?.value);
+      const boundary = text(receipt?.createdAt);
+      if (!receipt || receipt.version !== 1 || text(receipt.checkpointId) !== checkpointId
+          || text(receipt.namespace) !== target || text(receipt.ledgerId) !== text(identity.ledger_id)
+          || Number(receipt.restoreEpoch) !== Number(identity.restore_epoch)
+          || !Number.isFinite(Date.parse(boundary))) {
+        throw new Error('financial_v2_legacy_outbox_discard_boundary_invalid');
+      }
+
+      const rows = await db.getAllAsync(
+        `SELECT sequence_id,namespace,mutation_id,entity_type,entity_id,operation,entity_revision,
+                payload_version,payload_json,created_at,attempts,last_error
+           FROM ledger_outbox_v2
+          WHERE namespace=? AND acknowledged_at IS NULL AND created_at > ?
+          ORDER BY sequence_id`,
+        target, boundary,
+      );
+      if (!rows.length) {
+        return {
+          supported: true, ok: true, namespace: target, boundary, discarded: 0,
+          status: text(intent.status),
+        };
+      }
+      if (rows.length > MAX_DISCARDABLE_LEGACY_ROWS) throw new Error('financial_v2_legacy_outbox_discard_too_many_rows');
+      // Re-prove the window in JavaScript too: the SQL comparison is textual,
+      // and a malformed timestamp must not smuggle a row into the discard.
+      if (!rows.every(row => setupOnlyLegacyRow(row) && isoAfter(row.created_at, boundary))) {
+        throw new Error('financial_v2_legacy_outbox_discard_unsafe_row_present');
+      }
+
+      const now = new Date().toISOString();
+      for (const row of rows) {
+        const deleted = await db.runAsync(
+          `DELETE FROM ledger_outbox_v2 WHERE namespace=? AND sequence_id=? AND acknowledged_at IS NULL`,
+          target, Number(row.sequence_id),
+        );
+        if (Number(deleted?.changes || 0) !== 1) throw new Error('financial_v2_legacy_outbox_discard_row_delete_failed');
+      }
+      const remaining = await count(
+        db,
+        `SELECT COUNT(*) AS n FROM ledger_outbox_v2 WHERE namespace=? AND acknowledged_at IS NULL AND created_at > ?`,
+        target, boundary,
+      );
+      if (remaining !== 0) throw new Error('financial_v2_legacy_outbox_discard_incomplete');
+
+      // The status does not move: the V2 conflict this recovery never repaired
+      // is still open, and the sync gate must stay closed until it is.
+      const updatedIntent = {
+        ...intent,
+        discardedLegacyOutbox: {
+          boundary, discardedAt: now, rowCount: rows.length, rows,
+        },
+      };
+      const updated = await db.runAsync(
+        `UPDATE ledger_v7_meta SET value=?,updated_at=? WHERE key=? AND value=?`,
+        JSON.stringify(updatedIntent), now, conflictRecoveryIntentKey(target), String(intentRow.value),
+      );
+      if (Number(updated?.changes || 0) !== 1) throw new Error('financial_v2_legacy_outbox_discard_intent_compare_and_swap_failed');
+      const foreignKeys = await db.getAllAsync('PRAGMA foreign_key_check');
+      if (foreignKeys.length) throw new Error('financial_v2_legacy_outbox_discard_foreign_key_failed');
+      const quick = await db.getFirstAsync('PRAGMA quick_check');
+      if (String(quick ? Object.values(quick)[0] : '').toLowerCase() !== 'ok') {
+        throw new Error('financial_v2_legacy_outbox_discard_quick_check_failed');
+      }
+      return {
+        supported: true, ok: true, namespace: target, boundary, discarded: rows.length,
+        status: text(intent.status), discardedRows: rows.map(row => ({
+          sequenceId: Number(row.sequence_id), mutationId: text(row.mutation_id),
+          entityType: text(row.entity_type), entityId: text(row.entity_id),
+          operation: text(row.operation), createdAt: text(row.created_at),
+        })),
+      };
+    }});
+  } catch (error) {
+    return failure(error?.message);
+  }
+};
