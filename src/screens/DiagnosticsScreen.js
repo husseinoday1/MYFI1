@@ -1,6 +1,13 @@
 // Phase 12 — on-device diagnostics for the V2 sync-conflict / restore-recovery
-// chain (see src/dev/p12ConflictRecoveryDiagnostics.js). Entirely read-only:
-// no SQLite write, no network, no Supabase call, no action/repair button.
+// chain (see src/dev/p12ConflictRecoveryDiagnostics.js). The whole reading side
+// is read-only: no SQLite write, no network, no Supabase call.
+//
+// It carries exactly one action, and only in one state: when a conflict
+// recovery was promoted locally but never activated, the owner can put the
+// checkpoint back. It is rendered only while that state actually holds, runs
+// only after an explicit confirmation, and never repeats itself. The reading
+// collector stays write-free — the action calls the recovery library directly.
+//
 // Reachable only from About > version number (five taps) — not a normal
 // user-facing entry point.
 import React, { useCallback, useEffect, useState } from 'react';
@@ -12,6 +19,7 @@ import { useTheme } from '../lib/useTheme';
 import { AppButton, ScreenScroll, SectionTitle, SurfaceCard, rowDirection, textAlign } from '../components/AppPrimitives';
 import { SPACE, weight } from '../lib/tokens';
 import { collectP12ConflictRecoveryDiagnostics } from '../dev/p12ConflictRecoveryDiagnostics';
+import { restoreFinancialConflictRecoveryCheckpointV1 } from '../lib/financialBootstrapRecoveryPromotionV2';
 
 const j = value => (value === null || value === undefined ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value));
 
@@ -51,6 +59,8 @@ export default function DiagnosticsScreen() {
 
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreResult, setRestoreResult] = useState(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -73,11 +83,62 @@ export default function DiagnosticsScreen() {
 
   const copyAll = async () => {
     if (!snapshot) return;
-    await Clipboard.setStringAsync(JSON.stringify(snapshot, null, 2));
+    await Clipboard.setStringAsync(JSON.stringify({ ...snapshot, restore: restoreResult }, null, 2));
     Alert.alert('', isAr ? 'تم نسخ كل بيانات التشخيص.' : 'All diagnostic data copied.');
   };
 
   const ledger = snapshot?.ledger;
+
+  // Both halves must hold: a promotion that never activated, and a checkpoint
+  // still on disk. In any other state the library refuses anyway, so the button
+  // would only be a trap.
+  const canRestore = ledger?.ok === true
+    && ledger.intent?.status === 'local_promoted_pending_activation'
+    && ledger.checkpointPresent === true
+    && !!ledger.intent?.checkpointId
+    && !!ledger.activeNamespace;
+
+  const runRestore = async () => {
+    setRestoreBusy(true);
+    let result;
+    try {
+      result = await restoreFinancialConflictRecoveryCheckpointV1({
+        namespace: ledger.activeNamespace,
+        checkpointId: ledger.intent.checkpointId,
+      });
+    } catch (error) {
+      result = { ok: false, reason: `restore_threw:${String(error?.message || error)}` };
+    }
+    setRestoreResult({ finishedAt: new Date().toISOString(), result });
+    setRestoreBusy(false);
+    // The store still holds the projection the failed promotion installed. It is
+    // deliberately not reloaded here: a full restart is the one path that cannot
+    // write stale in-memory data back over what was just restored.
+    Alert.alert(
+      result?.ok ? (isAr ? 'تمت الاستعادة' : 'Restored')
+        : (isAr ? 'لم تتم الاستعادة' : 'Not restored'),
+      result?.ok
+        ? (isAr
+          ? 'عادت بياناتك المالية إلى ما كانت عليه قبل محاولة الاستبدال. أغلق التطبيق كليًا الآن ثم افتحه من جديد قبل أي استخدام آخر.'
+          : 'Your financial data is back to what it was before the replacement attempt. Close the app completely now and reopen it before using it again.')
+        : (isAr
+          ? `لم يتغير شيء. السبب: ${result?.reason || 'غير معروف'}`
+          : `Nothing changed. Reason: ${result?.reason || 'unknown'}`),
+    );
+  };
+
+  const confirmRestore = () => {
+    Alert.alert(
+      isAr ? 'استعادة بياناتك المحفوظة' : 'Restore your saved data',
+      isAr
+        ? 'ستعود بياناتك المالية إلى ما كانت عليه قبل محاولة الاستبدال، وتبقى المزامنة متوقفة بعدها. عند النجاح أغلق التطبيق كليًا ثم افتحه من جديد قبل أي استخدام آخر.'
+        : 'Your financial data returns to what it was before the replacement attempt, and sync stays stopped afterwards. When it succeeds, close the app completely and reopen it before using it again.',
+      [
+        { text: isAr ? 'إلغاء' : 'Cancel', style: 'cancel' },
+        { text: isAr ? 'استعادة' : 'Restore', style: 'destructive', onPress: runRestore },
+      ],
+    );
+  };
 
   return (
     <ScreenScroll th={th}>
@@ -88,6 +149,42 @@ export default function DiagnosticsScreen() {
 
       {loading && !snapshot ? (
         <Text style={{ color: th.sub, textAlign: textAlign(lang) }}>{isAr ? 'جارٍ القراءة…' : 'Reading…'}</Text>
+      ) : null}
+
+      {canRestore && !restoreResult?.result?.ok ? (
+        <SurfaceCard th={th} style={{ marginBottom: 12, gap: 8, borderColor: th.warn, borderWidth: 1 }}>
+          <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: textAlign(lang) }}>
+            {isAr ? 'استعادة بياناتك المحفوظة' : 'Restore your saved data'}
+          </Text>
+          <Text style={{ color: th.sub, fontSize: 12, textAlign: textAlign(lang) }}>
+            {isAr
+              ? 'محاولة استبدال سابقة اكتملت محليًا ولم تُفعَّل. بياناتك الحقيقية محفوظة كما هي، ويمكن إعادتها إلى مكانها. المزامنة تبقى متوقفة بعد ذلك.'
+              : 'An earlier replacement completed locally but was never activated. Your real data is still preserved and can be put back. Sync stays stopped afterwards.'}
+          </Text>
+          <AppButton
+            th={th} lang={lang} tone="danger" icon="arrow-undo-outline"
+            label={restoreBusy ? (isAr ? 'جارٍ الاستعادة…' : 'Restoring…') : (isAr ? 'استعادة بياناتي' : 'Restore my data')}
+            onPress={confirmRestore} disabled={restoreBusy}
+          />
+        </SurfaceCard>
+      ) : null}
+
+      {restoreResult ? (
+        <Section th={th} lang={lang} isAr={isAr} icon="arrow-undo-outline" title="restoreFinancialConflictRecoveryCheckpointV1">
+          <Row th={th} lang={lang} label="ok" value={restoreResult.result?.ok} />
+          <Row th={th} lang={lang} label="reason" value={restoreResult.result?.reason} />
+          <Row th={th} lang={lang} label="finishedAt" value={restoreResult.finishedAt} />
+          <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', marginTop: 4, textAlign: textAlign(lang) }} selectable>
+            {j(restoreResult.result)}
+          </Text>
+          {restoreResult.result?.ok ? (
+            <Text style={{ color: th.warn, fontSize: 12, ...weight('700'), marginTop: 6, textAlign: textAlign(lang) }}>
+              {isAr
+                ? 'أغلق التطبيق كليًا ثم افتحه من جديد قبل أي استخدام آخر.'
+                : 'Close the app completely and reopen it before using it again.'}
+            </Text>
+          ) : null}
+        </Section>
       ) : null}
 
       {snapshot ? (
