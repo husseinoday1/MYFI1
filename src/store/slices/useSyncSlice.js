@@ -1588,18 +1588,25 @@ export const createSyncSlice = (set, get) => ({
     if (!current.user || current.cfg?.demoMode || !current.workspaceReady) {
       return { ok: false, reason: 'financial_v2_conflict_recovery_signin_required' };
     }
+    const workspaceNamespace = current.workspaceNamespace || workspaceNamespaceForSession({ user: current.user });
+    const namespace = getLedgerNamespace(workspaceNamespace, current.cfg);
+    const resumed = await resumePreparedCloudConflictRecoveryV1({ namespace, accountId: current.user.id });
+    if (resumed.found) {
+      set({
+        restoreSafety: {
+          status: resumed?.ok ? 'financial_v2_conflict_recovery_ready' : 'financial_v2_conflict_recovery_blocked',
+          operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString(),
+          checkpointId: resumed?.intent?.local?.checkpointId || null, reason: resumed?.ok ? null : String(resumed?.reason || 'prepare_failed'),
+        },
+      });
+      return resumed;
+    }
     if (!current.online || current.syncing || String(current.lastSyncError || '') !== 'financial_v2_revision_conflict') {
       return { ok: false, reason: 'financial_v2_conflict_recovery_not_eligible' };
     }
-    const workspaceNamespace = current.workspaceNamespace || workspaceNamespaceForSession({ user: current.user });
     const result = await get().runFinancialMaintenance(
       'financial_v2_conflict_recovery_prepare',
-      async () => {
-        const namespace = getLedgerNamespace(workspaceNamespace, get().cfg);
-        const resumed = await resumePreparedCloudConflictRecoveryV1({ namespace, accountId: current.user.id });
-        if (resumed.found) return resumed;
-        return prepareVerifiedCloudConflictRecoveryV1({ supabase, namespace, accountId: current.user.id });
-      },
+      () => prepareVerifiedCloudConflictRecoveryV1({ supabase, namespace, accountId: current.user.id }),
       { resumeSync: false, presentation: 'blocking' },
     );
     set({
@@ -2108,6 +2115,25 @@ export const createSyncSlice = (set, get) => ({
             error: null,
           },
         });
+      }
+      const conflictRecoveryAccountId = String(get().user?.id || '').trim();
+      if (conflictRecoveryAccountId) {
+        try {
+          const resumedConflictRecovery = await resumePreparedCloudConflictRecoveryV1({
+            namespace: getLedgerNamespace(namespace, get().cfg || DEF_CFG),
+            accountId: conflictRecoveryAccountId,
+          });
+          if (resumedConflictRecovery?.found) {
+            set({
+              restoreSafety: {
+                status: resumedConflictRecovery?.ok ? 'financial_v2_conflict_recovery_ready' : 'financial_v2_conflict_recovery_blocked',
+                operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString(),
+                checkpointId: resumedConflictRecovery?.intent?.local?.checkpointId || null,
+                reason: resumedConflictRecovery?.ok ? null : String(resumedConflictRecovery?.reason || 'resume_failed'),
+              },
+            });
+          }
+        } catch {}
       }
       const demoSnapshot = resetMarker?.legacyRecoveryDisabled
         ? null

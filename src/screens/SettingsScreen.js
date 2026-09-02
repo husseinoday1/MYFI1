@@ -2116,7 +2116,10 @@ function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview,
                 onPress={conflictRecoveryBusy ? null : onConfirmConflictRecovery}
               />
             ) : null}
-            {lastSyncError === 'financial_v2_revision_conflict' && restoreSafety?.status !== 'financial_v2_conflict_recovery_ready' ? (
+            {(lastSyncError === 'financial_v2_revision_conflict'
+              || (restoreSafety?.status === 'financial_v2_conflict_recovery_blocked'
+                && restoreSafety?.operation === 'financial_v2_conflict_recovery'))
+              && restoreSafety?.status !== 'financial_v2_conflict_recovery_ready' ? (
               <MenuRow
                 th={th} isAr={isAr} icon="shield-checkmark-outline" iconColor={th.warn}
                 title={isAr ? 'إصلاح تعارض المزامنة' : 'Repair sync conflict'}

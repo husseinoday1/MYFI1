@@ -11,6 +11,7 @@ const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const recoveryTarget = path.join(root, 'src/lib/financialV2ConflictRecoveryV1.js');
 const promotionTarget = path.join(root, 'src/lib/financialBootstrapRecoveryPromotionV2.js');
 const sliceTarget = path.join(root, 'src/store/slices/useSyncSlice.js');
+const settingsTarget = path.join(root, 'src/screens/SettingsScreen.js');
 const now = '2026-09-02T00:00:00.000Z';
 
 class Db {
@@ -169,11 +170,11 @@ const testSliceResumeRouting = async () => {
   let handler = source.slice(start, end).trim().replace(/^prepareV2ConflictRecovery:\s*/, '');
   if (handler.endsWith(',')) handler = handler.slice(0, -1);
   const build = new Function('get', 'set', 'supabase', 'workspaceNamespaceForSession', 'getLedgerNamespace', 'resumePreparedCloudConflictRecoveryV1', 'prepareVerifiedCloudConflictRecoveryV1', `return (${handler});`);
-  const run = async resumed => {
+  const run = async ({ resumed, lastSyncError = 'financial_v2_revision_conflict', online = true, syncing = false }) => {
     let resumeCalls = 0; let prepareCalls = 0;
     const state = {
-      user: { id: 'account-1' }, cfg: {}, workspaceReady: true, online: true, syncing: false,
-      lastSyncError: 'financial_v2_revision_conflict', workspaceNamespace: 'user:store-test',
+      user: { id: 'account-1' }, cfg: {}, workspaceReady: true, online, syncing,
+      lastSyncError, workspaceNamespace: 'user:store-test',
       runFinancialMaintenance: async (_name, task) => task(),
     };
     const action = build(
@@ -181,16 +182,56 @@ const testSliceResumeRouting = async () => {
       async () => { resumeCalls += 1; return resumed; },
       async () => { prepareCalls += 1; return { ok: true, intent: { local: { checkpointId: 'new-checkpoint' } } }; },
     );
-    await action();
-    return { resumeCalls, prepareCalls, state };
+    const result = await action();
+    return { result, resumeCalls, prepareCalls, state };
   };
-  const resumed = await run({ ok: true, found: true, resumed: true, intent: { local: { checkpointId: 'existing-checkpoint' } } });
+  const resumed = await run({
+    resumed: { ok: true, found: true, resumed: true, intent: { local: { checkpointId: 'existing-checkpoint' } } },
+    lastSyncError: 'ledger_queue_reentrant_from_read_transaction', online: false, syncing: true,
+  });
   assert.equal(resumed.resumeCalls, 1);
   assert.equal(resumed.prepareCalls, 0, 'resume must not create a second checkpoint');
   assert.equal(resumed.state.restoreSafety.checkpointId, 'existing-checkpoint');
-  const absent = await run({ ok: false, found: false });
+  assert.equal(resumed.state.restoreSafety.status, 'financial_v2_conflict_recovery_ready');
+  const absent = await run({ resumed: { ok: false, found: false }, lastSyncError: 'ledger_queue_reentrant_from_read_transaction' });
   assert.equal(absent.resumeCalls, 1);
-  assert.equal(absent.prepareCalls, 1, 'normal preparation must run only when no prepared intent exists');
+  assert.equal(absent.prepareCalls, 0, 'an absent intent must not weaken new-preparation eligibility');
+  assert.equal(absent.result.reason, 'financial_v2_conflict_recovery_not_eligible');
+  const normalPreparation = await run({ resumed: { ok: false, found: false } });
+  assert.equal(normalPreparation.prepareCalls, 1, 'normal preparation must run only when no prepared intent exists and the conflict is live');
+};
+
+const testSliceRestartRehydration = async fixture => {
+  const source = fs.readFileSync(sliceTarget, 'utf8');
+  const start = source.indexOf('loadLocal: async (requestedNamespace = null, options = {}) => {');
+  const end = source.indexOf('      const demoSnapshot =', start);
+  assert.ok(start >= 0 && end > start, 'loadLocal rehydration path is missing');
+  let handler = `${source.slice(start, end)}      return true;\n    } catch (error) { throw error; }\n  }`;
+  handler = handler.trim().replace(/^loadLocal:\s*/, '');
+  const build = new Function(
+    'get', 'set', 'readActiveLocalLedgerNamespace', 'GUEST_NAMESPACE', 'readResetMarker',
+    'resumePreparedCloudConflictRecoveryV1', 'getLedgerNamespace', 'DEF_CFG', `return (${handler});`,
+  );
+  for (const lastSyncError of [null, 'ledger_queue_reentrant_from_read_transaction']) {
+    const state = { user: { id: 'account-1' }, cfg: {}, restoreSafety: null, lastSyncError };
+    const action = build(
+      () => state,
+      patch => Object.assign(state, patch),
+      async () => fixture.namespace,
+      'guest',
+      async namespace => { assert.equal(namespace, fixture.namespace); return {}; },
+      input => recovery.resumePreparedCloudConflictRecoveryV1({ ...input, database: fixture.db }),
+      namespace => namespace,
+      {},
+    );
+    assert.equal(await action(fixture.namespace, { maintenanceOwned: true }), true);
+    assert.equal(state.restoreSafety?.status, 'financial_v2_conflict_recovery_ready');
+    assert.equal(state.restoreSafety?.checkpointId, fixture.checkpointId);
+    assert.equal(fixture.db.native.prepare("SELECT COUNT(*) AS n FROM ledger_v7_meta WHERE key LIKE 'financial_v2_conflict_checkpoint_v1:%'").get().n, 1, 'restart rehydration must not create a second checkpoint');
+  }
+  const settings = fs.readFileSync(settingsTarget, 'utf8');
+  assert.match(settings, /restoreSafety\?\.status === 'financial_v2_conflict_recovery_blocked'/);
+  assert.match(settings, /restoreSafety\?\.operation === 'financial_v2_conflict_recovery'/);
 };
 
 (async () => {
@@ -200,6 +241,7 @@ const testSliceResumeRouting = async () => {
   assert.equal(resumed.ok, true, JSON.stringify(resumed));
   assert.equal(resumed.intent.local.checkpointId, prepared.intent.local.checkpointId);
   assert.equal(basic.db.native.prepare("SELECT COUNT(*) AS n FROM ledger_v7_meta WHERE key LIKE 'financial_v2_conflict_checkpoint_v1:%'").get().n, 1, 'resume must not create a second checkpoint');
+  await testSliceRestartRehydration(basic);
 
   const wrongAccount = await recovery.resumePreparedCloudConflictRecoveryV1({ namespace: basic.namespace, accountId: 'another-account', database: basic.db });
   assert.equal(wrongAccount.ok, false);
