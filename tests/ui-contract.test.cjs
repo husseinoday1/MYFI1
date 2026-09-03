@@ -110,6 +110,9 @@ assert.equal(addModal.includes('onNewTracker'), false, 'Transaction entry must n
 assert.equal(addModal.includes('renderTrackerCreateAction'), false, 'Transaction entry must keep tracker creation out of money entry');
 assert.equal(addModal.includes('trackerEntryPanel'), false, 'Transaction entry must not show tracker add panels');
 assert(addModal.includes("{selected?.detail || ' '}"), 'Select fields must reserve a detail line so category and wallet cards stay symmetric');
+assert(addModal.includes('renderFixedWalletField'), 'Money entries must identify their wallet even when wallet selection is unavailable');
+assert(addModal.includes("'المحفظة الوحيدة المتاحة'"), 'A single-wallet entry must explain why its wallet source is fixed');
+assert(addModal.includes('modules.wallets && walletList.length > 1'), 'Wallet selection must remain interactive only when multiple visible wallets exist');
 assert(/selectField\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64/.test(addModal), 'Wallet and category select cards must share an exact fixed visual height');
 assert(/dateButton\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64/.test(addModal), 'Date field must match the select card exact height');
 assert(/repeatField\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64/.test(addModal), 'Monthly repeat field must match the select card exact height');

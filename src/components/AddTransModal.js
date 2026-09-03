@@ -1211,6 +1211,30 @@ export default function AddTransModal({
     );
   };
 
+  // A wallet can be intentionally hidden from navigation during personalization,
+  // but every money entry must still make its financial source visible.
+  const renderFixedWalletField = () => {
+    const selected = walletOptions.find(option => option.value === walletId) || walletOptions[0];
+    const detail = walletList.length === 1
+      ? (cfg.lang === 'ar' ? 'المحفظة الوحيدة المتاحة' : 'Only available wallet')
+      : (cfg.lang === 'ar' ? 'المحفظة الافتراضية' : 'Default wallet');
+    return (
+      <View style={s.selectFieldBlock}>
+        <View style={[s.selectField, { backgroundColor: th.cardHigh, borderColor: th.border, flexDirection: rowDir }]}>
+          <Ionicons name="wallet-outline" size={18} color={th.primary} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[s.selectLabel, { color: th.sub, textAlign: align }]}>{walletLabel}</Text>
+            <Text numberOfLines={1} style={[s.selectValue, { color: th.text, textAlign: align }]}>
+              {selected?.label || (cfg.lang === 'ar' ? 'المحفظة الافتراضية' : 'Default wallet')}
+            </Text>
+            <Text numberOfLines={1} style={[s.selectDetail, { color: th.sub, textAlign: align }]}>{detail}</Text>
+          </View>
+          <Ionicons name="lock-closed-outline" size={16} color={th.faint} />
+        </View>
+      </View>
+    );
+  };
+
   const transferFromOptions = eligibleTransferWallets.map(wallet => {
     const row = walletBalanceById(wallet.id);
     return {
@@ -1555,19 +1579,23 @@ export default function AddTransModal({
 
             {isMoneyEntry ? (
               <View style={[s.twoColumnRow, { flexDirection: rowDir }]}>
-                {modules.wallets && walletList.length > 0 ? renderSelectField({
-                    id: 'wallet',
-                    label: walletLabel,
-                    value: walletId,
-                    options: walletOptions,
-                    icon: 'wallet-outline',
-                    tone: th.primary,
-                    onChange: (value) => {
-                      setWalletId(value);
-                      setExchangeRate('');
-                      setExchangeRateOrigin('none');
-                    },
-                  }) : null}
+                {walletList.length > 0
+                  ? (modules.wallets && walletList.length > 1
+                    ? renderSelectField({
+                        id: 'wallet',
+                        label: walletLabel,
+                        value: walletId,
+                        options: walletOptions,
+                        icon: 'wallet-outline',
+                        tone: th.primary,
+                        onChange: (value) => {
+                          setWalletId(value);
+                          setExchangeRate('');
+                          setExchangeRateOrigin('none');
+                        },
+                      })
+                    : renderFixedWalletField())
+                  : null}
                 {renderSelectField({
                   id: 'category',
                   label: categoryFlowHint,
