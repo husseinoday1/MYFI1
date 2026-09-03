@@ -132,11 +132,17 @@ const failOneAttempt = async db => {
     { mutation_id: 'remote-workspace-4', apply_status: 'conflict' },
   ], 'the failing command must be recorded as a conflict');
 
-  // 2) Without the reset the next attempt cannot even reach preflight, so the
-  //    shadow chain fix can never run: this is the lock the reset exists for.
-  const locked = await shadow(db, CHAIN, new Map());
-  assert.equal(locked.ok, false, 'a tombstoned command must block a fresh attempt');
-  assert.equal(locked.reason, 'financial_v2_remote_command_conflict_pending');
+  // 2) A recorded conflict no longer decides anything: the next attempt
+  //    revalidates and fails for the honest reason, with live numbers, instead
+  //    of returning a cached code. (This assertion previously pinned the
+  //    opposite — the tombstone blocking the attempt — which was the lock, not
+  //    a contract.)
+  const revalidated = await shadow(db, CHAIN, new Map());
+  assert.equal(revalidated.ok, false, 'the chain still conflicts from a stale cursor');
+  assert.equal(revalidated.reason, 'financial_v2_remote_cas_conflict',
+    'the live conflict must surface, not the cached code');
+  assert.equal(revalidated.previouslyConflicted, true,
+    'the earlier failure is still reported, as diagnostics rather than a gate');
 
   // 3) After the reset the same chain validates end to end.
   const reset = await resetFinancialV2ShadowValidationStateV8({ namespace: NS, database: db });

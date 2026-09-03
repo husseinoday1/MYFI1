@@ -3512,6 +3512,11 @@ const v2WriteInboxCommand = async (db, identity, group, status, now) => {
          server_sequence=excluded.server_sequence,
          received_at=excluded.received_at,
          apply_status=CASE
+           -- An actual apply outranks an older conflict marker. Without this a
+           -- command that failed once and later applied stayed recorded as a
+           -- conflict for good: a false record, and one that kept the
+           -- already-applied shortcut from ever recognising it again.
+           WHEN excluded.apply_status='applied' THEN 'applied'
            WHEN ledger_inbox_v3.apply_status='applied' THEN 'applied'
            WHEN ledger_inbox_v3.apply_status='conflict' THEN 'conflict'
            ELSE excluded.apply_status
@@ -3673,13 +3678,17 @@ export const applyRemoteLedgerMutationsV8 = async ({
         );
         statuses.push(String(inbox?.apply_status || ''));
       }
-      if (statuses.some(status => status === 'conflict')) {
-        return {
-          supported:true,ok:false,reason:'financial_v2_remote_command_conflict_pending',
-          conflicts: group.map(item => v2RemoteConflict('financial_v2_remote_command_conflict_pending', item)),
-          applied,processed,cursor,shadow:shadowMode,
-        };
-      }
+      // A recorded conflict is a cached negative result, not a durable fact. It
+      // says how local state compared with this command at one moment, and local
+      // state moves. Treating it as a gate meant a device that later converged
+      // could never revalidate — and since the cursor does not advance past a
+      // refused group, every later command was blocked with it, silently and
+      // permanently, with nothing in the code able to clear it after activation.
+      //
+      // Re-running the preflight *is* the staleness check: a conflict that still
+      // holds fails again with its live numbers, and one that has been resolved
+      // simply applies. The row stays as evidence and decides nothing.
+      const previouslyConflicted = statuses.some(status => status === 'conflict');
       if (!shadowMode && statuses.every(status => status === 'applied')) {
         cursor = Math.max(cursor, commandSequence);
         processed += group.length;
@@ -3699,6 +3708,9 @@ export const applyRemoteLedgerMutationsV8 = async ({
         return {
           supported:true,ok:false,reason:String(error?.message || 'financial_v2_remote_cas_conflict'),
           conflicts:[conflict],applied,processed,cursor,shadow:shadowMode,
+          // Diagnostic only: says this group had already failed once before, which
+          // the caller can no longer infer from the reason code.
+          ...(previouslyConflicted ? { previouslyConflicted: true } : {}),
         };
       }
 
