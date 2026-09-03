@@ -3,11 +3,17 @@ name: Test Gate (all feature branches)
 on:
   push:
     branches:
-      - 'impl/**'
-      - 'impl2/**'
+      # Every prefix the repository actually uses. `impl*/**` covers the
+      # numbered implementation branches as a family -- listing them one at a
+      # time is how `impl6/` and `fix/` came to be missing while this workflow
+      # still called itself "all feature branches".
+      - 'impl*/**'
+      - 'fix/**'
       - 'docs/**'
       - 'planning/**'
       - 'chore/**'
+      - 'codex/**'
+      - 'ci/**'
   workflow_dispatch:
 
 permissions:
