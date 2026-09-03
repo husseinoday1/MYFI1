@@ -540,18 +540,62 @@ export const restoreFinancialConflictRecoveryCheckpointV1 = async ({
       });
       await actions.replaceColdArchiveNamespaceFromStage({ namespace: target, stageNamespace: stage });
       await assertCheckpointCounts(db, target, receipt.counts, 'financial_v2_conflict_recovery_restore_counts_mismatch');
-      // The outbox rows of this epoch are all rejected retries produced *by* the
-      // failed recovery; they can never be accepted by the cloud and would keep
-      // accumulating. The restored ledger re-uploads through a normal sync.
-      await db.runAsync(
-        `DELETE FROM ledger_outbox_v3 WHERE ledger_id=? AND restore_epoch=?`,
-        text(identity.ledger_id), Number(identity.restore_epoch),
+      // This once deleted every pending row of the epoch, on the belief that they
+      // were all rejected retries produced by the failed recovery. That belief was
+      // wrong on a real device: it also destroyed the owner's own unsent
+      // mutations, and with them the echo evidence that would have let those
+      // commands replay cleanly later.
+      //
+      // The checkpoint's own timestamp separates the two, and the polarity is the
+      // opposite of the legacy-outbox cleanup. A row written at or before it
+      // describes work the checkpoint contains, so the restore brings its result
+      // back and the row stays a valid pending upload -- it must survive. A row
+      // written after it describes work the restore has just removed, so leaving
+      // it would have the queue claim changes the ledger no longer holds. Those
+      // have to go, but they are the last trace of that work, so they are copied
+      // into the intent verbatim first rather than simply dropped.
+      const boundary = text(receipt.createdAt);
+      if (!Number.isFinite(Date.parse(boundary))) {
+        throw new Error('financial_v2_conflict_recovery_restore_boundary_invalid');
+      }
+      const strandedRows = await db.getAllAsync(
+        `SELECT sequence_id,namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,
+                operation,revision,base_revision,payload_json,created_at
+           FROM ledger_outbox_v3
+          WHERE ledger_id=? AND restore_epoch=? AND acknowledged_at IS NULL AND created_at > ?
+          ORDER BY sequence_id`,
+        text(identity.ledger_id), Number(identity.restore_epoch), boundary,
       );
+      if (strandedRows.length > MAX_STRANDED_PENDING_ROWS) {
+        throw new Error('financial_v2_conflict_recovery_restore_too_many_stranded_rows');
+      }
+      for (const row of strandedRows) {
+        const deleted = await db.runAsync(
+          `DELETE FROM ledger_outbox_v3
+            WHERE ledger_id=? AND restore_epoch=? AND sequence_id=? AND acknowledged_at IS NULL`,
+          text(identity.ledger_id), Number(identity.restore_epoch), Number(row.sequence_id),
+        );
+        if (Number(deleted?.changes || 0) !== 1) {
+          throw new Error('financial_v2_conflict_recovery_restore_stranded_delete_failed');
+        }
+      }
+      const strandedLeft = await count(
+        db,
+        `SELECT COUNT(*) AS n FROM ledger_outbox_v3
+          WHERE ledger_id=? AND restore_epoch=? AND acknowledged_at IS NULL AND created_at > ?`,
+        text(identity.ledger_id), Number(identity.restore_epoch), boundary,
+      );
+      if (strandedLeft !== 0) throw new Error('financial_v2_conflict_recovery_restore_stranded_incomplete');
       const rolledBack = {
         ...intent,
         status: 'rolled_back_after_activation_failure',
         restoredAt: now,
         restoredFrom: { checkpointId: checkpoint, checkpointNamespace: stage, counts: receipt.counts },
+        ...(strandedRows.length ? {
+          strandedPendingCommands: {
+            boundary, discardedAt: now, rowCount: strandedRows.length, rows: strandedRows,
+          },
+        } : {}),
       };
       const updated = await db.runAsync(
         `UPDATE ledger_v7_meta SET value=?,updated_at=? WHERE key=? AND value=?`,
@@ -653,6 +697,10 @@ const isoAfter = (value, boundary) => {
 };
 
 const MAX_DISCARDABLE_LEGACY_ROWS = 32;
+
+// A restore that would strand more than this is not the situation this was
+// reasoned about; it stops for review rather than widening its own reach.
+const MAX_STRANDED_PENDING_ROWS = 64;
 
 /**
  * A checkpoint restore rewinds the financial tables but cannot rewind the

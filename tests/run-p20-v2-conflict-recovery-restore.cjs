@@ -94,6 +94,10 @@ const OTHER_LEDGER = 'ledger-phase12-restore-other';
 const CHECKPOINT_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const STAGE = `${NS}::conflict-recovery-checkpoint::${CHECKPOINT_ID}`;
 const now = '2026-09-02T10:00:00.000Z';
+// The checkpoint's own moment is the boundary. Work queued before it survives
+// the restore; work queued after it is what the restore removes.
+const BEFORE_CHECKPOINT = '2026-09-02T09:30:00.000Z';
+const AFTER_CHECKPOINT = ['2026-09-02T11:45:47.000Z', '2026-09-02T12:09:51.000Z', '2026-09-02T12:57:16.000Z'];
 const intentKey = `financial_v2_conflict_recovery_intent_v1:${NS}`;
 const receiptKey = `financial_v2_conflict_checkpoint_v1:${NS}:${CHECKPOINT_ID}`;
 
@@ -152,10 +156,15 @@ const createFixture = ({ status = 'local_promoted_pending_activation' } = {}) =>
     preparedAt: now,
   }), now);
 
-  // The three rejected retries the failed recovery accumulated, plus one row of
-  // another ledger that this restore must never touch.
+  // A pending row written *before* the checkpoint: its result is inside the
+  // checkpoint, so the restore brings it back and the row stays a valid upload.
+  // It must survive.
+  run('INSERT INTO ledger_outbox_v3(namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,operation,revision,base_revision,protocol_version,minimum_supported_version,payload_schema_version,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', NS, LEDGER, 1, 'preserved-1', 'cmd-preserved', 'wallet', 'wallet-1', 'upsert', 2, 1, 2, 2, 1, '{"kept":true}', BEFORE_CHECKPOINT);
+
+  // The three rejected retries the failed recovery accumulated afterwards, plus
+  // one row of another ledger that this restore must never touch.
   for (const [index, revision] of [3, 4, 5].entries()) {
-    run('INSERT INTO ledger_outbox_v3(namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,operation,revision,base_revision,protocol_version,minimum_supported_version,payload_schema_version,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', NS, LEDGER, 1, `stale-${index}`, `cmd-${index}`, 'workspace', 'workspace', 'upsert', revision, revision - 1, 2, 2, 1, '{}', now);
+    run('INSERT INTO ledger_outbox_v3(namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,operation,revision,base_revision,protocol_version,minimum_supported_version,payload_schema_version,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', NS, LEDGER, 1, `stale-${index}`, `cmd-${index}`, 'workspace', 'workspace', 'upsert', revision, revision - 1, 2, 2, 1, `{"stale":${revision}}`, AFTER_CHECKPOINT[index]);
   }
   run('INSERT INTO ledger_outbox_v3(namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,operation,revision,base_revision,protocol_version,minimum_supported_version,payload_schema_version,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', OTHER_NS, OTHER_LEDGER, 1, 'other-1', 'cmd-other', 'workspace', 'workspace', 'upsert', 2, 1, 2, 2, 1, '{}', now);
 
@@ -170,7 +179,7 @@ const meta = (db, key) => JSON.parse(db.native.prepare('SELECT value FROM ledger
 const assertLiveStillPromoted = (db, message) => {
   assert.equal(count(db, 'ledger_financial_transactions_v7', NS), 0, message);
   assert.equal(db.native.prepare('SELECT payload_json FROM ledger_workspace_state_v7 WHERE namespace=?').get(NS).payload_json, '{"bootstrap":true}', message);
-  assert.equal(outbox(db, LEDGER), 3, message);
+  assert.equal(outbox(db, LEDGER), 4, message);
   assert.equal(meta(db, intentKey).status !== 'rolled_back_after_activation_failure', true, message);
 };
 
@@ -191,12 +200,21 @@ const assertLiveStillPromoted = (db, message) => {
   assert.equal(success.db.native.prepare('SELECT revision FROM ledger_entities_v7 WHERE namespace=? AND entity_type=? AND id=?').get(NS, 'workspace', 'workspace').revision, 2, 'the checkpoint workspace revision must replace the promoted one');
   assert.equal(count(success.db, 'ledger_accounts_v7', NS), 1);
   assert.equal(success.db.native.prepare('SELECT COUNT(*) AS n FROM ledger_accounts_v7 WHERE namespace=? AND id=?').get(NS, 'wallet-bootstrap').n, 0, 'the promoted snapshot must be gone');
-  assert.equal(outbox(success.db, LEDGER), 0, 'the accumulated rejected retries must be discarded');
+  assert.equal(outbox(success.db, LEDGER), 1, 'only the rows queued after the checkpoint may be discarded');
+  assert.equal(success.db.native.prepare('SELECT mutation_id FROM ledger_outbox_v3 WHERE ledger_id=?').get(LEDGER).mutation_id, 'preserved-1', 'a row whose result the checkpoint holds must survive the restore');
   assert.equal(outbox(success.db, OTHER_LEDGER), 1, 'another ledger\'s outbox must never be touched');
   const rolledBack = meta(success.db, intentKey);
   assert.equal(rolledBack.status, 'rolled_back_after_activation_failure', 'the intent must be updated, not deleted');
   assert.equal(rolledBack.restoredFrom.checkpointId, CHECKPOINT_ID);
   assert.equal(rolledBack.preparedAt, now, 'the original intent evidence must be preserved');
+  // The rows the restore had to remove are the last trace of work it undid, so
+  // they are kept verbatim rather than simply dropped.
+  assert.equal(rolledBack.strandedPendingCommands.rowCount, 3);
+  assert.equal(rolledBack.strandedPendingCommands.boundary, now, 'the checkpoint moment is the boundary');
+  assert.deepEqual(rolledBack.strandedPendingCommands.rows.map(row => row.mutation_id), ['stale-0', 'stale-1', 'stale-2']);
+  assert.equal(rolledBack.strandedPendingCommands.rows[2].payload_json, '{"stale":5}',
+    'each removed command must keep its payload');
+  assert.equal(rolledBack.strandedPendingCommands.rows[0].created_at, AFTER_CHECKPOINT[0]);
   assert.equal(count(success.db, 'ledger_financial_transactions_v7', STAGE), 2, 'the checkpoint itself must survive the restore');
   assert.equal(meta(success.db, receiptKey).checkpointId, CHECKPOINT_ID, 'the checkpoint receipt must survive the restore');
   const repeated = await success.restore({ namespace: NS, checkpointId: CHECKPOINT_ID, database: success.db });
