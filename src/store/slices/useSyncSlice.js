@@ -26,6 +26,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import { STORAGE, DEF_CATS, DEF_CFG, DEF_NOTIF, LEGACY_STORAGE_KEYS, normalizeCfg } from '../../lib/constants';
 import { normalizedPreviewEnabled, normalizedShadowEnabled } from '../../lib/databaseMode';
+import { legacyUserDataMirrorPlanV1 } from '../../lib/p13LegacyMirrorGate';
 import {
   acknowledgeLedgerOutbox,
   activeLedgerSupported,
@@ -1759,6 +1760,12 @@ export const createSyncSlice = (set, get) => ({
     return { ...result, activated: true };
   },
 
+  // Phase 13 Stage D — the other old reader, and the one that needed no gate.
+  // It reads the dead normalized tables (`workspaces` and friends), but nothing
+  // in the app calls it and the flag it needs is off unless
+  // EXPO_PUBLIC_NORMALIZED_READ_MODE is set to preview/shadow, which no build
+  // profile does. Two locks already, so it stays as-is; removing it is Stage E,
+  // together with the tables it reads.
   previewNormalizedCloud: async ({ baseline } = {}) => {
     const current = get();
     if (!normalizedPreviewEnabled) return { ok: false, reason: 'disabled' };
@@ -3132,6 +3139,22 @@ export const createSyncSlice = (set, get) => ({
           // Cloud row missing, local changes exist, bootstrap merge produced a
           // combined state, or an intentional reset must replace cloud.
           if (get().user?.id !== syncUserId) return false;
+
+          // Phase 13 Stage C. After cutover this row is a mirror of a projection
+          // no reader is allowed to trust, so stop emitting it. The financial
+          // upload and the cfg entity both happen inside persistSynced, which
+          // throws if either fails -- reaching a clean state here still means
+          // the work landed, it just no longer includes the mirror.
+          const mirrorPlan = legacyUserDataMirrorPlanV1({
+            cutoverBridge, cloudRevision, localRevision: get().cloudRevision,
+          });
+          if (!mirrorPlan.write) {
+            return persistSynced({
+              revision: mirrorPlan.settleRevision,
+              syncConflict: pendingSyncConflict,
+            });
+          }
+
           const current = await readCurrentForSnapshot();
           const expectedRevision = cloudRevision;
 

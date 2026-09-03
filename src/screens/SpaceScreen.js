@@ -11,6 +11,21 @@ import { supabase } from '../lib/supabase';
 import { calcStats, byMonth } from '../utils/calc';
 import { weight } from '../lib/tokens';
 
+// Phase 13 Stage D — retired reader.
+//
+// This screen is the last caller of the `family_rooms` / `room_members` tables
+// and of the `user_data(trans,cfg)` join. None of those three exist any more:
+// the two room tables are absent from the production schema entirely, and
+// `user_data` is the legacy mirror Stage C stopped writing. The screen is also
+// unreachable — nothing in the app imports it, `App.js` included — so what
+// follows is dead code kept only until Stage E deletes it together with the
+// tables.
+//
+// It is gated rather than left as-is because every query below swallows its own
+// error (`catch {}`): wired up by accident it would render an empty room and
+// look like a working feature that had simply lost its data.
+const SPACE_SCREEN_RETIRED = true;
+
 export default function SpaceScreen() {
   const { cfg, user, trans } = useStore();
   const th  = TH[cfg.theme] || TH.dark;
@@ -24,7 +39,7 @@ export default function SpaceScreen() {
 
   const fmt = (n) => Math.abs(n).toLocaleString();
 
-  useEffect(() => { if (user) loadRoom(); }, [user]);
+  useEffect(() => { if (!SPACE_SCREEN_RETIRED && user) loadRoom(); }, [user]);
 
   const loadRoom = async () => {
     try {
@@ -98,6 +113,20 @@ export default function SpaceScreen() {
 
   const now    = new Date();
   const myStats = calcStats(byMonth(trans, now.getMonth(), now.getFullYear()));
+
+  // Fail closed ahead of every other branch: say the feature is gone rather
+  // than show an empty room built from tables that no longer exist.
+  if (SPACE_SCREEN_RETIRED) {
+    return (
+      <View style={{ flex:1, backgroundColor: th.bg, alignItems:'center', justifyContent:'center', padding:32 }}>
+        <Ionicons name="people-circle-outline" size={48} color={th.sub} style={{ marginBottom:16 }} />
+        <Text style={{ color: th.text, fontSize:18, ...weight('700'), textAlign:'center', marginBottom:8 }}>{L.spaceTab}</Text>
+        <Text style={{ color: th.sub, fontSize:14, textAlign:'center' }}>
+          {cfg.lang==='ar' ? 'هذه الميزة غير متاحة حالياً' : 'This feature is not available'}
+        </Text>
+      </View>
+    );
+  }
 
   if (!user) {
     return (
