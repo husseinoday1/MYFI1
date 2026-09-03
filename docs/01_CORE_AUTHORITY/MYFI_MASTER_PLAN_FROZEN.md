@@ -5869,3 +5869,55 @@ After successful Phase 8 promotion:
 * Reports use V7 SQL aggregate/category queries for financial totals.
 * health checks after cutover use V7 invariant proof, not legacy mirror row-count parity.
 * pending outbox is preserved during stage promotion unless an explicit reviewed protocol says otherwise.
+
+---
+
+# 196. §94 Staging Environment Definition — Plan Change, 2026-09-04
+
+Phase 14 gap-analysis (2026-09-04) found §94's gate unsatisfiable as
+written: it requires the 5 Snapshot-Sync-Removal preconditions to pass "على
+staging/realistic environment", but a separate staging Supabase project was
+explicitly declined 2026-08-20 and the decline note says not to re-propose
+without a concrete incident. Put to the owner directly; his ruling was to
+reinterpret §94 against current infrastructure, not revisit the decline.
+
+## Amended definition
+
+قبل الإطلاق العام فقط، "staging/realistic environment" في §94 يُقصد به:
+
+```text
+نفس مشروع Supabase الإنتاجي الحالي
++
+حصراً حسابات المالك التجريبية المخصصة
++
+بأثر محدود (blast-radius limited)
+```
+
+طالما لا توجد بيانات مستخدمين حقيقيين. الاختبارات تُقيَّد صراحة بمعرّفات
+حسابات المالك المخصصة، لا حساب عام أو عشوائي.
+
+## Time-box, not a permanent loosening
+
+هذا التفسير يسقط تلقائياً عند أول ما يحدث من:
+
+```text
+الإطلاق العام
+أو
+إنشاء الحساب الاحترافي الجديد (Phase 16)
+```
+
+بعدها "staging" تعود لتعني بيئة منفصلة فعلياً عن الإنتاج الحقيقي، ويُعاد
+فتح هذا القرار وقتها — لا يبقى مفتوحاً بلا نهاية. راجع Phase 16 account
+migration planning عند الوصول لتلك النقطة.
+
+## Scope
+
+هذا يُعدّل قراءة §94 فقط. لا يُغيّر:
+
+* أياً من 5 preconditions نفسها (mutation sync / two devices / restore
+  epoch / cross-version / account lifecycle) — تبقى كما هي، تُشغَّل الآن
+  فعلياً بدل أن تبقى غير قابلة للتحقق.
+* قرار 2026-08-20 رفض بيئة staging منفصلة — يبقى كما هو، غير مُعاد فتحه.
+* أي عمل هندسي آخر من Phase 14 (outbox retry، sync auto-resume).
+
+هذا التعديل يصبح جزءاً من MYFI Frozen Master Plan من تاريخ 2026-09-04.
