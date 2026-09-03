@@ -158,6 +158,26 @@ export async function collectP12ConflictRecoveryDiagnostics({
     params: [activeNamespace],
   });
 
+  // Whether V2 is live. Only then is the legacy outbox provably unreadable by
+  // the sync path, which is what makes reviewing those rows for removal safe.
+  const syncState = await readRows({
+    db, present, table: 'ledger_sync_identity_v8',
+    sql: `SELECT activated_at FROM ledger_sync_state_v8
+           WHERE ledger_id=(SELECT ledger_id FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1)
+             AND restore_epoch=(SELECT restore_epoch FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1)
+           LIMIT 1`,
+    params: [activeNamespace, activeNamespace],
+  });
+
+  // What the owner has already reviewed and confirmed, so the screen can show
+  // each row's state instead of asking again.
+  const legacyAckRow = await readRows({
+    db, present, table: 'ledger_v7_meta',
+    sql: `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`,
+    params: [`financial_v2_legacy_outbox_ack_v1:${activeNamespace}`],
+  });
+  const legacyAck = parseJson(legacyAckRow.rows?.[0]?.value);
+
   // The legacy V1 outbox is written again whenever V2 is not activated, so rows
   // can survive a recovery that only cleared V3. A count alone cannot say what
   // they carry: payload_json here is the whole entity envelope, and after a
@@ -217,6 +237,10 @@ export async function collectP12ConflictRecoveryDiagnostics({
     outboxV3PendingRows: outboxV3PendingRows.rows || [],
     outboxV2PendingCount: Number(outboxV2Pending.rows?.[0]?.row_count || 0),
     outboxV2PendingRows: outboxV2PendingRows.rows || [],
+    activatedAt: syncState.rows?.[0]?.activated_at || null,
+    legacyOutboxAcknowledged: legacyAck?.version === 1 && legacyAck.rows && typeof legacyAck.rows === 'object'
+      ? Object.values(legacyAck.rows).map(entry => Number(entry?.sequenceId))
+      : [],
     resume,
   };
 }

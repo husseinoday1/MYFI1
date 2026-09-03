@@ -34,10 +34,29 @@ export const conflictRecoveryGatesV1 = (ledger = null) => {
   const legacyRowsComplete = legacyRows.length === legacyPendingCount;
   const unsyncedFinancialRows = legacyRows.filter(row => !setupOnlyLegacyRowV1(row));
 
+  // Once V2 is live the sync path never reads the legacy outbox and nothing adds
+  // to it, so whatever is left can never reach the cloud. That is the only state
+  // in which offering to remove those rows is honest — before it they may still
+  // be queued work.
+  const activated = !!text(ledger?.activatedAt);
+  const acknowledged = Array.isArray(ledger?.legacyOutboxAcknowledged)
+    ? ledger.legacyOutboxAcknowledged.map(Number)
+    : [];
+  const reviewableLegacyRows = activated && legacyRowsComplete ? legacyRows : [];
+  const acknowledgedLegacyRows = reviewableLegacyRows
+    .filter(row => acknowledged.includes(Number(row?.sequence_id)));
+
   return {
     legacyRows,
     legacyRowsComplete,
     unsyncedFinancialRows,
+
+    // Each row is reviewed and confirmed on its own: these are independent
+    // financial entries, and one confirmation covering all of them would let a
+    // single tap discard work the owner never compared.
+    reviewableLegacyRows,
+    acknowledgedLegacyRows,
+    canDiscardAcknowledgedLegacy: acknowledgedLegacyRows.length > 0 && !!namespace,
 
     // A promotion that completed locally but never activated, with its
     // checkpoint still on disk.

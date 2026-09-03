@@ -111,6 +111,44 @@ for (const broken of [ledger({ namespace: '' }), ledger({ ok: false }), null, un
     'activation must wait for the active queue to drain');
 }
 
+// 9) Reviewing legacy rows for removal is only offered once V2 is live, because
+//    only then can none of them still reach the cloud.
+{
+  const rows = [financialRow(74), financialRow(75)];
+  const live = conflictRecoveryGatesV1({ ...ledger({ rows }), activatedAt: '2026-09-03T07:11:08.380Z' });
+  assert.equal(live.reviewableLegacyRows.length, 2, 'an activated ledger may review its dead legacy rows');
+  assert.equal(live.canDiscardAcknowledgedLegacy, false, 'but nothing is removable before it is acknowledged');
+
+  const notLive = conflictRecoveryGatesV1(ledger({ rows }));
+  assert.equal(notLive.reviewableLegacyRows.length, 0,
+    'before activation those rows may still be queued work, so they are not offered');
+  assert.equal(notLive.canDiscardAcknowledgedLegacy, false);
+}
+
+// 10) Only the rows actually acknowledged become removable, one at a time.
+{
+  const gates = conflictRecoveryGatesV1({
+    ...ledger({ rows: [financialRow(74), financialRow(75), financialRow(76)] }),
+    activatedAt: '2026-09-03T07:11:08.380Z',
+    legacyOutboxAcknowledged: [75],
+  });
+  assert.equal(gates.canDiscardAcknowledgedLegacy, true);
+  assert.deepEqual(gates.acknowledgedLegacyRows.map(row => row.sequence_id), [75],
+    'an acknowledgement covers the row it was given, and no other');
+}
+
+// 11) A truncated list cannot be reviewed either: rows it never read would be
+//     invisible to the owner while the ones shown looked like the whole set.
+{
+  const gates = conflictRecoveryGatesV1({
+    ...ledger({ rows: [financialRow(74)], pendingCount: 9 }),
+    activatedAt: '2026-09-03T07:11:08.380Z',
+    legacyOutboxAcknowledged: [74],
+  });
+  assert.equal(gates.reviewableLegacyRows.length, 0);
+  assert.equal(gates.canDiscardAcknowledgedLegacy, false);
+}
+
 // 8) The allow-list itself: a delete or a void is not setup metadata, whatever
 //    entity it names.
 assert.equal(setupOnlyLegacyRowV1(settingsRow(1)), true);

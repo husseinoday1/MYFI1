@@ -24,6 +24,8 @@ import { SPACE, weight } from '../lib/tokens';
 import { collectP12ConflictRecoveryDiagnostics } from '../dev/p12ConflictRecoveryDiagnostics';
 import { conflictRecoveryGatesV1 } from '../dev/p12ConflictRecoveryGates';
 import {
+  acknowledgeLegacyOutboxRowV1,
+  discardAcknowledgedLegacyOutboxV1,
   discardLegacyOutboxAfterCheckpointRestoreV1,
   restoreFinancialConflictRecoveryCheckpointV1,
   retireConflictRecoveryIntentAfterActivationV1,
@@ -103,7 +105,9 @@ export default function DiagnosticsScreen() {
   const {
     legacyRows, unsyncedFinancialRows,
     canRestore, canDiscard, canActivate, showUnsyncedFinancialWarning,
+    reviewableLegacyRows, acknowledgedLegacyRows, canDiscardAcknowledgedLegacy,
   } = conflictRecoveryGatesV1(ledger);
+  const acknowledgedSequences = acknowledgedLegacyRows.map(row => Number(row.sequence_id));
 
   // Activation is only finished when the ledger activated *and* the intent that
   // holds the sync gate shut was retired. Reporting on activation alone would
@@ -192,6 +196,49 @@ export default function DiagnosticsScreen() {
             : `Activated, but the sync block was not lifted. Reason: ${retired?.reason || 'unknown'}`)
           : failureNotice(result));
   };
+
+  const runAcknowledgeLegacyRow = async row => {
+    setBusyAction(`ack-${row.sequence_id}`);
+    let result;
+    try {
+      result = await acknowledgeLegacyOutboxRowV1({
+        namespace: ledger.activeNamespace, sequenceId: Number(row.sequence_id),
+      });
+    } catch (error) {
+      result = { ok: false, reason: `ack_threw:${String(error?.message || error)}` };
+    }
+    setBusyAction(null);
+    if (!result?.ok) {
+      Alert.alert(isAr ? 'لم يُسجَّل' : 'Not recorded', failureNotice(result));
+      return;
+    }
+    refresh();
+  };
+
+  const runDiscardAcknowledged = async () => {
+    setBusyAction('discardAcknowledged');
+    let result;
+    try {
+      result = await discardAcknowledgedLegacyOutboxV1({ namespace: ledger.activeNamespace, confirmed: true });
+    } catch (error) {
+      result = { ok: false, reason: `discard_ack_threw:${String(error?.message || error)}` };
+    }
+    finish('discardAcknowledged', result,
+      result?.ok ? (isAr ? 'تمت الإزالة' : 'Removed') : (isAr ? 'لم تتم الإزالة' : 'Not removed'),
+      result?.ok
+        ? (isAr
+          ? `أُزيلت ${Number(result.discarded || 0)} من السجلات التي أكّدتها. بياناتك المالية لم تتغيّر.`
+          : `Removed ${Number(result.discarded || 0)} records you confirmed. Your financial data is unchanged.`)
+        : failureNotice(result));
+    if (result?.ok) refresh();
+  };
+
+  const confirmDiscardAcknowledged = () => confirm(
+    isAr ? 'إزالة السجلات المؤكَّدة' : 'Remove the confirmed records',
+    isAr
+      ? `ستُزال ${acknowledgedSequences.length} من السجلات التي راجعتها وأكّدتها. لا يمكن التراجع، لذا تأكّد أنك أعدت إدخال ما يقابلها فعلًا.`
+      : `This removes the ${acknowledgedSequences.length} records you reviewed and confirmed. It cannot be undone, so be sure you have re-entered what they correspond to.`,
+    isAr ? 'إزالة' : 'Remove', runDiscardAcknowledged);
 
   const confirm = (title, message, action, onPress) => Alert.alert(title, message, [
     { text: isAr ? 'إلغاء' : 'Cancel', style: 'cancel' },
@@ -288,6 +335,54 @@ export default function DiagnosticsScreen() {
               {`#${row.sequence_id} ${row.entity_type}/${row.operation} · ${row.created_at}`}
             </Text>
           ))}
+        </SurfaceCard>
+      ) : null}
+
+      {reviewableLegacyRows.length ? (
+        <SurfaceCard th={th} style={{ marginBottom: 12, gap: 8, borderColor: th.border, borderWidth: 1 }}>
+          <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: textAlign(lang) }}>
+            {isAr ? 'سجلات قديمة لم تصل السحابة' : 'Old records the cloud never received'}
+          </Text>
+          <Text style={{ color: th.sub, fontSize: 12, textAlign: textAlign(lang) }}>
+            {isAr
+              ? 'المزامنة تعمل الآن، وهذه السجلات لن تُرسَل أبدًا. راجع كل واحد وقارنه بما أعدت إدخاله، وأكّده وحده حين تتأكد. لا يُزال شيء قبل تأكيدك.'
+              : 'Sync is working now and these can never be sent. Review each one against what you re-entered and confirm it on its own. Nothing is removed before you do.'}
+          </Text>
+          {reviewableLegacyRows.map(row => {
+            const done = acknowledgedSequences.includes(Number(row.sequence_id));
+            return (
+              <View key={row.sequence_id} style={{ gap: 4, paddingVertical: 6, borderTopWidth: 1, borderTopColor: th.border }}>
+                <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', textAlign: textAlign(lang) }} selectable>
+                  {`#${row.sequence_id} ${row.entity_type}/${row.operation} · ${row.created_at}`}
+                </Text>
+                <Text style={{ color: th.sub, fontSize: 11, fontFamily: 'monospace', textAlign: textAlign(lang) }} selectable>
+                  {String(row.payload_json || '')}
+                </Text>
+                {done ? (
+                  <Text style={{ color: th.sub, fontSize: 12, ...weight('700'), textAlign: textAlign(lang) }}>
+                    {isAr ? '✓ مؤكَّد — جاهز للإزالة' : '✓ Confirmed — ready to remove'}
+                  </Text>
+                ) : (
+                  <AppButton
+                    th={th} lang={lang} tone="secondary" icon="checkmark-outline"
+                    label={busyAction === `ack-${row.sequence_id}`
+                      ? (isAr ? 'جارٍ…' : 'Working…')
+                      : (isAr ? 'أكّدت هذا السجل' : 'I have checked this one')}
+                    onPress={() => runAcknowledgeLegacyRow(row)} disabled={!!busyAction}
+                  />
+                )}
+              </View>
+            );
+          })}
+          {canDiscardAcknowledgedLegacy ? (
+            <AppButton
+              th={th} lang={lang} tone="danger" icon="trash-outline"
+              label={busyAction === 'discardAcknowledged'
+                ? (isAr ? 'جارٍ الإزالة…' : 'Removing…')
+                : (isAr ? `إزالة المؤكَّد (${acknowledgedSequences.length})` : `Remove confirmed (${acknowledgedSequences.length})`)}
+              onPress={confirmDiscardAcknowledged} disabled={!!busyAction}
+            />
+          ) : null}
         </SurfaceCard>
       ) : null}
 

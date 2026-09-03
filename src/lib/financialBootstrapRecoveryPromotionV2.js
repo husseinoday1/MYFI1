@@ -828,3 +828,180 @@ export const discardLegacyOutboxAfterCheckpointRestoreV1 = async ({
     return failure(error?.message);
   }
 };
+
+const legacyOutboxAckKey = namespace => `financial_v2_legacy_outbox_ack_v1:${text(namespace)}`;
+const discardedLegacyOutboxKey = namespace => `financial_v2_legacy_outbox_discarded_v1:${text(namespace)}`;
+
+// The exact stored text, not a canonical form. Two rows are the same only when
+// their payload is byte-identical, so any rewrite between acknowledging a row
+// and removing it voids the acknowledgement rather than quietly carrying over.
+const legacyRowFingerprint = row => JSON.stringify({
+  sequenceId: Number(row?.sequence_id),
+  mutationId: text(row?.mutation_id),
+  entityType: text(row?.entity_type),
+  entityId: text(row?.entity_id),
+  operation: text(row?.operation),
+  entityRevision: Number(row?.entity_revision),
+  createdAt: text(row?.created_at),
+  payloadJson: String(row?.payload_json ?? ''),
+});
+
+const readLegacyOutboxRow = (db, namespace, sequenceId) => db.getFirstAsync(
+  `SELECT sequence_id,namespace,mutation_id,entity_type,entity_id,operation,entity_revision,
+          payload_version,payload_json,created_at,acknowledged_at
+     FROM ledger_outbox_v2
+    WHERE namespace=? AND sequence_id=? AND acknowledged_at IS NULL LIMIT 1`,
+  namespace, Number(sequenceId),
+);
+
+/**
+ * Records that the owner looked at one pending legacy row and confirmed they no
+ * longer need it — normally because they re-entered the same entry by hand
+ * after a recovery.
+ *
+ * Deliberately one row at a time. These are independent financial entries, and
+ * a single confirmation covering several would let one tap discard work the
+ * owner never actually compared. The acknowledgement stores the row as it stood,
+ * so the discard can prove it removes that same row and not one that changed
+ * underneath it.
+ */
+export const acknowledgeLegacyOutboxRowV1 = async ({
+  namespace = 'guest', sequenceId, database = null,
+} = {}) => {
+  const target = text(namespace);
+  const sequence = Number(sequenceId);
+  if (!target || !Number.isSafeInteger(sequence)) return failure('financial_v2_legacy_outbox_ack_input_invalid');
+
+  try {
+    return await runFinancialRestorePromotionTransactionV8({ database, task: async actions => {
+      const txn = actions.database;
+      const row = await readLegacyOutboxRow(txn, target, sequence);
+      if (!row) throw new Error('financial_v2_legacy_outbox_ack_row_missing');
+
+      const now = new Date().toISOString();
+      const ackRow = await txn.getFirstAsync(
+        `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, legacyOutboxAckKey(target),
+      );
+      const existing = parse(ackRow?.value);
+      const record = {
+        version: 1,
+        namespace: target,
+        rows: {
+          ...(existing?.version === 1 && existing.rows && typeof existing.rows === 'object' ? existing.rows : {}),
+          [String(sequence)]: {
+            sequenceId: sequence,
+            mutationId: text(row.mutation_id),
+            entityType: text(row.entity_type),
+            entityId: text(row.entity_id),
+            operation: text(row.operation),
+            createdAt: text(row.created_at),
+            payloadJson: String(row.payload_json ?? ''),
+            fingerprint: legacyRowFingerprint(row),
+            acknowledgedAt: now,
+          },
+        },
+        updatedAt: now,
+      };
+      await txn.runAsync(
+        `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+        legacyOutboxAckKey(target), JSON.stringify(record), now,
+      );
+      return {
+        supported: true, ok: true, namespace: target, sequenceId: sequence,
+        acknowledgedCount: Object.keys(record.rows).length,
+      };
+    }});
+  } catch (error) {
+    return failure(error?.message);
+  }
+};
+
+/**
+ * Removes only the legacy rows the owner acknowledged, and only while they are
+ * provably unsendable: once V2 is activated the sync path never reads the legacy
+ * outbox and shouldWriteLegacyOutboxV1 stops adding to it, so nothing here can
+ * still reach the cloud. Before activation these may be genuine queued work, so
+ * the whole call is refused.
+ *
+ * Every row is re-read and re-fingerprinted inside the transaction. An
+ * acknowledgement of a row that has since changed is not honoured — it would be
+ * a confirmation of something the owner never saw. Rows are copied out before
+ * they go, because on the device this was written for they were the last
+ * surviving record of entries the cloud never received.
+ */
+export const discardAcknowledgedLegacyOutboxV1 = async ({
+  namespace = 'guest', confirmed = false, database = null,
+} = {}) => {
+  const target = text(namespace);
+  if (!target) return failure('financial_v2_legacy_outbox_discard_ack_input_invalid');
+  if (confirmed !== true) return failure('financial_v2_legacy_outbox_discard_ack_confirmation_required');
+
+  try {
+    return await runFinancialRestorePromotionTransactionV8({ database, task: async actions => {
+      const txn = actions.database;
+      const [identity, restoreIntent, ackRow] = await Promise.all([
+        txn.getFirstAsync(`SELECT * FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`, target),
+        txn.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, restoreIntentKey(target)),
+        txn.getFirstAsync(`SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, legacyOutboxAckKey(target)),
+      ]);
+      if (restoreIntent?.value) throw new Error('financial_v2_legacy_outbox_discard_ack_restore_intent_active');
+      if (!identity?.ledger_id) throw new Error('financial_v2_legacy_outbox_discard_ack_identity_missing');
+
+      const state = await txn.getFirstAsync(
+        `SELECT activated_at FROM ledger_sync_state_v8 WHERE ledger_id=? AND restore_epoch=? LIMIT 1`,
+        text(identity.ledger_id), Number(identity.restore_epoch),
+      );
+      if (!state?.activated_at) throw new Error('financial_v2_legacy_outbox_discard_ack_not_activated');
+
+      const record = parse(ackRow?.value);
+      const acknowledged = record?.version === 1 && record.rows && typeof record.rows === 'object' ? record.rows : null;
+      if (!acknowledged || !Object.keys(acknowledged).length) {
+        throw new Error('financial_v2_legacy_outbox_discard_ack_missing');
+      }
+
+      const now = new Date().toISOString();
+      const removed = [];
+      for (const entry of Object.values(acknowledged)) {
+        const row = await readLegacyOutboxRow(txn, target, entry?.sequenceId);
+        // An acknowledgement for a row already gone is not an error: the owner
+        // confirmed it, and there is nothing left to remove.
+        if (!row) continue;
+        if (legacyRowFingerprint(row) !== text(entry?.fingerprint)) {
+          throw new Error('financial_v2_legacy_outbox_discard_ack_row_changed');
+        }
+        removed.push(row);
+      }
+      if (!removed.length) {
+        return { supported: true, ok: true, namespace: target, discarded: 0 };
+      }
+
+      // The record outlives the rows it describes.
+      await txn.runAsync(
+        `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at) VALUES (?,?,?)`,
+        discardedLegacyOutboxKey(target),
+        JSON.stringify({ version: 1, namespace: target, discardedAt: now, rowCount: removed.length, rows: removed }),
+        now,
+      );
+      for (const row of removed) {
+        const deleted = await txn.runAsync(
+          `DELETE FROM ledger_outbox_v2 WHERE namespace=? AND sequence_id=? AND acknowledged_at IS NULL`,
+          target, Number(row.sequence_id),
+        );
+        if (Number(deleted?.changes || 0) !== 1) {
+          throw new Error('financial_v2_legacy_outbox_discard_ack_delete_failed');
+        }
+      }
+      const foreignKeys = await txn.getAllAsync('PRAGMA foreign_key_check');
+      if (foreignKeys.length) throw new Error('financial_v2_legacy_outbox_discard_ack_foreign_key_failed');
+      return {
+        supported: true, ok: true, namespace: target, discarded: removed.length,
+        discardedRows: removed.map(row => ({
+          sequenceId: Number(row.sequence_id), mutationId: text(row.mutation_id),
+          entityType: text(row.entity_type), entityId: text(row.entity_id),
+        })),
+      };
+    }});
+  } catch (error) {
+    return failure(error?.message);
+  }
+};
