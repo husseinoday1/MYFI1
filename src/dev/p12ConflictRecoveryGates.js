@@ -42,7 +42,7 @@ export const conflictRecoveryGatesV1 = (ledger = null) => {
   const acknowledged = Array.isArray(ledger?.legacyOutboxAcknowledged)
     ? ledger.legacyOutboxAcknowledged.map(Number)
     : [];
-  const reviewableLegacyRows = activated && legacyRowsComplete ? legacyRows : [];
+  const reviewableLegacyRows = ok && activated && legacyRowsComplete && !!namespace ? legacyRows : [];
   const acknowledgedLegacyRows = reviewableLegacyRows
     .filter(row => acknowledged.includes(Number(row?.sequence_id)));
 

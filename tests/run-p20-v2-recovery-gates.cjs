@@ -137,6 +137,18 @@ for (const broken of [ledger({ namespace: '' }), ledger({ ok: false }), null, un
     'an acknowledgement covers the row it was given, and no other');
 }
 
+// 11b) No namespace to act on, or a failed read, means nothing is offered —
+//      the same guard every other gate applies.
+for (const broken of [{ namespace: '' }, { ok: false }]) {
+  const gates = conflictRecoveryGatesV1({
+    ...ledger({ rows: [financialRow(74)], ...broken }),
+    activatedAt: '2026-09-03T07:11:08.380Z',
+    legacyOutboxAcknowledged: [74],
+  });
+  assert.equal(gates.reviewableLegacyRows.length, 0, 'nothing may be offered without a namespace to act on');
+  assert.equal(gates.canDiscardAcknowledgedLegacy, false);
+}
+
 // 11) A truncated list cannot be reviewed either: rows it never read would be
 //     invisible to the owner while the ones shown looked like the whole set.
 {
