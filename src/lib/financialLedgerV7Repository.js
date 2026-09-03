@@ -7,6 +7,7 @@ import {
   FINANCIAL_LEDGER_SCHEMA_VERSION,
 } from './financialLedgerV7Model';
 import { cloudWorkspaceCfg, mergeCloudWorkspaceCfg } from './cloudWorkspaceMetadata.js';
+import { outboxRetryPlanV1, outboxPermanentFailureCutoffV1 } from './financialOutboxRetryPolicyV1';
 import {
   clearColdArchiveNamespaceInTransaction,
   ensureColdArchiveSchema,
@@ -2942,13 +2943,45 @@ export const readPendingLedgerMutationsV8 = async ({
   if (targetLedgerId !== identity.ledgerId || targetEpoch !== identity.restoreEpoch) {
     throw new Error('financial_v2_pending_identity_mismatch');
   }
+  // §86: a permanently-failed row stays in the table but leaves the pending
+  // set, otherwise "stop retrying" would only be advisory and the ladder
+  // would hand it straight back on the next drain.
+  const cutoff = outboxPermanentFailureCutoffV1();
   const rows = await db.getAllAsync(
     `SELECT * FROM ledger_outbox_v3
       WHERE namespace=? AND ledger_id=? AND restore_epoch=? AND acknowledged_at IS NULL
         AND superseded_by_bootstrap_id IS NULL
+        AND attempts < ? AND (attempts = 0 OR created_at > ?)
         AND (next_attempt_at IS NULL OR next_attempt_at<=?)
       ORDER BY sequence_id LIMIT ?`,
-    identity.namespace, targetLedgerId, targetEpoch, new Date().toISOString(),
+    identity.namespace, targetLedgerId, targetEpoch,
+    cutoff.maxAttempts, cutoff.createdAfter, new Date().toISOString(),
+    Math.max(1, Math.min(500, Number(limit) || 100)),
+  );
+  return rows.map(row => ({ ...row, payload: parseJson(row.payload_json, null) }));
+};
+
+// §86: the terminal state has to be readable, or "visible and actionable" is
+// just a claim. Same derivation as the pending query's exclusion, so the two
+// can never disagree about which rows have stopped.
+export const readFailedPermanentLedgerMutationsV8 = async ({
+  namespace = 'guest', ledgerId, restoreEpoch, limit = 100, database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return [];
+  await ensureFinancialLedgerV7(db);
+  const identity = await ensureLedgerSyncIdentityV8({ namespace, database: db });
+  const targetLedgerId = String(ledgerId || identity.ledgerId);
+  const targetEpoch = Math.max(1, Number(restoreEpoch || identity.restoreEpoch));
+  const cutoff = outboxPermanentFailureCutoffV1();
+  const rows = await db.getAllAsync(
+    `SELECT * FROM ledger_outbox_v3
+      WHERE namespace=? AND ledger_id=? AND restore_epoch=? AND acknowledged_at IS NULL
+        AND superseded_by_bootstrap_id IS NULL
+        AND (attempts >= ? OR (attempts > 0 AND created_at <= ?))
+      ORDER BY sequence_id LIMIT ?`,
+    identity.namespace, targetLedgerId, targetEpoch,
+    cutoff.maxAttempts, cutoff.createdAfter,
     Math.max(1, Math.min(500, Number(limit) || 100)),
   );
   return rows.map(row => ({ ...row, payload: parseJson(row.payload_json, null) }));
@@ -2984,12 +3017,29 @@ export const failLedgerMutationV8 = async ({
   const db = database || await getLedgerDb();
   if (!db || !mutationId) return false;
   await ensureFinancialLedgerV7(db);
-  const retryAt = new Date(Date.now() + 60_000).toISOString();
+  // §86: the row's own history decides the wait. Read it back rather than
+  // assuming a first failure -- attempts is the whole input to the ladder.
+  const row = await db.getFirstAsync(
+    `SELECT attempts, created_at FROM ledger_outbox_v3
+      WHERE ledger_id=? AND restore_epoch=? AND mutation_id=? LIMIT 1`,
+    String(ledgerId), Number(restoreEpoch), String(mutationId),
+  );
+  if (!row) return false;
+  const plan = outboxRetryPlanV1({
+    attempts: Number(row.attempts || 0) + 1,
+    createdAt: row.created_at,
+  });
+  // A permanent failure keeps the row and stops scheduling it. It is left out
+  // of the pending set by attempts/age, so a null next_attempt_at here cannot
+  // be mistaken for "eligible immediately".
+  const failure = plan.state === 'failed_permanent'
+    ? `${plan.reason}:${String(error || 'sync_failed')}`
+    : String(error || 'sync_failed');
   await enqueueWrite(() => db.runAsync(
     `UPDATE ledger_outbox_v3
         SET attempts=attempts+1,next_attempt_at=?,last_error=?
       WHERE ledger_id=? AND restore_epoch=? AND mutation_id=?`,
-    retryAt, String(error || 'sync_failed').slice(0,500),
+    plan.nextAttemptAt, failure.slice(0,500),
     String(ledgerId), Number(restoreEpoch), String(mutationId),
   ));
   return true;
@@ -4879,11 +4929,19 @@ export const readPendingLedgerMutationsV7 = async ({ namespace = 'guest', limit 
   const db = database || await getLedgerDb();
   if (!db) return [];
   await ensureFinancialLedgerV7(db);
+  // §86: the same permanent-failure exclusion as V8. Without it a retired row
+  // would be *more* eligible than before, not less: its null next_attempt_at
+  // reads as "due now" to the clause below, turning a stopped mutation into a
+  // hot retry every drain.
+  const cutoff = outboxPermanentFailureCutoffV1();
   const rows = await db.getAllAsync(
     `SELECT * FROM ledger_outbox_v2
-      WHERE namespace=? AND acknowledged_at IS NULL AND (next_attempt_at IS NULL OR next_attempt_at<=?)
+      WHERE namespace=? AND acknowledged_at IS NULL
+        AND attempts < ? AND (attempts = 0 OR created_at > ?)
+        AND (next_attempt_at IS NULL OR next_attempt_at<=?)
       ORDER BY sequence_id LIMIT ?`,
-    namespace, new Date().toISOString(), Math.max(1, Math.min(500, Number(limit) || 100)),
+    namespace, cutoff.maxAttempts, cutoff.createdAfter,
+    new Date().toISOString(), Math.max(1, Math.min(500, Number(limit) || 100)),
   );
   return rows.map(row => ({ ...row, payload: parseJson(row.payload_json, null) }));
 };
@@ -4912,10 +4970,24 @@ export const failLedgerMutationV7 = async ({ mutationId, error, database = null 
   const db = database || await getLedgerDb();
   if (!db || !mutationId) return false;
   await ensureFinancialLedgerV7(db);
-  const retryAt = new Date(Date.now() + 60_000).toISOString();
+  // §86 applies to the pre-cutover outbox too. It is the legacy path, but a
+  // device that has not cut over still runs it, and leaving a known-bad flat
+  // retry there just because it is on the way out is how it survives.
+  const row = await db.getFirstAsync(
+    `SELECT attempts, created_at FROM ledger_outbox_v2 WHERE mutation_id=? LIMIT 1`,
+    String(mutationId),
+  );
+  if (!row) return false;
+  const plan = outboxRetryPlanV1({
+    attempts: Number(row.attempts || 0) + 1,
+    createdAt: row.created_at,
+  });
+  const failure = plan.state === 'failed_permanent'
+    ? `${plan.reason}:${String(error || 'sync_failed')}`
+    : String(error || 'sync_failed');
   await enqueueWrite(() => db.runAsync(
     `UPDATE ledger_outbox_v2 SET attempts=attempts+1,next_attempt_at=?,last_error=? WHERE mutation_id=?`,
-    retryAt, String(error || 'sync_failed').slice(0, 500), String(mutationId),
+    plan.nextAttemptAt, failure.slice(0, 500), String(mutationId),
   ));
   return true;
 };

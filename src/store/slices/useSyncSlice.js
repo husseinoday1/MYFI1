@@ -27,6 +27,7 @@ import { supabase } from '../../lib/supabase';
 import { STORAGE, DEF_CATS, DEF_CFG, DEF_NOTIF, LEGACY_STORAGE_KEYS, normalizeCfg } from '../../lib/constants';
 import { normalizedPreviewEnabled, normalizedShadowEnabled } from '../../lib/databaseMode';
 import { legacyUserDataMirrorPlanV1 } from '../../lib/p13LegacyMirrorGate';
+import { requestMaintenanceResumeSync, consumeMaintenanceResumeSignal } from '../../lib/financialMaintenanceResumeSignal';
 import {
   acknowledgeLedgerOutbox,
   activeLedgerSupported,
@@ -1571,10 +1572,16 @@ export const createSyncSlice = (set, get) => ({
           marks.writerFlushMs = Date.now() - syncDrained;
         },
         afterExit: async () => {
-          if (options.resumeSync === false) return;
+          // A migration or cutover that ran nested inside this maintenance call
+          // overrides an explicit resumeSync:false -- that flag means "routine
+          // work, no reason to arm a sync", not "never arm one even if the task
+          // turned out to change operational state." Ordinary calls with nothing
+          // to report leave the signal unset and keep today's behavior exactly.
+          const forcedReason = consumeMaintenanceResumeSignal();
+          if (options.resumeSync === false && !forcedReason) return;
           const current = get();
           if (current.user && !current.cfg.demoMode && current.workspaceReady && current.dirty) {
-            armScheduledCloudSync(get, options.resumeSyncReason || normalizedReason, 0);
+            armScheduledCloudSync(get, forcedReason || options.resumeSyncReason || normalizedReason, 0);
           }
         },
       }, async (...args) => {
@@ -2111,6 +2118,10 @@ export const createSyncSlice = (set, get) => ({
         ledgerError: null,
       }));
       await writeActiveLocalLedgerNamespace(namespace);
+      // §92: cutover just switched this device onto the V2 mutation-sync
+      // protocol -- resume the same way restore already does, whether this
+      // ran standalone or nested inside loadLocal's auto-cutover branch.
+      requestMaintenanceResumeSync('canonical_cutover_resume');
       return result;
     } catch (error) {
       const reason = String(error?.message || 'financial_v7_cutover_failed');
@@ -2374,6 +2385,12 @@ export const createSyncSlice = (set, get) => ({
               financialLedgerV7Checksum: migration.checksum || null,
               financialLedgerV7Migration: migration,
             });
+            // §92: `alreadyCutover` is the routine fast path every load takes
+            // once cut over -- nothing changed, no reason to arm a sync. A real
+            // migration this call (first shadow build/verify, or a forced
+            // re-verify) did change operational state and must resume sync the
+            // same way restore already does, once this barrier fully exits.
+            if (!migration.alreadyCutover) requestMaintenanceResumeSync('financial_v7_schema_migration_resume');
           }
           await replaceLedgerSnapshot({
             namespace: ledgerNamespace,
