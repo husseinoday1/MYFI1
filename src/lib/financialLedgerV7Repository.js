@@ -3285,6 +3285,50 @@ const v2ResolveCurrentRevision = async (db, namespace, item, projected) => {
   return current;
 };
 
+// A command whose result the ledger already holds is not a conflict: it is a
+// replay of history this device already embodies. That happens after a recovery,
+// where the local rows come from a checkpoint while the sync cursor still points
+// at the start of cloud history — nothing seeds a cursor from a bootstrap, and
+// the cloud registration carries no sequence to seed one from.
+//
+// v2ExactLocalEcho already expresses this idea, but only for commands still
+// sitting in this device's own outbox. A restore deletes those, and commands
+// authored by another device were never there, so the escape it offers cannot
+// reach either case. This asks the live row instead.
+//
+// Revision equality alone would be a guess. The stored form is rebuilt exactly
+// as the apply path writes it and compared canonically, so a skip is a proven
+// no-op rather than a likely one. If the two ever drift apart the comparison
+// simply fails and the command stays a conflict: the failure direction is always
+// the strict one. Anything whose stored shape this does not model — a void, a
+// delete, an archive — is left to the existing behaviour.
+const v2AlreadyAppliedLocally = async (db, namespace, item) => {
+  if (item.operation !== 'upsert') return false;
+  if (item.entityType === 'financial_transaction') {
+    const expected = item.payload?.originalTransaction;
+    if (!expected || typeof expected !== 'object' || Array.isArray(expected)) return false;
+    const row = await db.getFirstAsync(
+      `SELECT payload_json FROM ledger_financial_transactions_v7
+        WHERE namespace=? AND id=? AND revision=? AND deleted_at IS NULL LIMIT 1`,
+      namespace, item.entityId, item.revision,
+    );
+    if (!row) return false;
+    return canonicalSyncValue(parseJson(row.payload_json, null))
+      === canonicalSyncValue({ ...expected, revision: item.revision });
+  }
+  const source = item.payload;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return false;
+  const row = await db.getFirstAsync(
+    `SELECT payload_json,deleted_at FROM ledger_entities_v7
+      WHERE namespace=? AND entity_type=? AND id=? AND revision=? LIMIT 1`,
+    namespace, item.entityType, item.entityId, item.revision,
+  );
+  if (!row) return false;
+  if (String(row.deleted_at || '') !== String(source.deletedAt || '')) return false;
+  return canonicalSyncValue(parseJson(row.payload_json, null))
+    === canonicalSyncValue(source.payload ?? null);
+};
+
 const v2PreflightMutation = async (db, identity, item, projected = null) => {
   if (await v2ExactLocalEcho(db, identity, item)) {
     const currentRevision = await v2ResolveCurrentRevision(db, identity.namespace, item, projected);
@@ -3297,6 +3341,11 @@ const v2PreflightMutation = async (db, identity, item, projected = null) => {
   }
   const currentRevision = await v2ResolveCurrentRevision(db, identity.namespace, item, projected);
   if (currentRevision !== item.baseRevision) {
+    // Only ever consulted on the path that was about to fail, so a command that
+    // applies normally never reaches it.
+    if (currentRevision === item.revision && await v2AlreadyAppliedLocally(db, identity.namespace, item)) {
+      return { item, kind: 'already_applied', echo: true, currentRevision };
+    }
     throw Object.assign(new Error('financial_v2_remote_cas_conflict'), {
       conflict: v2RemoteConflict('financial_v2_remote_cas_conflict', item, { currentRevision }),
     });
