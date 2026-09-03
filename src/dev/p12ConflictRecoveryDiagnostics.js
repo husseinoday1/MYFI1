@@ -11,6 +11,11 @@ import { Platform } from 'react-native';
 import { getLedgerNamespace } from '../lib/activeLedgerRepository';
 import { peekLedgerDb } from '../lib/ledgerDatabase';
 import { resumePreparedCloudConflictRecoveryV1 } from '../lib/financialV2ConflictRecoveryV1';
+// Only the cutoff, which is pure arithmetic over the policy's constants. The
+// repository's reader would be the obvious thing to call here and is exactly
+// what this file must not call: it goes through getLedgerDb/ensureFinancialLedgerV7
+// and would open and migrate the database from a diagnostics read.
+import { outboxPermanentFailureCutoffV1 } from '../lib/financialOutboxRetryPolicyV1';
 
 const REQUIRED_TABLES = [
   'ledger_sync_identity_v8',
@@ -152,6 +157,30 @@ export async function collectP12ConflictRecoveryDiagnostics({
     });
   }
 
+  // Phase 14 §86: rows the retry ladder has stopped. They are still pending
+  // (never acknowledged, never deleted) but no drain will pick them up again,
+  // so without this read they would be invisible in exactly the state someone
+  // needs to see them. The boundary comes from the policy module rather than a
+  // second copy of the rule, so this can never disagree with the drain about
+  // which rows have stopped. `attempts > 0` on the age arm mirrors the policy:
+  // an old row that was never attempted is a device that was offline, not a
+  // stuck mutation.
+  const retryCutoff = outboxPermanentFailureCutoffV1();
+  let outboxV3StoppedRows = { available: present.has('ledger_outbox_v3'), rows: [] };
+  if (identityLedgerId && identityRestoreEpoch > 0) {
+    outboxV3StoppedRows = await readRows({
+      db, present, table: 'ledger_outbox_v3',
+      sql: `SELECT sequence_id,mutation_id,command_id,entity_type,entity_id,operation,
+                   revision,base_revision,created_at,attempts,next_attempt_at,last_error
+              FROM ledger_outbox_v3
+             WHERE ledger_id=? AND restore_epoch=?
+               AND acknowledged_at IS NULL AND superseded_by_bootstrap_id IS NULL
+               AND (attempts >= ? OR (attempts > 0 AND created_at <= ?))
+             ORDER BY sequence_id ASC`,
+      params: [identityLedgerId, identityRestoreEpoch, retryCutoff.maxAttempts, retryCutoff.createdAfter],
+    });
+  }
+
   const outboxV2Pending = await readRows({
     db, present, table: 'ledger_outbox_v2',
     sql: `SELECT COUNT(*) AS row_count FROM ledger_outbox_v2 WHERE namespace=? AND acknowledged_at IS NULL`,
@@ -235,6 +264,10 @@ export async function collectP12ConflictRecoveryDiagnostics({
     archiveImports: archiveImports.rows || [],
     outboxV3PendingCount: Number(outboxV3Pending.rows?.[0]?.row_count || 0),
     outboxV3PendingRows: outboxV3PendingRows.rows || [],
+    // §86: a subset of the pending count above, not a separate population --
+    // these rows are still unacknowledged, they have just stopped being retried.
+    outboxV3StoppedRows: outboxV3StoppedRows.rows || [],
+    outboxV3StoppedCount: (outboxV3StoppedRows.rows || []).length,
     outboxV2PendingCount: Number(outboxV2Pending.rows?.[0]?.row_count || 0),
     outboxV2PendingRows: outboxV2PendingRows.rows || [],
     activatedAt: syncState.rows?.[0]?.activated_at || null,

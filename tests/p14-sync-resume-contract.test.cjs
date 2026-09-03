@@ -1,4 +1,5 @@
-// Phase 14 §92 — the two call sites that raise the resume signal.
+// Phase 14 — wiring contracts for both §92 (resume signal call sites) and
+// §86 (the stopped-rows diagnostics surface).
 //
 // The behavior itself is proven by run-financial-maintenance-resume-wiring.cjs
 // (the afterExit override) and run-financial-maintenance-resume-signal.cjs (the
@@ -62,5 +63,37 @@ assert(migrationOkAt > 0 && migrationRaiseAt > migrationOkAt,
   'the migration raise must sit inside the migration.ok branch');
 assert(parityFailAt > 0 && parityFailAt < migrationOkAt,
   'the parity-failure branch must stay ahead of it and must not raise');
+
+// --- §86: the stopped-rows diagnostics surface -----------------------------
+
+const diagnostics = fs.readFileSync(path.join(root, 'src/dev/p12ConflictRecoveryDiagnostics.js'), 'utf8');
+const screen = fs.readFileSync(path.join(root, 'src/screens/DiagnosticsScreen.js'), 'utf8');
+
+// The boundary must come from the policy module. A second hand-written copy of
+// the rule here would let the diagnostics disagree with the drain about which
+// rows have stopped, which is the one thing this surface exists to report.
+assert(diagnostics.includes("import { outboxPermanentFailureCutoffV1 } from '../lib/financialOutboxRetryPolicyV1'"),
+  'the stopped-rows read must take its cutoff from the retry policy, not restate it');
+assert(diagnostics.includes('AND (attempts >= ? OR (attempts > 0 AND created_at <= ?))'),
+  'the diagnostics predicate must match the repository stopped-rows predicate exactly');
+
+// This module must never open the database. The repository reader would, so
+// calling it from here is the specific mistake worth pinning against.
+assert(!diagnostics.includes('readFailedPermanentLedgerMutationsV8'),
+  'diagnostics must not call the repository reader — it opens/migrates the ledger');
+assert(diagnostics.includes('peekLedgerDb'), 'diagnostics must still peek rather than open');
+
+// The stopped rows must not carry financial payloads. The pending read above it
+// does, by an older decision; this one has no reason to.
+const stoppedSelect = diagnostics.slice(
+  diagnostics.indexOf('let outboxV3StoppedRows'),
+  diagnostics.indexOf('const outboxV2Pending'),
+);
+assert(stoppedSelect.length > 0, 'the stopped-rows read must exist');
+assert(!stoppedSelect.includes('payload_json'),
+  'a stopped row is reported by metadata, never by its financial payload');
+
+assert(screen.includes('ledger.outboxV3StoppedCount'),
+  'the screen must show the stopped count, or the state is still invisible');
 
 console.log('MYFI P14 SYNC RESUME CONTRACT: PASSED');

@@ -516,6 +516,26 @@ export default function DiagnosticsScreen() {
                 </Text>
               </Section>
 
+              {/* Phase 14 §86. A subset of the pending rows above: still queued,
+                  never acknowledged, but the retry ladder has stopped them, so
+                  no drain will pick them up again. Called out separately
+                  because that is invisible in the pending count alone. */}
+              <Section
+                th={th} lang={lang} isAr={isAr} icon="hand-left-outline"
+                title={isAr ? 'صفوف توقفت إعادة محاولتها' : 'Rows that stopped retrying'}
+              >
+                <Row th={th} lang={lang} label="ledger_outbox_v3 stopped" value={ledger.outboxV3StoppedCount} />
+                {Number(ledger.outboxV3StoppedCount || 0) > 0 ? (
+                  <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', marginTop: 4, textAlign: textAlign(lang) }} selectable>
+                    ledger_outbox_v3 stopped rows: {j(ledger.outboxV3StoppedRows)}
+                  </Text>
+                ) : (
+                  <Text style={{ color: th.faint, fontSize: 12, marginTop: 4, textAlign: textAlign(lang) }}>
+                    {isAr ? 'لا صفوف متوقفة' : 'no stopped rows'}
+                  </Text>
+                )}
+              </Section>
+
               <SectionTitle th={th} lang={lang}>resumePreparedCloudConflictRecoveryV1</SectionTitle>
               <Section th={th} lang={lang} isAr={isAr} icon="play-skip-forward-outline" title={isAr ? 'نتيجة الاستدعاء الحالية' : 'Current call result'}>
                 <Row th={th} lang={lang} label="ok" value={ledger.resume?.ok} />
