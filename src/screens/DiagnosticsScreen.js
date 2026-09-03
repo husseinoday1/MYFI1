@@ -105,21 +105,37 @@ export default function DiagnosticsScreen() {
     && !!ledger.intent?.checkpointId
     && !!ledger.activeNamespace;
 
+  // The library's own allow-list, mirrored here only to decide what to show.
+  // The real guard is inside the transaction; this exists so the screen does not
+  // offer a button that would be refused, or describe a discard as harmless when
+  // the rows in front of it are not.
+  const setupOnlyRow = row => String(row?.operation || '') === 'upsert' && (
+    (String(row?.entity_type || '') === 'workspace' && String(row?.entity_id || '') === 'workspace')
+    || ['wallet', 'category'].includes(String(row?.entity_type || ''))
+  );
+  const legacyRows = Array.isArray(ledger?.outboxV2PendingRows) ? ledger.outboxV2PendingRows : [];
+  // Rows carrying real financial mutations. On this device they turned out to be
+  // the last surviving copy of transactions the cloud never received, so they
+  // are never offered for deletion and are surfaced instead.
+  const unsyncedFinancialRows = legacyRows.filter(row => !setupOnlyRow(row));
+
   // Each step is offered only in the state it repairs, and only after the one
   // before it is done. The library refuses anything else anyway, so a button
   // outside its state would only be a trap.
   const canDiscard = ledger?.ok === true
     && ledger.intent?.status === 'rolled_back_after_activation_failure'
     && Number(ledger.outboxV2PendingCount || 0) > 0
+    && legacyRows.length > 0
+    && unsyncedFinancialRows.length === 0
     && !!ledger.activeNamespace;
 
-  // The conflict is repaired by an ordinary activation; nothing here is special
-  // cased. It runs only once the ledger is genuinely quiet: the rollback done,
-  // and both outboxes empty.
+  // Activation gates on the V2 queue alone: activateFinancialSyncProtocolV2V8
+  // counts ledger_outbox_v3 and never looks at the legacy V1 outbox. Requiring
+  // outbox_v2 to be empty here was caution of this screen's own, and it locked
+  // the last step behind rows that cannot be safely deleted.
   const canActivate = ledger?.ok === true
     && ledger.intent?.status === 'rolled_back_after_activation_failure'
     && Number(ledger.outboxV3PendingCount || 0) === 0
-    && Number(ledger.outboxV2PendingCount || 0) === 0
     && !!ledger.activeNamespace;
 
   // Activation is only finished when the ledger activated *and* the intent that
@@ -223,10 +239,10 @@ export default function DiagnosticsScreen() {
     isAr ? 'استعادة' : 'Restore', runRestore);
 
   const confirmDiscard = () => confirm(
-    isAr ? 'إزالة التعديلات المعلّقة' : 'Remove the pending changes',
+    isAr ? 'إزالة تعديلات الإعدادات المعلّقة' : 'Remove the pending settings changes',
     isAr
-      ? 'ستُزال تعديلات معلّقة خلّفتها المحاولة الفاشلة ولا يمكن للسحابة قبولها. بياناتك المالية لن تتغيّر، وأي تعديل أقدم من نسختك المحفوظة لن يُمَس.'
-      : 'This removes pending changes left by the failed attempt that the cloud can never accept. Your financial data does not change, and nothing older than your saved copy is touched.',
+      ? `ستُزال ${legacyRows.length} من تعديلات الإعدادات المعلّقة التي خلّفتها المحاولة الفاشلة ولا يمكن للسحابة قبولها. لا حركات ولا أرصدة ضمنها — لو وُجدت لتوقفت العملية. وأي تعديل أقدم من نسختك المحفوظة لن يُمَس.`
+      : `This removes ${legacyRows.length} pending settings changes left by the failed attempt that the cloud can never accept. No transactions or balances are among them — if any were, this would stop. Nothing older than your saved copy is touched.`,
     isAr ? 'إزالة' : 'Remove', runDiscard);
 
   const confirmActivate = () => confirm(
@@ -253,10 +269,10 @@ export default function DiagnosticsScreen() {
       key: 'discard',
       show: canDiscard,
       icon: 'trash-outline',
-      title: isAr ? 'إزالة التعديلات المعلّقة' : 'Remove the pending changes',
+      title: isAr ? 'إزالة تعديلات الإعدادات المعلّقة' : 'Remove the pending settings changes',
       body: isAr
-        ? `بقيت ${Number(ledger?.outboxV2PendingCount || 0)} تعديلات معلّقة من المحاولة الفاشلة، لا يمكن للسحابة قبولها. إزالتها لا تمسّ أي بيانات مالية.`
-        : `${Number(ledger?.outboxV2PendingCount || 0)} pending changes remain from the failed attempt and the cloud can never accept them. Removing them touches no financial data.`,
+        ? `بقيت ${legacyRows.length} من تعديلات الإعدادات من المحاولة الفاشلة، لا يمكن للسحابة قبولها. كلها إعدادات — لا حركات ولا أرصدة.`
+        : `${legacyRows.length} settings changes remain from the failed attempt and the cloud can never accept them. All of them are settings — no transactions, no balances.`,
       label: isAr ? 'إزالة المعلّق' : 'Remove them',
       busyLabel: isAr ? 'جارٍ الإزالة…' : 'Removing…',
       onPress: confirmDiscard,
@@ -267,8 +283,8 @@ export default function DiagnosticsScreen() {
       icon: 'sync-outline',
       title: isAr ? 'إعادة تشغيل المزامنة' : 'Turn sync back on',
       body: isAr
-        ? 'الجهاز الآن نظيف ولا تعديلات معلّقة عليه. تشغيل المزامنة سيُنزّل ما فاته من السحابة عبر المسار العادي.'
-        : 'The device is clean now, with nothing pending. Turning sync on downloads what it missed through the ordinary path.',
+        ? `طابور المزامنة النشط فارغ. تشغيل المزامنة سيُنزّل ما فات الجهاز من السحابة عبر المسار العادي.${unsyncedFinancialRows.length ? ' الحركات غير المُرسَلة أعلاه تبقى محفوظة كما هي ولن يرفعها التفعيل.' : ''}`
+        : `The active sync queue is empty. Turning sync on downloads what this device missed through the ordinary path.${unsyncedFinancialRows.length ? ' The unsent entries above stay as they are; activation will not upload them.' : ''}`,
       label: isAr ? 'تشغيل المزامنة' : 'Turn sync on',
       busyLabel: isAr ? 'جارٍ التفعيل…' : 'Activating…',
       onPress: confirmActivate,
@@ -284,6 +300,28 @@ export default function DiagnosticsScreen() {
 
       {loading && !snapshot ? (
         <Text style={{ color: th.sub, textAlign: textAlign(lang) }}>{isAr ? 'جارٍ القراءة…' : 'Reading…'}</Text>
+      ) : null}
+
+      {unsyncedFinancialRows.length ? (
+        <SurfaceCard th={th} style={{ marginBottom: 12, gap: 8, borderColor: th.warn, borderWidth: 1 }}>
+          <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: textAlign(lang) }}>
+            {isAr ? 'حركات لم تصل السحابة' : 'Transactions the cloud never received'}
+          </Text>
+          <Text style={{ color: th.sub, fontSize: 12, textAlign: textAlign(lang) }}>
+            {isAr
+              ? `${unsyncedFinancialRows.length} حركة أُنشئت على هذا الجهاز ولم تُرسَل، ولم تعد ضمن بياناتك الحالية. تفاصيلها كاملة محفوظة هنا ولن تُحذف — أعد إدخالها يدويًا بعد عودة المزامنة، ثم أرسل «نسخ الكل» للدعم أولًا.`
+              : `${unsyncedFinancialRows.length} entries were created on this device, never sent, and are no longer part of your current data. Their full details are kept here and will not be deleted — re-enter them by hand once sync is back, and send "Copy all" to support first.`}
+          </Text>
+          {unsyncedFinancialRows.map(row => (
+            <Text
+              key={row.sequence_id}
+              style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', textAlign: textAlign(lang) }}
+              selectable
+            >
+              {`#${row.sequence_id} ${row.entity_type}/${row.operation} · ${row.created_at}`}
+            </Text>
+          ))}
+        </SurfaceCard>
       ) : null}
 
       {ACTIONS.map(action => (action.show && !succeeded(actionResults[action.key]) ? (
