@@ -114,10 +114,20 @@ export default function DiagnosticsScreen() {
     || ['wallet', 'category'].includes(String(row?.entity_type || ''))
   );
   const legacyRows = Array.isArray(ledger?.outboxV2PendingRows) ? ledger.outboxV2PendingRows : [];
+  // The collector caps that list. Classifying a truncated view would let the
+  // screen say "these are all settings" about rows it never saw, so anything
+  // built on the classification is withheld until the list is known complete.
+  const legacyRowsComplete = legacyRows.length === Number(ledger?.outboxV2PendingCount || 0);
   // Rows carrying real financial mutations. On this device they turned out to be
   // the last surviving copy of transactions the cloud never received, so they
   // are never offered for deletion and are surfaced instead.
   const unsyncedFinancialRows = legacyRows.filter(row => !setupOnlyRow(row));
+  // The claim "these are gone from your data" is only true once a rollback has
+  // rewound the ledger past them. Before that they are ordinary pending uploads,
+  // and telling their owner to re-enter them by hand would duplicate real money.
+  const showUnsyncedFinancialWarning = legacyRowsComplete
+    && unsyncedFinancialRows.length > 0
+    && ledger?.intent?.status === 'rolled_back_after_activation_failure';
 
   // Each step is offered only in the state it repairs, and only after the one
   // before it is done. The library refuses anything else anyway, so a button
@@ -125,6 +135,7 @@ export default function DiagnosticsScreen() {
   const canDiscard = ledger?.ok === true
     && ledger.intent?.status === 'rolled_back_after_activation_failure'
     && Number(ledger.outboxV2PendingCount || 0) > 0
+    && legacyRowsComplete
     && legacyRows.length > 0
     && unsyncedFinancialRows.length === 0
     && !!ledger.activeNamespace;
@@ -283,8 +294,8 @@ export default function DiagnosticsScreen() {
       icon: 'sync-outline',
       title: isAr ? 'إعادة تشغيل المزامنة' : 'Turn sync back on',
       body: isAr
-        ? `طابور المزامنة النشط فارغ. تشغيل المزامنة سيُنزّل ما فات الجهاز من السحابة عبر المسار العادي.${unsyncedFinancialRows.length ? ' الحركات غير المُرسَلة أعلاه تبقى محفوظة كما هي ولن يرفعها التفعيل.' : ''}`
-        : `The active sync queue is empty. Turning sync on downloads what this device missed through the ordinary path.${unsyncedFinancialRows.length ? ' The unsent entries above stay as they are; activation will not upload them.' : ''}`,
+        ? `طابور المزامنة النشط فارغ. تشغيل المزامنة سيُنزّل ما فات الجهاز من السحابة عبر المسار العادي.${showUnsyncedFinancialWarning ? ' الحركات غير المُرسَلة أعلاه تبقى محفوظة كما هي ولن يرفعها التفعيل.' : ''}`
+        : `The active sync queue is empty. Turning sync on downloads what this device missed through the ordinary path.${showUnsyncedFinancialWarning ? ' The unsent entries above stay as they are; activation will not upload them.' : ''}`,
       label: isAr ? 'تشغيل المزامنة' : 'Turn sync on',
       busyLabel: isAr ? 'جارٍ التفعيل…' : 'Activating…',
       onPress: confirmActivate,
@@ -302,7 +313,7 @@ export default function DiagnosticsScreen() {
         <Text style={{ color: th.sub, textAlign: textAlign(lang) }}>{isAr ? 'جارٍ القراءة…' : 'Reading…'}</Text>
       ) : null}
 
-      {unsyncedFinancialRows.length ? (
+      {showUnsyncedFinancialWarning ? (
         <SurfaceCard th={th} style={{ marginBottom: 12, gap: 8, borderColor: th.warn, borderWidth: 1 }}>
           <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: textAlign(lang) }}>
             {isAr ? 'حركات لم تصل السحابة' : 'Transactions the cloud never received'}
