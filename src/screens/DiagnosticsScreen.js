@@ -22,6 +22,7 @@ import { useTheme } from '../lib/useTheme';
 import { AppButton, ScreenScroll, SectionTitle, SurfaceCard, rowDirection, textAlign } from '../components/AppPrimitives';
 import { SPACE, weight } from '../lib/tokens';
 import { collectP12ConflictRecoveryDiagnostics } from '../dev/p12ConflictRecoveryDiagnostics';
+import { conflictRecoveryGatesV1 } from '../dev/p12ConflictRecoveryGates';
 import {
   discardLegacyOutboxAfterCheckpointRestoreV1,
   restoreFinancialConflictRecoveryCheckpointV1,
@@ -96,58 +97,13 @@ export default function DiagnosticsScreen() {
 
   const ledger = snapshot?.ledger;
 
-  // Both halves must hold: a promotion that never activated, and a checkpoint
-  // still on disk. In any other state the library refuses anyway, so the button
-  // would only be a trap.
-  const canRestore = ledger?.ok === true
-    && ledger.intent?.status === 'local_promoted_pending_activation'
-    && ledger.checkpointPresent === true
-    && !!ledger.intent?.checkpointId
-    && !!ledger.activeNamespace;
-
-  // The library's own allow-list, mirrored here only to decide what to show.
-  // The real guard is inside the transaction; this exists so the screen does not
-  // offer a button that would be refused, or describe a discard as harmless when
-  // the rows in front of it are not.
-  const setupOnlyRow = row => String(row?.operation || '') === 'upsert' && (
-    (String(row?.entity_type || '') === 'workspace' && String(row?.entity_id || '') === 'workspace')
-    || ['wallet', 'category'].includes(String(row?.entity_type || ''))
-  );
-  const legacyRows = Array.isArray(ledger?.outboxV2PendingRows) ? ledger.outboxV2PendingRows : [];
-  // The collector caps that list. Classifying a truncated view would let the
-  // screen say "these are all settings" about rows it never saw, so anything
-  // built on the classification is withheld until the list is known complete.
-  const legacyRowsComplete = legacyRows.length === Number(ledger?.outboxV2PendingCount || 0);
-  // Rows carrying real financial mutations. On this device they turned out to be
-  // the last surviving copy of transactions the cloud never received, so they
-  // are never offered for deletion and are surfaced instead.
-  const unsyncedFinancialRows = legacyRows.filter(row => !setupOnlyRow(row));
-  // The claim "these are gone from your data" is only true once a rollback has
-  // rewound the ledger past them. Before that they are ordinary pending uploads,
-  // and telling their owner to re-enter them by hand would duplicate real money.
-  const showUnsyncedFinancialWarning = legacyRowsComplete
-    && unsyncedFinancialRows.length > 0
-    && ledger?.intent?.status === 'rolled_back_after_activation_failure';
-
-  // Each step is offered only in the state it repairs, and only after the one
-  // before it is done. The library refuses anything else anyway, so a button
-  // outside its state would only be a trap.
-  const canDiscard = ledger?.ok === true
-    && ledger.intent?.status === 'rolled_back_after_activation_failure'
-    && Number(ledger.outboxV2PendingCount || 0) > 0
-    && legacyRowsComplete
-    && legacyRows.length > 0
-    && unsyncedFinancialRows.length === 0
-    && !!ledger.activeNamespace;
-
-  // Activation gates on the V2 queue alone: activateFinancialSyncProtocolV2V8
-  // counts ledger_outbox_v3 and never looks at the legacy V1 outbox. Requiring
-  // outbox_v2 to be empty here was caution of this screen's own, and it locked
-  // the last step behind rows that cannot be safely deleted.
-  const canActivate = ledger?.ok === true
-    && ledger.intent?.status === 'rolled_back_after_activation_failure'
-    && Number(ledger.outboxV3PendingCount || 0) === 0
-    && !!ledger.activeNamespace;
+  // Which actions this device may be offered, and whether its unsent entries
+  // are genuinely lost. Decided in p12ConflictRecoveryGates so the rules can be
+  // tested directly — they were wrong twice before a test existed.
+  const {
+    legacyRows, unsyncedFinancialRows,
+    canRestore, canDiscard, canActivate, showUnsyncedFinancialWarning,
+  } = conflictRecoveryGatesV1(ledger);
 
   // Activation is only finished when the ledger activated *and* the intent that
   // holds the sync gate shut was retired. Reporting on activation alone would
