@@ -166,6 +166,12 @@ const createFixture = ({ status = 'local_promoted_pending_activation' } = {}) =>
   for (const [index, revision] of [3, 4, 5].entries()) {
     run('INSERT INTO ledger_outbox_v3(namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,operation,revision,base_revision,protocol_version,minimum_supported_version,payload_schema_version,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', NS, LEDGER, 1, `stale-${index}`, `cmd-${index}`, 'workspace', 'workspace', 'upsert', revision, revision - 1, 2, 2, 1, `{"stale":${revision}}`, AFTER_CHECKPOINT[index]);
   }
+  // An *acknowledged* row past the boundary. The cloud has it, but the restore
+  // removes its effect all the same, and leaving it behind is worse than a stale
+  // upload: v2ExactLocalEcho matches on mutation_id alone, so a replay would take
+  // the echo branch and fail before the already-applied check could resolve it.
+  run('INSERT INTO ledger_outbox_v3(namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,operation,revision,base_revision,protocol_version,minimum_supported_version,payload_schema_version,payload_json,created_at,acknowledged_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', NS, LEDGER, 1, 'acked-after', 'cmd-acked', 'wallet', 'wallet-2', 'upsert', 2, 1, 2, 2, 1, '{"acked":true}', AFTER_CHECKPOINT[0], AFTER_CHECKPOINT[1]);
+
   run('INSERT INTO ledger_outbox_v3(namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,operation,revision,base_revision,protocol_version,minimum_supported_version,payload_schema_version,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', OTHER_NS, OTHER_LEDGER, 1, 'other-1', 'cmd-other', 'workspace', 'workspace', 'upsert', 2, 1, 2, 2, 1, '{}', now);
 
   const fixture = { db };
@@ -179,7 +185,7 @@ const meta = (db, key) => JSON.parse(db.native.prepare('SELECT value FROM ledger
 const assertLiveStillPromoted = (db, message) => {
   assert.equal(count(db, 'ledger_financial_transactions_v7', NS), 0, message);
   assert.equal(db.native.prepare('SELECT payload_json FROM ledger_workspace_state_v7 WHERE namespace=?').get(NS).payload_json, '{"bootstrap":true}', message);
-  assert.equal(outbox(db, LEDGER), 4, message);
+  assert.equal(outbox(db, LEDGER), 5, message);
   assert.equal(meta(db, intentKey).status !== 'rolled_back_after_activation_failure', true, message);
 };
 
@@ -209,12 +215,14 @@ const assertLiveStillPromoted = (db, message) => {
   assert.equal(rolledBack.preparedAt, now, 'the original intent evidence must be preserved');
   // The rows the restore had to remove are the last trace of work it undid, so
   // they are kept verbatim rather than simply dropped.
-  assert.equal(rolledBack.strandedPendingCommands.rowCount, 3);
+  assert.equal(rolledBack.strandedPendingCommands.rowCount, 4, 'the acknowledged row past the boundary must be removed too');
+  assert.equal(rolledBack.strandedPendingCommands.rows.some(row => row.mutation_id === 'acked-after'), true,
+    'an acknowledged row is still stranded by the restore, and must be recorded');
   assert.equal(rolledBack.strandedPendingCommands.boundary, now, 'the checkpoint moment is the boundary');
-  assert.deepEqual(rolledBack.strandedPendingCommands.rows.map(row => row.mutation_id), ['stale-0', 'stale-1', 'stale-2']);
-  assert.equal(rolledBack.strandedPendingCommands.rows[2].payload_json, '{"stale":5}',
+  assert.deepEqual(rolledBack.strandedPendingCommands.rows.map(row => row.mutation_id).sort(), ['acked-after', 'stale-0', 'stale-1', 'stale-2']);
+  assert.equal(rolledBack.strandedPendingCommands.rows.find(row => row.mutation_id === 'stale-2').payload_json, '{"stale":5}',
     'each removed command must keep its payload');
-  assert.equal(rolledBack.strandedPendingCommands.rows[0].created_at, AFTER_CHECKPOINT[0]);
+
   assert.equal(count(success.db, 'ledger_financial_transactions_v7', STAGE), 2, 'the checkpoint itself must survive the restore');
   assert.equal(meta(success.db, receiptKey).checkpointId, CHECKPOINT_ID, 'the checkpoint receipt must survive the restore');
   const repeated = await success.restore({ namespace: NS, checkpointId: CHECKPOINT_ID, database: success.db });

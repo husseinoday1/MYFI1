@@ -558,11 +558,18 @@ export const restoreFinancialConflictRecoveryCheckpointV1 = async ({
       if (!Number.isFinite(Date.parse(boundary))) {
         throw new Error('financial_v2_conflict_recovery_restore_boundary_invalid');
       }
+      // Acknowledgement is deliberately not part of the test. What matters is
+      // whether the restore removed the row's effect, and it removes everything
+      // after the boundary either way. An acknowledged row left behind is worse
+      // than a stale upload: v2ExactLocalEcho matches on mutation_id alone, so a
+      // replay of that command would take the echo branch, find the local state
+      // below its revision, and fail there — before the already-applied check
+      // that would otherwise resolve it.
       const strandedRows = await db.getAllAsync(
         `SELECT sequence_id,namespace,ledger_id,restore_epoch,mutation_id,command_id,entity_type,entity_id,
-                operation,revision,base_revision,payload_json,created_at
+                operation,revision,base_revision,payload_json,created_at,acknowledged_at
            FROM ledger_outbox_v3
-          WHERE ledger_id=? AND restore_epoch=? AND acknowledged_at IS NULL AND created_at > ?
+          WHERE ledger_id=? AND restore_epoch=? AND created_at > ?
           ORDER BY sequence_id`,
         text(identity.ledger_id), Number(identity.restore_epoch), boundary,
       );
@@ -572,7 +579,7 @@ export const restoreFinancialConflictRecoveryCheckpointV1 = async ({
       for (const row of strandedRows) {
         const deleted = await db.runAsync(
           `DELETE FROM ledger_outbox_v3
-            WHERE ledger_id=? AND restore_epoch=? AND sequence_id=? AND acknowledged_at IS NULL`,
+            WHERE ledger_id=? AND restore_epoch=? AND sequence_id=?`,
           text(identity.ledger_id), Number(identity.restore_epoch), Number(row.sequence_id),
         );
         if (Number(deleted?.changes || 0) !== 1) {
@@ -582,7 +589,7 @@ export const restoreFinancialConflictRecoveryCheckpointV1 = async ({
       const strandedLeft = await count(
         db,
         `SELECT COUNT(*) AS n FROM ledger_outbox_v3
-          WHERE ledger_id=? AND restore_epoch=? AND acknowledged_at IS NULL AND created_at > ?`,
+          WHERE ledger_id=? AND restore_epoch=? AND created_at > ?`,
         text(identity.ledger_id), Number(identity.restore_epoch), boundary,
       );
       if (strandedLeft !== 0) throw new Error('financial_v2_conflict_recovery_restore_stranded_incomplete');
