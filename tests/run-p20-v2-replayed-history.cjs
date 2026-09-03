@@ -99,7 +99,13 @@ const walletCommand = ({ revision = 1, sequence = 215, payload = { name: 'Cash' 
   payload: { entityType: 'wallet', id: 'wallet-1', revision, payload },
 });
 
-const createDb = ({ txRevision = 1, txBody = originalTransaction, walletPayload = { name: 'Cash' } } = {}) => {
+// The two writers store this row differently: remote apply merges the revision
+// into the payload, the local commit path stores the transaction as authored.
+// A transaction created on this device carries the second shape.
+const storedByLocalWriter = body => JSON.stringify(body);
+const storedByRemoteApply = (body, revision) => JSON.stringify({ ...body, revision });
+
+const createDb = ({ txRevision = 1, txBody = originalTransaction, walletPayload = { name: 'Cash' }, storedPayload = null } = {}) => {
   const db = new Db();
   db.native.exec(ddl('FINANCIAL_LEDGER_V7_SCHEMA_SQL'));
   db.native.exec(ddl('FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL'));
@@ -109,7 +115,7 @@ const createDb = ({ txRevision = 1, txBody = originalTransaction, walletPayload 
   run('INSERT INTO ledger_workspace_state_v7(namespace,source_mode,schema_version,payload_json,updated_at) VALUES (?,?,?,?,?)', NS, 'sqlite', 12, '{}', now);
   // The state a checkpoint restore left behind: rows the cloud history produced.
   run('INSERT INTO ledger_financial_transactions_v7(namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,?,?,?)',
-    NS, TX_ID, 'expense', 'posted', 'personal', '2026-09-01', now, 'food', 'Coffee', '', 'manual', '', 'idem-1', 'device-1', txRevision, JSON.stringify({ ...txBody, revision: txRevision }), now, now);
+    NS, TX_ID, 'expense', 'posted', 'personal', '2026-09-01', now, 'food', 'Coffee', '', 'manual', '', 'idem-1', 'device-1', txRevision, storedPayload || storedByRemoteApply(txBody, txRevision), now, now);
   run('INSERT INTO ledger_entities_v7(namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at) VALUES (?,?,?,?,NULL,?,?,?)',
     NS, 'wallet', 'wallet-1', 1, JSON.stringify(walletPayload), now, now);
   globalThis.__TEST_DB__ = db;
@@ -150,6 +156,27 @@ const walletRow = db => db.native.prepare('SELECT revision,payload_json FROM led
       assert.equal(result.ok, false, `${mode}: divergent content must stay a conflict`);
       assert.equal(result.reason, 'financial_v2_remote_cas_conflict');
       assert.deepEqual(txRow(db), before, `${mode}: a refused command must change nothing`);
+      db.native.close();
+    }
+
+    // 2b) The provenance that actually matters here: the row was written by the
+    //     local commit path, which stores no merged revision. Modelling only the
+    //     remote writer would leave exactly these rows deadlocked.
+    {
+      const db = createDb({ storedPayload: storedByLocalWriter(originalTransaction) });
+      const before = txRow(db);
+      const result = await apply(db, [transactionCommand()], production);
+      assert.equal(result.ok, true, `${mode}: a locally authored row must converge too: ${JSON.stringify(result)}`);
+      assert.equal(result.applied, 0);
+      assert.deepEqual(txRow(db), before);
+      db.native.close();
+    }
+    {
+      // ...and it must still refuse divergent content in that shape.
+      const db = createDb({ storedPayload: storedByLocalWriter({ ...originalTransaction, amountMinor: -9900 }) });
+      const result = await apply(db, [transactionCommand()], production);
+      assert.equal(result.ok, false, `${mode}: divergence must be caught in the local shape too`);
+      assert.equal(result.reason, 'financial_v2_remote_cas_conflict');
       db.native.close();
     }
 

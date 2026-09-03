@@ -3313,8 +3313,15 @@ const v2AlreadyAppliedLocally = async (db, namespace, item) => {
       namespace, item.entityId, item.revision,
     );
     if (!row) return false;
-    return canonicalSyncValue(parseJson(row.payload_json, null))
-      === canonicalSyncValue({ ...expected, revision: item.revision });
+    // Two writers store this row. Remote apply merges the revision into the
+    // payload; the local commit path stores the transaction as authored, with no
+    // revision merged. A transaction created here and replayed back to us is the
+    // second shape, so accepting only the first would silently never match the
+    // rows this exists for. Both are the same content: the authoritative
+    // revision is the row's own column, already proven equal by the caller.
+    const stored = canonicalSyncValue(parseJson(row.payload_json, null));
+    return stored === canonicalSyncValue({ ...expected, revision: item.revision })
+      || stored === canonicalSyncValue(expected);
   }
   const source = item.payload;
   if (!source || typeof source !== 'object' || Array.isArray(source)) return false;
