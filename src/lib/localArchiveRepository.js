@@ -4,7 +4,8 @@
 // performance/archive layer; the encrypted vault remains the active workspace
 // safety boundary and external MYFI archive packages remain portable backups.
 import { enqueueLedgerWrite, getLedgerDb, runLedgerExclusiveTransaction } from './ledgerDatabase';
-// Shared connection initializes: PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON.
+// Operational pragmas belong to the shared connection and are set only in
+// ledgerDatabase.getLedgerDb() (§102): WAL, foreign_keys, busy_timeout, synchronous.
 import { defaultScopeForProfile, normalizeScope } from './modules';
 import { advanceLiveGenerationForMutationInTransactionV13 } from './financialLiveGenerationV13';
 

@@ -131,12 +131,13 @@ export async function runFinancialLedgerV7DeviceHarness() {
     }
     assertHarness(constraintRejected, 'sqlite_check_constraint_missing');
 
-    const [projection, pending, foreignKeys, journalMode, busyTimeout, quickCheck, migrationStatus, invariantReport] = await Promise.all([
+    const [projection, pending, foreignKeys, journalMode, busyTimeout, synchronous, quickCheck, migrationStatus, invariantReport] = await Promise.all([
       readFinancialProjectionV7({ namespace, database: db }),
       readPendingLedgerMutationsV7({ namespace, limit: 20, database: db }),
       db.getFirstAsync('PRAGMA foreign_keys'),
       db.getFirstAsync('PRAGMA journal_mode'),
       db.getFirstAsync('PRAGMA busy_timeout'),
+      db.getFirstAsync('PRAGMA synchronous'),
       db.getFirstAsync('PRAGMA quick_check'),
       readLedgerSchemaMigrationStatus(db),
       proveFinancialLedgerInvariantsV7({ namespace, database: db }),
@@ -150,6 +151,9 @@ export async function runFinancialLedgerV7DeviceHarness() {
     assertHarness(Number(pragmaValue(foreignKeys)) === 1, 'foreign_keys_disabled');
     assertHarness(String(pragmaValue(journalMode) || '').toLowerCase() === 'wal', 'wal_not_enabled');
     assertHarness(Number(pragmaValue(busyTimeout)) >= 5000, 'busy_timeout_too_low');
+    // §102: 1 === NORMAL. Pinned in ledgerDatabase.getLedgerDb(); asserted here so
+    // that a reintroduced per-module PRAGMA cannot silently change durability again.
+    assertHarness(Number(pragmaValue(synchronous)) === 1, 'synchronous_not_normal');
     assertHarness(String(pragmaValue(quickCheck) || '').toLowerCase() === 'ok', 'quick_check_failed');
     assertHarness(
       Number(migrationStatus?.currentVersion) === FINANCIAL_SQLITE_SCHEMA_VERSION,

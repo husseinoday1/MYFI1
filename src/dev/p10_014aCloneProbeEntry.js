@@ -310,7 +310,13 @@ async function runCloneProbe() {
       ),
     });
 
-    await clone.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+    // §102: this clone is installed as the shared ledger connection via
+    // setP10CloneLedgerDbOverride, and getLedgerDb() returns it *before* reaching its
+    // own pragma block — so this line is the clone's only chance to match the
+    // connection contract. It must carry all four operational pragmas that
+    // ledgerDatabase.getLedgerDb() sets, synchronous included; omitting synchronous
+    // left this path at the SQLite default FULL.
+    await clone.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA synchronous = NORMAL;');
     const cloneQuick = String(scalar(await clone.getFirstAsync('PRAGMA quick_check')) || '').toLowerCase();
     const cloneUserVersion = Number(scalar(await clone.getFirstAsync('PRAGMA user_version')) || 0);
     const clonePageCount = Number(scalar(await clone.getFirstAsync('PRAGMA page_count')) || 0);

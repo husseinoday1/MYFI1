@@ -54,7 +54,10 @@ must(reports.includes('reportInlineStack'), 'Direct inline report detail layout 
 // Root large-ledger distribution: current year hot, completed years in indexed SQLite cold storage.
 must(perf.includes('partitionCompletedYears') && perf.includes('__performanceArchives'), 'Performance fixtures are not partitioned by completed year');
 must(perf.includes('performanceTestActiveTransactions') && perf.includes('performanceTestArchivedTransactions'), 'Hot/cold performance counts are missing');
-must(repo.includes('PRAGMA journal_mode = WAL'), 'SQLite WAL is not enabled');
+// §102: the pragma lives on the shared connection, not in this repository module.
+// This previously matched a comment inside localArchiveRepository.js, so it passed
+// on prose rather than on configuration. Point it at the single real owner.
+must(read('src/lib/ledgerDatabase.js').includes('PRAGMA journal_mode = WAL'), 'SQLite WAL is not enabled');
 must(repo.includes('cold_archive_years') && repo.includes('cold_archive_transactions'), 'Relational cold archive tables are missing');
 must(repo.includes('idx_cold_archive_date') && repo.includes('idx_cold_archive_wallet') && repo.includes('idx_cold_archive_category'), 'Cold archive indexes are incomplete');
 must(repo.includes('ORDER BY date_iso DESC, ts DESC, id DESC'), 'Archived transaction retrieval is not newest-first');

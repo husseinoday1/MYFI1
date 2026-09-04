@@ -125,10 +125,25 @@ export async function getLedgerDb() {
   if (!dbPromise) {
     dbPromise = (async () => {
       const db = await SQLite.openDatabaseAsync(LEDGER_DB_NAME);
+      // §102: every operational pragma for this connection is set HERE and only
+      // here, so the setting is a property of the connection rather than of
+      // whichever module happened to touch the database first.
+      //
+      // synchronous = NORMAL was previously set inside activeLedgerRepository's
+      // schema bootstrap, which meant the financial ledger ran at NORMAL or at
+      // the SQLite default FULL depending on whether that bootstrap had run yet
+      // in this process — a durability guarantee that varied by call order. It
+      // is pinned here instead. Reason + benchmark + crash-safety evidence:
+      // docs/04_CURRENT_EVIDENCE/MYFI_PHASE15_SQLITE_CONFIG_AUDIT_2026-09-04.md.
+      // Short version: with WAL, NORMAL still survives an app/process crash; it
+      // trades only the last commits against an OS crash or power loss, and
+      // measured 41x faster than FULL on the per-command commit path that every
+      // add/edit/delete uses.
       await db.execAsync(`
         PRAGMA journal_mode = WAL;
         PRAGMA foreign_keys = ON;
         PRAGMA busy_timeout = 5000;
+        PRAGMA synchronous = NORMAL;
       `);
       return db;
     })();

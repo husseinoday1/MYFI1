@@ -37,8 +37,11 @@ const openDb = async () => {
   if (!schemaReady) {
     await enqueueLedgerWrite(async () => {
       if (schemaReady) return;
+      // §102: synchronous is no longer set here. Setting it inside this schema
+      // bootstrap made the connection's durability depend on whether this module
+      // ran before the financial repositories did. It is now pinned once, for the
+      // whole shared connection, in ledgerDatabase.getLedgerDb().
       await db.execAsync(`
-      PRAGMA synchronous = NORMAL;
       CREATE TABLE IF NOT EXISTS ledger_meta (
         namespace TEXT NOT NULL,
         key TEXT NOT NULL,

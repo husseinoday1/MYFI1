@@ -26,7 +26,9 @@ must(read('src/dev/performanceTestStorage.js').includes('MYFI_PERFORMANCE_DATA_R
 must(read('App.js').includes('MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2'), 'performance-test runtime App prerequisite is missing');
 must(read('src/lib/history.js').includes('getVisibleHistoryTransactions'), 'V5.2 large-ledger history helper is missing');
 must(read('src/components/MultiSelect.js').includes('new Set(ids)'), 'V5.2 large-ledger MultiSelect optimization is missing');
-must(read('src/lib/localArchiveRepository.js').includes('PRAGMA journal_mode = WAL'), 'V5.3 SQLite cold archive is missing');
+// §102: see database-archive-ux-v53 — this asserted on a comment, not on the pragma.
+must(read('src/lib/ledgerDatabase.js').includes('PRAGMA journal_mode = WAL'), 'V5.3 SQLite cold archive is missing');
+must(read('src/lib/localArchiveRepository.js').includes('cold_archive_years'), 'V5.3 SQLite cold archive tables are missing');
 
 // Verify relative imports from package-owned source files resolve against the project.
 const owned = [
