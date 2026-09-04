@@ -13,6 +13,24 @@ on one material point — see the Correction section below.
 
 ---
 
+> **CORRECTION, same day (see `MYFI_PHASE15_READ_CUTOVER_SIZING_2026-09-04.md`).**
+> The claim below that "the finance read cutover has not happened" is **wrong**.
+> It rested on `grep -rn "readCutover|CANONICAL_READ" src` returning nothing —
+> a guess about naming, not a behavioural check. A cutover mechanism exists, is
+> enabled (`R04_OPERATIONAL_CUTOVER_ENABLED = true`), runs automatically, and
+> flips `ledger_workspace_state_v7.source_mode` to `'sqlite'`, after which
+> `loadLocal` hydrates from SQLite instead of the vault. HistoryScreen likewise
+> does call `queryLedgerTransactions` with full filter/pagination support; it
+> renders SQL results behind a coverage-checked fallback, not instead of them.
+>
+> What survives from the finding below: History still computes an in-memory
+> filtered list on every render and prefers it whenever the SQL page fails a
+> coverage check, and `trans` is still eagerly resident. The §95 concern is
+> therefore real but **narrower** than "measurement is blocked" — see the sizing
+> document for what is actually left. Everything else in this file (§97 has no
+> timing instrumentation, §101/§102/§103 findings, the tier benchmark) was
+> verified directly and stands.
+
 ## Correction to the preliminary scoping
 
 The preliminary pass concluded that the dataset-tier infrastructure "matches §96
