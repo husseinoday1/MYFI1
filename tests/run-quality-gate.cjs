@@ -147,6 +147,8 @@ const runtimeTests = [
   ['SQLITE_RUNTIME', 'p14_outbox_retry_repository', 'run-p14-outbox-retry-repository.cjs'],
   ['SQLITE_RUNTIME', 'p14_tombstone_resurrection', 'run-p14-tombstone-resurrection.cjs'],
   ['SQLITE_RUNTIME', 'p14_inbox_retention', 'run-p14-inbox-retention.cjs'],
+  ['UNIT_RUNTIME', 'p14_protocol_compatibility_gate', 'run-p14-protocol-compatibility-gate.cjs'],
+  ['SQLITE_RUNTIME', 'p14_outbox_restart', 'run-p14-outbox-restart.cjs'],
   ['SQLITE_RUNTIME', 'p20_v2_replayed_history', 'run-p20-v2-replayed-history.cjs'],
   ['SQLITE_RUNTIME', 'p20_v2_conflict_revalidation', 'run-p20-v2-conflict-revalidation.cjs'],
   ['SQLITE_RUNTIME', 'p20_v2_legacy_outbox_ack', 'run-p20-v2-legacy-outbox-ack.cjs'],
