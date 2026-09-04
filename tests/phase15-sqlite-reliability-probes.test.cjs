@@ -37,6 +37,11 @@ try { ({ DatabaseSync } = require('node:sqlite')); } catch { /* flagged or absen
 
 // CI runs Node 22, where node:sqlite is behind --experimental-sqlite. Re-exec once
 // with the flag rather than skipping silently. See the sibling §102 config test.
+if (!DatabaseSync && process.env.MYFI_ALLOW_NO_SQLITE === '1') {
+  console.log(`SKIP (opted out): node:sqlite unavailable on ${process.version}; §101 probes not run`);
+  process.exit(0);
+}
+
 if (!DatabaseSync && !process.env.MYFI_P15_SQLITE_FLAG_RETRY) {
   const retry = spawnSync(
     process.execPath,
@@ -46,9 +51,19 @@ if (!DatabaseSync && !process.env.MYFI_P15_SQLITE_FLAG_RETRY) {
   process.exit(retry.status === null ? 1 : retry.status);
 }
 
+// Fail closed rather than skip. The quality-gate runner only prints a test's stdout
+// when it FAILS, so a skip is invisible: the gate would report PASS for a run in
+// which no fault was ever executed, which is precisely the "evidence that rots
+// while staying green" failure this file exists to correct. Both environments we
+// actually run — local Node 24 and CI's Node 22 (via the flagged re-exec above) —
+// have node:sqlite, so unavailability means something changed and deserves a stop.
 if (!DatabaseSync) {
-  console.log(`SKIP: node:sqlite unavailable on ${process.version}; §101 probes not run`);
-  process.exit(0);
+  assert.fail(
+    `§101 probes could not run: node:sqlite unavailable on ${process.version}, `
+    + 'including after retrying with --experimental-sqlite. Node 22.5+ is required. '
+    + 'Set MYFI_ALLOW_NO_SQLITE=1 to downgrade this to a skip if you genuinely need to '
+    + 'run the gate on an older Node — but then the §101 evidence is NOT being produced.',
+  );
 }
 
 const PRAGMAS = 'PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; '

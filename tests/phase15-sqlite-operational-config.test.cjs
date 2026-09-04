@@ -141,9 +141,16 @@ if (!DatabaseSync && !process.env.MYFI_P15_SQLITE_FLAG_RETRY) {
 }
 
 if (!DatabaseSync) {
-  // Reached only when the flagged retry also failed to provide node:sqlite, i.e.
-  // Node older than 22.5. Static assertions above still ran and still gate.
-  console.log(`SKIP: node:sqlite unavailable on ${process.version}, static §102 assertions only`);
+  // Fail closed rather than skip: the gate runner prints a test's stdout only on
+  // failure, so a skip here would leave the benchmark silently unrun while the gate
+  // reported PASS — exactly how the cited numbers would rot unnoticed.
+  assert(
+    process.env.MYFI_ALLOW_NO_SQLITE === '1',
+    `§102 benchmark could not run: node:sqlite unavailable on ${process.version}, `
+    + 'including after retrying with --experimental-sqlite. Node 22.5+ is required. '
+    + 'Set MYFI_ALLOW_NO_SQLITE=1 to accept static-only §102 checks.',
+  );
+  console.log(`SKIP (opted out): node:sqlite unavailable on ${process.version}, static §102 assertions only`);
 } else {
   const measure = (mode, rows, batched) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'myfi-p15-'));
