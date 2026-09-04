@@ -120,10 +120,30 @@ assert(
 // --- 3. The benchmark the audit cites, run for real --------------------------
 
 let DatabaseSync = null;
-try { ({ DatabaseSync } = require('node:sqlite')); } catch { /* older Node */ }
+try { ({ DatabaseSync } = require('node:sqlite')); } catch { /* flagged or absent */ }
+
+// node:sqlite is unflagged from Node 23.4 onward, but CI runs Node 22, where it
+// exists only behind --experimental-sqlite. Without this re-exec the benchmark
+// would quietly skip on every CI run while passing locally — i.e. the numbers the
+// §102 audit cites could rot without anyone noticing, which is the whole failure
+// mode this test exists to prevent. Retry once in a child process with the flag.
+if (!DatabaseSync && !process.env.MYFI_P15_SQLITE_FLAG_RETRY) {
+  const { spawnSync } = require('node:child_process');
+  const retry = spawnSync(
+    process.execPath,
+    ['--experimental-sqlite', __filename, root],
+    {
+      stdio: 'inherit',
+      env: { ...process.env, MYFI_P15_SQLITE_FLAG_RETRY: '1' },
+    },
+  );
+  process.exit(retry.status === null ? 1 : retry.status);
+}
 
 if (!DatabaseSync) {
-  console.log('SKIP: node:sqlite unavailable, static §102 assertions only');
+  // Reached only when the flagged retry also failed to provide node:sqlite, i.e.
+  // Node older than 22.5. Static assertions above still ran and still gate.
+  console.log(`SKIP: node:sqlite unavailable on ${process.version}, static §102 assertions only`);
 } else {
   const measure = (mode, rows, batched) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'myfi-p15-'));

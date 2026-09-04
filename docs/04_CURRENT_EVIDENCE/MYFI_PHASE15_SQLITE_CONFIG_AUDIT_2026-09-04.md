@@ -201,8 +201,17 @@ flaky hardware benchmark.
 
 ## Open §102 items (not closed by this document)
 
-1. **Crash-safety evidence for `synchronous = NORMAL`** — needs the §101 kill
-   probes to actually run. Currently `PENDING_EXTERNAL_ADB_RUNNER`.
+1. **Crash-safety evidence for `synchronous = NORMAL`** — now **half closed**.
+   `tests/phase15-sqlite-reliability-probes.test.cjs` executes a real
+   kill-after-commit probe in CI and proves a committed row survives a `SIGKILL`
+   with no clean close and no checkpoint (see
+   `MYFI_PHASE15_RELIABILITY_PROBES_2026-09-04.md`). That covers the
+   application-crash case. It does **not** cover power loss or an OS crash —
+   a `SIGKILL` leaves the OS page cache intact, and power loss is the only thing
+   NORMAL actually trades away versus FULL. That half still needs device work,
+   and the device harness's own kill probes remain `PENDING_EXTERNAL_ADB_RUNNER`.
 2. **Checkpoint policy** — no value, no evidence, deliberately left alone pending
    WAL-size measurement (§98).
-3. **FK-violation probe** — enforcement is proven on; a fault probe does not exist.
+3. ~~**FK-violation probe**~~ — closed by
+   `tests/phase15-sqlite-reliability-probes.test.cjs`, which now executes a real
+   FK-violation fault in CI and asserts the whole transaction rolls back.
