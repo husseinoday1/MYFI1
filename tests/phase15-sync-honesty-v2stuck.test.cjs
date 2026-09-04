@@ -40,6 +40,7 @@ const evalSyncState = (fixture) => {
   const {
     user, cfg, financialLedgerV7Cutover, financialSyncV2Activation,
     financialMutationSyncProtocol, syncing, online, lastSyncError, dirty,
+    restoreSafety,
   } = fixture;
   const T = { localOnly: 'localOnly', syncPartial: 'syncPartial', syncing: 'syncing', needsAttention: 'needsAttention', pending: 'pending', synced: 'synced' };
   const th = { warn: 'warn', sub: 'sub', exp: 'exp', primary: 'primary', inc: 'inc' };
@@ -48,13 +49,13 @@ const evalSyncState = (fixture) => {
   const fn = new Function(
     'user', 'cfg', 'financialLedgerV7Cutover', 'financialSyncV2Activation',
     'financialMutationSyncProtocol', 'syncing', 'online', 'lastSyncError', 'dirty',
-    'T', 'th', 'isAr',
+    'restoreSafety', 'T', 'th', 'isAr',
     `${block}\nreturn syncState;`,
   );
   return fn(
     user, cfg, financialLedgerV7Cutover, financialSyncV2Activation,
     financialMutationSyncProtocol, syncing, online, lastSyncError, dirty,
-    T, th, isAr,
+    restoreSafety ?? null, T, th, isAr,
   );
 };
 
@@ -68,6 +69,7 @@ const base = {
   online: true,
   lastSyncError: null,
   dirty: false,
+  restoreSafety: null,
 };
 
 // The exact reported scenario: V1 fallback succeeded (online, no lastSyncError,
@@ -119,6 +121,55 @@ for (const status of ['bootstrapping', 'activating', 'recovered', null, undefine
 {
   const state = evalSyncState({ ...base, dirty: true });
   assert.equal(state.text, 'syncPartial', 'v2Stuck must take priority over the generic dirty/pending state');
+}
+
+// --- restoreSafety-driven block: financial_v2_conflict_recovery_blocked ----
+//
+// Found 2026-09-05: a device where restoreSafety.status was
+// 'financial_v2_conflict_recovery_blocked' (the P12 conflict-recovery path,
+// separate from financialSyncV2Activation) still showed "Synced", because
+// the original v2Stuck check only reads financialSyncV2Activation. This base
+// isolates that second path: V2 activation itself is healthy/inapplicable,
+// so only restoreSafety can trip the indicator here.
+const restoreSafetyBase = {
+  ...base,
+  financialSyncV2Activation: null,
+  financialMutationSyncProtocol: 2,
+};
+
+{
+  const state = evalSyncState({
+    ...restoreSafetyBase,
+    restoreSafety: { status: 'financial_v2_conflict_recovery_blocked', operation: 'financial_v2_conflict_recovery' },
+  });
+  assert.equal(state.text, 'syncPartial', 'a blocked conflict-recovery state must not report Synced');
+}
+
+// Regression guard: the 'ready' status (a prepared, reviewable recovery, not
+// a block) must not trip the indicator — that state already has its own
+// dedicated MenuRow in DataPage, this is not the place to duplicate it.
+{
+  const state = evalSyncState({
+    ...restoreSafetyBase,
+    restoreSafety: { status: 'financial_v2_conflict_recovery_ready', operation: 'financial_v2_conflict_recovery' },
+  });
+  assert.equal(state.text, 'synced', "a 'ready' (not blocked) restoreSafety state must not trip the indicator");
+}
+
+// Regression guard: null/absent restoreSafety (the common case) must not trip it.
+{
+  const state = evalSyncState({ ...restoreSafetyBase, restoreSafety: null });
+  assert.equal(state.text, 'synced', 'no restoreSafety state must not trip the indicator');
+}
+
+// demoMode/!user must still win over conflictRecoveryStuck too.
+{
+  const state = evalSyncState({
+    ...restoreSafetyBase,
+    user: null,
+    restoreSafety: { status: 'financial_v2_conflict_recovery_blocked' },
+  });
+  assert.equal(state.text, 'localOnly', '!user must take priority over conflictRecoveryStuck');
 }
 
 console.log('PASS: phase15-sync-honesty-v2stuck');

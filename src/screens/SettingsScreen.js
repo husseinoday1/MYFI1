@@ -451,11 +451,22 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
     && financialSyncV2Activation?.status === 'failed_before_activation'
     && financialMutationSyncProtocol !== 2;
 
+  // A second, separate way V2 can be stuck: not the activation path above,
+  // but the P12 conflict-recovery machinery (restoreSafety) reporting a
+  // block. Found 2026-09-05 on a device where the sync indicator showed
+  // "Synced" while restoreSafety.status was 'financial_v2_conflict_recovery_blocked'
+  // -- a different failure surface than financialSyncV2Activation, so the
+  // first v2Stuck check alone missed it. Same principle as above: any known
+  // blocked/unresolved sync-safety state must never render as "Synced",
+  // even before its root cause or recovery path is fully understood.
+  const conflictRecoveryStuck = !!user && !cfg.demoMode
+    && restoreSafety?.status === 'financial_v2_conflict_recovery_blocked';
+
   const syncState = cfg.demoMode
     ? { icon: 'flask-outline', color: th.warn, text: isAr ? 'بيانات تجريبية' : 'Demo workspace' }
     : !user
       ? { icon: 'phone-portrait-outline', color: th.sub, text: T.localOnly }
-      : v2Stuck
+      : v2Stuck || conflictRecoveryStuck
         ? { icon: 'cloud-offline-outline', color: th.exp, text: T.syncPartial }
         : syncing
           ? { icon: 'sync-outline', color: th.primary, text: T.syncing }
