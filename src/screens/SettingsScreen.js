@@ -83,6 +83,10 @@ const pageCopy = (lang = 'ar') => {
     syncing: ar ? 'جاري المزامنة' : 'Syncing',
     pending: ar ? 'بانتظار المزامنة' : 'Pending sync',
     needsAttention: ar ? 'تحتاج مراجعة' : 'Needs attention',
+    // Distinct from needsAttention on purpose: that one means a transient
+    // network/auth problem. This means real financial mutations are stuck
+    // behind an identity conflict that a retry cannot fix on its own.
+    syncPartial: ar ? 'بعض البيانات لا تُزامَن' : "Some data isn't syncing",
     localOnly: ar ? 'على هذا الجهاز' : 'On this device',
     syncNow: ar ? 'مزامنة الآن' : 'Sync now',
     syncStatus: ar ? 'حالة المزامنة' : 'Sync status',
@@ -354,6 +358,8 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
     refreshDataHealth,
     financialLedgerV7Cutover,
     financialMutationSync,
+    financialMutationSyncProtocol,
+    financialSyncV2Activation,
     financialCloudRecoveryV2,
     workspaceNamespace,
   } = useStore();
@@ -435,17 +441,29 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
     setAgreement(cfg.accountConsentAccepted === true);
   }, [cfg.displayName, cfg.accountConsentAccepted, user?.id]);
 
+  // A V2 activation stuck at 'failed_before_activation' means real financial
+  // mutations are queued in ledger_outbox_v3 and cannot reach the cloud no
+  // matter what dirty/lastSyncError say — those two only reflect the V1
+  // fallback's own (unrelated) success. Reading both fields already in store
+  // state; this adds no new DB read or sync call. See
+  // docs/04_CURRENT_EVIDENCE/MYFI_SYNC_HONESTY_AND_RECOVERY_DESIGN_2026-09-04.md
+  const v2Stuck = !!user && !cfg.demoMode && financialLedgerV7Cutover
+    && financialSyncV2Activation?.status === 'failed_before_activation'
+    && financialMutationSyncProtocol !== 2;
+
   const syncState = cfg.demoMode
     ? { icon: 'flask-outline', color: th.warn, text: isAr ? 'بيانات تجريبية' : 'Demo workspace' }
     : !user
       ? { icon: 'phone-portrait-outline', color: th.sub, text: T.localOnly }
-      : syncing
-        ? { icon: 'sync-outline', color: th.primary, text: T.syncing }
-        : !online || lastSyncError
-          ? { icon: 'cloud-offline-outline', color: th.exp, text: T.needsAttention }
-          : dirty
-            ? { icon: 'cloud-upload-outline', color: th.warn, text: T.pending }
-            : { icon: 'cloud-done-outline', color: th.inc, text: T.synced };
+      : v2Stuck
+        ? { icon: 'cloud-offline-outline', color: th.exp, text: T.syncPartial }
+        : syncing
+          ? { icon: 'sync-outline', color: th.primary, text: T.syncing }
+          : !online || lastSyncError
+            ? { icon: 'cloud-offline-outline', color: th.exp, text: T.needsAttention }
+            : dirty
+              ? { icon: 'cloud-upload-outline', color: th.warn, text: T.pending }
+              : { icon: 'cloud-done-outline', color: th.inc, text: T.synced };
 
   const dataCounts = useMemo(() => ({
     transactions: trans.length,
