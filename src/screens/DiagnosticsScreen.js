@@ -22,6 +22,7 @@ import { useTheme } from '../lib/useTheme';
 import { AppButton, ScreenScroll, SectionTitle, SurfaceCard, rowDirection, textAlign } from '../components/AppPrimitives';
 import { SPACE, weight } from '../lib/tokens';
 import { collectP12ConflictRecoveryDiagnostics } from '../dev/p12ConflictRecoveryDiagnostics';
+import { collectHistoryReadPathDiagnostics } from '../dev/historyReadPathDiagnostics';
 import { conflictRecoveryGatesV1 } from '../dev/p12ConflictRecoveryGates';
 import {
   acknowledgeLegacyOutboxRowV1,
@@ -80,10 +81,17 @@ export default function DiagnosticsScreen() {
     } catch (error) {
       ledger = { supported: true, ok: false, reason: `collector_threw:${String(error?.message || error)}` };
     }
+    let historyReadPath = null;
+    try {
+      historyReadPath = await collectHistoryReadPathDiagnostics({ workspaceNamespace, cfg });
+    } catch (error) {
+      historyReadPath = { supported: true, ok: false, reason: `collector_threw:${String(error?.message || error)}` };
+    }
     setSnapshot({
       generatedAt: new Date().toISOString(),
       store: { lastSyncError, online, syncing, restoreSafety, financialCloudRecoveryV2, financialSyncV2Activation },
       ledger,
+      historyReadPath,
     });
     setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -425,6 +433,33 @@ export default function DiagnosticsScreen() {
           <Section th={th} lang={lang} isAr={isAr} icon="shield-outline" title="restoreSafety">
             <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', textAlign: textAlign(lang) }} selectable>
               {j(restoreSafety)}
+            </Text>
+          </Section>
+
+          <SectionTitle th={th} lang={lang}>{isAr ? 'مسار قراءة السجل' : 'History read path'}</SectionTitle>
+          <Section
+            th={th}
+            lang={lang}
+            isAr={isAr}
+            icon="list-outline"
+            title={isAr ? 'حالة التحويل وعدّاد الرفض' : 'Cutover state & reject counters'}
+          >
+            <Row th={th} lang={lang} label="sourceMode" value={snapshot?.historyReadPath?.sourceMode} />
+            <Row th={th} lang={lang} label="cutover" value={snapshot?.historyReadPath?.cutover} />
+            <Row th={th} lang={lang} label="cutoverAt" value={snapshot?.historyReadPath?.cutoverAt} />
+            <Row th={th} lang={lang} label="resolvedQueries" value={snapshot?.historyReadPath?.telemetry?.resolvedQueries} />
+            <Row th={th} lang={lang} label="accepted" value={snapshot?.historyReadPath?.telemetry?.accepted} />
+            <Row th={th} lang={lang} label="rejectedCoverage" value={snapshot?.historyReadPath?.telemetry?.rejectedCoverage} />
+            <Row th={th} lang={lang} label="unsupported" value={snapshot?.historyReadPath?.telemetry?.unsupported} />
+            <Row th={th} lang={lang} label="errored" value={snapshot?.historyReadPath?.telemetry?.errored} />
+            <Row th={th} lang={lang} label="rejectRate" value={snapshot?.historyReadPath?.telemetry?.rejectRate} />
+            <Text style={{ color: th.sub, fontSize: 11, textAlign: textAlign(lang) }}>
+              {isAr
+                ? 'العدّاد لا يشمل العرض الأولي من الذاكرة (سلوك مقصود قبل وصول نتيجة SQL بـ120ms)، بل يعدّ فقط صفحة SQL رجعت ورُفضت. القيم تُصفَّر عند إعادة تشغيل التطبيق.'
+                : 'Counts exclude the by-design first paint from memory (before the SQL result arrives ~120ms later); only a returned-and-rejected SQL page is counted. Values reset when the app restarts.'}
+            </Text>
+            <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', textAlign: textAlign(lang) }} selectable>
+              {j(snapshot?.historyReadPath?.telemetry?.recentRejections)}
             </Text>
           </Section>
 

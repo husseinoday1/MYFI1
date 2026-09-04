@@ -50,6 +50,7 @@ const staticContracts = [
   'phase10-restore-benchmark-memory.test.cjs',
   'phase15-sqlite-operational-config.test.cjs',
   'phase15-sqlite-reliability-probes.test.cjs',
+  'phase15-history-read-path-telemetry.test.cjs',
   'p10-production-restore-wiring.test.cjs',
   'p10-014b-restore-workspace-conflict.test.cjs',
   'p19-001-offline-ledger-identity.test.cjs',

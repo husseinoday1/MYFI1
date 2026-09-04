@@ -20,6 +20,7 @@ import { getVisibleHistoryTransactions, ledgerPageCoversFallback } from '../lib/
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import { getTransactionsNewestFirst } from '../lib/transactionIndex';
 import { activeLedgerSupported, getLedgerNamespace, queryLedgerTransactions } from '../lib/activeLedgerRepository';
+import { recordHistoryLedgerQueryOutcome } from '../lib/historyReadPathTelemetry';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
 
@@ -313,6 +314,15 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
         archived: false,
       });
       if (!result?.supported) {
+        // Only first-page queries are measured, and only fresh ones. Appended
+        // pages skip the coverage check entirely (see `!append` below), so
+        // counting them would pile up "accepted" every time the user scrolls and
+        // drive the reject rate toward zero for a reason that has nothing to do
+        // with whether the fallback is still needed. A stale response is likewise
+        // not an outcome the user ever saw.
+        if (!append && requestId === ledgerRequestRef.current) {
+          recordHistoryLedgerQueryOutcome('unsupported');
+        }
         if (requestId === ledgerRequestRef.current) setLedgerQueryOk(false);
         return;
       }
@@ -322,15 +332,32 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
       // already present in the active UI cache. Keep the compatible result
       // visible until the ledger query catches up.
       if (!append && !ledgerPageCoversFallback(visible, filteredFallback, 250)) {
+        // Phase 15 diagnostic: this is the rejection that matters — a SQL page
+        // came back and was refused. Counting it (and not the by-design first
+        // paint) is what tells us whether this fallback is still load-bearing.
+        recordHistoryLedgerQueryOutcome('rejected_coverage', {
+          sqlRows: visible.length,
+          fallbackRows: filteredFallback.length,
+          search: Boolean(search),
+          transactionClass: sqlClass,
+          category: catF !== 'all',
+          wallet: walletF !== 'all',
+          scope: cfg.activeScope !== 'all' ? cfg.activeScope : null,
+          dated: Boolean(dateBounds.from || dateBounds.to),
+        });
         setLedgerQueryOk(false);
         setLedgerCursor(null);
         return;
       }
+      if (!append) recordHistoryLedgerQueryOutcome('accepted');
       setLedgerRows(current => append ? [...current, ...visible] : visible);
       setLedgerCursor(result.nextCursor || null);
       setLedgerQueryOk(true);
     } catch (error) {
       console.warn('[HISTORY] SQLite query failed; using compatibility fallback', error);
+      if (!append && requestId === ledgerRequestRef.current) {
+        recordHistoryLedgerQueryOutcome('error', { reason: String(error?.message || error) });
+      }
       if (requestId === ledgerRequestRef.current) setLedgerQueryOk(false);
     } finally {
       if (requestId === ledgerRequestRef.current) setLedgerLoading(false);
