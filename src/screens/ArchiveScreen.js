@@ -24,10 +24,11 @@ import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatMonthLabel } from '../lib/months';
 import { PRODUCT_FILE_PREFIX, PRODUCT_NAME } from '../lib/productIdentity';
 import { getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
+import { releasedGoalDeleteNotice } from '../lib/trackerLifecycle';
 
 export default function ArchiveScreen() {
   const {
-    trans, cats, wallets, cfg, deleteTrans, deleteTransMany,
+    trans, cats, wallets, goals, cfg, deleteTrans, deleteTransMany,
     buildYearArchive, commitYearArchive, workspaceNamespace,
   } = useStore();
   const th = TH[cfg.theme] || TH.dark;
@@ -372,7 +373,15 @@ export default function ArchiveScreen() {
     if (readOnly) return;
     if (getTransactionSemanticKind(t) === TRANSACTION_SEMANTIC_KIND.OPENING_BALANCE) return;
     const linked = isLinkedTransaction(t);
-    Alert.alert(linked ? copy.linkedTitle : L.delete, linked ? copy.linkedBody : L.confirmDel, [
+    const releasedGoal = t.isGoalSaving
+      ? releasedGoalDeleteNotice(t, goals.find(entity => entity.id === t.goalId))
+      : null;
+    const body = releasedGoal
+      ? (cfg.lang === 'ar'
+        ? `${releasedGoal.goalName ? `الهدف "${releasedGoal.goalName}"` : 'هذا الهدف'} مكتمل ومحوَّل بالفعل${releasedGoal.releasedAt ? ` بتاريخ ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. حذف هذه الحركة لن يغيّر حالته المسجّلة.`
+        : `${releasedGoal.goalName ? `Goal "${releasedGoal.goalName}"` : 'This goal'} was already completed and released${releasedGoal.releasedAt ? ` on ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. Deleting this transaction won't change its recorded status.`)
+      : linked ? copy.linkedBody : L.confirmDel;
+    Alert.alert(linked ? copy.linkedTitle : L.delete, body, [
       { text: L.no, style: 'cancel' },
       { text: L.delete, style: 'destructive', onPress: () => deleteTrans(t.id) },
     ]);
@@ -384,9 +393,11 @@ export default function ArchiveScreen() {
     const linked = trans.some(item => (
       selection.selected.has(item.id) && isLinkedTransaction(item)
     ));
+    const hasReleasedGoalRow = trans.some(item => selection.selected.has(item.id) && item.isGoalSaving
+      && releasedGoalDeleteNotice(item, goals.find(entity => entity.id === item.goalId)));
     const body = isAr
-      ? `سيتم حذف ${selection.selectedCount} حركة من السجل نهائياً${linked ? ' وتحديث العناصر المرتبطة بها.' : '.'}`
-      : `Delete ${selection.selectedCount} archived transactions permanently${linked ? ' and update linked items.' : '?'}`;
+      ? `سيتم حذف ${selection.selectedCount} حركة من السجل نهائياً${hasReleasedGoalRow ? ' (بعضها من هدف مكتمل ومحوَّل بالفعل، حذفها لن يغيّر حالته المسجّلة).' : linked ? ' وتحديث العناصر المرتبطة بها.' : '.'}`
+      : `Delete ${selection.selectedCount} archived transactions permanently${hasReleasedGoalRow ? " (some belong to a goal already completed and released — deleting them won't change its recorded status)." : linked ? ' and update linked items.' : '?'}`;
     Alert.alert(L.delete, body, [
       { text: L.no, style: 'cancel' },
       {

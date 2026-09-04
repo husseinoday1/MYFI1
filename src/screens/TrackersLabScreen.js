@@ -15,7 +15,7 @@ import { isRTL, rowDirFor, textAlignFor } from '../lib/layout';
 import { filterByActiveScope, getModules } from '../lib/modules';
 import { parseNumberInput, preserveNumberInputDraft } from '../lib/numberInput';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
-import { isSafelyArchivableTracker, isTrackerPastGracePeriod, latestMovementDate } from '../lib/trackerLifecycle';
+import { isSafelyArchivableTracker, isTrackerPastGracePeriod, latestMovementDate, releasedGoalDeleteNotice } from '../lib/trackerLifecycle';
 import { remainingInstallments } from '../store/domain';
 
 const money = (value) => Math.round(Math.abs(Number(value) || 0)).toLocaleString();
@@ -656,7 +656,15 @@ export default function TrackersLabScreen({
 
   const confirmDeletePayment = (item, payment) => {
     const movement = movementLabels(item.kind);
-    Alert.alert(T.confirmDelete, T.confirmDeletePayment, [
+    const releasedGoal = item.kind === 'saving'
+      ? releasedGoalDeleteNotice({ isGoalSaving: true }, item.source)
+      : null;
+    const body = releasedGoal
+      ? (isAr
+        ? `${releasedGoal.goalName ? `الهدف "${releasedGoal.goalName}"` : 'هذا الهدف'} مكتمل ومحوَّل بالفعل${releasedGoal.releasedAt ? ` بتاريخ ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. حذف هذه الدفعة لن يغيّر حالته المسجّلة.`
+        : `${releasedGoal.goalName ? `Goal "${releasedGoal.goalName}"` : 'This goal'} was already completed and released${releasedGoal.releasedAt ? ` on ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. Deleting this payment won't change its recorded status.`)
+      : T.confirmDeletePayment;
+    Alert.alert(T.confirmDelete, body, [
       { text: T.cancel, style: 'cancel' },
       {
         text: movement.delete,
@@ -775,9 +783,16 @@ export default function TrackersLabScreen({
       .filter(payment => paymentSelection.ids.includes(payment.id))
       .map(payment => ({ kind: item.kind, sourceId: item.sourceId, paymentId: payment.id }));
     const movement = movementLabels(item.kind);
-    const body = isAr
-      ? `سيتم حذف ${rows.length} من العمليات المحددة وتحديث الأرصدة والحركات المرتبطة.`
-      : `Delete ${rows.length} selected entries and update linked balances and transactions?`;
+    const releasedGoal = item.kind === 'saving'
+      ? releasedGoalDeleteNotice({ isGoalSaving: true }, item.source)
+      : null;
+    const body = releasedGoal
+      ? (isAr
+        ? `${releasedGoal.goalName ? `الهدف "${releasedGoal.goalName}"` : 'هذا الهدف'} مكتمل ومحوَّل بالفعل${releasedGoal.releasedAt ? ` بتاريخ ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. حذف هذه العمليات لن يغيّر حالته المسجّلة.`
+        : `${releasedGoal.goalName ? `Goal "${releasedGoal.goalName}"` : 'This goal'} was already completed and released${releasedGoal.releasedAt ? ` on ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. Deleting these entries won't change its recorded status.`)
+      : isAr
+        ? `سيتم حذف ${rows.length} من العمليات المحددة وتحديث الأرصدة والحركات المرتبطة.`
+        : `Delete ${rows.length} selected entries and update linked balances and transactions?`;
     Alert.alert(T.confirmDelete, body, [
       { text: T.cancel, style: 'cancel' },
       {

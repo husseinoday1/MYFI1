@@ -23,6 +23,7 @@ import { activeLedgerSupported, getLedgerNamespace, queryLedgerTransactions } fr
 import { recordHistoryLedgerQueryOutcome } from '../lib/historyReadPathTelemetry';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
+import { releasedGoalDeleteNotice } from '../lib/trackerLifecycle';
 
 const copy = (lang) => {
   const ar = lang === 'ar';
@@ -458,7 +459,15 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
 
   const confirmDeleteRow = (item) => {
     const linked = item.isDebtPayment || item.isGoalSaving || item.isCommitmentPayment;
-    Alert.alert(linked ? T.linkedDeleteTitle : L.delete, linked ? T.linkedDeleteBody : L.confirmDel, [
+    const releasedGoal = item.isGoalSaving
+      ? releasedGoalDeleteNotice(item, goals.find(entity => entity.id === item.goalId))
+      : null;
+    const body = releasedGoal
+      ? (cfg.lang === 'ar'
+        ? `${releasedGoal.goalName ? `الهدف "${releasedGoal.goalName}"` : 'هذا الهدف'} مكتمل ومحوَّل بالفعل${releasedGoal.releasedAt ? ` بتاريخ ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. حذف هذه الحركة لن يغيّر حالته المسجّلة.`
+        : `${releasedGoal.goalName ? `Goal "${releasedGoal.goalName}"` : 'This goal'} was already completed and released${releasedGoal.releasedAt ? ` on ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. Deleting this transaction won't change its recorded status.`)
+      : linked ? T.linkedDeleteBody : L.confirmDel;
+    Alert.alert(linked ? T.linkedDeleteTitle : L.delete, body, [
       { text: L.no, style: 'cancel' },
       {
         text: L.delete,
@@ -483,9 +492,11 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
     if (!selection.selectedCount) return;
     const selectedRows = trans.filter(item => selection.selected.has(item.id));
     const linked = selectedRows.some(item => item.isDebtPayment || item.isGoalSaving || item.isCommitmentPayment);
+    const hasReleasedGoalRow = selectedRows.some(item => item.isGoalSaving
+      && releasedGoalDeleteNotice(item, goals.find(entity => entity.id === item.goalId)));
     const body = cfg.lang === 'ar'
-      ? `سيتم حذف ${selection.selectedCount} حركة نهائياً${linked ? ' وتحديث العناصر المرتبطة بها.' : '.'}`
-      : `Delete ${selection.selectedCount} transactions permanently${linked ? ' and update their linked items.' : '?'}`;
+      ? `سيتم حذف ${selection.selectedCount} حركة نهائياً${hasReleasedGoalRow ? ' (بعضها من هدف مكتمل ومحوَّل بالفعل، حذفها لن يغيّر حالته المسجّلة).' : linked ? ' وتحديث العناصر المرتبطة بها.' : '.'}`
+      : `Delete ${selection.selectedCount} transactions permanently${hasReleasedGoalRow ? " (some belong to a goal already completed and released — deleting them won't change its recorded status)." : linked ? ' and update their linked items.' : '?'}`;
     Alert.alert(L.delete, body, [
       { text: L.no, style: 'cancel' },
       {

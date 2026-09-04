@@ -71,6 +71,20 @@ export const goalLifecycle = (item = {}, saved = item.cur, eventDate = null) => 
   };
 };
 
+// A released goal's status is frozen by design (see goalLifecycle above) --
+// deleting one of its saving transactions cannot change that, but the
+// generic "linked transaction" delete copy claims it will. This tells the
+// caller when that claim would be false, so the UI can say something true
+// instead. Pure/read-only: decides what to say, never what to do.
+export const releasedGoalDeleteNotice = (trans = {}, goal = null) => {
+  if (!trans?.isGoalSaving || !goal || goal.status !== 'released') return null;
+  return {
+    goalId: goal.id,
+    goalName: goal.name || null,
+    releasedAt: goal.settledAt || goal.completedAt || null,
+  };
+};
+
 export const reopenCompletionCommitments = (commitments = [], links = []) => {
   const linkReasons = new Map((Array.isArray(links) ? links : [])
     .filter(link => link?.linkedType && link?.linkedId)
