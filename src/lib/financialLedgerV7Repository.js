@@ -3061,6 +3061,63 @@ export const getLedgerSyncCursorV8 = async ({
   ) || 0);
 };
 
+// Phase 14 §93 — inbox retention.
+//
+// The apply path guards a re-delivered mutation twice: the cursor fast path
+// (`if (commandSequence <= cursor) continue;`) returns before the per-mutation
+// `apply_status` lookup is ever reached. So for any row at or below the cursor
+// the inbox record is already unreachable, and deleting it removes nothing the
+// idempotency guard can still consult -- the cursor keeps rejecting those
+// deliveries on its own. Above the cursor the inbox row is the only guard, and
+// is never touched here.
+//
+// Two cursors exist (shadow and production) and they advance independently, so
+// the bound is the LOWER of the two. Pruning against the higher one would drop
+// rows the other cursor has not passed yet.
+//
+// The lower bound also happens to be what makes this safe against a shadow
+// cursor RESET, which is the one way a cursor can move backwards without the
+// restore epoch changing. resetFinancialV2ShadowValidationStateV8 refuses once
+// `last_server_sequence > 0`, and this prunes nothing until that same value is
+// above 0 -- so pruning can only begin once the reset has become impossible.
+// The two are exactly complementary, which is easy to break by "simplifying"
+// this to the shadow cursor alone. Don't.
+//
+// The age floor is not part of that proof. It is insurance: if a cursor were
+// ever wrong in the high direction, an age floor means only long-settled rows
+// could be lost rather than the entire recent idempotency record at once.
+export const INBOX_RETENTION_MIN_AGE_MS = 7 * 24 * 60 * 60_000;
+
+export const pruneLedgerInboxV8 = async ({
+  ledgerId, restoreEpoch, now = Date.now(), database = null,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db || !ledgerId) return { pruned: 0, reason: 'unavailable' };
+  await ensureFinancialLedgerV7(db);
+  const targetLedgerId = String(ledgerId);
+  const targetEpoch = Math.max(1, Number(restoreEpoch || 0));
+  // Read sequentially: each call re-enters ensureFinancialLedgerV7, and this is
+  // housekeeping with nothing to gain from overlapping two cheap reads.
+  const shadowCursor = await getLedgerSyncCursorV8({
+    ledgerId: targetLedgerId, restoreEpoch: targetEpoch, shadow: true, database: db,
+  });
+  const productionCursor = await getLedgerSyncCursorV8({
+    ledgerId: targetLedgerId, restoreEpoch: targetEpoch, shadow: false, database: db,
+  });
+  const safeCursor = Math.min(Number(shadowCursor || 0), Number(productionCursor || 0));
+  // Nothing has been consumed by both paths yet, so nothing is provably
+  // redundant. Pruning here would be a guess.
+  if (!(safeCursor > 0)) return { pruned: 0, safeCursor: 0, reason: 'no_safe_cursor' };
+  const currentTime = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  const olderThan = new Date(currentTime - INBOX_RETENTION_MIN_AGE_MS).toISOString();
+  const result = await enqueueWrite(() => db.runAsync(
+    `DELETE FROM ledger_inbox_v3
+      WHERE ledger_id=? AND restore_epoch=? AND command_sequence<=? AND received_at<=?`,
+    targetLedgerId, targetEpoch, safeCursor, olderThan,
+  ));
+  return { pruned: Number(result?.changes || 0), safeCursor, olderThan };
+};
+
 const v2RemoteConflict = (code, item, extra = {}) => ({
   code: String(code || 'financial_v2_remote_cas_conflict'),
   mutationId: String(item?.mutationId || ''),

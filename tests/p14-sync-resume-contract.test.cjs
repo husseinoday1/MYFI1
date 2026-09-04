@@ -96,4 +96,25 @@ assert(!stoppedSelect.includes('payload_json'),
 assert(screen.includes('ledger.outboxV3StoppedCount'),
   'the screen must show the stopped count, or the state is still invisible');
 
+// --- §93: inbox retention is actually invoked ------------------------------
+
+const mutationSync = fs.readFileSync(path.join(root, 'src/lib/financialMutationSyncV2.js'), 'utf8');
+assert(mutationSync.includes('pruneLedgerInboxV8'),
+  'retention that nothing calls is not a retention mechanism');
+
+// It must run only after the sync has fully succeeded: the cursor it prunes
+// against has to be one this run actually proved, and pruning on a failed or
+// partial sync would trust a cursor that never advanced.
+const pageBudgetAt = mutationSync.indexOf("if (hasMore) throw new Error('financial_v2_sync_page_budget_exhausted');");
+const pruneCallAt = mutationSync.indexOf('await pruneLedgerInboxV8({');
+const catchAt = mutationSync.indexOf('} catch (error) {', pageBudgetAt);
+assert(pageBudgetAt > 0 && pruneCallAt > pageBudgetAt,
+  'retention must run after the sync has proven it completed');
+assert(catchAt > 0 && pruneCallAt < catchAt, 'and inside the success path');
+
+// Housekeeping must never fail a sync that already succeeded.
+const pruneBlock = mutationSync.slice(pruneCallAt - 200, pruneCallAt + 400);
+assert(pruneBlock.includes('catch (retentionError)'),
+  'a retention failure must not turn a completed sync into a failed one');
+
 console.log('MYFI P14 SYNC RESUME CONTRACT: PASSED');

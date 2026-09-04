@@ -7,6 +7,7 @@ import {
   readFinancialSyncProtocolV8,
   readLedgerRestoreIntentV8,
   readPendingLedgerMutationsV8,
+  pruneLedgerInboxV8,
 } from './financialLedgerV7Repository';
 
 const normalizedRow = row => ({
@@ -264,7 +265,23 @@ export const syncFinancialMutationsV2 = async ({
 
     if (hasMore) throw new Error('financial_v2_sync_page_budget_exhausted');
 
+    // §93: retention runs only after a sync has fully succeeded, so the cursor
+    // it prunes against is one this run just proved. It is best-effort by
+    // design -- housekeeping must never be the reason a completed sync reports
+    // failure, and anything it does not prune this time is simply pruned next.
+    let inboxRetention = null;
+    try {
+      inboxRetention = await pruneLedgerInboxV8({
+        ledgerId: identity.ledgerId,
+        restoreEpoch: identity.restoreEpoch,
+        database,
+      });
+    } catch (retentionError) {
+      inboxRetention = { pruned: 0, error: String(retentionError?.message || retentionError) };
+    }
+
     return {
+      inboxRetention,
       supported: true,
       ok: true,
       ledgerId: identity.ledgerId,
