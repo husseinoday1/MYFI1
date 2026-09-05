@@ -23,6 +23,7 @@ import { AppButton, ScreenScroll, SectionTitle, SurfaceCard, rowDirection, textA
 import { SPACE, weight } from '../lib/tokens';
 import { collectP12ConflictRecoveryDiagnostics } from '../dev/p12ConflictRecoveryDiagnostics';
 import { collectHistoryReadPathDiagnostics } from '../dev/historyReadPathDiagnostics';
+import IdentityAdoptionReview from '../components/IdentityAdoptionReview';
 import { conflictRecoveryGatesV1 } from '../dev/p12ConflictRecoveryGates';
 import {
   acknowledgeLegacyOutboxRowV1,
@@ -66,6 +67,7 @@ export default function DiagnosticsScreen() {
     lastSyncError, online, syncing, restoreSafety,
     financialCloudRecoveryV2, financialSyncV2Activation,
     workspaceNamespace, user, activateFinancialSyncV2,
+    financialIdentityAdoption, prepareV2IdentityAdoption, confirmV2IdentityAdoption,
   } = useStore();
 
   const [snapshot, setSnapshot] = useState(null);
@@ -138,6 +140,58 @@ export default function DiagnosticsScreen() {
     ? `لم يتغير شيء. السبب: ${result?.reason || 'غير معروف'}`
     : `Nothing changed. Reason: ${result?.reason || 'unknown'}`);
 
+  // A ledger-id conflict is the one state this review serves. Read from the
+  // activation record because the V1 fallback nulls lastSyncError, which is
+  // exactly why three accounts sat blocked with nothing offering them a way out.
+  const ledgerIdConflict = financialSyncV2Activation?.status === 'failed_before_activation'
+    && String(financialSyncV2Activation?.error || '') === 'financial_v2_ledger_id_conflict';
+
+  const runAdoptPrepare = async () => {
+    setBusyAction('adopt-prepare');
+    let result;
+    try { result = await prepareV2IdentityAdoption(); }
+    catch (error) { result = { ok: false, reason: `prepare_threw:${String(error?.message || error)}` }; }
+    setBusyAction(null);
+    if (!result?.ok) {
+      Alert.alert(isAr ? 'تعذّر التجهيز' : 'Could not prepare', failureNotice(result));
+      return;
+    }
+    await refresh();
+  };
+
+  // Takes the per-row decisions the review collected. The library refuses if
+  // any row is still undecided, so this cannot skip the review by accident.
+  const runAdopt = async (decisions) => {
+    setBusyAction('adopt');
+    let result;
+    try { result = await confirmV2IdentityAdoption(decisions); }
+    catch (error) { result = { ok: false, reason: `adopt_threw:${String(error?.message || error)}` }; }
+    setBusyAction(null);
+    if (!result?.ok) {
+      Alert.alert(isAr ? 'لم يتم التبنّي' : 'Not adopted', failureNotice(result));
+      return;
+    }
+    await refresh();
+    const remaining = Number(result?.reentryQueued || 0);
+    Alert.alert(
+      isAr ? 'تم تبنّي دفتر السحابة' : 'Cloud ledger adopted',
+      isAr
+        ? `استُبدلت نسخة هذا الجهاز بنسخة السحابة الموثقة${remaining ? `، وأُعيدت إضافة ${remaining} حركة اخترت إبقاءها` : ''}. ${restartNotice}`
+        : `This device now uses the verified cloud copy${remaining ? `, and ${remaining} kept entries were re-added` : ''}. ${restartNotice}`,
+    );
+  };
+
+  // Deliberately guidance, not an action: signing the owner out from a
+  // diagnostics screen is a bigger, more surprising step than this screen
+  // should take on its own.
+  const showWrongAccountGuidance = () => {
+    Alert.alert(
+      isAr ? 'لم يتغيّر شيء' : 'Nothing was changed',
+      isAr
+        ? 'بياناتك المحلية كما هي. إن كان هذا ليس الحساب الصحيح لهذا الجهاز، سجّل الخروج من الإعدادات ثم ادخل بالحساب الصحيح.'
+        : 'Your local data is untouched. If this is not the right account for this device, sign out from Settings and sign in with the correct one.',
+    );
+  };
   const runRestore = async () => {
     setBusyAction('restore');
     let result;
@@ -463,6 +517,42 @@ export default function DiagnosticsScreen() {
             </Text>
           </Section>
 
+          {ledgerIdConflict ? (
+            <>
+              <SectionTitle th={th} lang={lang}>{isAr ? 'تبنّي دفتر السحابة' : 'Adopt cloud ledger'}</SectionTitle>
+              {financialIdentityAdoption?.status === 'ready_for_review' ? (
+                <IdentityAdoptionReview
+                  th={th}
+                  lang={lang}
+                  adoption={financialIdentityAdoption}
+                  currency={cfg?.currency}
+                  busy={busyAction === 'adopt'}
+                  onAdopt={runAdopt}
+                  onWrongAccount={showWrongAccountGuidance}
+                />
+              ) : (
+                <Section th={th} lang={lang} isAr={isAr} icon='git-compare-outline' title={isAr ? 'تعارض هوية الدفتر' : 'Ledger identity conflict'}>
+                  <Text style={{ color: th.sub, fontSize: 12, textAlign: textAlign(lang) }}>
+                    {isAr
+                      ? 'هذا الحساب له دفتر سحابي سابق لا يطابق دفتر هذا الجهاز. جهّز المراجعة لترى حركاتك المعلّقة وتقرّر لكل واحدة.'
+                      : 'This account has a prior cloud ledger that does not match this device. Prepare the review to see your pending entries and decide on each.'}
+                  </Text>
+                  {financialIdentityAdoption?.reason ? (
+                    <Row th={th} lang={lang} label='reason' value={financialIdentityAdoption.reason} mono />
+                  ) : null}
+                  <AppButton
+                    th={th}
+                    lang={lang}
+                    tone='primary'
+                    icon='download-outline'
+                    label={isAr ? 'جهّز المراجعة' : 'Prepare review'}
+                    disabled={busyAction === 'adopt-prepare'}
+                    onPress={runAdoptPrepare}
+                  />
+                </Section>
+              )}
+            </>
+          ) : null}
           <SectionTitle th={th} lang={lang}>{isAr ? 'استعادة السحابة V2' : 'Cloud recovery V2'}</SectionTitle>
           <Section th={th} lang={lang} isAr={isAr} icon="cloud-outline" title="financialCloudRecoveryV2">
             <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', textAlign: textAlign(lang) }} selectable>
