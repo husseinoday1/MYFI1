@@ -20,8 +20,8 @@ const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
 
 let source = read('src/lib/historyReadPathTelemetry.js');
 source = source.replace(/^export const /gm, 'const ');
-source += '\nmodule.exports = { recordHistoryLedgerQueryOutcome, readHistoryReadPathTelemetry, resetHistoryReadPathTelemetry };\n';
-const sandbox = { module: { exports: {} }, exports: {}, Date, Number, Boolean, String, console };
+source += '\nmodule.exports = { recordHistoryLedgerQueryOutcome, recordHistoryLedgerQueryDuration, readHistoryReadPathTelemetry, resetHistoryReadPathTelemetry };\n';
+const sandbox = { module: { exports: {} }, exports: {}, Date, Number, Boolean, String, Math, console };
 vm.createContext(sandbox);
 vm.runInContext(source, sandbox, { filename: 'historyReadPathTelemetry.js' });
 const {
@@ -96,7 +96,7 @@ assert.equal(readTelemetry().recentRejections.length, 1, 'readTelemetry must ret
 
 const history = read('src/screens/HistoryScreen.js');
 assert(
-  history.includes("import { recordHistoryLedgerQueryOutcome } from '../lib/historyReadPathTelemetry'"),
+  history.includes('recordHistoryLedgerQueryOutcome') && history.includes("from '../lib/historyReadPathTelemetry'"),
   'HistoryScreen must import the telemetry recorder',
 );
 for (const outcome of ["'accepted'", "'rejected_coverage'", "'unsupported'", "'error'"]) {
@@ -158,3 +158,77 @@ assert(
 );
 
 console.log('PASS: phase15-history-read-path-telemetry');
+
+// --- §97 duration percentiles -----------------------------------------------
+//
+// The Phase 15 audit found no timing instrumentation of any kind. These are the
+// first numbers for it. They only became meaningful on 2026-09-05, when the
+// year-filter fix let the SQL path return rows: before that, any timing would
+// have measured how fast SQLite returns nothing.
+
+const { recordHistoryLedgerQueryDuration: recordDuration } = sandbox.module.exports;
+
+// Nothing measured must read as null, never 0 -- "not observed" and "instant"
+// are opposite facts and must not share a value.
+reset();
+{
+  const stats = readTelemetry();
+  assert.equal(stats.p50Ms, null);
+  assert.equal(stats.p95Ms, null);
+  assert.equal(stats.maxMs, null);
+  assert.equal(stats.durationSampleCount, 0);
+}
+
+// Nearest-rank percentiles over a known set.
+reset();
+for (const ms of [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]) recordDuration(ms);
+{
+  const stats = readTelemetry();
+  assert.equal(stats.durationSampleCount, 10);
+  assert.equal(stats.p50Ms, 50, 'p50 of 10 samples is the 5th');
+  assert.equal(stats.p95Ms, 100, 'p95 of 10 samples is the 10th');
+  assert.equal(stats.maxMs, 100);
+}
+
+// Order of arrival must not change the percentiles.
+reset();
+for (const ms of [100, 30, 70, 10, 50]) recordDuration(ms);
+assert.equal(readTelemetry().p50Ms, 50, 'percentiles must sort, not take arrival order');
+
+// Junk must not enter the sample and quietly drag a percentile down.
+reset();
+recordDuration(40);
+for (const junk of [null, undefined, NaN, -1, 'abc', {}]) recordDuration(junk);
+assert.equal(readTelemetry().durationSampleCount, 1, 'only real durations may be recorded');
+assert.equal(readTelemetry().p50Ms, 40);
+
+// Bounded, keeping the most recent -- percentiles should describe recent
+// behaviour, not app start, and a long session must not grow this forever.
+reset();
+for (let i = 1; i <= 250; i += 1) recordDuration(i);
+{
+  const stats = readTelemetry();
+  assert.equal(stats.durationSampleCount, 200, 'the duration sample must be bounded');
+  assert.equal(stats.maxMs, 250, 'the newest samples must be the ones kept');
+}
+
+// The raw array must not leak into the snapshot; only the summary is reported.
+assert.equal(readTelemetry().durationsMs, undefined, 'raw durations must not be exposed');
+
+// Wired at the call site, and only for first-page queries -- an appended page
+// is a different, cheaper operation and would skew the percentiles.
+assert(
+  history.includes('recordHistoryLedgerQueryDuration(Date.now() - startedAt)'),
+  'HistoryScreen must record the query duration',
+);
+assert(
+  /if \(!append\) recordHistoryLedgerQueryDuration/.test(history),
+  'only first-page queries may be timed',
+);
+
+const diagnosticsSource = read('src/screens/DiagnosticsScreen.js');
+for (const field of ['p50Ms', 'p95Ms', 'durationSampleCount']) {
+  assert(diagnosticsSource.includes(field), `Diagnostics must surface ${field}`);
+}
+
+console.log('PASS: phase15-history-read-path-telemetry (§97 durations)');

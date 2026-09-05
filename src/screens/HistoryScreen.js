@@ -20,7 +20,7 @@ import { getVisibleHistoryTransactions, ledgerPageCoversFallback } from '../lib/
 import { isCurrentMonthTransaction } from '../lib/transactionAccess';
 import { getTransactionsNewestFirst } from '../lib/transactionIndex';
 import { activeLedgerSupported, getLedgerNamespace, queryLedgerTransactions } from '../lib/activeLedgerRepository';
-import { recordHistoryLedgerQueryOutcome } from '../lib/historyReadPathTelemetry';
+import { recordHistoryLedgerQueryDuration, recordHistoryLedgerQueryOutcome } from '../lib/historyReadPathTelemetry';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
 import { releasedGoalDeleteNotice, releasedGoalDeleteRefusalCopy } from '../lib/trackerLifecycle';
@@ -300,6 +300,9 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
     if (!sqlEnabled || (append && ledgerLoading)) return;
     const requestId = ++ledgerRequestRef.current;
     setLedgerLoading(true);
+    // §97: wall time for this query, recorded whatever the outcome -- a slow
+    // query that is then rejected still cost the user that time.
+    const startedAt = Date.now();
     try {
       const result = await queryLedgerTransactions({
         namespace: getLedgerNamespace(workspaceNamespace, cfg),
@@ -314,6 +317,7 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
         toDate: dateBounds.to || null,
         archived: false,
       });
+      if (!append) recordHistoryLedgerQueryDuration(Date.now() - startedAt);
       if (!result?.supported) {
         // Only first-page queries are measured, and only fresh ones. Appended
         // pages skip the coverage check entirely (see `!append` below), so

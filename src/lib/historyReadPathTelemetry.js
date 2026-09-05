@@ -37,6 +37,8 @@ const EMPTY = () => ({
   // Bounded ring of the most recent rejections, for diagnosing WHY coverage
   // failed rather than only how often. Capped so a long session cannot grow it.
   recentRejections: [],
+  // §97: wall time per resolved query, bounded.
+  durationsMs: [],
 });
 
 const MAX_SAMPLES = 10;
@@ -96,12 +98,54 @@ export const recordHistoryLedgerQueryOutcome = (outcome, detail = {}) => {
   ];
 };
 
+// §97 — query duration, which the Phase 15 audit found had no instrumentation
+// of any kind. Kept here rather than in a new module because the outcome and
+// the time it took are the same event, and splitting them would let a future
+// change record one without the other.
+//
+// Durations are only meaningful now that the SQL path actually returns rows:
+// before the year-filter fix (2026-09-05) every query returned empty, so any
+// timing collected would have measured "how fast SQLite says no".
+const MAX_DURATIONS = 200;
+
+/**
+ * @param {number} durationMs wall time for one resolved query
+ */
+export const recordHistoryLedgerQueryDuration = (durationMs) => {
+  // typeof first, on purpose. Number(null) is 0, so a bare Number() coercion
+  // would record a missing measurement as a 0ms query and quietly drag p50
+  // down -- the same trap that emptied every History page until 2026-09-05,
+  // reintroduced here within an hour of fixing it. 0 itself stays valid: a
+  // genuinely fast query can measure 0 on a Date.now() diff.
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) return;
+  const value = durationMs;
+  // Bounded: a long session must not grow this without limit. Oldest go first,
+  // so the percentiles describe recent behaviour rather than app start.
+  counters.durationsMs = [...counters.durationsMs.slice(-(MAX_DURATIONS - 1)), value];
+};
+
+// Nearest-rank percentile. Deliberately not interpolated: with a bounded
+// sample, an exact observed value is easier to reason about than a synthetic
+// one, and p95 of 20 samples should name a query that really happened.
+const percentile = (sorted, fraction) => {
+  if (!sorted.length) return null;
+  const rank = Math.max(1, Math.ceil(fraction * sorted.length));
+  return sorted[Math.min(rank, sorted.length) - 1];
+};
+
 export const readHistoryReadPathTelemetry = () => {
   const resolved = counters.accepted + counters.rejectedCoverage
     + counters.unsupported + counters.errored;
   return {
     ...counters,
     recentRejections: [...counters.recentRejections],
+    durationsMs: undefined,
+    // §97 read-path latency. Null rather than 0 when nothing was measured,
+    // so "not observed" cannot be mistaken for "instant".
+    durationSampleCount: counters.durationsMs.length,
+    p50Ms: percentile([...counters.durationsMs].sort((a, b) => a - b), 0.5),
+    p95Ms: percentile([...counters.durationsMs].sort((a, b) => a - b), 0.95),
+    maxMs: counters.durationsMs.length ? Math.max(...counters.durationsMs) : null,
     resolvedQueries: resolved,
     // Share of resolved queries whose SQL result was NOT used. Null rather than
     // 0 when nothing has been observed, so "no data yet" cannot be misread as

@@ -507,6 +507,14 @@ export default function DiagnosticsScreen() {
             <Row th={th} lang={lang} label="unsupported" value={snapshot?.historyReadPath?.telemetry?.unsupported} />
             <Row th={th} lang={lang} label="errored" value={snapshot?.historyReadPath?.telemetry?.errored} />
             <Row th={th} lang={lang} label="rejectRate" value={snapshot?.historyReadPath?.telemetry?.rejectRate} />
+            {/* §97 — read-path latency. The Phase 15 audit found no timing
+                instrumentation at all; these are the first numbers for it, and
+                they only became meaningful once the year-filter fix let the SQL
+                path return rows at all. */}
+            <Row th={th} lang={lang} label="p50Ms (§97)" value={snapshot?.historyReadPath?.telemetry?.p50Ms} />
+            <Row th={th} lang={lang} label="p95Ms (§97)" value={snapshot?.historyReadPath?.telemetry?.p95Ms} />
+            <Row th={th} lang={lang} label="maxMs" value={snapshot?.historyReadPath?.telemetry?.maxMs} />
+            <Row th={th} lang={lang} label="durationSamples" value={snapshot?.historyReadPath?.telemetry?.durationSampleCount} />
             <Text style={{ color: th.sub, fontSize: 11, textAlign: textAlign(lang) }}>
               {isAr
                 ? 'العدّاد لا يشمل العرض الأولي من الذاكرة (سلوك مقصود قبل وصول نتيجة SQL بـ120ms)، بل يعدّ فقط صفحة SQL رجعت ورُفضت. القيم تُصفَّر عند إعادة تشغيل التطبيق.'
