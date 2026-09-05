@@ -147,3 +147,25 @@ assert(
 );
 
 console.log('PASS: v2-identity-adoption-wiring');
+
+// The kept entries must actually be re-applied after adoption. Committing the
+// identity swap without draining would leave them parked in a meta row that
+// nothing reads -- present, but never coming back.
+const adoptConfirm = slice.slice(
+  slice.indexOf('  confirmV2IdentityAdoption: async'),
+  slice.indexOf('\n  },', slice.indexOf('  confirmV2IdentityAdoption: async')),
+);
+assert(
+  adoptConfirm.includes('drainCloudIdentityAdoptionReentryV1'),
+  'a successful adoption must drain the re-entry queue',
+);
+assert(
+  /result\?\.ok/.test(adoptConfirm.slice(0, adoptConfirm.indexOf('drainCloudIdentityAdoptionReentryV1'))),
+  'the drain must run only after the adoption actually succeeded',
+);
+assert(
+  adoptConfirm.includes('remaining'),
+  'a partial drain must be surfaced, not silently swallowed',
+);
+
+console.log('PASS: v2-identity-adoption-wiring (reentry)');

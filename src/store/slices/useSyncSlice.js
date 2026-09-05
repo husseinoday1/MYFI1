@@ -73,6 +73,7 @@ import {
 } from '../../lib/financialV2ConflictRecoveryV1';
 import {
   confirmCloudIdentityAdoptionV1,
+  drainCloudIdentityAdoptionReentryV1,
   prepareCloudIdentityAdoptionV1,
 } from '../../lib/financialV2IdentityAdoptionFlowV1';
 import {
@@ -1850,7 +1851,25 @@ export const createSyncSlice = (set, get) => ({
         } : null,
       },
     });
-    if (result?.ok) await get().loadLocal();
+    if (result?.ok) {
+      // The kept entries come back here, through the ordinary commit paths.
+      // A partial drain is reported, never hidden: an entry that could not be
+      // re-applied stays queued rather than disappearing with the old ledger.
+      const reentry = await drainCloudIdentityAdoptionReentryV1({
+        namespace, wallets: get().wallets, baseCurrency: get().cfg?.currency,
+      });
+      set(state => ({
+        financialIdentityAdoption: {
+          ...(state.financialIdentityAdoption || {}),
+          reentry: {
+            drained: Number(reentry?.drained || 0),
+            remaining: Number(reentry?.remaining || 0),
+            failed: Array.isArray(reentry?.failed) ? reentry.failed : [],
+          },
+        },
+      }));
+      await get().loadLocal();
+    }
     return result;
   },
 

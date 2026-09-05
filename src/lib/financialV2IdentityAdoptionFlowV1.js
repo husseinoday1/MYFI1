@@ -17,6 +17,8 @@
 
 import { getLedgerDb } from './ledgerDatabase';
 import {
+  commitEntityChangesV7,
+  commitFinancialTransactionV7,
   createFinancialConflictRecoveryCheckpointV1,
   ensureLedgerSyncIdentityV8,
 } from './financialLedgerV7Repository';
@@ -29,6 +31,7 @@ import {
 } from './financialV2IdentityAdoptionV1';
 import {
   adoptionIntentKey,
+  adoptionReentryQueueKey,
   promoteCloudIdentityAdoptionV1,
 } from './financialV2IdentityAdoptionPromotionV1';
 
@@ -174,6 +177,101 @@ export const prepareCloudIdentityAdoptionV1 = async ({
     adoptionIntentKey(target), JSON.stringify(intent), now,
   );
   return { supported: true, ok: true, status: intent.status, intent, review };
+};
+
+/**
+ * Re-applies the mutations the owner chose to keep, after the adoption.
+ *
+ * Through the ORDINARY commit paths, deliberately. A kept mutation's revision
+ * chain was computed against the ledger that was just replaced and cannot be
+ * carried over; these paths already compute revisions against current state and
+ * write correct outbox rows under the adopted identity. Re-deriving that by
+ * hand is the arithmetic this whole design avoids.
+ *
+ * One entry at a time, each removed from the queue only once it has actually
+ * been applied. A failure leaves that entry queued with its reason and does not
+ * stop the others -- losing one of the owner's entries silently is the outcome
+ * that matters most here.
+ *
+ * The commit functions are injectable so this can be tested without standing up
+ * the whole repository; production callers pass nothing and get the real ones.
+ */
+export const drainCloudIdentityAdoptionReentryV1 = async ({
+  namespace = 'guest', wallets = [], baseCurrency = 'IQD', database = null,
+  commitTransaction = null, commitEntities = null,
+} = {}) => {
+  const target = text(namespace);
+  const db = database || await getLedgerDb();
+  if (!db) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
+
+  const row = await db.getFirstAsync(
+    `SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1`, adoptionReentryQueueKey(target),
+  );
+  if (!row?.value) return { supported: true, ok: true, drained: 0, remaining: 0, empty: true };
+
+  const queue = parse(row.value);
+  const entries = Array.isArray(queue?.entries) ? queue.entries : [];
+  if (!entries.length) {
+    await db.runAsync(`DELETE FROM ledger_v7_meta WHERE key=?`, adoptionReentryQueueKey(target));
+    return { supported: true, ok: true, drained: 0, remaining: 0, empty: true };
+  }
+
+  const commitTx = commitTransaction || commitFinancialTransactionV7;
+  const commitEnt = commitEntities || commitEntityChangesV7;
+
+  const remaining = [];
+  const applied = [];
+  const failed = [];
+  for (const entry of entries) {
+    const payload = parse(entry?.payloadJson) || {};
+    try {
+      let result;
+      if (text(entry?.entityType) === 'financial_transaction') {
+        // The stored payload keeps the transaction exactly as the app first
+        // submitted it, which is what this path expects.
+        const original = payload.originalTransaction;
+        if (!original) throw new Error('financial_v2_identity_adoption_reentry_payload_missing');
+        result = await commitTx({
+          namespace: target, transaction: original, wallets, baseCurrency, entityChanges: [],
+        });
+      } else {
+        const entityPayload = payload.payload ?? payload;
+        result = await commitEnt({
+          namespace: target,
+          changes: [{ entityType: text(entry.entityType), id: text(entry.entityId), payload: entityPayload }],
+        });
+      }
+      if (result?.supported && !result?.ok) {
+        throw new Error(result.reason || 'financial_v2_identity_adoption_reentry_rejected');
+      }
+      applied.push({ sequenceId: entry.sequenceId, entityType: entry.entityType, entityId: entry.entityId });
+    } catch (error) {
+      const reason = text(error?.message) || 'financial_v2_identity_adoption_reentry_failed';
+      failed.push({ sequenceId: entry.sequenceId, entityType: entry.entityType, entityId: entry.entityId, reason });
+      remaining.push({ ...entry, lastError: reason });
+    }
+  }
+
+  const now = new Date().toISOString();
+  if (remaining.length) {
+    await db.runAsync(
+      `UPDATE ledger_v7_meta SET value=?,updated_at=? WHERE key=?`,
+      JSON.stringify({ ...queue, entries: remaining, lastDrainAt: now }), now,
+      adoptionReentryQueueKey(target),
+    );
+  } else {
+    await db.runAsync(`DELETE FROM ledger_v7_meta WHERE key=?`, adoptionReentryQueueKey(target));
+  }
+
+  return {
+    supported: true,
+    ok: failed.length === 0,
+    drained: applied.length,
+    remaining: remaining.length,
+    applied,
+    failed,
+    reason: failed.length ? 'financial_v2_identity_adoption_reentry_partial' : null,
+  };
 };
 
 /**
