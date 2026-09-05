@@ -51,6 +51,7 @@ const staticContracts = [
   'phase15-sqlite-operational-config.test.cjs',
   'phase15-sqlite-reliability-probes.test.cjs',
   'phase15-history-read-path-telemetry.test.cjs',
+  'history-sql-year-filter.test.cjs',
   'phase15-sync-honesty-v2stuck.test.cjs',
   'goal-release-delete-notice.test.cjs',
   'goal-release-undo.test.cjs',

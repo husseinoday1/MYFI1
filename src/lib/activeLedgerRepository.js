@@ -23,6 +23,19 @@ const parseJson = (value, fallback = null) => {
   try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
 };
 const ns = value => String(value || 'guest').trim() || 'guest';
+// Number(null) is 0 and Number.isInteger(0) is true, so a bare
+// Number.isInteger(Number(year)) treats "no year requested" as year 0 and
+// filters on date_iso LIKE '0-%', which matches nothing. That is not
+// hypothetical: it silently emptied every History SQL page on every device
+// until 2026-09-05, because History passes no year and the in-memory
+// fallback covered for it. Archive passes a real year, so it worked there
+// and nobody saw it. Two other files in this repo already carry comments
+// warning about this exact trap.
+const yearFilter = value => (
+  value === null || value === undefined || value === ''
+    ? null
+    : Number.isInteger(Number(value)) && Number(value) > 0 ? Number(value) : null
+);
 export const getLedgerNamespace = (workspaceNamespace = 'guest', cfg = {}) => (
   cfg?.performanceTestMode ? `${ns(workspaceNamespace)}::performance-test` : ns(workspaceNamespace)
 );
@@ -529,7 +542,7 @@ const queryV7PayloadRows = async (db, {
   const params = [ns(namespace)];
   if (archived === true) clauses.push('archived_at IS NOT NULL');
   if (archived === false) clauses.push('archived_at IS NULL');
-  if (Number.isInteger(Number(year))) { clauses.push('date_iso LIKE ?'); params.push(`${Number(year)}-%`); }
+  if (yearFilter(year) !== null) { clauses.push('date_iso LIKE ?'); params.push(`${yearFilter(year)}-%`); }
   if (scope && scope !== 'all') { clauses.push('scope=?'); params.push(String(scope)); }
   if (fromDate) { clauses.push('date_iso>=?'); params.push(String(fromDate)); }
   if (toDate) { clauses.push('date_iso<=?'); params.push(String(toDate)); }
@@ -557,7 +570,7 @@ const queryV7TransactionPage = async (db, {
   const params = [ns(namespace)];
   if (archived === true) clauses.push('t.archived_at IS NOT NULL');
   if (archived === false) clauses.push('t.archived_at IS NULL');
-  if (Number.isInteger(Number(year))) { clauses.push('t.date_iso LIKE ?'); params.push(`${Number(year)}-%`); }
+  if (yearFilter(year) !== null) { clauses.push('t.date_iso LIKE ?'); params.push(`${yearFilter(year)}-%`); }
   if (scope && scope !== 'all') { clauses.push('t.scope=?'); params.push(String(scope)); }
   if (fromDate) { clauses.push('t.date_iso>=?'); params.push(String(fromDate)); }
   if (toDate) { clauses.push('t.date_iso<=?'); params.push(String(toDate)); }
@@ -646,7 +659,7 @@ export const queryLedgerTransactions = async ({
   const clauses = ['namespace = ?', 'deleted_at IS NULL'];
   const params = [ns(namespace)];
   if (archived) clauses.push('archived_at IS NOT NULL'); else clauses.push('archived_at IS NULL');
-  if (Number.isInteger(Number(year))) { clauses.push('date_iso LIKE ?'); params.push(`${Number(year)}-%`); }
+  if (yearFilter(year) !== null) { clauses.push('date_iso LIKE ?'); params.push(`${yearFilter(year)}-%`); }
   if (scope && scope !== 'all') { clauses.push('scope = ?'); params.push(String(scope)); }
   if (flowType) { clauses.push('flow_type = ?'); params.push(String(flowType)); }
   if (transactionClass === 'income') clauses.push("flow_type = 'income'");
