@@ -1509,6 +1509,14 @@ const rehydratePreparedV2ConflictRecovery = async ({ set, namespace, accountId, 
           operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString(),
           checkpointId: resumedConflictRecovery?.intent?.local?.checkpointId || null,
           reason: resumedConflictRecovery?.ok ? null : String(resumedConflictRecovery?.reason || 'resume_failed'),
+          // This is the path a device actually reaches after an account switch
+          // -- no button is pressed -- so the classification has to be attached
+          // here too, not only in prepareV2ConflictRecovery. A real device sat
+          // blocked on 2026-09-05 and the manual path it never ran was the only
+          // one carrying this.
+          ...(resumedConflictRecovery?.intentDiagnostics
+            ? { intentDiagnostics: resumedConflictRecovery.intentDiagnostics }
+            : {}),
         },
       });
     }
@@ -1656,6 +1664,11 @@ export const createSyncSlice = (set, get) => ({
           status: resumed?.ok ? 'financial_v2_conflict_recovery_ready' : 'financial_v2_conflict_recovery_blocked',
           operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString(),
           checkpointId: resumed?.intent?.local?.checkpointId || null, reason: resumed?.ok ? null : String(resumed?.reason || 'prepare_failed'),
+          // Carries which of the five intent conditions failed, so a blocked
+          // device classifies itself on the Diagnostics screen instead of
+          // needing a round-trip. Shape-only (booleans/version/status), never
+          // the intent's contents.
+          ...(resumed?.intentDiagnostics ? { intentDiagnostics: resumed.intentDiagnostics } : {}),
         },
       });
       return resumed;

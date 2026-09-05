@@ -287,9 +287,36 @@ export const resumePreparedCloudConflictRecoveryV1 = async ({
     );
     if (!intentRow?.value) return { supported: true, ok: false, found: false };
     const intent = parse(intentRow.value);
-    if (!intent || intent.version !== 1 || intent.status !== 'ready_for_explicit_cloud_replacement'
-        || intent.namespace !== target || intent.accountId !== owner) {
-      return failure('financial_v2_conflict_recovery_resume_intent_invalid', { found: true });
+    // These five were one reason string. Every one of them still fails closed
+    // exactly as before -- what changes is only that the device can say WHICH
+    // one, because a real account reached this state on 2026-09-05 and neither
+    // Planning & Audit nor Implementation could tell an abandoned intent from a
+    // wrong-account one without a device round-trip. An intent for a different
+    // account is a very different fact from an intent left by an older build.
+    const intentReason = !intent
+      ? 'financial_v2_conflict_recovery_resume_intent_unparseable'
+      : intent.version !== 1
+        ? 'financial_v2_conflict_recovery_resume_intent_version'
+        : intent.status !== 'ready_for_explicit_cloud_replacement'
+          ? 'financial_v2_conflict_recovery_resume_intent_status'
+          : intent.namespace !== target
+            ? 'financial_v2_conflict_recovery_resume_intent_namespace'
+            : intent.accountId !== owner
+              ? 'financial_v2_conflict_recovery_resume_intent_account'
+              : null;
+    if (intentReason) {
+      return failure(intentReason, {
+        found: true,
+        // Enough to classify the stale intent without exposing its contents:
+        // no amounts, no ids beyond what the caller already knows.
+        intentDiagnostics: {
+          parsed: !!intent,
+          version: intent ? Number(intent.version) || null : null,
+          status: intent ? text(intent.status) || null : null,
+          namespaceMatches: intent ? intent.namespace === target : null,
+          accountMatches: intent ? intent.accountId === owner : null,
+        },
+      });
     }
     const identity = await db.getFirstAsync(
       `SELECT namespace,ledger_id,restore_epoch FROM ledger_sync_identity_v8 WHERE namespace=? LIMIT 1`, target,

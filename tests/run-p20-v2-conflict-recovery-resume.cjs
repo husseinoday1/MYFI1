@@ -338,9 +338,83 @@ const testSlicePreserveCurrentRehydration = async fixture => {
   await testSliceRestartRehydration(basic);
   await testSlicePreserveCurrentRehydration(basic);
 
+  // These five conditions used to share one reason string, which left a real
+  // device on 2026-09-05 unclassifiable: an intent from another account and one
+  // left by an older build looked identical. Each now reports itself, and each
+  // still fails closed.
   const wrongAccount = await recovery.resumePreparedCloudConflictRecoveryV1({ namespace: basic.namespace, accountId: 'another-account', database: basic.db });
   assert.equal(wrongAccount.ok, false);
-  assert.equal(wrongAccount.reason, 'financial_v2_conflict_recovery_resume_intent_invalid');
+  assert.equal(wrongAccount.reason, 'financial_v2_conflict_recovery_resume_intent_account');
+  assert.equal(wrongAccount.intentDiagnostics.accountMatches, false);
+  assert.equal(wrongAccount.intentDiagnostics.namespaceMatches, true, 'namespace still matches; only the account differs');
+
+  const intentMetaKey = `financial_v2_conflict_recovery_intent_v1:${basic.namespace}`;
+  const originalIntent = basic.db.native.prepare('SELECT value FROM ledger_v7_meta WHERE key=?').get(intentMetaKey).value;
+  const putIntent = value => basic.db.native.prepare('UPDATE ledger_v7_meta SET value=? WHERE key=?').run(value, intentMetaKey);
+  const resumeBasic = () => recovery.resumePreparedCloudConflictRecoveryV1({
+    namespace: basic.namespace, accountId: 'account-1', database: basic.db,
+  });
+
+  putIntent('{not json');
+  let classified = await resumeBasic();
+  assert.equal(classified.reason, 'financial_v2_conflict_recovery_resume_intent_unparseable');
+  assert.equal(classified.intentDiagnostics.parsed, false);
+
+  putIntent(JSON.stringify({ ...JSON.parse(originalIntent), version: 2 }));
+  classified = await resumeBasic();
+  assert.equal(classified.reason, 'financial_v2_conflict_recovery_resume_intent_version');
+  assert.equal(classified.intentDiagnostics.version, 2);
+
+  putIntent(JSON.stringify({ ...JSON.parse(originalIntent), status: 'something_else' }));
+  classified = await resumeBasic();
+  assert.equal(classified.reason, 'financial_v2_conflict_recovery_resume_intent_status');
+  assert.equal(classified.intentDiagnostics.status, 'something_else');
+
+  putIntent(JSON.stringify({ ...JSON.parse(originalIntent), namespace: 'user:someone-else' }));
+  classified = await resumeBasic();
+  assert.equal(classified.reason, 'financial_v2_conflict_recovery_resume_intent_namespace');
+  assert.equal(classified.intentDiagnostics.namespaceMatches, false);
+
+  // Diagnostics must never carry the intent's contents out to a copyable screen.
+  assert.equal(
+    JSON.stringify(classified.intentDiagnostics).includes('checkpoint'), false,
+    'intentDiagnostics must not leak intent internals',
+  );
+
+  // The automatic path, which is the one a device actually reaches. The device
+  // seen on 2026-09-05 became 'blocked' after an account switch without anyone
+  // pressing a button, so it never ran prepareV2ConflictRecovery -- attaching
+  // the classification only there would have left exactly that device
+  // unclassifiable, which is the case this asserts.
+  {
+    const sliceSource = fs.readFileSync(sliceTarget, 'utf8');
+    const state = { restoreSafety: null };
+    const rehydrate = buildSliceRehydrator({
+      source: sliceSource, set: patch => Object.assign(state, patch), fixture: basic,
+    });
+
+    putIntent(JSON.stringify({ ...JSON.parse(originalIntent), accountId: 'someone-else' }));
+    await rehydrate({
+      set: patch => Object.assign(state, patch),
+      namespace: basic.namespace, accountId: 'account-1', cfg: {},
+    });
+    assert.equal(
+      state.restoreSafety?.status, 'financial_v2_conflict_recovery_blocked',
+      'a mismatched intent must block through the automatic path',
+    );
+    assert.equal(
+      state.restoreSafety?.reason, 'financial_v2_conflict_recovery_resume_intent_account',
+      'the automatic path must carry the specific reason, not the old generic one',
+    );
+    assert.ok(
+      state.restoreSafety?.intentDiagnostics,
+      'the automatic path must carry intentDiagnostics -- this is the path devices actually reach',
+    );
+    assert.equal(state.restoreSafety.intentDiagnostics.accountMatches, false);
+  }
+
+  putIntent(originalIntent);
+  assert.equal((await resumeBasic()).ok, true, 'restoring the original intent must resume cleanly again');
 
   const extraMutation = createFixture('user:resume-extra');
   await prepare(extraMutation);
