@@ -1,5 +1,5 @@
 import { today, normalizeDate } from '../../utils/calc';
-import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
+import { getDefaultWalletId, getWalletAvailableBalances, normalizeWallets } from '../../lib/wallets';
 import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
 import {
   capLinkedAmount,
@@ -10,7 +10,7 @@ import {
   remainingAmount,
   uid,
 } from '../domain';
-import { debtLifecycle, goalLifecycle, reopenCompletionCommitments } from '../../lib/trackerLifecycle';
+import { debtLifecycle, goalLifecycle, planGoalReleaseUndoV1, reopenCompletionCommitments } from '../../lib/trackerLifecycle';
 import { buildEntityCurrencyFields, normalizeCurrencyCode } from '../../lib/financialCoreV2';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
 import { commandWalletPosition } from '../../lib/financialCommandBalances';
@@ -18,6 +18,7 @@ import { buildTrackerTransactionTitle, TRANSACTION_SEMANTIC_KIND } from '../../l
 import {
   commitEntityChangesV7,
   commitFinancialTransactionV7,
+  voidFinancialTransactionsV7,
 } from '../../lib/financialLedgerV7Repository';
 
 const walletPositionForTrackerCommand = (get, walletId) => commandWalletPosition({
@@ -631,6 +632,69 @@ export const createTrackersSlice = (set, get) => ({
     await get().saveLocal();
     get().scheduleCloudSync?.({ reason: 'tracker_change' });
     return true;
+  },
+
+  // The owner's way back from a completed-and-transferred goal. Deliberately
+  // explicit: nothing calls this automatically, and it refuses rather than
+  // half-applying. See planGoalReleaseUndoV1 for why a wallet check is required
+  // -- releasing frees a reservation, so undoing one has to re-take it.
+  undoGoalRelease: async (goalId) => {
+    const state = get();
+    const goal = state.goals.find(item => item.id === goalId);
+    if (!goal) return { ok: false, reason: 'goal_not_found' };
+
+    const availableById = new Map(
+      getWalletAvailableBalances(state.wallets, state.trans, state.cfg.currency, state.cfg.defaultWalletId)
+        .map(wallet => [wallet.id, Number(wallet.availableBalance || 0)]),
+    );
+    const plan = planGoalReleaseUndoV1({
+      goal, transactions: state.trans, walletAvailableById: availableById,
+    });
+    if (!plan.ok) return plan;
+
+    const nextGoal = {
+      ...goal,
+      savings: plan.savings,
+      cur: plan.cur,
+      status: plan.status,
+      active: true,
+      releasedAt: null,
+      settledAmount: plan.cur,
+    };
+    // The release transaction is what makes stateFromFinancialV7 re-derive
+    // allocationReleased on every hydration, so it has to go for the undo to
+    // survive a restart. Voided, not erased, like every other deletion here.
+    const releaseRows = state.trans.filter(item => item.isGoalRelease && item.goalId === goalId);
+
+    try {
+      const committed = await voidFinancialTransactionsV7({
+        namespace: getLedgerNamespace(state.workspaceNamespace, state.cfg),
+        transactionIds: releaseRows.map(item => item.id),
+        entityChanges: [{ entityType: 'goal', id: nextGoal.id, payload: nextGoal }],
+      });
+      if (committed.supported && !committed.ok) {
+        return { ok: false, reason: committed.reason || 'goal_release_undo_commit_failed' };
+      }
+    } catch (error) {
+      const reason = String(error?.message || 'goal_release_undo_failed');
+      set({ ledgerError: reason });
+      return { ok: false, reason };
+    }
+
+    const releaseIds = new Set(releaseRows.map(item => item.id));
+    set(s => ({
+      goals: s.goals.map(item => (item.id === goalId ? nextGoal : item)),
+      trans: s.trans
+        .filter(item => !releaseIds.has(item.id))
+        .map(item => (
+          item.isGoalSaving && item.goalId === goalId
+            ? { ...item, allocationReleased: false, allocationReleasedAt: null }
+            : item
+        )),
+    }));
+    await get().saveLocal();
+    get().scheduleCloudSync?.({ reason: 'tracker_change' });
+    return { ok: true, cur: plan.cur, reReserved: plan.reReserved };
   },
 
   editGoalSaving: async (goalId, savingId, amt, dateISO = null) => {

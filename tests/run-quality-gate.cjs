@@ -53,6 +53,8 @@ const staticContracts = [
   'phase15-history-read-path-telemetry.test.cjs',
   'phase15-sync-honesty-v2stuck.test.cjs',
   'goal-release-delete-notice.test.cjs',
+  'goal-release-undo.test.cjs',
+  'financial-v2-identity-adoption.test.cjs',
   'p10-production-restore-wiring.test.cjs',
   'p10-014b-restore-workspace-conflict.test.cjs',
   'p19-001-offline-ledger-identity.test.cjs',

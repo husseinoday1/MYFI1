@@ -32,7 +32,7 @@ import { startLiveSpeechPreview } from '../lib/liveSpeechPreview';
 import { formatNumberInput, parseNumberInput, preserveNumberInputDraft } from '../lib/numberInput';
 import { buildEntryFxSuggestion, buildTransferFxSuggestion } from '../lib/fxSuggestions';
 import { buildGeneratedEntryTitle, isGeneratedEntryTitle } from '../lib/transactionSemantics';
-import { releasedGoalDeleteNotice } from '../lib/trackerLifecycle';
+import { releasedGoalDeleteNotice, releasedGoalDeleteRefusalCopy } from '../lib/trackerLifecycle';
 
 const displayFxValue = value => {
   const n = parseNumberInput(value, { fractionDigits: 8 });
@@ -925,9 +925,7 @@ export default function AddTransModal({
       ? releasedGoalDeleteNotice(editData, goals.find(entity => entity.id === editData.goalId))
       : null;
     const body = releasedGoal
-      ? (cfg.lang === 'ar'
-        ? `${releasedGoal.goalName ? `الهدف "${releasedGoal.goalName}"` : 'هذا الهدف'} مكتمل ومحوَّل بالفعل${releasedGoal.releasedAt ? ` بتاريخ ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. حذف هذه الحركة لن يغيّر حالته المسجّلة.`
-        : `${releasedGoal.goalName ? `Goal "${releasedGoal.goalName}"` : 'This goal'} was already completed and released${releasedGoal.releasedAt ? ` on ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. Deleting this transaction won't change its recorded status.`)
+      ? releasedGoalDeleteRefusalCopy(releasedGoal, cfg.lang).body
       : L.confirmDel;
     Alert.alert(L.delete, body, [
       { text: L.no, style: 'cancel' },

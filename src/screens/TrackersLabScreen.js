@@ -15,7 +15,7 @@ import { isRTL, rowDirFor, textAlignFor } from '../lib/layout';
 import { filterByActiveScope, getModules } from '../lib/modules';
 import { parseNumberInput, preserveNumberInputDraft } from '../lib/numberInput';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
-import { isSafelyArchivableTracker, isTrackerPastGracePeriod, latestMovementDate, releasedGoalDeleteNotice } from '../lib/trackerLifecycle';
+import { isSafelyArchivableTracker, isTrackerPastGracePeriod, latestMovementDate, releasedGoalDeleteNotice, releasedGoalDeleteRefusalCopy } from '../lib/trackerLifecycle';
 import { remainingInstallments } from '../store/domain';
 
 const money = (value) => Math.round(Math.abs(Number(value) || 0)).toLocaleString();
@@ -78,6 +78,17 @@ const copy = (lang) => {
     releaseGoal,
     releaseGoalConfirm,
     completionRetention,
+    undoRelease: ar ? 'التراجع عن التحويل' : 'Undo transfer',
+    undoReleaseConfirm: ar
+      ? 'سيعود الهدف إلى حالة "مكتمل"، ويُحجز مبلغه مرة أخرى في نفس المحافظ. لن يتم هذا إن لم يعد الرصيد المتاح كافياً.'
+      : 'The goal returns to "completed" and its amount is reserved again in the same wallets. This will not proceed if the available balance is no longer enough.',
+    undoReleaseDone: ar ? 'تم التراجع عن التحويل.' : 'Transfer undone.',
+    undoReleaseNoSavings: ar
+      ? 'لم تعد هناك حركات توفير محفوظة لهذا الهدف، فلا يمكن إعادة بنائه.'
+      : 'No saving transactions remain for this goal, so it cannot be rebuilt.',
+    undoReleaseShort: ar
+      ? 'الرصيد المتاح لا يكفي لإعادة حجز المبلغ. لم يتغيّر شيء.'
+      : 'Available balance is not enough to reserve the amount again. Nothing was changed.',
     title: ar ? 'المتابعات' : 'Trackers',
     all: ar ? 'الكل' : 'All',
     owed: ar ? 'دين عليّ' : 'Debt I owe',
@@ -187,7 +198,7 @@ export default function TrackersLabScreen({
   const {
     trans, debts, goals, commitments, wallets, cfg,
     editDebt, deleteDebt, editDebtPayment, deleteDebtPayment,
-    editGoal, deleteGoal, editGoalSaving, deleteGoalSaving, releaseGoalSavings,
+    editGoal, deleteGoal, editGoalSaving, deleteGoalSaving, releaseGoalSavings, undoGoalRelease,
     deferCommitment, clearCommitmentDeferral, editCommitment, deleteCommitment,
     archiveTracker, archiveTrackersMany, restoreTracker, deleteTrackersMany, deleteTrackerPaymentsMany,
   } = useStore();
@@ -486,8 +497,33 @@ export default function TrackersLabScreen({
     ]);
   };
 
+  // The way back from a release. Explicit, confirmed, and it reports its own
+  // refusal rather than failing quietly -- the refusal that blocks deleting a
+  // released goal's transactions points the owner here, so this has to exist
+  // and has to say what happened.
+  const confirmUndoRelease = (item) => {
+    Alert.alert(T.undoRelease, T.undoReleaseConfirm, [
+      { text: T.cancel, style: 'cancel' },
+      {
+        text: T.undoRelease,
+        onPress: async () => {
+          const result = await undoGoalRelease?.(item.sourceId);
+          if (result?.ok) { Alert.alert('', T.undoReleaseDone); return; }
+          Alert.alert('', result?.reason === 'goal_release_undo_no_surviving_savings'
+            ? T.undoReleaseNoSavings
+            : result?.reason === 'goal_release_undo_insufficient_available'
+              ? T.undoReleaseShort
+              : String(result?.reason || ''));
+        },
+      },
+    ]);
+  };
+
   const actionFor = (item) => {
     if (item.archived) return null;
+    if (item.kind === 'saving' && item.source?.status === 'released') {
+      return { label: T.undoRelease, icon: 'arrow-undo-outline', onPress: () => confirmUndoRelease(item), color: th.warn };
+    }
     if (item.kind === 'saving' && item.source?.purpose === 'reserve' && ['active', 'settled'].includes(item.source?.status) && item.remaining <= 0) {
       return { label: T.releaseGoal, icon: 'lock-open-outline', onPress: () => confirmReleaseGoal(item), color: th.primary };
     }
@@ -660,9 +696,7 @@ export default function TrackersLabScreen({
       ? releasedGoalDeleteNotice({ isGoalSaving: true }, item.source)
       : null;
     const body = releasedGoal
-      ? (isAr
-        ? `${releasedGoal.goalName ? `الهدف "${releasedGoal.goalName}"` : 'هذا الهدف'} مكتمل ومحوَّل بالفعل${releasedGoal.releasedAt ? ` بتاريخ ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. حذف هذه الدفعة لن يغيّر حالته المسجّلة.`
-        : `${releasedGoal.goalName ? `Goal "${releasedGoal.goalName}"` : 'This goal'} was already completed and released${releasedGoal.releasedAt ? ` on ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. Deleting this payment won't change its recorded status.`)
+      ? releasedGoalDeleteRefusalCopy(releasedGoal, cfg.lang).body
       : T.confirmDeletePayment;
     Alert.alert(T.confirmDelete, body, [
       { text: T.cancel, style: 'cancel' },
@@ -787,9 +821,7 @@ export default function TrackersLabScreen({
       ? releasedGoalDeleteNotice({ isGoalSaving: true }, item.source)
       : null;
     const body = releasedGoal
-      ? (isAr
-        ? `${releasedGoal.goalName ? `الهدف "${releasedGoal.goalName}"` : 'هذا الهدف'} مكتمل ومحوَّل بالفعل${releasedGoal.releasedAt ? ` بتاريخ ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. حذف هذه العمليات لن يغيّر حالته المسجّلة.`
-        : `${releasedGoal.goalName ? `Goal "${releasedGoal.goalName}"` : 'This goal'} was already completed and released${releasedGoal.releasedAt ? ` on ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. Deleting these entries won't change its recorded status.`)
+      ? releasedGoalDeleteRefusalCopy(releasedGoal, cfg.lang).body
       : isAr
         ? `سيتم حذف ${rows.length} من العمليات المحددة وتحديث الأرصدة والحركات المرتبطة.`
         : `Delete ${rows.length} selected entries and update linked balances and transactions?`;

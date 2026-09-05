@@ -12,7 +12,7 @@ import {
   syncCommitmentPaidMonth,
   uid,
 } from '../domain';
-import { debtLifecycle, goalLifecycle, reopenCompletionCommitments } from '../../lib/trackerLifecycle';
+import { debtLifecycle, goalLifecycle, releasedGoalDeleteNotice, reopenCompletionCommitments } from '../../lib/trackerLifecycle';
 import { buildCurrencyFields, buildEntityCurrencyFields, buildTransferCurrencyFields } from '../../lib/financialCoreV2';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
 import { commandWalletPosition } from '../../lib/financialCommandBalances';
@@ -698,6 +698,14 @@ export const createTransactionSlice = (set, get) => ({
   deleteTrans: async (id) => {
     const t = get().trans.find(x => x.id === id);
     if (!t) return false;
+    // Refused, not warned about. Deleting one of these changed nothing --
+    // goalLifecycle short-circuits on 'released', so the goal kept asserting a
+    // settledAmount with no transaction left to support it. Enforced here, at
+    // the one place deletion happens, rather than in each screen that offers
+    // it, so no delete path can miss it. undoGoalRelease is the way back.
+    if (releasedGoalDeleteNotice(t, get().goals.find(goal => goal.id === t.goalId))) {
+      return false;
+    }
     const linkedDebtBefore = t?.isDebtPayment ? get().debts.find(item => item.id === t.debtId) : null;
     const linkedGoalBefore = t?.isGoalSaving ? get().goals.find(item => item.id === t.goalId) : null;
     const trans = get().trans.filter(item => item.id !== id);
@@ -839,6 +847,14 @@ export const createTransactionSlice = (set, get) => ({
   deleteTransMany: async (ids = []) => {
     const selected = new Set((Array.isArray(ids) ? ids : []).filter(Boolean));
     if (!selected.size) return false;
+    // Same refusal as deleteTrans, and all-or-nothing on purpose: silently
+    // deleting the rest of a multi-select while dropping the released-goal ones
+    // would leave the owner believing the whole selection went.
+    const goalsById = new Map(get().goals.map(goal => [goal.id, goal]));
+    if (get().trans.some(item => selected.has(item.id)
+      && releasedGoalDeleteNotice(item, goalsById.get(item.goalId)))) {
+      return false;
+    }
     const removed = get().trans.filter(item => selected.has(item.id));
     const debtPayments = new Set(removed.filter(item => item.isDebtPayment).map(item => `${item.debtId}:${item.paymentId}`));
     const goalSavings = new Set(removed.filter(item => item.isGoalSaving).map(item => `${item.goalId}:${item.savingId}`));

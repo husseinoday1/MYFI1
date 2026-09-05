@@ -24,7 +24,7 @@ import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { formatMonthLabel } from '../lib/months';
 import { PRODUCT_FILE_PREFIX, PRODUCT_NAME } from '../lib/productIdentity';
 import { getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
-import { releasedGoalDeleteNotice } from '../lib/trackerLifecycle';
+import { releasedGoalDeleteNotice, releasedGoalDeleteRefusalCopy } from '../lib/trackerLifecycle';
 
 export default function ArchiveScreen() {
   const {
@@ -376,11 +376,14 @@ export default function ArchiveScreen() {
     const releasedGoal = t.isGoalSaving
       ? releasedGoalDeleteNotice(t, goals.find(entity => entity.id === t.goalId))
       : null;
-    const body = releasedGoal
-      ? (cfg.lang === 'ar'
-        ? `${releasedGoal.goalName ? `الهدف "${releasedGoal.goalName}"` : 'هذا الهدف'} مكتمل ومحوَّل بالفعل${releasedGoal.releasedAt ? ` بتاريخ ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. حذف هذه الحركة لن يغيّر حالته المسجّلة.`
-        : `${releasedGoal.goalName ? `Goal "${releasedGoal.goalName}"` : 'This goal'} was already completed and released${releasedGoal.releasedAt ? ` on ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. Deleting this transaction won't change its recorded status.`)
-      : linked ? copy.linkedBody : L.confirmDel;
+    // Refused, not offered-then-ignored: the store declines this delete, so a
+    // destructive confirm here would make the button silently do nothing.
+    if (releasedGoal) {
+      const refusal = releasedGoalDeleteRefusalCopy(releasedGoal, cfg.lang);
+      Alert.alert(refusal.title, refusal.body, [{ text: L.ok || 'OK' }]);
+      return;
+    }
+    const body = linked ? copy.linkedBody : L.confirmDel;
     Alert.alert(linked ? copy.linkedTitle : L.delete, body, [
       { text: L.no, style: 'cancel' },
       { text: L.delete, style: 'destructive', onPress: () => deleteTrans(t.id) },
@@ -395,9 +398,21 @@ export default function ArchiveScreen() {
     ));
     const hasReleasedGoalRow = trans.some(item => selection.selected.has(item.id) && item.isGoalSaving
       && releasedGoalDeleteNotice(item, goals.find(entity => entity.id === item.goalId)));
+    if (hasReleasedGoalRow) {
+      // All-or-nothing in the store, so refuse the batch rather than deleting
+      // part of it or confirming a delete that cannot run.
+      Alert.alert(
+        isAr ? 'لا يمكن حذف هذا التحديد' : "This selection can't be deleted",
+        isAr
+          ? 'التحديد يشمل حركة تخص هدفاً مكتملاً وتم تحويل مبلغه. أزلها من التحديد، أو تراجع عن التحويل من صفحة الهدف أولاً.'
+          : 'The selection includes a transaction belonging to a completed, transferred goal. Remove it from the selection, or undo the transfer from the goal first.',
+        [{ text: L.ok || 'OK' }],
+      );
+      return;
+    }
     const body = isAr
-      ? `سيتم حذف ${selection.selectedCount} حركة من السجل نهائياً${hasReleasedGoalRow ? ' (بعضها من هدف مكتمل ومحوَّل بالفعل، حذفها لن يغيّر حالته المسجّلة).' : linked ? ' وتحديث العناصر المرتبطة بها.' : '.'}`
-      : `Delete ${selection.selectedCount} archived transactions permanently${hasReleasedGoalRow ? " (some belong to a goal already completed and released — deleting them won't change its recorded status)." : linked ? ' and update linked items.' : '?'}`;
+      ? `سيتم حذف ${selection.selectedCount} حركة من السجل نهائياً${linked ? ' وتحديث العناصر المرتبطة بها.' : '.'}`
+      : `Delete ${selection.selectedCount} archived transactions permanently${linked ? ' and update linked items.' : '?'}`;
     Alert.alert(L.delete, body, [
       { text: L.no, style: 'cancel' },
       {

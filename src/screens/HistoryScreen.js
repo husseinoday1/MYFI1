@@ -23,7 +23,7 @@ import { activeLedgerSupported, getLedgerNamespace, queryLedgerTransactions } fr
 import { recordHistoryLedgerQueryOutcome } from '../lib/historyReadPathTelemetry';
 import TransactionDetailsModal from '../components/TransactionDetailsModal';
 import { getTransactionSemanticKind, TRANSACTION_SEMANTIC_KIND } from '../lib/transactionSemantics';
-import { releasedGoalDeleteNotice } from '../lib/trackerLifecycle';
+import { releasedGoalDeleteNotice, releasedGoalDeleteRefusalCopy } from '../lib/trackerLifecycle';
 
 const copy = (lang) => {
   const ar = lang === 'ar';
@@ -462,11 +462,14 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
     const releasedGoal = item.isGoalSaving
       ? releasedGoalDeleteNotice(item, goals.find(entity => entity.id === item.goalId))
       : null;
-    const body = releasedGoal
-      ? (cfg.lang === 'ar'
-        ? `${releasedGoal.goalName ? `الهدف "${releasedGoal.goalName}"` : 'هذا الهدف'} مكتمل ومحوَّل بالفعل${releasedGoal.releasedAt ? ` بتاريخ ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. حذف هذه الحركة لن يغيّر حالته المسجّلة.`
-        : `${releasedGoal.goalName ? `Goal "${releasedGoal.goalName}"` : 'This goal'} was already completed and released${releasedGoal.releasedAt ? ` on ${String(releasedGoal.releasedAt).slice(0, 10)}` : ''}. Deleting this transaction won't change its recorded status.`)
-      : linked ? T.linkedDeleteBody : L.confirmDel;
+    // Refused, not offered-then-ignored: the store declines this delete, so
+    // showing a destructive confirm here would make the button do nothing.
+    if (releasedGoal) {
+      const copy = releasedGoalDeleteRefusalCopy(releasedGoal, cfg.lang);
+      Alert.alert(copy.title, copy.body, [{ text: L.ok || 'OK' }]);
+      return;
+    }
+    const body = linked ? T.linkedDeleteBody : L.confirmDel;
     Alert.alert(linked ? T.linkedDeleteTitle : L.delete, body, [
       { text: L.no, style: 'cancel' },
       {
@@ -494,9 +497,21 @@ export default function HistoryScreen({ onAddExpense = () => {}, onAddIncome = (
     const linked = selectedRows.some(item => item.isDebtPayment || item.isGoalSaving || item.isCommitmentPayment);
     const hasReleasedGoalRow = selectedRows.some(item => item.isGoalSaving
       && releasedGoalDeleteNotice(item, goals.find(entity => entity.id === item.goalId)));
+    if (hasReleasedGoalRow) {
+      // All-or-nothing in the store, so refuse the batch rather than deleting
+      // part of it or confirming a delete that cannot run.
+      Alert.alert(
+        cfg.lang === 'ar' ? 'لا يمكن حذف هذا التحديد' : "This selection can't be deleted",
+        cfg.lang === 'ar'
+          ? 'التحديد يشمل حركة تخص هدفاً مكتملاً وتم تحويل مبلغه. أزلها من التحديد، أو تراجع عن التحويل من صفحة الهدف أولاً.'
+          : 'The selection includes a transaction belonging to a completed, transferred goal. Remove it from the selection, or undo the transfer from the goal first.',
+        [{ text: L.ok || 'OK' }],
+      );
+      return;
+    }
     const body = cfg.lang === 'ar'
-      ? `سيتم حذف ${selection.selectedCount} حركة نهائياً${hasReleasedGoalRow ? ' (بعضها من هدف مكتمل ومحوَّل بالفعل، حذفها لن يغيّر حالته المسجّلة).' : linked ? ' وتحديث العناصر المرتبطة بها.' : '.'}`
-      : `Delete ${selection.selectedCount} transactions permanently${hasReleasedGoalRow ? " (some belong to a goal already completed and released — deleting them won't change its recorded status)." : linked ? ' and update their linked items.' : '?'}`;
+      ? `سيتم حذف ${selection.selectedCount} حركة نهائياً${linked ? ' وتحديث العناصر المرتبطة بها.' : '.'}`
+      : `Delete ${selection.selectedCount} transactions permanently${linked ? ' and update their linked items.' : '?'}`;
     Alert.alert(L.delete, body, [
       { text: L.no, style: 'cancel' },
       {

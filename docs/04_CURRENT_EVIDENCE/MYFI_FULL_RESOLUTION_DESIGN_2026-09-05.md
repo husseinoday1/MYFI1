@@ -62,6 +62,98 @@ So the honest description is not "no recovery mechanism exists". It is: **the
 mechanism exists, is proven, and is unreachable for this failure mode because
 of one eligibility condition.**
 
+## B2. Second correction — §A overstated how reusable the flow is
+
+Added 2026-09-05, after tracing `inspectCandidate` (which §A did not open).
+This is the second time my sizing of this item has moved, so stating it plainly
+rather than quietly adjusting: **§A's claim that the existing flow "does not
+trip the ledger-id guard at all" is wrong.**
+
+It is true of the *download*: `stageVerifiedBootstrapWithArchiveV2` resolves the
+cloud source independently and never consults the local identity. It is not
+true of the flow that calls it. `prepareVerifiedCloudConflictRecoveryV1` runs
+`inspectCandidate` immediately after staging, and that function carries two
+hard refusals our accounts hit:
+
+```js
+if (text(identity.ledger_id) !== text(cloudSource.ledgerId)
+    || Number(identity.restore_epoch) !== Number(cloudSource.restoreEpoch)) {
+  throw new Error('financial_v2_conflict_recovery_cloud_identity_mismatch');
+}
+...
+if (!pending.length || pending.length > 16
+    || !pending.every(row => staleWorkspaceCommand(row, cloudWorkspaceRevision))) {
+  throw new Error('financial_v2_conflict_recovery_pending_mutations_not_safe');
+}
+```
+
+1. It **requires the local identity to equal the cloud identity** — the exact
+   condition that is false for every account we are trying to recover. The
+   download would succeed and the candidate inspection would then refuse.
+2. It **requires every pending row to be a stale workspace command, at most 16
+   of them.** The owner's 37 rows are real transactions, debts and commitments.
+
+So this flow is not a general "adopt a different cloud ledger" mechanism. It is
+narrowly built for one scenario: same identity, a handful of stale workspace
+metadata commands. Widening the eligibility gate would therefore not open a
+working path — it would replace a silent dead end with a failure one step
+later, after a real cloud download and a durable checkpoint had already been
+created. That is worse than the current state, not better.
+
+### What this means for scope
+
+Reusable, unchanged: the cloud download + independent re-verification, the
+checkpoint machinery, the intent/confirm split, the promotion transaction.
+
+Genuinely new, and the actual work:
+
+- an adoption path that **deliberately permits an identity change** (today's
+  refusal is correct for its own scenario, so this must be a separate, clearly
+  named path — not a loosened condition inside the existing one, which would
+  weaken a guard that is right for the case it was written for);
+- per-row review for pending rows that are **not** stale-workspace-only, since
+  refusing outright is exactly what blocks these accounts.
+
+This lands closer to my original estimate than to §A's. I would rather say so
+now than have a third revision arrive mid-implementation.
+
+## B3. The promotion transaction is not reusable either
+
+Traced 2026-09-05 while building. PA's approved scope listed the promotion
+transaction among the pieces to reuse unchanged. It cannot be, for the same
+reason as the other two, which makes this the **third** place the same
+identity-equality assumption is built in:
+
+`promotePreparedCloudConflictRecoveryV1` (`financialBootstrapRecoveryPromotionV2.js:373`)
+
+```js
+if (!identity?.ledger_id || String(identity.ledger_id) !== hot.ledgerId
+    || Number(identity.restore_epoch) !== hot.restoreEpoch) { throw ... }
+```
+
+and, more consequentially, it clears the outbox by the **cloud** ledger id:
+
+```js
+await db.runAsync(`DELETE FROM ledger_outbox_v3 WHERE ledger_id=? AND restore_epoch=?`,
+  hot.ledgerId, hot.restoreEpoch);
+```
+
+In an adoption the pending rows live under the **old local** ledger id, so that
+delete would not touch them. They would be left orphaned under an identity
+nothing reads any more — the 37 rows would survive on disk and be invisible
+forever, which is a worse outcome than today's honest block.
+
+So the adoption path needs its own promotion. It must, in one transaction:
+apply the staged cloud data, rewrite `ledger_sync_identity_v8` from the old
+local id to the cloud id/epoch, and settle the old ledger's outbox rows
+explicitly by the owner's per-row decisions — kept rows re-committed as fresh
+mutations under the adopted identity (their old revision chains were computed
+against a ledger that is being replaced and cannot be carried over), discarded
+rows removed.
+
+Still reused unchanged: the cloud download and independent re-verification, the
+checkpoint, and the intent/confirm split.
+
 ## C. What genuinely remains (the part that is real work)
 
 Widening the gate alone is *not* sufficient, and must not be done alone.

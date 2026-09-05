@@ -85,6 +85,104 @@ export const releasedGoalDeleteNotice = (trans = {}, goal = null) => {
   };
 };
 
+// One copy of the refusal wording, because six screens offer this delete and
+// six near-identical strings drift. The store refuses regardless; this is what
+// the owner is told, and it has to name the way forward rather than leave the
+// tap doing nothing.
+export const releasedGoalDeleteRefusalCopy = (notice, lang = 'ar') => {
+  const ar = lang === 'ar';
+  const name = notice?.goalName;
+  const on = notice?.releasedAt ? String(notice.releasedAt).slice(0, 10) : null;
+  return {
+    title: ar ? 'لا يمكن حذف هذه الحركة' : "This transaction can't be deleted",
+    body: ar
+      ? `${name ? `الهدف "${name}"` : 'هذا الهدف'} مكتمل وتم تحويل مبلغه إلى المحفظة${on ? ` بتاريخ ${on}` : ''}. حذف هذه الحركة كان سيترك الهدف يعرض مبلغاً لا تسنده أي حركة. للتعديل: افتح الهدف واختر "التراجع عن التحويل" أولاً، ثم احذف ما تريد.`
+      : `${name ? `Goal "${name}"` : 'This goal'} was completed and its amount transferred to the wallet${on ? ` on ${on}` : ''}. Deleting this would leave the goal showing an amount no transaction supports. To change it: open the goal, choose "Undo transfer" first, then delete what you need.`,
+  };
+};
+
+// Undoing a release, decided as pure data so it can be tested without a store.
+//
+// Releasing a reserve goal does not move cash: both the saving and the release
+// transaction carry amt/walletAmount 0. What a saving does is RESERVE part of a
+// wallet (getWalletAvailableBalances subtracts un-released goal allocations from
+// availableBalance), and what the release does is free that reservation. So
+// undoing a release means re-reserving — and that can only be honoured if the
+// wallet still has that much available. If the owner spent the money after
+// releasing it, re-reserving would drive available balance negative, so this
+// refuses instead, naming the wallet and the shortfall.
+//
+// The goal's own savings list was emptied at release, but the saving
+// transactions themselves were not deleted, so the list is rebuilt from them.
+export const planGoalReleaseUndoV1 = ({
+  goal = null, transactions = [], walletAvailableById = new Map(),
+} = {}) => {
+  if (!goal || goal.status !== 'released') {
+    return { ok: false, reason: 'goal_not_released' };
+  }
+  const rows = (Array.isArray(transactions) ? transactions : []).filter(item => (
+    item?.isGoalSaving && item.goalId === goal.id && item.savingId && !item.deletedAt
+  ));
+  if (!rows.length) {
+    // Nothing survives to rebuild from. The saving transactions are voided
+    // rather than erased, so recovering from voided rows is possible in
+    // principle — deliberately out of scope here rather than guessed at.
+    return { ok: false, reason: 'goal_release_undo_no_surviving_savings' };
+  }
+
+  const savings = rows.map(item => ({
+    id: item.savingId,
+    amt: Math.abs(Number(item.allocationAmount || 0)),
+    date: item.dateISO || null,
+    ts: Number(item.ts || 0),
+    walletId: item.walletId || null,
+    walletAmount: Math.abs(Number(item.allocationWalletAmount ?? item.allocationAmount ?? 0)),
+    walletCurrency: item.walletCurrency || null,
+    exchangeRate: item.exchangeRate,
+  })).sort((a, b) => a.ts - b.ts);
+
+  const perWallet = new Map();
+  for (const saving of savings) {
+    const key = saving.walletId || '';
+    perWallet.set(key, (perWallet.get(key) || 0) + saving.walletAmount);
+  }
+
+  // Every wallet must be able to absorb its share. Checked for all of them
+  // before returning, so the refusal names every shortfall rather than only
+  // the first one the owner would then hit again.
+  const shortfalls = [];
+  for (const [walletId, amount] of perWallet) {
+    if (amount <= 0) continue;
+    const available = Number(walletAvailableById.get(walletId));
+    if (!Number.isFinite(available) || available + 0.0001 < amount) {
+      shortfalls.push({
+        walletId,
+        required: amount,
+        available: Number.isFinite(available) ? available : null,
+        shortfall: Number.isFinite(available) ? amount - available : null,
+      });
+    }
+  }
+  if (shortfalls.length) {
+    return { ok: false, reason: 'goal_release_undo_insufficient_available', shortfalls };
+  }
+
+  const cur = Math.min(
+    savings.reduce((total, item) => total + Math.abs(Number(item.amt) || 0), 0),
+    Math.abs(Number(goal.target) || 0),
+  );
+  return {
+    ok: true,
+    savings,
+    cur,
+    // Back to 'settled', not 'active': the goal really did reach its target.
+    // goalLifecycle re-derives from here normally, because only 'released'
+    // short-circuits it.
+    status: 'settled',
+    reReserved: [...perWallet.entries()].map(([walletId, amount]) => ({ walletId, amount })),
+  };
+};
+
 export const reopenCompletionCommitments = (commitments = [], links = []) => {
   const linkReasons = new Map((Array.isArray(links) ? links : [])
     .filter(link => link?.linkedType && link?.linkedId)
