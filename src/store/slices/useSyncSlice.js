@@ -72,6 +72,10 @@ import {
   resumePreparedCloudConflictRecoveryV1,
 } from '../../lib/financialV2ConflictRecoveryV1';
 import {
+  confirmCloudIdentityAdoptionV1,
+  prepareCloudIdentityAdoptionV1,
+} from '../../lib/financialV2IdentityAdoptionFlowV1';
+import {
   cloudWorkspaceRevisionFromConflictsV1,
   discardStaleWorkspaceCommandsV1,
   inspectStaleWorkspaceConflictV1,
@@ -1673,6 +1677,14 @@ export const createSyncSlice = (set, get) => ({
       });
       return resumed;
     }
+    // A ledger-id conflict is a different failure with a different repair, and
+    // it never reaches lastSyncError at all -- the V1 fallback nulls it. The
+    // activation record is the only place it survives, which is why three real
+    // accounts sat blocked with no route to any recovery: this gate could not be
+    // satisfied by them however many times sync ran.
+    const ledgerIdConflict = current.financialSyncV2Activation?.status === 'failed_before_activation'
+      && String(current.financialSyncV2Activation?.error || '') === 'financial_v2_ledger_id_conflict';
+    if (ledgerIdConflict) return get().prepareV2IdentityAdoption();
     if (!current.online || current.syncing || String(current.lastSyncError || '') !== 'financial_v2_revision_conflict') {
       return { ok: false, reason: 'financial_v2_conflict_recovery_not_eligible' };
     }
@@ -1778,6 +1790,68 @@ export const createSyncSlice = (set, get) => ({
     }
     set({ lastSyncError: null, restoreSafety: { status: 'financial_v2_conflict_recovery_complete', operation: 'financial_v2_conflict_recovery', checkedAt: new Date().toISOString() } });
     return { ...result, activated: true };
+  },
+
+  // Adoption of a different cloud identity. Separate actions from the conflict
+  // recovery pair above, because the two repairs are not interchangeable and a
+  // screen must never reach one while meaning the other.
+  prepareV2IdentityAdoption: async () => {
+    const current = get();
+    if (!current.user || current.cfg?.demoMode || !current.workspaceReady) {
+      return { ok: false, reason: 'financial_v2_identity_adoption_signin_required' };
+    }
+    if (!current.online || current.syncing) {
+      return { ok: false, reason: 'financial_v2_identity_adoption_not_eligible' };
+    }
+    const workspaceNamespace = current.workspaceNamespace || workspaceNamespaceForSession({ user: current.user });
+    const namespace = getLedgerNamespace(workspaceNamespace, current.cfg);
+    const result = await get().runFinancialMaintenance(
+      'financial_v2_identity_adoption_prepare',
+      () => prepareCloudIdentityAdoptionV1({ supabase, namespace, accountId: current.user.id }),
+      { resumeSync: false, presentation: 'blocking' },
+    );
+    set({
+      financialIdentityAdoption: {
+        status: result?.ok ? 'ready_for_review' : 'blocked',
+        checkedAt: new Date().toISOString(),
+        reason: result?.ok ? null : String(result?.reason || 'prepare_failed'),
+        review: Array.isArray(result?.review) ? result.review : [],
+        local: result?.intent?.local || null,
+        cloud: result?.intent?.cloud || null,
+      },
+    });
+    return result;
+  },
+
+  // Takes the owner's per-row decisions. Refuses unless every pending mutation
+  // carries one -- that gate lives in the library, not here.
+  confirmV2IdentityAdoption: async (decisions = {}) => {
+    const current = get();
+    if (!current.user || current.cfg?.demoMode) {
+      return { ok: false, reason: 'financial_v2_identity_adoption_signin_required' };
+    }
+    const workspaceNamespace = current.workspaceNamespace || workspaceNamespaceForSession({ user: current.user });
+    const namespace = getLedgerNamespace(workspaceNamespace, current.cfg);
+    const result = await get().runFinancialMaintenance(
+      'financial_v2_identity_adoption_confirm',
+      () => confirmCloudIdentityAdoptionV1({
+        supabase, namespace, accountId: current.user.id, decisions, confirmed: true,
+      }),
+      { resumeSync: true, presentation: 'blocking' },
+    );
+    set({
+      financialIdentityAdoption: {
+        status: result?.ok ? 'adopted' : 'blocked',
+        checkedAt: new Date().toISOString(),
+        reason: result?.ok ? null : String(result?.reason || 'confirm_failed'),
+        adopted: result?.ok ? {
+          ledgerId: result.adoptedLedgerId, restoreEpoch: result.adoptedRestoreEpoch,
+          kept: result.kept, discarded: result.discarded, reentryQueued: result.reentryQueued,
+        } : null,
+      },
+    });
+    if (result?.ok) await get().loadLocal();
+    return result;
   },
 
   // Phase 13 Stage D — the other old reader, and the one that needed no gate.
