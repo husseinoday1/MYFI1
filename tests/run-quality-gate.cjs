@@ -55,6 +55,7 @@ const staticContracts = [
   'phase15-sync-honesty-v2stuck.test.cjs',
   'goal-release-delete-notice.test.cjs',
   'goal-release-undo.test.cjs',
+  'tracker-hidden-transaction-lookups.test.cjs',
   'financial-v2-identity-adoption.test.cjs',
   'v2-identity-adoption-wiring.test.cjs',
   'identity-adoption-review-ui.test.cjs',
