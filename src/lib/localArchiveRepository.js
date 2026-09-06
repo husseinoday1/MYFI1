@@ -105,7 +105,8 @@ const archiveMetadata = (data = {}, summary = {}) => ({
   archiveScope: data.archiveScope || summary.scope || 'personal',
 });
 
-const isPrivateArchiveNamespaceV13 = namespace => /::(?:shadow-stage|restore-stage|restore-checkpoint)::/.test(String(namespace || ''));
+const isPrivateArchiveNamespaceV13 = namespace => String(namespace || '').endsWith('::performance-test')
+  || /::(?:shadow-stage|restore-stage|restore-checkpoint)::/.test(String(namespace || ''));
 const advanceArchiveGenerationInTransactionV13 = (database, namespace) => (
   isPrivateArchiveNamespaceV13(namespace)
     ? Promise.resolve(null)

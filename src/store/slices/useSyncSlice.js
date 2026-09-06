@@ -41,6 +41,7 @@ import {
 import { accountIdentityPatch, ensureProfileIdentity } from '../../lib/accountIdentity';
 import { accountIdFromWorkspaceNamespace, resolveWorkspaceTransition, workspaceNamespaceForSession } from '../../lib/accountWorkspace';
 import { readPerformanceSnapshot, schedulePerformanceSnapshotWrite } from '../../dev/performanceTestStorage';
+import { ensurePerformanceTestLedgerV7 } from '../../dev/performanceTestLedgerV7';
 import { exportColdArchives, getColdArchiveNamespace, replaceColdArchives } from '../../lib/localArchiveRepository';
 import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
 import {
@@ -2362,7 +2363,41 @@ export const createSyncSlice = (set, get) => ({
         : await readPerformanceSnapshot(namespace);
       const demoCfg = demoSnapshot?.cfg || demoSnapshot?.data?.cfg || {};
       if (demoSnapshot && demoCfg.demoMode === true && demoCfg.performanceTestMode === true) {
-        const loadedDemo = stateFromSnapshot(demoSnapshot, get().cfg || DEF_CFG);
+        let loadedDemo = stateFromSnapshot(demoSnapshot, get().cfg || DEF_CFG);
+        const coldArchives = await exportColdArchives(
+          getColdArchiveNamespace(namespace, loadedDemo.cfg),
+        );
+        let performanceLedger = await ensurePerformanceTestLedgerV7({
+          workspaceNamespace: namespace,
+          workspace: loadedDemo,
+          coldArchives,
+        });
+        if (performanceLedger?.alreadyCutover && performanceLedger?.ok) {
+          try {
+            // The SQLite ledger may be newer than the deferred performance
+            // snapshot after a same-count edit. Hydrate Zustand from the V7
+            // source of truth instead of accepting count-only equivalence.
+            const v7Workspace = await readFinancialWorkspaceV7({
+              namespace: getLedgerNamespace(namespace, loadedDemo.cfg),
+              includeArchived: false,
+              transactionLimit: null,
+            });
+            if (!v7Workspace) throw new Error('performance_v7_read_failed');
+            loadedDemo = stateFromFinancialV7(v7Workspace, loadedDemo.cfg);
+          } catch (error) {
+            performanceLedger = {
+              ...performanceLedger,
+              ok: false,
+              cutover: false,
+              reason: String(error?.message || 'performance_v7_read_failed'),
+            };
+          }
+        }
+        const performanceLedgerFailed = performanceLedger.supported === true
+          && (!performanceLedger.ok || !performanceLedger.cutover);
+        const performanceLedgerError = performanceLedgerFailed
+          ? (performanceLedger.reason || 'performance_v7_bootstrap_failed')
+          : null;
         set({
           ...loadedDemo,
           workspaceNamespace: namespace,
@@ -2370,32 +2405,22 @@ export const createSyncSlice = (set, get) => ({
           pendingGuestTransfer: false,
           guestTransferPreview: null,
           syncConflict: null,
-          lastSyncError: null,
+          lastSyncError: performanceLedgerError,
           vaultUnreadable: false,
           vaultError: null,
           vaultRecovery: null,
+          ledgerReady: activeLedgerSupported() && !performanceLedgerFailed,
+          ledgerError: performanceLedgerError,
+          financialLedgerV7Ready: performanceLedger.supported === true && !performanceLedgerFailed,
+          financialLedgerV7Cutover: performanceLedger.cutover === true && !performanceLedgerFailed,
+          financialLedgerV7Checksum: performanceLedgerFailed ? null : performanceLedger.checksum || null,
+          financialLedgerV7Migration: performanceLedger.supported ? performanceLedger : null,
+          dataHealth: performanceLedgerFailed ? {
+            ok: false,
+            supported: true,
+            issues: [{ code: performanceLedgerError }],
+          } : performanceLedger.health || null,
         });
-        if (activeLedgerSupported()) {
-          try {
-            const ledgerNamespace = getLedgerNamespace(namespace, loadedDemo.cfg);
-            await clearFinancialWorkspaceV7({ namespace: ledgerNamespace });
-            await replaceLedgerSnapshot({
-              namespace: ledgerNamespace,
-              transactions: loadedDemo.trans,
-              wallets: loadedDemo.wallets,
-              baseCurrency: loadedDemo.cfg?.currency || 'IQD',
-            });
-            const health = await getLedgerDataHealth({
-              namespace: ledgerNamespace,
-              walletIds: loadedDemo.wallets.map(item => item.id),
-              expectedActiveCount: loadedDemo.trans.length,
-            });
-            set({ ledgerReady: true, ledgerError: null, dataHealth: health });
-          } catch (ledgerError) {
-            console.warn('[LEDGER] performance bootstrap', ledgerError);
-            set({ ledgerReady: false, ledgerError: String(ledgerError?.message || ledgerError) });
-          }
-        }
         await writeActiveLocalLedgerNamespace(namespace);
         return true;
       }
@@ -2550,6 +2575,10 @@ export const createSyncSlice = (set, get) => ({
   },
 
   clearAndResetVault: async (options = {}) => {
+    if (get().cfg?.performanceTestMode === true) {
+      set({ lastSyncError: 'performance_test_requires_exit' });
+      return false;
+    }
     // P19-015A2: vault reset is a maintenance operation.
     if (!options?.maintenanceOwned) {
       return get().runFinancialMaintenance(

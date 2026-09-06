@@ -18,14 +18,16 @@ import {
   yearOf,
 } from '../domain';
 import { buildPerformanceTestWorkspaceAsync, DEFAULT_PERFORMANCE_TEST_TIER } from '../../dev/performanceTestData';
+import { ensurePerformanceTestLedgerV7 } from '../../dev/performanceTestLedgerV7';
 import { clearPerformanceSnapshot, flushScheduledPerformanceSnapshot } from '../../dev/performanceTestStorage';
 import { clearColdArchives, exportColdArchives, getColdArchiveNamespace, replaceColdArchives, storeColdArchiveYear, storeColdArchiveYears } from '../../lib/localArchiveRepository';
 import { compareTransactionsNewestFirst } from '../../lib/transactionIndex';
-import { activeLedgerSupported, clearLedgerNamespace, getLedgerNamespace, replaceLedgerSnapshot } from '../../lib/activeLedgerRepository';
+import { activeLedgerSupported, clearLedgerNamespace, getLedgerNamespace } from '../../lib/activeLedgerRepository';
 import {
   archiveFinancialTransactionsV7,
   clearFinancialWorkspaceV7,
   clearLocalFinancialDataForCloudRecoveryV8,
+  getFinancialWorkspaceStateV7,
   inspectLocalFinancialResetSafetyV8,
 } from '../../lib/financialLedgerV7Repository';
 import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
@@ -97,6 +99,30 @@ const stripPerformanceCfg = (cfg = {}) => {
   return cleanCfg;
 };
 
+const restoredFinancialLedgerState = async ({ namespace, cfg }) => {
+  if (!activeLedgerSupported()) {
+    return {
+      financialLedgerV7Ready: false,
+      financialLedgerV7Cutover: false,
+      financialLedgerV7Checksum: null,
+      financialLedgerV7Migration: null,
+      dataHealth: null,
+    };
+  }
+  const state = await getFinancialWorkspaceStateV7({
+    namespace: getLedgerNamespace(namespace || GUEST_NAMESPACE, cfg || {}),
+  });
+  const cutover = state?.source_mode === 'sqlite';
+  const ready = cutover || (state?.source_mode === 'shadow' && !!state?.shadow_checksum);
+  return {
+    financialLedgerV7Ready: ready,
+    financialLedgerV7Cutover: cutover,
+    financialLedgerV7Checksum: ready ? state.shadow_checksum || null : null,
+    financialLedgerV7Migration: null,
+    dataHealth: null,
+  };
+};
+
 export const createDataSlice = (set, get) => ({
   enterDemoMode: async (tierId = DEFAULT_PERFORMANCE_TEST_TIER) => {
     const current = get();
@@ -123,6 +149,7 @@ export const createDataSlice = (set, get) => ({
     if (performanceArchives.length) {
       archivesStored = await storeColdArchiveYears({ namespace: archiveNamespace, archives: performanceArchives });
     }
+    let v7ColdArchives = performanceArchives;
     if (!archivesStored) {
       // Never drop fixture history because the cold database was unavailable.
       // Fall back to the legacy in-memory layout so the test remains complete.
@@ -135,25 +162,27 @@ export const createDataSlice = (set, get) => ({
         performanceTestActiveTransactions: demoState.trans.length,
         performanceTestArchivedTransactions: 0,
       };
+      v7ColdArchives = [];
     }
-    if (activeLedgerSupported()) {
-      const ledgerNamespace = getLedgerNamespace(
-        current.workspaceNamespace || GUEST_NAMESPACE,
-        demoState.cfg,
-      );
-      // Test workspaces use the lightweight V6 query ledger. A stale V7
-      // cutover marker from an older test run would otherwise return zero
-      // summaries while the visible fixture rows are present in History.
-      await clearFinancialWorkspaceV7({ namespace: ledgerNamespace });
-      const prepared = await replaceLedgerSnapshot({
-        namespace: ledgerNamespace,
-        transactions: demoState.trans,
-        wallets: demoState.wallets,
-        baseCurrency: demoState.cfg.currency,
-      });
-      if (!prepared) throw new Error('performance_active_ledger_prepare_failed');
+    const performanceLedger = await ensurePerformanceTestLedgerV7({
+      workspaceNamespace: current.workspaceNamespace || GUEST_NAMESPACE,
+      workspace: demoState,
+      coldArchives: v7ColdArchives,
+      forceReplace: true,
+    });
+    if (performanceLedger.supported && (!performanceLedger.ok || !performanceLedger.cutover)) {
+      throw new Error(performanceLedger.reason || 'performance_v7_cutover_failed');
     }
-    set({ ...demoState, ledgerReady: activeLedgerSupported(), ledgerError: null });
+    set({
+      ...demoState,
+      ledgerReady: activeLedgerSupported(),
+      ledgerError: null,
+      financialLedgerV7Ready: performanceLedger.supported === true,
+      financialLedgerV7Cutover: performanceLedger.cutover === true,
+      financialLedgerV7Checksum: performanceLedger.checksum || null,
+      financialLedgerV7Migration: performanceLedger.supported ? performanceLedger : null,
+      dataHealth: performanceLedger.health || null,
+    });
     await get().saveLocal({ dirty: false });
     await flushScheduledPerformanceSnapshot();
     await AsyncStorage.setItem(STORAGE.DEMO_ACTIVE, JSON.stringify({
@@ -180,6 +209,10 @@ export const createDataSlice = (set, get) => ({
       } = current.cfg;
       const wallets = normalizeWallets([], current.cfg.currency);
       const defaultWalletId = getDefaultWalletId(wallets, current.cfg.currency, current.cfg.defaultWalletId);
+      const restoredLedger = await restoredFinancialLedgerState({
+        namespace: current.workspaceNamespace || GUEST_NAMESPACE,
+        cfg: realCfg,
+      });
       set({
         trans: [],
         debts: [],
@@ -199,9 +232,11 @@ export const createDataSlice = (set, get) => ({
         syncConflict: null,
         lastSyncError: null,
         dirty: true,
+        ...restoredLedger,
       });
       await clearColdArchives(getColdArchiveNamespace(get().workspaceNamespace || GUEST_NAMESPACE, { performanceTestMode: true }));
       if (activeLedgerSupported()) await clearLedgerNamespace(getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, { performanceTestMode: true }));
+      if (activeLedgerSupported()) await clearFinancialWorkspaceV7({ namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, { performanceTestMode: true }) });
       await clearPerformanceSnapshot();
       await AsyncStorage.removeItem(STORAGE.DEMO_REAL);
       await get().saveLocal({ force: true, dirty: true });
@@ -210,13 +245,19 @@ export const createDataSlice = (set, get) => ({
     try {
       const snapshot = vault.snapshot || JSON.parse(legacyRaw);
       const loaded = stateFromSnapshot(snapshot, DEF_CFG);
+      const restoredLedger = await restoredFinancialLedgerState({
+        namespace: get().workspaceNamespace || GUEST_NAMESPACE,
+        cfg: loaded.cfg,
+      });
       set({
         ...loaded,
         workspaceNamespace: get().workspaceNamespace,
         workspaceReady: true,
+        ...restoredLedger,
       });
       await clearColdArchives(getColdArchiveNamespace(get().workspaceNamespace || GUEST_NAMESPACE, { performanceTestMode: true }));
       if (activeLedgerSupported()) await clearLedgerNamespace(getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, { performanceTestMode: true }));
+      if (activeLedgerSupported()) await clearFinancialWorkspaceV7({ namespace: getLedgerNamespace(get().workspaceNamespace || GUEST_NAMESPACE, { performanceTestMode: true }) });
       await clearPerformanceSnapshot();
       await AsyncStorage.removeItem(STORAGE.DEMO_REAL);
       return true;
@@ -226,6 +267,19 @@ export const createDataSlice = (set, get) => ({
   },
 
   resetAll: async (options = {}) => {
+    const resetState = get();
+    if (resetState.cfg?.performanceTestMode === true) {
+      set({
+        lastSyncError: 'performance_test_requires_exit',
+        restoreSafety: {
+          status: 'performance_test_requires_exit',
+          operation: 'delete_local_data',
+          checkedAt: new Date().toISOString(),
+          reason: 'exit_performance_test_before_reset',
+        },
+      });
+      return false;
+    }
     // P19-015A2: destructive local reset owns the maintenance barrier. A
     // signed-in V2 workspace is a separate operation from "start fresh".
     // First finish its cloud sync while normal writes are still allowed; only
@@ -608,6 +662,7 @@ export const createDataSlice = (set, get) => ({
       trans, debts, goals, wallets, commitments, cats, trackerTypes, trackerItems, cfg, workspaceNamespace,
       user, financialLedgerV7Cutover,
     } = get();
+    if (cfg?.performanceTestMode === true) throw new Error('performance_test_backup_disabled');
     if (user && financialLedgerV7Cutover) {
       const canonical = await createCanonicalBackupV11({
         namespace: getLedgerNamespace(workspaceNamespace || GUEST_NAMESPACE, cfg),
@@ -891,6 +946,10 @@ export const createDataSlice = (set, get) => ({
   },
 
   importBackup: async (jsonStr, options = {}) => {
+    if (get().cfg?.performanceTestMode === true) {
+      set({ lastSyncError: 'performance_test_backup_disabled' });
+      return false;
+    }
     // P19-015A2: backup restore owns the maintenance barrier.
     if (!options?.maintenanceOwned) {
       let candidate = null;

@@ -3987,7 +3987,9 @@ const ensureShadowLedgerSyncIdentityV8 = async (db, namespace) => {
 // P10-013 Strategy B: this is the only adapter used by ordinary active-ledger
 // mutations. It deliberately creates the token only while committing a real
 // mutation, never from a read/advance call or from a private restore namespace.
-const isPrivateFinancialNamespaceV13 = namespace => /::(?:shadow-stage|restore-stage|restore-checkpoint|conflict-recovery-checkpoint)::/.test(String(namespace || ''));
+const isPerformanceTestNamespaceV13 = namespace => String(namespace || '').endsWith('::performance-test');
+const isPrivateFinancialNamespaceV13 = namespace => isPerformanceTestNamespaceV13(namespace)
+  || /::(?:shadow-stage|restore-stage|restore-checkpoint|conflict-recovery-checkpoint)::/.test(String(namespace || ''));
 const advanceActiveFinancialGenerationInTransactionV13 = async (database, namespace) => {
   if (isPrivateFinancialNamespaceV13(namespace)) return null;
   return advanceLiveGenerationForMutationInTransactionV13({ database, namespace });
@@ -4011,6 +4013,10 @@ const insertShadowMutationV2 = async (db, {
   namespace, commandId, entityType, entityId, operation = 'upsert',
   revision, baseRevision, payload, createdAt,
 } = {}) => {
+  // Performance data is local-only even though the lab deliberately uses the
+  // operational V7 projection. Never create a cloud transport identity or
+  // outbox row for the isolated performance namespace.
+  if (isPerformanceTestNamespaceV13(namespace)) return null;
   const identity = await ensureShadowLedgerSyncIdentityV8(db, namespace);
   const mutationId = await createShadowMutationIdV2(db);
   const nextRevision = Number(revision);
@@ -5479,6 +5485,9 @@ export const clearFinancialWorkspaceV7 = async ({ namespace = 'guest', database 
       await txn.runAsync(`DELETE FROM ledger_sync_state_v7 WHERE namespace=?`, target),
       await txn.runAsync(`DELETE FROM ledger_migration_audits_v7 WHERE namespace=?`, target),
     ];
+    if (isPerformanceTestNamespaceV13(target)) {
+      cleanup.push(await txn.runAsync(`DELETE FROM ledger_outbox_v3 WHERE namespace=?`, target));
+    }
     if (cleared > 0 || cleanup.some(result => Number(result?.changes || 0) > 0)) {
       await advanceActiveFinancialGenerationInTransactionV13(txn, target);
     }
