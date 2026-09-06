@@ -712,11 +712,23 @@ function AppRoot() {
 
   useEffect(() => {
     // Legacy internal demo data must never leak into a normal build. The
-    // development-only performance lab is intentionally different: when the
-    // user activates it, it must remain active until they explicitly return
-    // to their real workspace.
+    // performance lab is intentionally different: when the user activates it,
+    // it must remain active until they explicitly return to their real
+    // workspace.
+    //
+    // The exemption below used to also require __DEV__, which was harmless
+    // while the lab itself was __DEV__-only (Settings never offered a tier to
+    // press outside dev). Opening the lab to installed builds (2026-09-06, for
+    // Phase 15 §96/§98/§100, which can only be measured on a device) turned it
+    // from redundant into a real bug: cfg.demoMode flips true when a tier is
+    // entered, this effect re-runs, __DEV__ is false in a release build, so the
+    // exemption never matched and exitDemoMode fired immediately -- the mode
+    // toggled on and off in the same tick, which is what read on device as the
+    // screen flickering and refusing to enter. performanceTestMode is already
+    // the flag that actually distinguishes the lab from stray legacy demo
+    // state; __DEV__ was never doing real work here.
     if (!ready || INTERNAL_DEMO_ENABLED || !cfg.demoMode) return;
-    if (__DEV__ && cfg.performanceTestMode === true) return;
+    if (cfg.performanceTestMode === true) return;
     Promise.resolve(exitDemoMode?.()).catch(() => {});
   }, [ready, cfg.demoMode, cfg.performanceTestMode, exitDemoMode]);
 
@@ -1144,7 +1156,12 @@ function AppRoot() {
       ) : null}
 
       <View style={{ flex: 1 }}>
-        {INTERNAL_DEMO_ENABLED && cfg.demoMode ? (
+        {/* Same stale __DEV__ coupling as the exit-effect above, and the same
+            fix: performanceTestMode is the real signal for a genuine lab
+            session, so the warning banner must not depend on __DEV__ either --
+            otherwise a release-build tester sees no "this is test data" banner
+            at all while genuinely inside the performance lab. */}
+        {(INTERNAL_DEMO_ENABLED || cfg.performanceTestMode) && cfg.demoMode ? (
           <View style={[s.demoBanner, { backgroundColor: th.warnBg, borderColor: th.warn }]}>
             <Ionicons name="flask-outline" size={14} color={th.warn} />
             <Text style={{ color: th.warn, fontSize: 11, fontWeight: '900' }}>

@@ -15,7 +15,19 @@ const data = read('src/store/slices/dataSlice.js');
 const settings = read('src/screens/SettingsScreen.js');
 
 must(app.includes('if (!ready || INTERNAL_DEMO_ENABLED || !cfg.demoMode) return;'), 'legacy demo auto-exit boundary is missing');
-must(app.includes('if (__DEV__ && cfg.performanceTestMode === true) return;'), 'App can still auto-exit an active performance workspace');
+// CHANGED 2026-09-06. This line pinned the exact defect reported from a
+// real device the same day: cfg.demoMode flips true when a tier is entered,
+// the exit-effect re-runs, __DEV__ is false in a release build (the lab was
+// opened to installed builds for Phase 15 §96/§98/§100, which can only be
+// measured on a device), so the __DEV__-gated exemption never matched and
+// exitDemoMode fired in the same tick -- on then instantly off, which read
+// on device as the screen flickering and refusing to enter.
+//
+// performanceTestMode was always the flag that actually distinguishes a real
+// lab session from stray legacy demo state; __DEV__ was never doing real
+// work in this exemption; see tests/performance-lab-release-build.test.cjs
+// for the full behavioural coverage.
+must(app.includes('if (cfg.performanceTestMode === true) return;'), 'the performance workspace must stay exempt from auto-exit without requiring __DEV__');
 
 for (const [id, months] of [['200', 24], ['1000', 36], ['5000', 48], ['10000', 60], ['25000', 72], ['50000', 96]]) {
   must(config.includes(`id: '${id}'`), `missing performance tier ${id}`);

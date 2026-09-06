@@ -445,7 +445,19 @@ assert(transactionDetails.includes('C.delete') && transactionDetails.includes('t
 
 /* MYFI_STAGE6_CONSOLIDATED_UX */
 assert(appRoot.includes("const INTERNAL_DEMO_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_INTERNAL_DEMO === '1';"), 'Demo tools must be gated behind an explicit internal development flag');
-assert(appRoot.includes('INTERNAL_DEMO_ENABLED && cfg.demoMode'), 'Demo banner must never appear in the normal user build');
+// CHANGED 2026-09-06. The literal condition this pinned
+// (INTERNAL_DEMO_ENABLED && cfg.demoMode) is gone, but what it protected --
+// the legacy internal demo tools never surfacing outside a dev build with
+// the explicit env flag -- is unchanged: INTERNAL_DEMO_ENABLED itself is
+// still __DEV__-gated, asserted two lines above.
+//
+// What changed is that the performance lab (a SEPARATE, deliberately-opened
+// surface, see PHASE15_TEST_SURFACE in SettingsScreen.js) now also shows this
+// banner while active, in every build. That is correct, not a leak: a tester
+// running §96/§98/§100 in an installed build must see "this is test data",
+// and the old INTERNAL_DEMO_ENABLED-only condition would have silently hidden
+// that warning the moment the lab stopped being __DEV__-only.
+assert(appRoot.includes('INTERNAL_DEMO_ENABLED') && appRoot.includes('cfg.performanceTestMode') && appRoot.includes('cfg.demoMode'), 'Demo banner must cover both the legacy internal-demo path and a real performance-lab session');
 assert(appRoot.includes("if (!ready || INTERNAL_DEMO_ENABLED || !cfg.demoMode) return;") && appRoot.includes('exitDemoMode?.()'), 'A legacy demo session must automatically restore real data in normal user builds');
 
 assert(appRoot.includes("const orientationMode = ['system', 'auto', 'portrait'].includes(cfg.orientationMode)"), 'Orientation must preserve device, explicit auto-rotate, and portrait choices');

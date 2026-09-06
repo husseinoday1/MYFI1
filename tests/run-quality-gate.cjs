@@ -46,6 +46,7 @@ const staticContracts = [
   'onboarding-preview.test.cjs',
   'onboarding-runtime-regressions.test.cjs',
   'performance-data-lab-v51.test.cjs',
+  'performance-lab-release-build.test.cjs',
   'performance-data-persistence-v511.test.cjs',
   'phase10-restore-benchmark-memory.test.cjs',
   'phase15-sqlite-operational-config.test.cjs',
