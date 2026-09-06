@@ -144,6 +144,7 @@ const runtimeTests = [
   ['SQLITE_RUNTIME', 'p20_v2_conflict_recovery_checkpoint', 'run-p20-v2-conflict-checkpoint.cjs'],
   ['SQLITE_RUNTIME', 'v2_identity_adoption_promotion', 'run-v2-identity-adoption-promotion.cjs'],
   ['SQLITE_RUNTIME', 'v2_identity_adoption_reentry', 'run-v2-identity-adoption-reentry.cjs'],
+  ['SQLITE_RUNTIME', 'goal_release_undo_ledger', 'run-goal-release-undo-ledger.cjs'],
   ['SQLITE_RUNTIME', 'p20_v2_conflict_recovery_resume', 'run-p20-v2-conflict-recovery-resume.cjs'],
   ['SQLITE_RUNTIME', 'p20_v2_conflict_recovery_restore', 'run-p20-v2-conflict-recovery-restore.cjs'],
   ['SQLITE_RUNTIME', 'p20_v2_legacy_outbox_discard', 'run-p20-v2-legacy-outbox-discard.cjs'],

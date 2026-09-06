@@ -18,6 +18,7 @@ import { buildTrackerTransactionTitle, TRANSACTION_SEMANTIC_KIND } from '../../l
 import {
   commitEntityChangesV7,
   commitFinancialTransactionV7,
+  findGoalReleaseTransactionIdsV7,
   voidFinancialTransactionsV7,
 } from '../../lib/financialLedgerV7Repository';
 
@@ -664,12 +665,31 @@ export const createTrackersSlice = (set, get) => ({
     // The release transaction is what makes stateFromFinancialV7 re-derive
     // allocationReleased on every hydration, so it has to go for the undo to
     // survive a restart. Voided, not erased, like every other deletion here.
-    const releaseRows = state.trans.filter(item => item.isGoalRelease && item.goalId === goalId);
+    // Read from the ledger, NOT from state.trans. A release is written with
+    // hiddenFromHistory, and stateFromFinancialV7 filters those out, so after
+    // any reload this list is empty in memory -- the undo then voided nothing,
+    // reported success, and left the reserved posting behind. Four release/undo
+    // cycles on a 200 goal inflated the wallet by 800 on a real device.
+    const found = await findGoalReleaseTransactionIdsV7({
+      namespace: getLedgerNamespace(state.workspaceNamespace, state.cfg),
+      goalId,
+    });
+    if (found.supported && !found.ok) {
+      return { ok: false, reason: found.reason || 'goal_release_undo_lookup_failed' };
+    }
+    const releaseIdList = found.supported
+      ? found.ids
+      : state.trans.filter(item => item.isGoalRelease && item.goalId === goalId).map(item => item.id);
+    // A release that cannot be found is not an undo -- refusing here is what
+    // stops the silent no-op that caused the inflation.
+    if (!releaseIdList.length) {
+      return { ok: false, reason: 'goal_release_undo_release_transaction_missing' };
+    }
 
     try {
       const committed = await voidFinancialTransactionsV7({
         namespace: getLedgerNamespace(state.workspaceNamespace, state.cfg),
-        transactionIds: releaseRows.map(item => item.id),
+        transactionIds: releaseIdList,
         entityChanges: [{ entityType: 'goal', id: nextGoal.id, payload: nextGoal }],
       });
       if (committed.supported && !committed.ok) {
@@ -681,7 +701,7 @@ export const createTrackersSlice = (set, get) => ({
       return { ok: false, reason };
     }
 
-    const releaseIds = new Set(releaseRows.map(item => item.id));
+    const releaseIds = new Set(releaseIdList);
     set(s => ({
       goals: s.goals.map(item => (item.id === goalId ? nextGoal : item)),
       trans: s.trans

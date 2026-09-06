@@ -4431,6 +4431,32 @@ export const replaceFinancialTransactionV7 = async ({
   });
 };
 
+// A goal release is written with hiddenFromHistory, and stateFromFinancialV7
+// filters those out of the in-memory list. So after any reload the release
+// transaction is invisible to the store, and anything looking for it there
+// finds nothing and silently does nothing -- which is how undoing a release
+// came to leave its reserved posting in the ledger forever, inflating the
+// wallet by the released amount on every repeat. Found on device 2026-09-06
+// after four cycles added 800 to a 200 goal. This reads the ledger itself.
+export const findGoalReleaseTransactionIdsV7 = async ({
+  namespace = 'guest', goalId, database = null,
+} = {}) => {
+  if (!database && !financialLedgerV7Supported()) return { supported: false, ok: false, ids: [] };
+  const db = database || await getLedgerDb();
+  if (!db) return { supported: false, ok: false, ids: [] };
+  const target = String(goalId || '').trim();
+  if (!target) return { supported: true, ok: false, ids: [], reason: 'goal_id_required' };
+  await ensureFinancialLedgerV7(db);
+  const rows = await db.getAllAsync(
+    `SELECT id FROM ledger_financial_transactions_v7
+      WHERE namespace=? AND deleted_at IS NULL
+        AND (kind='goal_release' OR COALESCE(json_extract(payload_json,'$.isGoalRelease'),0)=1)
+        AND COALESCE(json_extract(payload_json,'$.goalId'),'')=?
+      ORDER BY id`,
+    namespace, target,
+  );
+  return { supported: true, ok: true, ids: rows.map(row => String(row.id)) };
+};
 export const voidFinancialTransactionsV7 = async ({
   namespace = 'guest', transactionIds = [], entityChanges = [], database = null,
 } = {}) => {
