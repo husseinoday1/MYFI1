@@ -54,9 +54,11 @@ assert(dataSlice.includes('financialDataCount(snapshot?.data || snapshot)'), 'Re
 assert(dataSlice.includes('financial_v7_reset_cutover_failed'), 'Reset must rebuild and verify the empty SQLite V7 cutover immediately');
 
 const syncSlice = read('src/store/slices/useSyncSlice.js');
+const performanceStorage = read('src/dev/performanceTestStorage.js');
 assert(syncSlice.includes('legacyRecoveryDisabled'), 'Legacy recovery tombstone enforcement missing');
 assert(syncSlice.includes('const allowLegacyRecovery = allowLegacy && !resetMarker?.legacyRecoveryDisabled;'), 'Intentional empty snapshots must suppress legacy recovery via reset tombstone');
-assert(syncSlice.includes('const demoSnapshot = resetMarker?.legacyRecoveryDisabled'), 'Intentional reset must suppress stale performance snapshots before local hydrate');
+assert(syncSlice.includes('newerThan: resetMarker?.resetAt || null'), 'Intentional reset timestamp must bound performance snapshots before local hydrate');
+assert(performanceStorage.includes('activeStartedAt <= minimumStartedAt'), 'A performance snapshot active before an intentional reset must stay suppressed');
 assert(syncSlice.includes('pendingCloudSync'), 'Pending cloud reset enforcement missing');
 assert(syncSlice.includes('financialDataCount(get()) === 0'), 'Cloud must respect explicit empty reset');
 assert(syncSlice.includes('supersededByReset'), 'Older queued sync operations must not overwrite a newer reset');

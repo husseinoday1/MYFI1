@@ -44,7 +44,8 @@ must(storage.includes('TRANSACTION_CHUNK_SIZE = 750'), 'chunked performance stor
 must(storage.includes('AsyncStorage.multiSet'), 'chunked performance write is missing');
 must(storage.includes('AsyncStorage.multiGet'), 'chunked performance read is missing');
 must(storage.includes('transactionCount'), 'performance storage does not validate transaction count');
-must(sync.includes('readPerformanceSnapshot(namespace)'), 'loadLocal does not use chunked performance restore');
+must(sync.includes('readPerformanceSnapshot(namespace, {'), 'loadLocal does not use chunked performance restore');
+must(sync.includes('newerThan: resetMarker?.resetAt || null'), 'chunked restore does not distinguish a current lab from a stale pre-reset snapshot');
 must(sync.includes('schedulePerformanceSnapshotWrite(demoSnapshot'), 'saveLocal does not use coalesced chunked performance persistence');
 must(storage.includes('WRITE_BATCH_SIZE = 1'), 'large fixture writes are not yielded after each bounded chunk');
 must(storage.includes('writePerformanceOverlay'), 'single additions still rewrite the full performance fixture');

@@ -44,6 +44,12 @@ No §96/§98/§100 number is invented or carried forward from the invalid V6 run
   the V7 migration for the larger tiers.
 - Reset, backup export, backup import, and vault reset are explicitly guarded in
   the performance workspace.
+- A device restart exposed a separate persistence defect: the durable
+  `legacyRecoveryDisabled` marker suppressed every performance snapshot, even a
+  lab explicitly started after the reset represented by that marker. Startup now
+  compares `DEMO_ACTIVE.startedAt` with `resetAt`: a pre-reset snapshot remains
+  blocked, while a newer isolated lab is restored. This preserves reset safety
+  without silently returning the operator to real financial data.
 
 ## Verification completed
 
@@ -73,6 +79,22 @@ No §96/§98/§100 number is invented or carried forward from the invalid V6 run
   that workspace has not reached operational cutover yet.
 - `git diff --check`: clean for the changed files.
 - No live Supabase account or real cloud identity-adoption path was activated.
+- Restart-persistence regression gates after the device finding: static
+  **96 passed, 0 failed, 11 skipped**; runtime **89 passed, 0 failed, 6 skipped**.
+
+## Device runs rejected during validation
+
+- The first 200-row demo attempt reported `sourceMode` unset and
+  `financialLedgerV7Cutover=false`; it was the retired V6 route and is invalid.
+- A later screen showed the 200-row demo workspace with 80 active and 120 archived
+  rows, but its diagnostic counters had not been reset, so those timings are not
+  an isolated tier result.
+- After a clean process restart, the app mounted the owner's real workspace
+  instead of the active demo workspace. The subsequent month-switch timings and
+  memory sample therefore measured real data and are rejected.
+- No number from these three attempts is used for §96, §98, or §100. A rebuilt
+  APK containing the timestamp-bounded restart fix must be installed before the
+  five-tier sequence begins again.
 
 ## Measurement gate still open
 
@@ -88,11 +110,10 @@ runner against the rebuilt commit:
 | 50,000 | pending device run | pending external ADB | n/a |
 | 100,000 policy tier | n/a | pending external ADB | pending device policy run |
 
-ADB access is now available with the required host permission, but `adb devices -l`
-and `adb mdns services` both returned no device. Therefore the old V6 measurements
-stay invalid and §§96/98/100 stay open rather than being relabeled. The owner will
-perform the in-app steps once the post-change APK is available; ADB will collect
-the external memory evidence when that phone is connected.
+ADB access and the physical Android device are now available. Screenshots and
+external memory samples can be collected directly after the restart fix is built
+and installed. The rejected attempts remain retained under `.artifacts/phase15/`
+as diagnostic evidence only; they are not acceptance measurements.
 
 ## Required closure evidence
 

@@ -184,9 +184,18 @@ export const flushScheduledPerformanceSnapshot = async () => {
   return true;
 };
 
-export const readPerformanceSnapshot = async (namespace = 'guest') => {
+export const readPerformanceSnapshot = async (namespace = 'guest', { newerThan = null } = {}) => {
   const active = parseJson(await AsyncStorage.getItem(STORAGE.DEMO_ACTIVE), null);
   if (!active?.active || String(active.namespace || '') !== String(namespace || 'guest')) return null;
+  const minimumStartedAt = Date.parse(String(newerThan || ''));
+  if (Number.isFinite(minimumStartedAt)) {
+    const activeStartedAt = Date.parse(String(active.startedAt || ''));
+    // An intentional reset invalidates only a performance workspace that was
+    // already active when the reset began. A newer, explicitly selected lab
+    // tier remains restartable even though the durable reset marker is kept to
+    // block legacy financial-data recovery for this namespace.
+    if (!Number.isFinite(activeStartedAt) || activeStartedAt <= minimumStartedAt) return null;
+  }
 
   const raw = await AsyncStorage.getItem(STORAGE.DEMO_DATA);
   const snapshot = parseJson(raw, null);

@@ -13,6 +13,7 @@ const must = (condition, message) => {
 const helper = read('src/dev/performanceTestLedgerV7.js');
 const data = read('src/store/slices/dataSlice.js');
 const sync = read('src/store/slices/useSyncSlice.js');
+const storage = read('src/dev/performanceTestStorage.js');
 const ledger = read('src/lib/financialLedgerV7Repository.js');
 const archive = read('src/lib/localArchiveRepository.js');
 
@@ -30,6 +31,10 @@ must(data.includes('financialLedgerV7Migration: null'), 'exiting the performance
 must(data.includes('dataHealth: null'), 'exiting the performance workspace can leave stale health evidence');
 must(data.includes('dataHealth: performanceLedger.health || null'), 'enterDemoMode does not publish the V7 health result');
 must(data.includes("const ready = cutover || (state?.source_mode === 'shadow' && !!state?.shadow_checksum)"), 'exiting the lab discards valid real-workspace shadow readiness');
+
+must(storage.includes("activeStartedAt <= minimumStartedAt"), 'a pre-reset performance snapshot can resurface after restart');
+must(sync.includes("newerThan: resetMarker?.resetAt || null"), 'startup does not distinguish a new lab from a stale pre-reset snapshot');
+must(!sync.includes('resetMarker?.legacyRecoveryDisabled\n        ? null\n        : await readPerformanceSnapshot(namespace)'), 'legacy recovery marker still disables every new performance workspace');
 
 const demoStart = sync.indexOf('if (demoSnapshot && demoCfg.demoMode === true && demoCfg.performanceTestMode === true)');
 const demoEnd = sync.indexOf('\n      if (activeLedgerSupported()) {', demoStart);

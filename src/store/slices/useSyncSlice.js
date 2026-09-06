@@ -2358,9 +2358,13 @@ export const createSyncSlice = (set, get) => ({
         accountId: get().user?.id,
         cfg: get().cfg || DEF_CFG,
       });
-      const demoSnapshot = resetMarker?.legacyRecoveryDisabled
-        ? null
-        : await readPerformanceSnapshot(namespace);
+      // The reset marker blocks legacy financial-data recovery, not a newer
+      // isolated performance workspace that the user explicitly selected.
+      // Comparing timestamps still prevents a pre-reset lab snapshot from
+      // resurfacing if a reset was interrupted before its cache cleanup.
+      const demoSnapshot = await readPerformanceSnapshot(namespace, {
+        newerThan: resetMarker?.resetAt || null,
+      });
       const demoCfg = demoSnapshot?.cfg || demoSnapshot?.data?.cfg || {};
       if (demoSnapshot && demoCfg.demoMode === true && demoCfg.performanceTestMode === true) {
         let loadedDemo = stateFromSnapshot(demoSnapshot, get().cfg || DEF_CFG);

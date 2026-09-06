@@ -15,7 +15,8 @@ must(dataSlice.includes('MYFI_PERFORMANCE_DATA_PERSISTENCE_V5_1_1'), 'dataSlice 
 must(storage.includes('MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2'), 'performance storage boundary marker missing');
 must(dataSlice.includes('AsyncStorage.setItem(STORAGE.DEMO_ACTIVE'), 'enterDemoMode does not mark the test workspace active');
 must(dataSlice.includes('STORAGE.DEMO_REAL, STORAGE.DEMO_DATA, STORAGE.DEMO_ACTIVE'), 'exit/reset does not clear the persistent demo marker');
-must(syncSlice.includes('readPerformanceSnapshot(namespace)'), 'loadLocal does not use the performance snapshot boundary');
+must(syncSlice.includes('readPerformanceSnapshot(namespace, {'), 'loadLocal does not use the performance snapshot boundary');
+must(syncSlice.includes('newerThan: resetMarker?.resetAt || null'), 'restart restore does not allow an explicitly selected post-reset performance workspace');
 must(storage.includes('AsyncStorage.getItem(STORAGE.DEMO_ACTIVE)'), 'performance storage does not inspect the persistent demo marker');
 must(storage.includes('AsyncStorage.getItem(STORAGE.DEMO_DATA)'), 'performance storage does not restore the saved demo snapshot');
 must(syncSlice.includes('demoCfg.demoMode === true'), 'loadLocal does not validate demo snapshot mode');
