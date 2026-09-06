@@ -37,7 +37,17 @@ must(sync.includes('schedulePerformanceSnapshotWrite(demoSnapshot'), 'test data 
 must(storage.includes('STORAGE.DEMO_DATA'), 'test data must persist separately from the real vault');
 
 must(settings.includes('MYFI_PERFORMANCE_DATA_LAB_V5_1'), 'settings V5.1 marker missing');
-must(settings.includes('{__DEV__ ? ('), 'performance lab must be development-only UI');
+// CHANGED 2026-09-06 by owner instruction. The lab was __DEV__-only, which
+// meant §96/§98/§100 could never be measured from an installed build -- and
+// those numbers only exist on a real device. Every diagnostic surface in this
+// app is stripped before a user release, so this gate was blocking the
+// measurement without protecting a shipping user.
+//
+// What still must hold is isolation, which is asserted above and is the part
+// that actually protects real money: demoMode, a separate storage key, and no
+// cloud sync. The marker below keeps the surface findable for the pre-release
+// strip.
+must(settings.includes('PHASE15_TEST_SURFACE'), 'the performance lab must stay marked as a test surface to strip before release');
 must(settings.includes('PERFORMANCE_TEST_TIERS.map'), 'five-tier selector missing');
 must(settings.includes('onExitTestData'), 'return-to-real-data action missing');
 must(settings.includes('التصدير والاستعادة معطلان أثناء بيانات الاختبار'), 'backup isolation notice missing');

@@ -2030,7 +2030,14 @@ function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview,
   const activeTier = cfg?.demoMode ? String(cfg?.performanceTestTier || '') : '';
   return (
     <>
-      {__DEV__ ? (
+      {/* PHASE15_TEST_SURFACE: the dataset tiers were __DEV__-only, which made
+          §96/§98/§100 unmeasurable from any installed build -- the numbers
+          Phase 15 needs can only come from a real device. Opened up on the
+          owner's instruction 2026-09-06: every diagnostic surface in this app
+          is stripped before a user release, so gating it further only blocked
+          us. The data it generates stays isolated: demoMode, never synced,
+          removable in one tap. */}
+      {true ? (
         <>
           <SectionLabel th={th} isAr={isAr} text={isAr ? 'مختبر بيانات الأداء' : 'Performance data lab'} />
           <View style={[s.testLabCard, { backgroundColor: th.card, borderColor: cfg?.demoMode ? th.warn : th.border }]}>
