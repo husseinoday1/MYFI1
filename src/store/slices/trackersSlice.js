@@ -18,6 +18,8 @@ import { buildTrackerTransactionTitle, TRANSACTION_SEMANTIC_KIND } from '../../l
 import {
   commitEntityChangesV7,
   commitFinancialTransactionV7,
+  findDebtLinkedTransactionIdsV7,
+  findGoalLinkedTransactionIdsV7,
   findGoalReleaseTransactionIdsV7,
   voidFinancialTransactionsV7,
 } from '../../lib/financialLedgerV7Repository';
@@ -178,9 +180,29 @@ export const createTrackersSlice = (set, get) => ({
       (item.linkedType === 'debt' || item.linkedType === 'receivable') && item.linkedId === id
     ));
     const now = new Date().toISOString();
+    const namespace = getLedgerNamespace(current.workspaceNamespace, current.cfg);
+
+    // Owner decision 2026-09-06, the same one applied to goals: deleting a
+    // tracker deletes its transactions. Applied to debts in the same change on
+    // purpose -- doing goals alone would leave the app inconsistent, deleting
+    // history for one tracker type and keeping it for another.
+    const found = await findDebtLinkedTransactionIdsV7({ namespace, debtId: id });
+    if (found.supported && !found.ok) return false;
+    const linkedTransactionIds = found.supported
+      ? found.ids
+      : current.trans.filter(item => item.debtId === id).map(item => item.id);
+
     try {
+      // Voided before the entity, and a failure at either step aborts: a debt
+      // removed while its payments survive is the state this prevents.
+      if (linkedTransactionIds.length) {
+        const voided = await voidFinancialTransactionsV7({
+          namespace, transactionIds: linkedTransactionIds,
+        });
+        if (voided.supported && !voided.ok) return false;
+      }
       const committed = await commitEntityChangesV7({
-        namespace: getLedgerNamespace(current.workspaceNamespace, current.cfg),
+        namespace,
         changes: [
           { entityType: 'debt', id, payload: debt, deletedAt: now },
           ...linkedCommitments.map(item => ({ entityType: 'commitment', id: item.id, payload: item, deletedAt: now })),
@@ -191,10 +213,11 @@ export const createTrackersSlice = (set, get) => ({
       set({ ledgerError: String(error?.message || 'financial_v7_debt_delete_failed') });
       return false;
     }
-    // Tracker deletion is metadata lifecycle only. Financial origin/payment rows remain immutable history.
+    const removedIds = new Set(linkedTransactionIds);
     set(s => ({
       debts: s.debts.filter(item => item.id !== id),
       commitments: s.commitments.filter(item => !linkedCommitments.some(linked => linked.id === item.id)),
+      trans: s.trans.filter(item => !removedIds.has(item.id) && item.debtId !== id),
     }));
     await get().saveLocal({ force: true });
     get().scheduleCloudSync?.({ reason: 'tracker_change' });
@@ -399,9 +422,38 @@ export const createTrackersSlice = (set, get) => ({
     if (!goal) return false;
     const linkedCommitments = current.commitments.filter(item => item.linkedType === 'goal' && item.linkedId === id);
     const now = new Date().toISOString();
+    const namespace = getLedgerNamespace(current.workspaceNamespace, current.cfg);
+
+    // Owner decision 2026-09-06: deleting a goal deletes its transactions too.
+    // Previously they were deliberately left behind, which meant a deleted goal
+    // kept its savings and releases in History with nothing to explain them.
+    //
+    // Read from the ledger, not from state.trans: a release carries
+    // hiddenFromHistory and is filtered out of the in-memory list, so an
+    // in-memory sweep would leave exactly the row whose reserved posting keeps
+    // the wallet inflated -- the same half-visible split that caused the
+    // release/undo inflation.
+    let linkedTransactionIds = [];
+    const found = await findGoalLinkedTransactionIdsV7({ namespace, goalId: id });
+    if (found.supported && !found.ok) {
+      return false;
+    }
+    linkedTransactionIds = found.supported
+      ? found.ids
+      : current.trans.filter(item => item.goalId === id).map(item => item.id);
+
     try {
+      // Voided first, and the goal is only removed if that succeeded: a goal
+      // deleted while its transactions survive is the state this change exists
+      // to prevent, so it must not be reachable through a partial failure.
+      if (linkedTransactionIds.length) {
+        const voided = await voidFinancialTransactionsV7({
+          namespace, transactionIds: linkedTransactionIds,
+        });
+        if (voided.supported && !voided.ok) return false;
+      }
       const committed = await commitEntityChangesV7({
-        namespace: getLedgerNamespace(current.workspaceNamespace, current.cfg),
+        namespace,
         changes: [
           { entityType: 'goal', id, payload: goal, deletedAt: now },
           ...linkedCommitments.map(item => ({ entityType: 'commitment', id: item.id, payload: item, deletedAt: now })),
@@ -412,10 +464,11 @@ export const createTrackersSlice = (set, get) => ({
       set({ ledgerError: String(error?.message || 'financial_v7_goal_delete_failed') });
       return false;
     }
-    // Goal tracker removal never erases allocations/releases already posted to the ledger.
+    const removedIds = new Set(linkedTransactionIds);
     set(s => ({
       goals: s.goals.filter(item => item.id !== id),
       commitments: s.commitments.filter(item => !linkedCommitments.some(linked => linked.id === item.id)),
+      trans: s.trans.filter(item => !removedIds.has(item.id) && item.goalId !== id),
     }));
     await get().saveLocal({ force: true });
     get().scheduleCloudSync?.({ reason: 'tracker_change' });

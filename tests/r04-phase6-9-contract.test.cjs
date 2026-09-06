@@ -75,10 +75,34 @@ const accountCenter = read('src/components/HomeCenterModal.js');
 assert(accountCenter.includes("onOpenSettingsPage?.('account')") && !accountCenter.includes("onOpenTab?.('settings')"), 'Profile Account & Security still routes to generic Settings');
 
 const trackers = read('src/store/slices/trackersSlice.js');
+// SUPERSEDED 2026-09-06 by an explicit owner decision.
+//
+// R04 pinned the opposite rule: deleting a tracker was metadata-only, and its
+// financial rows stayed as immutable history. The reasoning was sound -- the
+// money did move, and removing a label should not rewrite that record.
+//
+// The owner overrode it after seeing the result on a real device: a deleted
+// goal left its savings and releases in History with nothing to explain them,
+// which reads as corruption rather than as history. He was told what the
+// contract protected and what breaks (the rows are gone from History, and the
+// cascade is not undoable) and chose deletion anyway.
+//
+// Applied to BOTH trackers in the same change. Doing goals alone would have
+// left the app deleting history for one tracker type and keeping it for
+// another, which is worse than either rule consistently applied.
+//
+// What is still pinned is the part that is not a preference: the sweep must
+// come from the LEDGER, not from the in-memory list. A goal release carries
+// hiddenFromHistory and is filtered out of state.trans, so an in-memory sweep
+// would leave exactly the row whose reserved posting keeps the wallet
+// inflated -- the defect that cost 800 on a real device the same day.
 const debtDelete = trackers.slice(trackers.indexOf('deleteDebt: async'), trackers.indexOf('addPayment: async'));
-assert(!debtDelete.includes('trans: s.trans.filter'), 'deleting a debt still deletes financial history');
 const goalDelete = trackers.slice(trackers.indexOf('deleteGoal: async'), trackers.indexOf('releaseGoalSavings: async'));
-assert(!goalDelete.includes('trans: s.trans.filter'), 'deleting a goal still deletes financial history');
+for (const [label, body, lookup] of [['debt', debtDelete, 'findDebtLinkedTransactionIdsV7'], ['goal', goalDelete, 'findGoalLinkedTransactionIdsV7']]) {
+  assert(body.includes(lookup), `deleting a ${label} must find its transactions in the ledger, not in state.trans`);
+  assert(body.includes('voidFinancialTransactionsV7'), `deleting a ${label} must void its transactions`);
+  assert(body.indexOf('voidFinancialTransactionsV7') < body.indexOf('commitEntityChangesV7'), `a ${label} must not be removed before its transactions are voided`);
+}
 
 const home = read('src/screens/HomeScreen.js');
 assert(home.includes('queryLedgerSummary') && home.includes('queryLedgerWalletPositions'), 'Home is not SQL-first after cutover');

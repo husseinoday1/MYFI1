@@ -4431,6 +4431,50 @@ export const replaceFinancialTransactionV7 = async ({
   });
 };
 
+// Every transaction belonging to a goal -- savings AND releases, visible and
+// hidden alike -- in one ledger query. Deliberately not "savings from memory,
+// releases from SQL": that split is exactly what produced the release/undo
+// inflation on 2026-09-06, where the hidden half was invisible to its caller.
+export const findGoalLinkedTransactionIdsV7 = async ({
+  namespace = 'guest', goalId, database = null,
+} = {}) => {
+  if (!database && !financialLedgerV7Supported()) return { supported: false, ok: false, ids: [] };
+  const db = database || await getLedgerDb();
+  if (!db) return { supported: false, ok: false, ids: [] };
+  const target = String(goalId || '').trim();
+  if (!target) return { supported: true, ok: false, ids: [], reason: 'goal_id_required' };
+  await ensureFinancialLedgerV7(db);
+  const rows = await db.getAllAsync(
+    `SELECT id FROM ledger_financial_transactions_v7
+      WHERE namespace=? AND deleted_at IS NULL
+        AND COALESCE(json_extract(payload_json,'$.goalId'),'')=?
+      ORDER BY id`,
+    namespace, target,
+  );
+  return { supported: true, ok: true, ids: rows.map(row => String(row.id)) };
+};
+
+// The debt equivalent. Same shape, same reason: one ledger query so no linked
+// transaction can be missed because of how it happens to be flagged.
+export const findDebtLinkedTransactionIdsV7 = async ({
+  namespace = 'guest', debtId, database = null,
+} = {}) => {
+  if (!database && !financialLedgerV7Supported()) return { supported: false, ok: false, ids: [] };
+  const db = database || await getLedgerDb();
+  if (!db) return { supported: false, ok: false, ids: [] };
+  const target = String(debtId || '').trim();
+  if (!target) return { supported: true, ok: false, ids: [], reason: 'debt_id_required' };
+  await ensureFinancialLedgerV7(db);
+  const rows = await db.getAllAsync(
+    `SELECT id FROM ledger_financial_transactions_v7
+      WHERE namespace=? AND deleted_at IS NULL
+        AND COALESCE(json_extract(payload_json,'$.debtId'),'')=?
+      ORDER BY id`,
+    namespace, target,
+  );
+  return { supported: true, ok: true, ids: rows.map(row => String(row.id)) };
+};
+
 // A goal release is written with hiddenFromHistory, and stateFromFinancialV7
 // filters those out of the in-memory list. So after any reload the release
 // transaction is invisible to the store, and anything looking for it there

@@ -126,5 +126,30 @@ const add = (id, { kind = 'goal_release', goalId = GOAL, hidden = true, deleted 
     'the primary lookup must not be the filtered in-memory list',
   );
 
+  // --- deleting a goal must take its transactions with it ------------------
+  //
+  // Owner decision 2026-09-06. Previously the goal went and its savings and
+  // releases stayed in History with nothing to explain them.
+  const del = slice2.slice(slice2.indexOf('  deleteGoal: async'));
+  const delBody = del.slice(0, del.indexOf('\n  addGoalSaving'));
+  assert(
+    delBody.includes('findGoalLinkedTransactionIdsV7'),
+    'deleting a goal must find its transactions in the ledger, where hidden releases live',
+  );
+  assert(
+    delBody.includes('voidFinancialTransactionsV7'),
+    'deleting a goal must void its transactions',
+  );
+  // The void must come BEFORE the entity delete: a goal removed while its
+  // transactions survive is the state this change exists to prevent.
+  assert(
+    delBody.indexOf('voidFinancialTransactionsV7') < delBody.indexOf('commitEntityChangesV7'),
+    'the transactions must be voided before the goal is removed',
+  );
+  assert(
+    /trans: s.trans.filter/.test(delBody),
+    'the in-memory list must drop them too, not wait for a reload',
+  );
+
   console.log('MYFI GOAL RELEASE UNDO LEDGER LOOKUP: PASSED');
 })();
