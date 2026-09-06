@@ -129,17 +129,38 @@ here is enough to not violate one by accident.
 
 ## 3. Current state, as of this document
 
+**UPDATED 2026-09-06, after this document was first written — read this
+correction before trusting the "nearly closed" framing below.**
+`docs/04_CURRENT_EVIDENCE/MYFI_PHASE15_DATASET_TIER_V7_GAP_2026-09-06.md`
+(commit `bc2063e`) found that the performance-data lab's dataset tiers
+(§96/§98/§100's only measurement source) run on the **legacy V6 query
+path**, not the V7 path every real cutover account uses — `enterDemoMode`
+deliberately keeps demo data off V7 cutover (its own comment explains an
+older stale-cutover-marker bug that made this the safe default), so
+**every §96/§98/§100 number gathered from the dataset-tier lab so far
+describes a code path no real post-cutover user is ever on.** §97 (History
+read-path latency) is unaffected — it was measured on real (non-lab)
+usage, on the actual V7 path, and remains confirmed: 45-47ms/61-64ms.
+Explicitly not fixed yet: `financialLedgerV7Cutover` gates dozens of paths
+(sync activation, Home/Reports' SQL-vs-fallback split, the identity-
+adoption gate) that have never run with `demoMode:true` and
+`financialLedgerV7Cutover:true` together — wiring the demo lab onto V7
+needs its own careful session, not a rushed fix. Read that evidence doc in
+full before touching the performance-data lab or Phase 15's remaining
+measurement.
+
 - Branch `fix/pui-001-r2-onboarding-reader-recent-transactions`, all
-  pushed, HEAD `37b942f`, CI green.
-- Phase 15 (Performance + Reliability Gate) is nearly closed. §97/§99/
-  §101/§102/§103 are done and verified (including one real durability bug
-  found and fixed in SQLite connection config, and one real bug where
-  History's SQL read path had silently returned zero rows on every device
-  since the code existed — both fixed and device-confirmed). **§96/§98/
-  §100 remain — they need real on-device measurement (dataset tiers +
-  memory metrics) and the owner is running that himself right now.**
-  Nothing is owed from an engineering session on Phase 15 until his
-  numbers come back; do not start "closing" it yourself.
+  pushed, HEAD `bc2063e`, CI green.
+- Phase 15 (Performance + Reliability Gate): §97/§99/§101/§102/§103 are
+  done and verified (including one real durability bug found and fixed in
+  SQLite connection config, and one real bug where History's SQL read
+  path had silently returned zero rows on every device since the code
+  existed — both fixed and device-confirmed). **§96/§98/§100 are NOT
+  actually measured yet** — everything gathered so far was on the wrong
+  code path per the correction above. Getting real numbers requires
+  wiring the demo lab onto the V7 path first (see the gap doc for what
+  that needs), which is real, non-trivial engineering work, not just
+  "run the owner's device test again."
 - A full identity-adoption recovery flow was built this stretch to unstick
   3 real accounts blocked behind a ledger-identity conflict (see the
   handoff docs, §3/§6 of handoff 1). It is fully unit- and SQLite-tested,
@@ -165,6 +186,14 @@ The owner has not assigned a specific next task to you as of this
 writing — these are open items surfaced in the handoff docs, worth
 knowing about, not a queue to work through unprompted:
 
+- **Wiring the dataset-tier lab onto the real V7 path**, per §3's
+  correction above — the most likely actual next Phase 15 task. Requires
+  auditing every path `financialLedgerV7Cutover` gates before flipping it
+  on for demo data (sync activation, Home/Reports' SQL-vs-fallback split,
+  the identity-adoption gate — none tested with `demoMode` and cutover
+  both true), then re-running all five dataset tiers on the corrected
+  path. Read `MYFI_PHASE15_DATASET_TIER_V7_GAP_2026-09-06.md` in full
+  first.
 - `inspectCloudIdentityAdoptionV1` is exported with zero callers —
   written for a review screen that ended up reading store state directly
   instead. Needs a decision: wire it in, or delete it as dead code.
