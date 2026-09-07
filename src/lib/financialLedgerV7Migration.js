@@ -533,7 +533,7 @@ export const runFinancialShadowMigrationV7 = async ({
 
 export const runFinancialOperationalCutoverV7 = async ({
   namespace = 'guest', workspace = {}, coldArchives = [], database = null,
-  forceReplace = false, resetPendingOutbox = false,
+  forceReplace = false, resetPendingOutbox = false, foreignKeyScope = 'database',
 } = {}) => {
   if (!database && !financialLedgerV7Supported()) {
     return { supported: false, ok: false, reason: 'sqlite_unavailable', cutover: false };
@@ -598,7 +598,11 @@ export const runFinancialOperationalCutoverV7 = async ({
       };
     }
 
-    const health = await proveFinancialLedgerInvariantsV7({ namespace: stageNamespace, database });
+    const health = await proveFinancialLedgerInvariantsV7({
+      namespace: stageNamespace,
+      database,
+      foreignKeyScope,
+    });
     if (!health?.ok) {
       await discardFinancialWorkspaceStageV7({ stageNamespace, database });
       return {

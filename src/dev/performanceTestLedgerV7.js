@@ -112,6 +112,10 @@ export const ensurePerformanceTestLedgerV7 = async ({
     coldArchives,
     forceReplace: true,
     resetPendingOutbox: true,
+    // The lab namespace is disposable and never synchronizes. Keep database-
+    // wide FK proof for real cutovers, but do not let an unrelated historical
+    // row outside this stage prevent measurement of the isolated V7 path.
+    foreignKeyScope: 'namespace',
   });
   if (cutover?.supported === false) return report(failure(cutover, 'financial_v7_cutover_unavailable'), 'operational_cutover');
   if (!cutover?.ok || !cutover?.cutover) return report(failure(cutover, 'financial_v7_cutover_failed'), 'operational_cutover');

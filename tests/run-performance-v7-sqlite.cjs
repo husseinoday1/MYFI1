@@ -47,9 +47,10 @@ require.extensions['.js'] = (mod, filename) => {
 async function run() {
   const { buildPerformanceTestWorkspace } = require('../src/dev/performanceTestData');
   const { ensurePerformanceTestLedgerV7, readPerformanceLedgerAttemptV7 } = require('../src/dev/performanceTestLedgerV7');
-  const { getFinancialWorkspaceStateV7 } = require('../src/lib/financialLedgerV7Repository');
+  const { getFinancialWorkspaceStateV7, proveFinancialLedgerInvariantsV7 } = require('../src/lib/financialLedgerV7Repository');
   const { snapshotFromState, stateFromSnapshot } = require('../src/store/domain');
   const { storeColdArchiveYears, exportColdArchives, clearColdArchives } = require('../src/lib/localArchiveRepository');
+  const verifyRebuild = process.env.MYFI_TEST_VERIFY_REBUILD !== '0';
   const fixture = buildPerformanceTestWorkspace({}, '200');
   for (const cfg of [{}, { demoMode: true }, { performanceTestMode: true }, { demoMode: false, performanceTestMode: true }]) {
     const before = native.prepare('SELECT count(*) AS n FROM sqlite_master').get().n;
@@ -69,37 +70,55 @@ async function run() {
     assert.equal(result.ok, true, JSON.stringify(result.health || result));
     const state = await getFinancialWorkspaceStateV7({ namespace: 'guest::performance-test' });
     assert.equal(state.source_mode, 'sqlite');
-    const again = await ensurePerformanceTestLedgerV7({
-      workspaceNamespace: 'guest', workspace: stateFromSnapshot(JSON.parse(JSON.stringify(snapshotFromState(workspace)))) , coldArchives,
-    });
-    assert.equal(again.ok, true, JSON.stringify(again));
-    assert.equal(again.alreadyCutover, true);
-    const rebuilt = await ensurePerformanceTestLedgerV7({
-      workspaceNamespace: 'guest', workspace: stateFromSnapshot(JSON.parse(JSON.stringify(snapshotFromState(workspace)))), coldArchives, forceReplace: true,
-    });
-    assert.equal(rebuilt.ok, true, JSON.stringify(rebuilt.health || rebuilt));
+    if (verifyRebuild) {
+      const again = await ensurePerformanceTestLedgerV7({
+        workspaceNamespace: 'guest', workspace: stateFromSnapshot(JSON.parse(JSON.stringify(snapshotFromState(workspace)))) , coldArchives,
+      });
+      assert.equal(again.ok, true, JSON.stringify(again));
+      assert.equal(again.alreadyCutover, true);
+      const rebuilt = await ensurePerformanceTestLedgerV7({
+        workspaceNamespace: 'guest', workspace: stateFromSnapshot(JSON.parse(JSON.stringify(snapshotFromState(workspace)))), coldArchives, forceReplace: true,
+      });
+      assert.equal(rebuilt.ok, true, JSON.stringify(rebuilt.health || rebuilt));
+    }
     for (const table of ['ledger_outbox_v2', 'ledger_outbox_v3', 'ledger_sync_identity_v8']) {
       assert.equal(native.prepare(`SELECT count(*) AS n FROM ${table} WHERE namespace LIKE 'guest::performance-test%'`).get().n, 0, `${table}: lab must not create transport state`);
     }
   }
   // Reproduce a database-wide failure outside the selected fixture. The real
-  // invariant checker must still refuse it (never weaken the global FK guard).
+  // invariant checker must still refuse it (never weaken the global FK guard),
+  // while the isolated performance stage verifies only relations it materializes.
   native.exec('CREATE TABLE test_parent(id INTEGER PRIMARY KEY); CREATE TABLE test_orphan(parent_id INTEGER REFERENCES test_parent(id)); PRAGMA foreign_keys=OFF; INSERT INTO test_orphan VALUES(123); PRAGMA foreign_keys=ON;');
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const { __performanceArchives, ...workspace } = fixture;
-    const failed = await ensurePerformanceTestLedgerV7({ workspace, coldArchives: __performanceArchives, forceReplace: true });
-    assert.equal(failed.ok, false);
-    assert.equal(failed.cutover, false);
-    assert.equal(failed.reason, 'financial_v7_health_blocking');
-    assert.deepEqual(failed.issueCodes, ['foreign_key_violation']);
-    const diagnostic = readPerformanceLedgerAttemptV7();
-    assert.equal(diagnostic.tier, '200');
-    assert.equal(diagnostic.phase, 'operational_cutover');
-    assert.deepEqual(Object.keys(diagnostic).sort(), ['at', 'cutover', 'issueCodes', 'ok', 'phase', 'tier']);
-    assert.equal((await getFinancialWorkspaceStateV7({ namespace: 'guest::performance-test' })).source_mode, 'shadow');
-  }
+  const globalHealth = await proveFinancialLedgerInvariantsV7({ namespace: 'guest::performance-test' });
+  assert.equal(globalHealth.ok, false, 'real cutovers must retain database-wide FK blocking');
+  assert.deepEqual(globalHealth.issues.map(issue => issue.code), ['foreign_key_violation']);
+  // Supplying the lab-only option must never narrow proof for a real workspace.
+  // This catches a future regression that removes or weakens the namespace guard.
+  const realWorkspaceNarrowRequest = await proveFinancialLedgerInvariantsV7({
+    namespace: 'workspace:real-user',
+    foreignKeyScope: 'namespace',
+  });
+  assert.equal(realWorkspaceNarrowRequest.ok, false, 'a real workspace must not opt into namespace FK proof');
+  assert.deepEqual(realWorkspaceNarrowRequest.issues.map(issue => issue.code), ['foreign_key_violation']);
+  assert.equal(realWorkspaceNarrowRequest.issues[0].scope, 'database');
+  const { __performanceArchives, ...workspace } = fixture;
+  const isolated = await ensurePerformanceTestLedgerV7({ workspace, coldArchives: __performanceArchives, forceReplace: true });
+  assert.equal(isolated.ok, true, JSON.stringify(isolated.health || isolated));
+  assert.equal(isolated.cutover, true);
+  assert.equal(readPerformanceLedgerAttemptV7().phase, 'complete');
+  assert.equal((await getFinancialWorkspaceStateV7({ namespace: 'guest::performance-test' })).source_mode, 'sqlite');
+
+  // A real FK break inside the namespace being proved must still stop the
+  // operation. This is the mutation boundary the lab scope is allowed to use.
+  const scopeCheckNamespace = 'scope-check::performance-test::shadow-stage::v7-cutover';
+  native.exec(`PRAGMA foreign_keys=OFF; INSERT INTO ledger_accounts_v7(namespace,id,name,account_type,scope,currency_code,status,created_at,updated_at) VALUES ('${scopeCheckNamespace}','orphan','orphan','cash','personal','ZZZ','active','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z'); PRAGMA foreign_keys=ON;`);
+  const scopedHealth = await proveFinancialLedgerInvariantsV7({ namespace: scopeCheckNamespace, foreignKeyScope: 'namespace' });
+  assert.equal(scopedHealth.ok, false, 'namespace proof must reject an FK violation in its own rows');
+  assert.deepEqual(scopedHealth.issues.map(issue => issue.code), ['foreign_key_violation']);
+  assert.equal(scopedHealth.issues[0].scope, 'namespace');
+  native.exec(`DELETE FROM ledger_accounts_v7 WHERE namespace='${scopeCheckNamespace}';`);
   native.exec('DELETE FROM test_orphan');
-  console.log('PASS: real SQLite lab entry, saved-snapshot reuse/rebuild, transport isolation, repeated global-health refusal and diagnostic codes');
+  console.log('PASS: real SQLite lab entry, saved-snapshot reuse/rebuild, transport isolation, global real-cutover FK blocking, and namespace-stage FK blocking');
   native.close();
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

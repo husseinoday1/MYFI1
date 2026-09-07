@@ -4900,7 +4900,43 @@ export const readFinancialProjectionV7 = async ({
 };
 
 
-export const proveFinancialLedgerInvariantsV7 = async ({ namespace = 'guest', database = null } = {}) => {
+const NAMESPACE_SCOPED_FOREIGN_KEY_TABLES_V7 = new Set([
+  'ledger_accounts_v7',
+  'ledger_exchange_rates_v7',
+  'ledger_financial_transactions_v7',
+  'ledger_postings_v7',
+  'ledger_transaction_links_v7',
+]);
+
+// A performance stage is an intentionally isolated namespace. Its proof must
+// still reject any broken relation written into that stage, but a pre-existing
+// relation elsewhere in the shared local database cannot be caused by, nor be
+// repaired by, a disposable lab rebuild. Real cutovers retain the database
+// scope below; callers have to opt in explicitly to this narrow stage scope.
+const namespaceForeignKeyViolationsV7 = async (db, rows, namespace) => {
+  const scoped = [];
+  for (const row of rows || []) {
+    const table = String(row?.table || '');
+    const rowId = Number(row?.rowid);
+    if (!NAMESPACE_SCOPED_FOREIGN_KEY_TABLES_V7.has(table)) continue;
+    // Every eligible table has an ordinary SQLite rowid and a namespace. If a
+    // malformed PRAGMA result cannot be tied to a namespace, fail closed.
+    if (!Number.isSafeInteger(rowId) || rowId <= 0) {
+      scoped.push(row);
+      continue;
+    }
+    const matching = await db.getFirstAsync(
+      `SELECT 1 AS present FROM ${table} WHERE rowid=? AND namespace=? LIMIT 1`,
+      rowId, namespace,
+    );
+    if (matching?.present) scoped.push(row);
+  }
+  return scoped;
+};
+
+export const proveFinancialLedgerInvariantsV7 = async ({
+  namespace = 'guest', database = null, foreignKeyScope = 'database',
+} = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return { supported: false, ok: false, level: 'BLOCKING', issues: [{ code: 'sqlite_unavailable' }], walletBalances: [] };
   await ensureFinancialLedgerV7(db);
@@ -4912,7 +4948,20 @@ export const proveFinancialLedgerInvariantsV7 = async ({ namespace = 'guest', da
   if (quickCheck !== 'ok') issues.push({ code: 'sqlite_quick_check_failed' });
 
   const foreignKeyRows = await db.getAllAsync('PRAGMA foreign_key_check');
-  if ((foreignKeyRows || []).length) issues.push({ code: 'foreign_key_violation', count: foreignKeyRows.length });
+  // Namespace scope is reserved for the disposable lab's transient stage. A
+  // caller cannot opt a real workspace into a narrower integrity proof.
+  const namespaceScope = foreignKeyScope === 'namespace'
+    && namespaceValue.includes('::performance-test::shadow-stage::');
+  const scopedForeignKeys = namespaceScope
+    ? await namespaceForeignKeyViolationsV7(db, foreignKeyRows, namespaceValue)
+    : foreignKeyRows;
+  if ((scopedForeignKeys || []).length) {
+    issues.push({
+      code: 'foreign_key_violation',
+      count: scopedForeignKeys.length,
+      scope: namespaceScope ? 'namespace' : 'database',
+    });
+  }
 
   const missingPostings = await db.getFirstAsync(
     `SELECT COUNT(*) AS n
