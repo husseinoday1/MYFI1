@@ -208,6 +208,7 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'performance_data', 'performance-data-runtime-v512.test.cjs'],
   ['UNIT_RUNTIME', 'performance_generator', 'performance-generator-runtime-v51.test.cjs'],
   ['UNIT_RUNTIME', 'performance_storage', 'performance-storage-runtime-v512.test.cjs'],
+  ['SQLITE_RUNTIME', 'performance_v7_lab', 'run-performance-v7-sqlite.cjs'],
 ];
 
 const checks = [];

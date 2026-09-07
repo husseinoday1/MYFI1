@@ -23,6 +23,7 @@ import { AppButton, ScreenScroll, SectionTitle, SurfaceCard, rowDirection, textA
 import { SPACE, weight } from '../lib/tokens';
 import { collectP12ConflictRecoveryDiagnostics } from '../dev/p12ConflictRecoveryDiagnostics';
 import { collectHistoryReadPathDiagnostics } from '../dev/historyReadPathDiagnostics';
+import { readPerformanceLedgerAttemptV7 } from '../dev/performanceTestLedgerV7';
 import IdentityAdoptionReview from '../components/IdentityAdoptionReview';
 import { conflictRecoveryGatesV1 } from '../dev/p12ConflictRecoveryGates';
 import {
@@ -94,6 +95,7 @@ export default function DiagnosticsScreen() {
       store: { lastSyncError, online, syncing, restoreSafety, financialCloudRecoveryV2, financialSyncV2Activation },
       ledger,
       historyReadPath,
+      performanceLabAttempt: readPerformanceLedgerAttemptV7(),
     });
     setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -499,6 +501,7 @@ export default function DiagnosticsScreen() {
             title={isAr ? 'حالة التحويل وعدّاد الرفض' : 'Cutover state & reject counters'}
           >
             <Row th={th} lang={lang} label="sourceMode" value={snapshot?.historyReadPath?.sourceMode} />
+            <Row th={th} lang={lang} label="Last lab attempt (this process)" value={snapshot?.performanceLabAttempt} />
             <Row th={th} lang={lang} label="cutover" value={snapshot?.historyReadPath?.cutover} />
             <Row th={th} lang={lang} label="cutoverAt" value={snapshot?.historyReadPath?.cutoverAt} />
             <Row th={th} lang={lang} label="resolvedQueries" value={snapshot?.historyReadPath?.telemetry?.resolvedQueries} />

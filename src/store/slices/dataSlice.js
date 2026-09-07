@@ -171,7 +171,8 @@ export const createDataSlice = (set, get) => ({
       forceReplace: true,
     });
     if (performanceLedger.supported && (!performanceLedger.ok || !performanceLedger.cutover)) {
-      throw new Error(performanceLedger.reason || 'performance_v7_cutover_failed');
+      const details = (performanceLedger.issueCodes || []).join(', ');
+      throw new Error(`${performanceLedger.reason || 'performance_v7_cutover_failed'}${details ? `: ${details}` : ''}`);
     }
     set({
       ...demoState,

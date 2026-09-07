@@ -11,6 +11,21 @@ import {
   runFinancialShadowMigrationV7,
 } from '../lib/financialLedgerV7Migration';
 
+let lastAttempt = null;
+// Retain codes only: health results also contain wallet balances and account IDs.
+// Failed entry leaves the store in the previous workspace, so Diagnostics must
+// not infer which namespace/tier failed from the current store configuration.
+export const readPerformanceLedgerAttemptV7 = () => lastAttempt;
+const recordAttempt = (result, tier, phase) => {
+  lastAttempt = {
+    tier, phase, at: new Date().toISOString(),
+    ok: result?.ok === true, cutover: result?.cutover === true,
+    issueCodes: [...new Set((result?.health?.issues || []).map(issue => issue?.code)
+      .filter(code => typeof code === 'string' && /^[A-Za-z0-9_]+$/.test(code)))],
+  };
+  return { ...result, issueCodes: lastAttempt.issueCodes };
+};
+
 const parseJson = (value, fallback = null) => {
   try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
 };
@@ -42,12 +57,17 @@ export const ensurePerformanceTestLedgerV7 = async ({
   coldArchives = [],
   forceReplace = false,
 } = {}) => {
+  // The destructive rebuild below is only authorized for the isolated lab.
+  if (workspace?.cfg?.demoMode !== true || workspace?.cfg?.performanceTestMode !== true) {
+    return { supported: true, ok: false, cutover: false, reason: 'performance_v7_isolation_required' };
+  }
   if (!activeLedgerSupported()) {
     return { supported: false, ok: false, cutover: false, reason: 'sqlite_unavailable' };
   }
 
   const namespace = getLedgerNamespace(workspaceNamespace, workspace?.cfg || {});
   const requestedTier = String(workspace?.cfg?.performanceTestTier || '');
+  const report = (result, phase) => recordAttempt(result, requestedTier, phase);
   const currentState = await getFinancialWorkspaceStateV7({ namespace });
   const currentTier = stateTier(currentState);
 
@@ -58,7 +78,7 @@ export const ensurePerformanceTestLedgerV7 = async ({
       expectedActiveCount: Array.isArray(workspace?.trans) ? workspace.trans.length : null,
     });
     if (health?.ok) {
-      return {
+      return report({
         supported: true,
         ok: true,
         alreadyCutover: true,
@@ -66,7 +86,7 @@ export const ensurePerformanceTestLedgerV7 = async ({
         sourceMode: 'sqlite',
         checksum: currentState.shadow_checksum || null,
         health,
-      };
+      }, 'reuse');
     }
   }
 
@@ -80,8 +100,8 @@ export const ensurePerformanceTestLedgerV7 = async ({
     coldArchives,
     forceReplace: true,
   });
-  if (shadow?.supported === false) return failure(shadow, 'financial_v7_shadow_unavailable');
-  if (!shadow?.ok) return failure(shadow, 'financial_v7_shadow_parity_failed');
+  if (shadow?.supported === false) return report(failure(shadow, 'financial_v7_shadow_unavailable'), 'shadow');
+  if (!shadow?.ok) return report(failure(shadow, 'financial_v7_shadow_parity_failed'), 'shadow');
 
   // The shadow pass above proves parity and records readiness. Force the
   // operational call to consume the same source in one final staged promotion;
@@ -93,17 +113,17 @@ export const ensurePerformanceTestLedgerV7 = async ({
     forceReplace: true,
     resetPendingOutbox: true,
   });
-  if (cutover?.supported === false) return failure(cutover, 'financial_v7_cutover_unavailable');
-  if (!cutover?.ok || !cutover?.cutover) return failure(cutover, 'financial_v7_cutover_failed');
+  if (cutover?.supported === false) return report(failure(cutover, 'financial_v7_cutover_unavailable'), 'operational_cutover');
+  if (!cutover?.ok || !cutover?.cutover) return report(failure(cutover, 'financial_v7_cutover_failed'), 'operational_cutover');
 
   const health = await getLedgerDataHealth({
     namespace,
     walletIds: Array.isArray(workspace?.wallets) ? workspace.wallets.map(item => item.id) : [],
     expectedActiveCount: Array.isArray(workspace?.trans) ? workspace.trans.length : null,
   });
-  if (!health?.ok) return failure({ ...cutover, health }, 'financial_v7_cutover_health_failed');
+  if (!health?.ok) return report(failure({ ...cutover, health }, 'financial_v7_cutover_health_failed'), 'post_cutover_health');
 
-  return {
+  return report({
     ...cutover,
     supported: true,
     ok: true,
@@ -121,5 +141,5 @@ export const ensurePerformanceTestLedgerV7 = async ({
     },
     health,
     performanceTestTier: requestedTier,
-  };
+  }, 'complete');
 };
