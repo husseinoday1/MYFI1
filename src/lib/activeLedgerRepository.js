@@ -1036,15 +1036,25 @@ export const clearLedgerNamespace = async (namespace = 'guest') => {
   });
 };
 
-export const getLedgerDataHealth = async ({ namespace = 'guest', walletIds = [], expectedActiveCount = null } = {}) => {
+export const getLedgerDataHealth = async ({
+  namespace = 'guest', walletIds = [], expectedActiveCount = null, onDiagnosticStep = null,
+} = {}) => {
+  // The optional hook is deliberately duration-only instrumentation for the
+  // performance-lab startup proof. It receives structural step names only;
+  // no health counts, account IDs, or financial rows leave this function.
+  const diagnosticStep = name => {
+    try { onDiagnosticStep?.(String(name)); } catch {}
+  };
   const directDb = await getLedgerDb();
   if (directDb && await v7IsSourceOfTruth(directDb, namespace)) {
+    diagnosticStep('v7_source');
     const namespaceValue = ns(namespace);
     const issues = [];
     const invalidDates = await directDb.getFirstAsync(
       `SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7
         WHERE namespace=? AND deleted_at IS NULL AND date_iso NOT GLOB '????-??-??'`, namespaceValue,
     );
+    diagnosticStep('invalid_dates');
     if (Number(invalidDates?.n || 0)) issues.push({ code: 'invalid_dates', count: Number(invalidDates.n) });
     const missingPostings = await directDb.getFirstAsync(
       `SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7 tx
@@ -1052,6 +1062,7 @@ export const getLedgerDataHealth = async ({ namespace = 'guest', walletIds = [],
           SELECT 1 FROM ledger_postings_v7 p WHERE p.namespace=tx.namespace AND p.transaction_id=tx.id
         )`, namespaceValue,
     );
+    diagnosticStep('missing_postings');
     if (Number(missingPostings?.n || 0)) issues.push({ code: 'transactions_without_postings', count: Number(missingPostings.n) });
     const invalidTransfers = await directDb.getFirstAsync(
       `SELECT COUNT(*) AS n FROM (
@@ -1064,12 +1075,14 @@ export const getLedgerDataHealth = async ({ namespace = 'guest', walletIds = [],
           GROUP BY tx.id HAVING sources<>1 OR destinations<>1
        )`, namespaceValue,
     );
+    diagnosticStep('invalid_transfer_legs');
     if (Number(invalidTransfers?.n || 0)) issues.push({ code: 'invalid_transfer_legs', count: Number(invalidTransfers.n) });
     const invalidCurrencies = await directDb.getFirstAsync(
       `SELECT COUNT(*) AS n FROM ledger_postings_v7 p
         LEFT JOIN ledger_accounts_v7 a ON a.namespace=p.namespace AND a.id=p.account_id
        WHERE p.namespace=? AND (a.id IS NULL OR a.currency_code<>p.currency_code)`, namespaceValue,
     );
+    diagnosticStep('posting_currency');
     if (Number(invalidCurrencies?.n || 0)) issues.push({ code: 'posting_currency_mismatch', count: Number(invalidCurrencies.n) });
     if (expectedActiveCount != null && Number.isFinite(Number(expectedActiveCount))) {
       const active = await directDb.getFirstAsync(
@@ -1077,6 +1090,7 @@ export const getLedgerDataHealth = async ({ namespace = 'guest', walletIds = [],
           WHERE namespace=? AND deleted_at IS NULL AND archived_at IS NULL
             AND COALESCE(json_extract(payload_json,'$.hiddenFromHistory'),0)<>1`, namespaceValue,
       );
+      diagnosticStep('active_count');
       const actual = Number(active?.n || 0);
       const expected = Number(expectedActiveCount || 0);
       if (actual !== expected) issues.push({ code: 'active_count_mismatch', expected, actual });
@@ -1084,6 +1098,7 @@ export const getLedgerDataHealth = async ({ namespace = 'guest', walletIds = [],
     const outbox = await directDb.getFirstAsync(
       `SELECT COUNT(*) AS n FROM ledger_outbox_v2 WHERE namespace=? AND acknowledged_at IS NULL`, namespaceValue,
     );
+    diagnosticStep('outbox');
     if (Number(outbox?.n || 0) > 5000) issues.push({ code: 'sync_outbox_backlog', count: Number(outbox.n) });
     const known = new Set((Array.isArray(walletIds) ? walletIds : []).filter(Boolean).map(String));
     if (known.size) {
@@ -1092,9 +1107,11 @@ export const getLedgerDataHealth = async ({ namespace = 'guest', walletIds = [],
           JOIN ledger_financial_transactions_v7 tx ON tx.namespace=p.namespace AND tx.id=p.transaction_id
          WHERE p.namespace=? AND tx.deleted_at IS NULL AND tx.archived_at IS NULL`, namespaceValue,
       );
+      diagnosticStep('wallet_refs');
       const orphanCount = accounts.filter(row => !known.has(String(row.account_id))).length;
       if (orphanCount) issues.push({ code: 'orphan_wallet_refs', count: orphanCount });
     }
+    diagnosticStep('complete');
     return { ok: issues.length === 0, supported: true, engine: 'sqlite_v7', issues };
   }
   const db = await openDb();

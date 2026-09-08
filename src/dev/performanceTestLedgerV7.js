@@ -57,10 +57,12 @@ const failure = (result, fallbackReason) => ({
 const reusablePerformanceTestLedgerV7 = async ({
   workspaceNamespace = 'guest',
   workspace = {},
+  onDiagnosticStep = null,
 } = {}) => {
   const namespace = getLedgerNamespace(workspaceNamespace, workspace?.cfg || {});
   const requestedTier = String(workspace?.cfg?.performanceTestTier || '');
   const currentState = await getFinancialWorkspaceStateV7({ namespace });
+  try { onDiagnosticStep?.('state'); } catch {}
   if (!currentState) return { ok: false, reuseFailureReason: 'performance_v7_reuse_state_missing' };
   if (currentState.source_mode !== 'sqlite') return { ok: false, reuseFailureReason: 'performance_v7_reuse_source_not_sqlite' };
   if (stateTier(currentState) !== requestedTier) return { ok: false, reuseFailureReason: 'performance_v7_reuse_tier_mismatch' };
@@ -69,6 +71,7 @@ const reusablePerformanceTestLedgerV7 = async ({
     namespace,
     walletIds: Array.isArray(workspace?.wallets) ? workspace.wallets.map(item => item.id) : [],
     expectedActiveCount: Array.isArray(workspace?.trans) ? workspace.trans.length : null,
+    onDiagnosticStep,
   });
   if (!health?.ok) {
     return {
@@ -103,6 +106,7 @@ export const ensurePerformanceTestLedgerV7 = async ({
   coldArchives = [],
   forceReplace = false,
   batchSize,
+  onDiagnosticStep = null,
   // `reuseOnly` is startup's non-mutating preflight. It must never fall
   // through into the disposable rebuild without the caller first loading the
   // archived source that parity needs.
@@ -126,7 +130,7 @@ export const ensurePerformanceTestLedgerV7 = async ({
     ...(healthIssueCodes.length ? { healthIssueCodes } : {}),
   }, requestedTier, phase);
   if (!forceReplace) {
-    const reused = await reusablePerformanceTestLedgerV7({ workspaceNamespace, workspace });
+    const reused = await reusablePerformanceTestLedgerV7({ workspaceNamespace, workspace, onDiagnosticStep });
     if (reused?.ok) return report(reused, 'reuse');
     reuseFailureReason = reused?.reuseFailureReason || null;
     healthIssueCodes = Array.isArray(reused?.healthIssueCodes) ? reused.healthIssueCodes : [];

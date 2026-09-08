@@ -2379,6 +2379,10 @@ export const createSyncSlice = (set, get) => ({
           workspaceNamespace: namespace,
           workspace: loadedDemo,
           reuseOnly: true,
+          // Keep the diagnostic in the same in-memory timing record as the
+          // rest of startup. The callback receives fixed structural labels,
+          // never rows, counts, account IDs, or financial values.
+          onDiagnosticStep: step => markStartupStage(`performance:reuseHealth:${step}`),
         });
         markStartupStage('performance:ledgerReuseProof');
         if (performanceLedger?.rebuildRequired) {

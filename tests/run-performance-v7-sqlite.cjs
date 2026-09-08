@@ -277,11 +277,18 @@ async function run() {
       assert.equal(again.alreadyCutover, true);
       // Cold archives are intentionally absent here.  A proven reuse must not
       // need to hydrate them, and a failed proof must not clear the lab.
+      const diagnosticSteps = [];
       const reuseOnly = await ensurePerformanceTestLedgerV7({
         workspaceNamespace: 'guest', workspace: stateFromSnapshot(JSON.parse(JSON.stringify(snapshotFromState(workspace)))), reuseOnly: true,
+        onDiagnosticStep: step => diagnosticSteps.push(step),
       });
       assert.equal(reuseOnly.ok, true, JSON.stringify(reuseOnly));
       assert.equal(reuseOnly.alreadyCutover, true);
+      assert.deepEqual(diagnosticSteps, [
+        'state', 'v7_source', 'invalid_dates', 'missing_postings',
+        'invalid_transfer_legs', 'posting_currency', 'active_count',
+        'outbox', 'wallet_refs', 'complete',
+      ], 'startup diagnostics must expose only the fixed V7 reuse-proof steps');
       // A broken V7 stage must remain a non-mutating preflight failure. The
       // final full rebuild below restores the fixture for the next assertion.
       native.exec("DELETE FROM ledger_postings_v7 WHERE namespace='guest::performance-test' AND transaction_id=(SELECT id FROM ledger_financial_transactions_v7 WHERE namespace='guest::performance-test' LIMIT 1)");
