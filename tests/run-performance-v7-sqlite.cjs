@@ -117,6 +117,17 @@ async function run() {
     database,
     batchSize: 1,
   });
+  const healthProofPlan = native.prepare(`EXPLAIN QUERY PLAN
+    SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7 tx
+     WHERE tx.namespace=? AND tx.deleted_at IS NULL AND NOT EXISTS (
+       SELECT 1 FROM ledger_postings_v7 p
+        WHERE p.namespace=tx.namespace AND p.transaction_id=tx.id
+     )`).all(batchParityNamespace);
+  assert.equal(
+    healthProofPlan.some(row => String(row.detail || '').includes('idx_ledger_v7_posting_transaction')),
+    true,
+    'missing-posting health proof must seek postings by namespace and transaction ID, not rescan them per transaction',
+  );
   const singleRowResult = readBatchParityRows();
   await stageFinancialWorkspaceV7({
     stageNamespace: batchParityNamespace,

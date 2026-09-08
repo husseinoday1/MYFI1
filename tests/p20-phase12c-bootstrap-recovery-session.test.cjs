@@ -5,11 +5,12 @@ const path = require('node:path');
 const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const repository = fs.readFileSync(path.join(root, 'src/lib/financialLedgerV7Repository.js'), 'utf8');
 
-assert.match(repository, /FINANCIAL_SQLITE_SCHEMA_VERSION = 12/);
+assert.match(repository, /FINANCIAL_SQLITE_SCHEMA_VERSION = 13/);
 assert.match(repository, /0009_bootstrap_recovery_import/);
 assert.match(repository, /0010_bootstrap_recovery_stage_rows/);
 assert.match(repository, /0011_archive_recovery_import/);
 assert.match(repository, /0012_archive_recovery_stage_rows/);
+assert.match(repository, /0013_posting_transaction_index/);
 assert.match(repository, /ledger_bootstrap_recovery_import_v9/);
 assert.match(repository, /ledger_bootstrap_recovery_rows_v10/);
 assert.match(repository, /ledger_archive_recovery_import_v11/);

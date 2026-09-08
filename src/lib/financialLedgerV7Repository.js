@@ -21,7 +21,7 @@ import {
 
 const readyDatabases = new WeakSet();
 const readyDatabasePromises = new WeakMap();
-export const FINANCIAL_SQLITE_SCHEMA_VERSION = 12;
+export const FINANCIAL_SQLITE_SCHEMA_VERSION = 13;
 
 const safeJson = value => {
   try { return JSON.stringify(value ?? null); } catch { return 'null'; }
@@ -577,6 +577,34 @@ const FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_MIGRATION = {
   },
 };
 
+// The health proof joins postings by their owning transaction. The older
+// account-oriented index cannot serve that lookup, which turns the
+// missing-posting anti-join into a correlated scan at large ledger sizes.
+// This is an additive index only: it changes neither rows nor proof logic.
+export const FINANCIAL_LEDGER_V13_POSTING_TRANSACTION_INDEX_SQL = `
+CREATE INDEX IF NOT EXISTS idx_ledger_v7_posting_transaction
+  ON ledger_postings_v7(namespace, transaction_id);
+`;
+
+const FINANCIAL_LEDGER_V13_POSTING_TRANSACTION_INDEX_MIGRATION = {
+  migrationId: '0013_posting_transaction_index',
+  fromVersion: 12,
+  toVersion: FINANCIAL_SQLITE_SCHEMA_VERSION,
+  signature: [
+    FINANCIAL_LEDGER_V13_POSTING_TRANSACTION_INDEX_SQL,
+    'index V7 postings by owning transaction for health proof joins',
+    'ledger_v7_meta sqlite_schema_version=13',
+  ].join('\n'),
+  apply: async (db) => {
+    await db.execAsync(FINANCIAL_LEDGER_V13_POSTING_TRANSACTION_INDEX_SQL);
+    await db.runAsync(
+      `INSERT OR REPLACE INTO ledger_v7_meta(key,value,updated_at)
+       VALUES ('sqlite_schema_version','13',?)`,
+      new Date().toISOString(),
+    );
+  },
+};
+
 const financialLedgerHealthCheck = async (db) => {
   const row = await db.getFirstAsync('PRAGMA quick_check');
   const result = row ? Object.values(row)[0] : null;
@@ -603,6 +631,7 @@ export const ensureFinancialLedgerV7 = async (db) => {
         FINANCIAL_LEDGER_V10_BOOTSTRAP_RECOVERY_STAGE_MIGRATION,
         FINANCIAL_LEDGER_V11_ARCHIVE_RECOVERY_MIGRATION,
         FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_MIGRATION,
+        FINANCIAL_LEDGER_V13_POSTING_TRANSACTION_INDEX_MIGRATION,
       ],
       appVersion: '1.0.0',
       healthCheck: financialLedgerHealthCheck,

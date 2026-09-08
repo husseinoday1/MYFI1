@@ -58,7 +58,7 @@ assert(authListenerIndex > loadLocalIndex);
 assert(getSessionIndex > loadLocalIndex);
 assert(readyIndex > getSessionIndex);
 
-assert(repoV7.includes('export const FINANCIAL_SQLITE_SCHEMA_VERSION = 12;'));
+assert(repoV7.includes('export const FINANCIAL_SQLITE_SCHEMA_VERSION = 13;'));
 assert(!barrier.includes('PRAGMA user_version'));
 assert(!barrier.includes('ALTER TABLE'));
 assert(!barrier.includes('CREATE TABLE'));
