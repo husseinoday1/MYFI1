@@ -26,7 +26,8 @@ assert(sync.includes('runFinancialOperationalCutoverV7'), 'operational cutover g
 
 const migration = read('src/lib/financialLedgerV7Migration.js');
 assert(migration.includes('export const runFinancialOperationalCutoverV7'), 'Phase 8 cutover function missing');
-assert(migration.includes('promoteFinancialWorkspaceStageV7'), 'cutover does not use atomic stage promotion');
+assert(migration.includes('runFinancialWorkspaceStageSessionV7'), 'cutover does not retain one transaction-local stage through atomic promotion');
+assert(migration.includes('task: async ({ readProjection, proveInvariants, promote })'), 'cutover does not preserve parity and health gates before atomic stage promotion');
 
 const active = read('src/lib/activeLedgerRepository.js');
 assert(!active.includes("||' '||t.payload_json) LIKE ?"), 'V7 history search scans payload_json');

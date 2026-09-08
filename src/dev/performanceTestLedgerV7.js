@@ -6,22 +6,28 @@ import {
   clearFinancialWorkspaceV7,
   getFinancialWorkspaceStateV7,
 } from '../lib/financialLedgerV7Repository';
-import {
-  runFinancialOperationalCutoverV7,
-  runFinancialShadowMigrationV7,
-} from '../lib/financialLedgerV7Migration';
+import { runFinancialOperationalCutoverV7 } from '../lib/financialLedgerV7Migration';
 
 let lastAttempt = null;
 // Retain codes only: health results also contain wallet balances and account IDs.
 // Failed entry leaves the store in the previous workspace, so Diagnostics must
 // not infer which namespace/tier failed from the current store configuration.
 export const readPerformanceLedgerAttemptV7 = () => lastAttempt;
+const safeCode = value => (
+  typeof value === 'string' && /^[A-Za-z0-9_]+$/.test(value) ? value : null
+);
 const recordAttempt = (result, tier, phase) => {
   lastAttempt = {
     tier, phase, at: new Date().toISOString(),
     ok: result?.ok === true, cutover: result?.cutover === true,
-    issueCodes: [...new Set((result?.health?.issues || []).map(issue => issue?.code)
-      .filter(code => typeof code === 'string' && /^[A-Za-z0-9_]+$/.test(code)))],
+    // These are structural state codes only. Do not retain health counts,
+    // wallet IDs, or any fixture rows in a Diagnostics-safe attempt record.
+    reason: safeCode(result?.reason),
+    reuseFailureReason: safeCode(result?.reuseFailureReason),
+    issueCodes: [...new Set([
+      ...(result?.health?.issues || []).map(issue => issue?.code),
+      ...(result?.healthIssueCodes || []),
+    ].filter(safeCode))],
   };
   return { ...result, issueCodes: lastAttempt.issueCodes };
 };
@@ -55,16 +61,22 @@ const reusablePerformanceTestLedgerV7 = async ({
   const namespace = getLedgerNamespace(workspaceNamespace, workspace?.cfg || {});
   const requestedTier = String(workspace?.cfg?.performanceTestTier || '');
   const currentState = await getFinancialWorkspaceStateV7({ namespace });
-  if (currentState?.source_mode !== 'sqlite' || stateTier(currentState) !== requestedTier) {
-    return null;
-  }
+  if (!currentState) return { ok: false, reuseFailureReason: 'performance_v7_reuse_state_missing' };
+  if (currentState.source_mode !== 'sqlite') return { ok: false, reuseFailureReason: 'performance_v7_reuse_source_not_sqlite' };
+  if (stateTier(currentState) !== requestedTier) return { ok: false, reuseFailureReason: 'performance_v7_reuse_tier_mismatch' };
 
   const health = await getLedgerDataHealth({
     namespace,
     walletIds: Array.isArray(workspace?.wallets) ? workspace.wallets.map(item => item.id) : [],
     expectedActiveCount: Array.isArray(workspace?.trans) ? workspace.trans.length : null,
   });
-  if (!health?.ok) return null;
+  if (!health?.ok) {
+    return {
+      ok: false,
+      reuseFailureReason: 'performance_v7_reuse_health_failed',
+      healthIssueCodes: (health?.issues || []).map(issue => issue?.code).filter(safeCode),
+    };
+  }
 
   return {
     supported: true,
@@ -90,6 +102,7 @@ export const ensurePerformanceTestLedgerV7 = async ({
   workspace = {},
   coldArchives = [],
   forceReplace = false,
+  batchSize,
   // `reuseOnly` is startup's non-mutating preflight. It must never fall
   // through into the disposable rebuild without the caller first loading the
   // archived source that parity needs.
@@ -105,10 +118,18 @@ export const ensurePerformanceTestLedgerV7 = async ({
 
   const namespace = getLedgerNamespace(workspaceNamespace, workspace?.cfg || {});
   const requestedTier = String(workspace?.cfg?.performanceTestTier || '');
-  const report = (result, phase) => recordAttempt(result, requestedTier, phase);
+  let reuseFailureReason = null;
+  let healthIssueCodes = [];
+  const report = (result, phase) => recordAttempt({
+    ...result,
+    ...(reuseFailureReason ? { reuseFailureReason } : {}),
+    ...(healthIssueCodes.length ? { healthIssueCodes } : {}),
+  }, requestedTier, phase);
   if (!forceReplace) {
     const reused = await reusablePerformanceTestLedgerV7({ workspaceNamespace, workspace });
-    if (reused) return report(reused, 'reuse');
+    if (reused?.ok) return report(reused, 'reuse');
+    reuseFailureReason = reused?.reuseFailureReason || null;
+    healthIssueCodes = Array.isArray(reused?.healthIssueCodes) ? reused.healthIssueCodes : [];
   }
 
   if (reuseOnly) {
@@ -125,24 +146,16 @@ export const ensurePerformanceTestLedgerV7 = async ({
   // only that performance namespace before rebuilding the selected tier.
   await clearFinancialWorkspaceV7({ namespace });
 
-  const shadow = await runFinancialShadowMigrationV7({
-    namespace,
-    workspace,
-    coldArchives,
-    forceReplace: true,
-  });
-  if (shadow?.supported === false) return report(failure(shadow, 'financial_v7_shadow_unavailable'), 'shadow');
-  if (!shadow?.ok) return report(failure(shadow, 'financial_v7_shadow_parity_failed'), 'shadow');
-
-  // The shadow pass above proves parity and records readiness. Force the
-  // operational call to consume the same source in one final staged promotion;
-  // it still repeats parity/health checks before making V7 authoritative.
+  // Operational cutover now owns one transaction-local stage from build through
+  // parity, health proof, and promotion. Calling the standalone shadow proof
+  // here would rebuild the same source and restore the startup bottleneck.
   const cutover = await runFinancialOperationalCutoverV7({
     namespace,
     workspace,
     coldArchives,
     forceReplace: true,
     resetPendingOutbox: true,
+    batchSize,
     // The lab namespace is disposable and never synchronizes. Keep database-
     // wide FK proof for real cutovers, but do not let an unrelated historical
     // row outside this stage prevent measurement of the isolated V7 path.
@@ -164,15 +177,15 @@ export const ensurePerformanceTestLedgerV7 = async ({
     ok: true,
     cutover: true,
     sourceMode: 'sqlite',
-    checksum: cutover.checksum || shadow.checksum || null,
+    checksum: cutover.checksum || cutover.sourceChecksum || null,
     shadowSummary: {
-      ok: shadow.ok === true,
-      sourceMode: shadow.sourceMode || 'shadow',
-      checksum: shadow.checksum || shadow.sourceChecksum || null,
-      targetChecksum: shadow.targetChecksum || null,
-      sourceCounts: shadow.sourceCounts || null,
-      targetCounts: shadow.targetCounts || null,
-      differences: Array.isArray(shadow.differences) ? shadow.differences.length : 0,
+      ok: cutover.ok === true,
+      sourceMode: 'shadow',
+      checksum: cutover.sourceChecksum || cutover.checksum || null,
+      targetChecksum: cutover.targetChecksum || null,
+      sourceCounts: cutover.sourceCounts || null,
+      targetCounts: cutover.targetCounts || null,
+      differences: Array.isArray(cutover.differences) ? cutover.differences.length : 0,
     },
     health,
     performanceTestTier: requestedTier,

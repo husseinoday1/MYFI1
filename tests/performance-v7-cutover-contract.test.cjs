@@ -15,10 +15,16 @@ const data = read('src/store/slices/dataSlice.js');
 const sync = read('src/store/slices/useSyncSlice.js');
 const storage = read('src/dev/performanceTestStorage.js');
 const ledger = read('src/lib/financialLedgerV7Repository.js');
+const migration = read('src/lib/financialLedgerV7Migration.js');
 const archive = read('src/lib/localArchiveRepository.js');
 
-must(helper.includes('runFinancialShadowMigrationV7'), 'performance V7 shadow migration is not wired');
+must(!helper.includes('runFinancialShadowMigrationV7'), 'performance rebuild still runs a redundant standalone shadow stage');
 must(helper.includes('runFinancialOperationalCutoverV7'), 'performance V7 operational cutover is not wired');
+const operationalStart = migration.indexOf('export const runFinancialOperationalCutoverV7');
+const operationalBody = migration.slice(operationalStart);
+must(operationalStart >= 0, 'operational V7 cutover implementation is missing');
+must(!operationalBody.includes('runFinancialShadowMigrationV7('), 'operational cutover still rebuilds through the public shadow proof');
+must(operationalBody.includes('runFinancialWorkspaceStageSessionV7'), 'operational cutover does not retain one verified stage through promotion');
 must(helper.includes('forceReplace: true'), 'performance cutover does not rebuild the requested tier');
 must(helper.includes('getLedgerNamespace(workspaceNamespace'), 'performance cutover is not namespaced through the isolated ledger namespace');
 must(helper.includes('getLedgerDataHealth'), 'performance V7 cutover has no post-promotion health proof');

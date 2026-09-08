@@ -7,6 +7,8 @@ import {
   commitEntityChangesV7,
   commitExpenseLedgerV7Command,
   replaceFinancialTransactionV7,
+  runFinancialWorkspaceStageSessionV7,
+  stageFinancialWorkspaceV7,
   voidFinancialTransactionsV7,
 } from '../src/lib/financialLedgerV7Repository';
 import { buildFinancialShadowProjectionV7, financialProjectionChecksum } from '../src/lib/financialLedgerV7Migration';
@@ -20,6 +22,7 @@ class FakeDatabase {
     currentEntityRevision = null,
     archivedGoal = false,
     v2Active = true,
+    failSql = null,
   } = {}) {
     this.failOutbox = failOutbox;
     this.existingId = existingId;
@@ -27,6 +30,7 @@ class FakeDatabase {
     this.currentEntityRevision = currentEntityRevision;
     this.archivedGoal = archivedGoal;
     this.v2Active = v2Active;
+    this.failSql = failSql;
     this.events = [];
     this.meta = new Map();
     this.shadowId = 0;
@@ -41,6 +45,7 @@ class FakeDatabase {
 
   async runAsync(sql, ...args) {
     this.events.push({ type: 'run', sql, args, inTransaction: this.inTransaction });
+    if (this.failSql && sql.includes(this.failSql)) throw new Error('injected_sql_failure');
     if (this.failOutbox && sql.includes('INSERT INTO ledger_outbox_v2')) throw new Error('outbox_insert_failed');
     if (sql.includes('INSERT INTO ledger_v7_meta')) {
       this.meta.set(String(args[0]), String(args[1]));
@@ -242,6 +247,163 @@ const run = async () => {
   assert.equal(shadow.metrics.syntheticTransactions, 1, `shadow synthetic=${shadow.metrics.syntheticTransactions}`);
   assert.equal(shadow.metrics.walletBalances['wallet-iqd'].physicalMinor, 7000000);
   assert.equal(financialProjectionChecksum(shadow.document), shadow.checksum);
+
+  const stageNamespace = 'user:test::shadow-stage::dimension-dedup-v7';
+  const stageHeader = (id, namespace = stageNamespace) => ({
+    namespace, id, kind: 'income', status: 'posted', scope: 'personal',
+    dateISO: '2026-08-14', occurredAt: '2026-08-14T03:00:00.000Z', categoryId: null,
+    title: id, note: '', sourceType: 'test', sourceId: id, idempotencyKey: `test:${id}`,
+    deviceId: 'test-device', revision: 1, archiveYear: null, archivedAt: null,
+    deletedAt: null, createdAt: '2026-08-14T03:00:00.000Z', updatedAt: '2026-08-14T03:00:00.000Z',
+  });
+  const stageCommand = ({ id, currencies, accounts, namespace = stageNamespace }) => ({
+    currencies, accounts, exchangeRates: [], postings: [], links: [],
+    header: stageHeader(id, namespace), originalTransaction: { id, title: id },
+  });
+  const stageDb = new FakeDatabase();
+  const stageResult = await stageFinancialWorkspaceV7({
+    stageNamespace,
+    database: stageDb,
+    batchSize: 2,
+    workspacePayload: { source: 'dimension-dedup-runtime-test' },
+    commands: [
+      stageCommand({
+        id: 'stage-1',
+        currencies: [{ code: 'USD', minorExponent: 2 }, { code: 'IQD', minorExponent: 3 }],
+        accounts: [{
+          namespace: stageNamespace, id: 'wallet-shared', name: 'First name', accountType: 'cash',
+          scope: 'personal', currencyCode: 'USD', status: 'active',
+          createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2025-01-01T00:00:00.000Z', archivedAt: null,
+        }],
+      }),
+      stageCommand({
+        id: 'stage-2',
+        currencies: [{ code: 'USD', minorExponent: 4 }],
+        accounts: [{
+          namespace: stageNamespace, id: 'wallet-shared', name: 'Last name', accountType: 'bank',
+          scope: 'business', currencyCode: 'IQD', status: 'archived',
+          createdAt: '2026-02-02T00:00:00.000Z', updatedAt: '2026-03-03T00:00:00.000Z',
+          archivedAt: '2026-03-03T00:00:00.000Z',
+        }],
+      }),
+      stageCommand({
+        id: 'stage-3',
+        currencies: [{ code: 'IQD', minorExponent: 3 }],
+        accounts: [{
+          namespace: stageNamespace, id: 'wallet-second', name: 'Second wallet', accountType: 'cash',
+          scope: 'personal', currencyCode: 'IQD', status: 'active',
+          createdAt: '2025-04-04T00:00:00.000Z', updatedAt: '2025-04-04T00:00:00.000Z', archivedAt: null,
+        }],
+      }),
+    ],
+  });
+  assert.equal(stageResult.ok, true);
+  assert.equal(stageDb.committed, true);
+  const stageCurrencyWrites = stageDb.events.filter(event => (
+    event.type === 'run' && event.sql.includes('INSERT INTO ledger_currencies(code,minor_exponent,enabled)')
+  ));
+  const stageAccountWrites = stageDb.events.filter(event => (
+    event.type === 'run' && event.sql.includes('INSERT INTO ledger_accounts_v7')
+  ));
+  const stageHeaderWrites = stageDb.events.filter(event => (
+    event.type === 'run' && event.sql.includes('INSERT INTO ledger_financial_transactions_v7')
+  ));
+  assert.deepEqual(
+    stageCurrencyWrites.map(event => event.args),
+    [['USD', 4, 'IQD', 3]],
+    'staging must emit one currency UPSERT per code with the legacy last-write value',
+  );
+  assert.equal(stageAccountWrites.length, 1, 'staging must batch unique accounts into one bound statement');
+  assert.deepEqual(
+    stageAccountWrites[0].args.slice(0, 10),
+    [
+      stageNamespace, 'wallet-shared', 'Last name', 'bank', 'business', 'IQD', 'archived',
+      '2025-01-01T00:00:00.000Z', '2026-03-03T00:00:00.000Z', '2026-03-03T00:00:00.000Z',
+    ],
+    'deduplication must preserve first created_at while every mutable account field uses the last value',
+  );
+  assert.equal(stageHeaderWrites.length, 2, 'three commands at batch size two must require exactly two bound statements');
+  assert.equal(
+    stageHeaderWrites.reduce((count, event) => count + event.args.length / 21, 0),
+    3,
+    'multi-row insertion must not drop financial commands',
+  );
+  assert.equal(
+    [...stageCurrencyWrites, ...stageAccountWrites, ...stageHeaderWrites]
+      .every(event => !event.sql.includes('Last name') && !event.sql.includes('stage-1')),
+    true,
+    'user text and payload values must remain bound parameters rather than SQL text',
+  );
+  assert.equal(
+    [...stageCurrencyWrites, ...stageAccountWrites, ...stageHeaderWrites].every(event => event.inTransaction),
+    true,
+    'all deduplicated dimensions and command rows must remain in the exclusive SQLite transaction',
+  );
+
+  const cappedBatchDb = new FakeDatabase();
+  const cappedBatchNamespace = 'user:test::shadow-stage::batch-cap-v7';
+  const cappedCommands = Array.from({ length: 1001 }, (_, index) => stageCommand({
+    id: `capped-stage-${index}`,
+    currencies: [],
+    accounts: [],
+    namespace: cappedBatchNamespace,
+  }));
+  await stageFinancialWorkspaceV7({
+    stageNamespace: cappedBatchNamespace,
+    database: cappedBatchDb,
+    batchSize: Number.MAX_SAFE_INTEGER,
+    commands: cappedCommands,
+  });
+  assert.equal(
+    cappedBatchDb.events.filter(event => (
+      event.type === 'run' && event.sql.includes('INSERT INTO ledger_financial_transactions_v7')
+    )).length,
+    2,
+    'the batch-size guard must cap statements at 1000 rows (21000 bound variables)',
+  );
+
+  const failingStageDb = new FakeDatabase({ failSql: 'INSERT INTO ledger_financial_transactions_v7' });
+  const failingStageNamespace = 'user:test::shadow-stage::batch-rollback-v7';
+  await assert.rejects(
+    () => stageFinancialWorkspaceV7({
+      stageNamespace: failingStageNamespace,
+      database: failingStageDb,
+      batchSize: 2,
+      commands: [stageCommand({
+        id: 'rollback-stage', currencies: [], accounts: [], namespace: failingStageNamespace,
+      })],
+    }),
+    /injected_sql_failure/,
+  );
+  assert.equal(failingStageDb.rolledBack, true, 'a failed bound batch must roll back the whole financial stage');
+  assert.equal(
+    failingStageDb.events.at(-1)?.type,
+    'rollback',
+    'a failed bound batch must end its financial stage with rollback rather than commit',
+  );
+
+  const reusedPromotionDb = new FakeDatabase();
+  const reusedPromotionTarget = 'user:test-stage-session-target';
+  await assert.rejects(
+    () => runFinancialWorkspaceStageSessionV7({
+      stageNamespace: `${reusedPromotionTarget}::shadow-stage::single-use-v7`,
+      database: reusedPromotionDb,
+      task: async ({ promote }) => {
+        const options = {
+          namespace: reusedPromotionTarget,
+          checksum: 'fnv1a32:test',
+          sourceCounts: {},
+          targetCounts: {},
+          differences: [],
+          workspacePayload: {},
+        };
+        await promote(options);
+        await promote(options);
+      },
+    }),
+    /financial_v7_stage_session_promotion_reused/,
+  );
+  assert.equal(reusedPromotionDb.rolledBack, true, 'a replay attempt must roll back the stage-session promotion');
 
   const mutationBatch = serializeLedgerMutationBatch([{
     mutation_id: 'm-1', entity_type: 'financial_transaction', entity_id: 'income-v7-1',

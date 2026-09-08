@@ -4935,11 +4935,11 @@ const namespaceForeignKeyViolationsV7 = async (db, rows, namespace) => {
 };
 
 export const proveFinancialLedgerInvariantsV7 = async ({
-  namespace = 'guest', database = null, foreignKeyScope = 'database',
+  namespace = 'guest', database = null, foreignKeyScope = 'database', schemaReady = false,
 } = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return { supported: false, ok: false, level: 'BLOCKING', issues: [{ code: 'sqlite_unavailable' }], walletBalances: [] };
-  await ensureFinancialLedgerV7(db);
+  if (!schemaReady) await ensureFinancialLedgerV7(db);
   const namespaceValue = String(namespace || 'guest');
   const issues = [];
 
@@ -5673,9 +5673,174 @@ export const clearLocalFinancialDataForCloudRecoveryV8 = async ({
   }
 };
 
-async function insertCommandWithoutOutbox(db, command) {
-  for (const currency of command.currencies || []) await insertCurrency(db, currency);
-  for (const account of command.accounts || []) await upsertAccount(db, account);
+const collectStageDimensionsV7 = (commands) => {
+  const currenciesByCode = new Map();
+  const accountsByNamespace = new Map();
+
+  for (const command of commands || []) {
+    for (const currency of command.currencies || []) {
+      // The existing UPSERT makes the last minor exponent win.
+      currenciesByCode.set(currency.code, currency);
+    }
+    for (const account of command.accounts || []) {
+      let accountsById = accountsByNamespace.get(account.namespace);
+      if (!accountsById) {
+        accountsById = new Map();
+        accountsByNamespace.set(account.namespace, accountsById);
+      }
+      if (!accountsById.has(account.id)) {
+        accountsById.set(account.id, account);
+        continue;
+      }
+      const prior = accountsById.get(account.id);
+      // Match sequential UPSERT semantics exactly: the first INSERT owns
+      // created_at; every mutable column comes from the last occurrence.
+      accountsById.set(account.id, { ...account, createdAt: prior.createdAt });
+    }
+  }
+
+  return {
+    currencies: [...currenciesByCode.values()],
+    accounts: [...accountsByNamespace.values()].flatMap(accountsById => [...accountsById.values()]),
+  };
+};
+
+const FINANCIAL_STAGE_WRITE_BATCH_SIZE = 500;
+const FINANCIAL_STAGE_MAX_WRITE_BATCH_SIZE = 1000;
+
+const normalizeFinancialStageBatchSizeV7 = (value) => {
+  const parsed = Math.trunc(Number(value));
+  if (!Number.isFinite(parsed)) return FINANCIAL_STAGE_WRITE_BATCH_SIZE;
+  return Math.max(1, Math.min(FINANCIAL_STAGE_MAX_WRITE_BATCH_SIZE, parsed));
+};
+
+const runBoundMultiRowInsertV7 = async (db, {
+  insertSql, valueSql, conflictSql = '', rows, bindRow, batchSize,
+}) => {
+  let batch = [];
+  const flush = async () => {
+    if (!batch.length) return;
+    const params = [];
+    for (const row of batch) params.push(...bindRow(row));
+    await db.runAsync(
+      `${insertSql} VALUES ${batch.map(() => valueSql).join(',')}${conflictSql}`,
+      ...params,
+    );
+    batch = [];
+  };
+
+  for (const row of rows || []) {
+    batch.push(row);
+    if (batch.length >= batchSize) await flush();
+  }
+  await flush();
+};
+
+function* stageCommandItemsV7(commands, field) {
+  for (const command of commands || []) {
+    for (const item of command[field] || []) yield item;
+  }
+}
+
+const writeFinancialStageBatchesV7 = async (db, {
+  commands, dimensions, entities, batchSize,
+}) => {
+  const size = normalizeFinancialStageBatchSizeV7(batchSize);
+  // Keep foreign-key parents ahead of their children while reducing each table
+  // to bounded, parameterized native calls. No user value is interpolated.
+  await runBoundMultiRowInsertV7(db, {
+    insertSql: 'INSERT INTO ledger_currencies(code,minor_exponent,enabled)',
+    valueSql: '(?,?,1)',
+    conflictSql: ` ON CONFLICT(code) DO UPDATE SET
+      minor_exponent=excluded.minor_exponent,enabled=1`,
+    rows: dimensions.currencies,
+    bindRow: item => [item.code, item.minorExponent],
+    batchSize: size,
+  });
+  await runBoundMultiRowInsertV7(db, {
+    insertSql: `INSERT INTO ledger_accounts_v7
+      (namespace,id,name,account_type,scope,currency_code,status,created_at,updated_at,archived_at)`,
+    valueSql: '(?,?,?,?,?,?,?,?,?,?)',
+    conflictSql: ` ON CONFLICT(namespace,id) DO UPDATE SET
+      name=excluded.name,account_type=excluded.account_type,scope=excluded.scope,
+      currency_code=excluded.currency_code,status=excluded.status,
+      updated_at=excluded.updated_at,archived_at=excluded.archived_at`,
+    rows: dimensions.accounts,
+    bindRow: account => [
+      account.namespace, account.id, account.name, account.accountType, account.scope,
+      account.currencyCode, account.status, account.createdAt, account.updatedAt, account.archivedAt,
+    ],
+    batchSize: size,
+  });
+  await runBoundMultiRowInsertV7(db, {
+    insertSql: `INSERT INTO ledger_exchange_rates_v7
+      (namespace,id,base_currency_code,quote_currency_code,numerator,denominator,rate_date,source,captured_at)`,
+    valueSql: '(?,?,?,?,?,?,?,?,?)',
+    rows: stageCommandItemsV7(commands, 'exchangeRates'),
+    bindRow: rate => [
+      rate.namespace, rate.id, rate.baseCurrencyCode, rate.quoteCurrencyCode,
+      rate.numerator, rate.denominator, rate.rateDate, rate.source, rate.capturedAt,
+    ],
+    batchSize: size,
+  });
+  await runBoundMultiRowInsertV7(db, {
+    insertSql: `INSERT INTO ledger_financial_transactions_v7
+      (namespace,id,kind,status,scope,date_iso,occurred_at,category_id,title,note,source_type,source_id,
+       idempotency_key,device_id,revision,archive_year,archived_at,deleted_at,payload_json,created_at,updated_at)`,
+    valueSql: '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    rows: commands,
+    bindRow: command => {
+      const header = command.header;
+      return [
+        header.namespace, header.id, header.kind, header.status, header.scope, header.dateISO,
+        header.occurredAt, header.categoryId, header.title, header.note, header.sourceType,
+        header.sourceId, header.idempotencyKey, header.deviceId, header.revision,
+        header.archiveYear, header.archivedAt, header.deletedAt, safeJson(command.originalTransaction),
+        header.createdAt, header.updatedAt,
+      ];
+    },
+    batchSize: size,
+  });
+  await runBoundMultiRowInsertV7(db, {
+    insertSql: `INSERT INTO ledger_postings_v7
+      (namespace,id,transaction_id,account_id,bucket,role,amount_minor,currency_code,exchange_rate_id,created_at)`,
+    valueSql: '(?,?,?,?,?,?,?,?,?,?)',
+    rows: stageCommandItemsV7(commands, 'postings'),
+    bindRow: item => [
+      item.namespace, item.id, item.transactionId, item.accountId, item.bucket,
+      item.role, item.amountMinor, item.currencyCode, item.exchangeRateId, item.createdAt,
+    ],
+    batchSize: size,
+  });
+  await runBoundMultiRowInsertV7(db, {
+    insertSql: `INSERT INTO ledger_transaction_links_v7
+      (namespace,id,transaction_id,link_type,link_id,relation,applied_amount_minor,currency_code,created_at)`,
+    valueSql: '(?,?,?,?,?,?,?,?,?)',
+    rows: stageCommandItemsV7(commands, 'links'),
+    bindRow: link => [
+      link.namespace, link.id, link.transactionId, link.linkType, link.linkId,
+      link.relation, link.appliedAmountMinor, link.currencyCode, link.createdAt,
+    ],
+    batchSize: size,
+  });
+  await runBoundMultiRowInsertV7(db, {
+    insertSql: `INSERT INTO ledger_entities_v7
+      (namespace,entity_type,id,revision,deleted_at,payload_json,created_at,updated_at)`,
+    valueSql: '(?,?,?,?,?,?,?,?)',
+    conflictSql: ` ON CONFLICT(namespace,entity_type,id) DO UPDATE SET
+      revision=excluded.revision,deleted_at=excluded.deleted_at,payload_json=excluded.payload_json,updated_at=excluded.updated_at
+      WHERE excluded.revision >= ledger_entities_v7.revision`,
+    rows: entities,
+    bindRow: entity => [
+      entity.namespace, entity.entityType, entity.id, entity.revision, entity.deletedAt,
+      safeJson(canonicalFinancialEntityPayload(entity.entityType, entity.payload)),
+      entity.createdAt, entity.updatedAt,
+    ],
+    batchSize: size,
+  });
+};
+
+async function insertCommandRowsWithoutOutbox(db, command) {
   for (const rate of command.exchangeRates || []) {
     await db.runAsync(
       `INSERT INTO ledger_exchange_rates_v7
@@ -5717,7 +5882,32 @@ async function insertCommandWithoutOutbox(db, command) {
   }
 }
 
-export const stageFinancialWorkspaceV7 = async ({ stageNamespace, commands = [], entities = [], workspacePayload = {}, database = null } = {}) => {
+async function insertCommandWithoutOutbox(db, command) {
+  for (const currency of command.currencies || []) await insertCurrency(db, currency);
+  for (const account of command.accounts || []) await upsertAccount(db, account);
+  await insertCommandRowsWithoutOutbox(db, command);
+}
+
+const stageFinancialWorkspaceInTransactionV7 = async (txn, {
+  namespace, commands, entities, workspacePayload, batchSize,
+}) => {
+  const dimensions = collectStageDimensionsV7(commands);
+  await clearFinancialNamespaceRowsInTransactionV7(txn, namespace);
+  await writeFinancialStageBatchesV7(txn, {
+    commands, dimensions, entities, batchSize,
+  });
+  const now = new Date().toISOString();
+  await txn.runAsync(
+    `INSERT INTO ledger_workspace_state_v7
+     (namespace,source_mode,schema_version,payload_json,updated_at) VALUES (?,?,?,?,?)`,
+    namespace, 'shadow', FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson(workspacePayload), now,
+  );
+};
+
+export const stageFinancialWorkspaceV7 = async ({
+  stageNamespace, commands = [], entities = [], workspacePayload = {}, database = null,
+  batchSize = FINANCIAL_STAGE_WRITE_BATCH_SIZE,
+} = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
   await ensureFinancialLedgerV7(db);
@@ -5725,15 +5915,9 @@ export const stageFinancialWorkspaceV7 = async ({ stageNamespace, commands = [],
   if (!namespace.includes('::shadow-stage::')) throw new Error('financial_v7_shadow_stage_namespace_invalid');
   return enqueueWrite(async () => {
     await runLedgerExclusiveTransaction(db, async (txn) => {
-      await clearFinancialNamespaceRowsInTransactionV7(txn, namespace);
-      for (const command of commands) await insertCommandWithoutOutbox(txn, command);
-      for (const entity of entities) await upsertEntity(txn, entity);
-      const now = new Date().toISOString();
-      await txn.runAsync(
-        `INSERT INTO ledger_workspace_state_v7
-         (namespace,source_mode,schema_version,payload_json,updated_at) VALUES (?,?,?,?,?)`,
-        namespace, 'shadow', FINANCIAL_LEDGER_SCHEMA_VERSION, safeJson(workspacePayload), now,
-      );
+      await stageFinancialWorkspaceInTransactionV7(txn, {
+        namespace, commands, entities, workspacePayload, batchSize,
+      });
     });
     return { supported: true, ok: true, namespace, transactions: commands.length, entities: entities.length };
   });
@@ -5749,6 +5933,94 @@ export const discardFinancialWorkspaceStageV7 = async ({ stageNamespace, databas
   return true;
 };
 
+const assertFinancialStagePromotionNamespacesV7 = (namespace, stageNamespace) => {
+  const target = String(namespace || '').trim();
+  const stage = String(stageNamespace || '').trim();
+  if (!target || !stage.includes('::shadow-stage::') || !stage.startsWith(`${target}::shadow-stage::`)) {
+    throw new Error('financial_v7_shadow_promotion_namespace_invalid');
+  }
+  return { target, stage };
+};
+
+const promoteFinancialWorkspaceStageInTransactionV7 = async (txn, {
+  target, stage, checksum, sourceCounts, targetCounts, workspacePayload,
+  resetPendingOutbox, now, runId,
+}) => {
+  if (resetPendingOutbox) {
+    await txn.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=? AND acknowledged_at IS NULL`, target);
+  }
+  await clearFinancialNamespaceRowsInTransactionV7(txn, target);
+  await copyFinancialNamespaceFromStageInTransactionV7({
+    database: txn, namespace: target, stageNamespace: stage,
+  });
+  await txn.runAsync(
+    `INSERT INTO ledger_workspace_state_v7
+     (namespace,source_mode,schema_version,shadow_checksum,shadow_verified_at,cutover_at,last_reconciled_at,payload_json,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    target, 'sqlite', FINANCIAL_LEDGER_SCHEMA_VERSION, checksum, now, now, now, safeJson(workspacePayload), now,
+  );
+  await txn.runAsync(
+    `INSERT INTO ledger_migration_audits_v7
+     (namespace,run_id,source_checksum,target_checksum,source_counts_json,target_counts_json,differences_json,exact_match,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    target, runId, checksum, checksum, safeJson(sourceCounts), safeJson(targetCounts), '[]', 1, now,
+  );
+  await clearFinancialNamespaceRowsInTransactionV7(txn, stage);
+};
+
+// The callback cannot expose a durable, replayable stage: build, reads, proof,
+// and optional promotion all happen inside the transaction that created it.
+// A throw or process interruption rolls the stage back; a normal non-promotion
+// path clears it before commit.
+export const runFinancialWorkspaceStageSessionV7 = async ({
+  stageNamespace, commands = [], entities = [], workspacePayload = {}, database = null,
+  batchSize = FINANCIAL_STAGE_WRITE_BATCH_SIZE, task,
+} = {}) => {
+  const db = database || await getLedgerDb();
+  if (!db) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
+  await ensureFinancialLedgerV7(db);
+  const stage = String(stageNamespace || '').trim();
+  if (!stage.includes('::shadow-stage::')) throw new Error('financial_v7_shadow_stage_namespace_invalid');
+  if (typeof task !== 'function') throw new Error('financial_v7_stage_session_task_required');
+  return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
+    await stageFinancialWorkspaceInTransactionV7(txn, {
+      namespace: stage, commands, entities, workspacePayload, batchSize,
+    });
+    let promotionAttempted = false;
+    let stageConsumed = false;
+    try {
+      return await task(Object.freeze({
+        stageNamespace: stage,
+        readProjection: () => readFinancialProjectionV7({
+          namespace: stage, database: txn, schemaReady: true,
+        }),
+        proveInvariants: ({ foreignKeyScope = 'database' } = {}) => proveFinancialLedgerInvariantsV7({
+          namespace: stage, database: txn, foreignKeyScope, schemaReady: true,
+        }),
+        promote: async ({
+          namespace, checksum, sourceCounts = {}, targetCounts = {}, differences = [],
+          workspacePayload: promotedWorkspacePayload = {}, resetPendingOutbox = false,
+        } = {}) => {
+          if (promotionAttempted) throw new Error('financial_v7_stage_session_promotion_reused');
+          promotionAttempted = true;
+          const { target, stage: verifiedStage } = assertFinancialStagePromotionNamespacesV7(namespace, stage);
+          if (differences.length) return { supported: true, ok: false, reason: 'shadow_parity_failed' };
+          const now = new Date().toISOString();
+          await promoteFinancialWorkspaceStageInTransactionV7(txn, {
+            target, stage: verifiedStage, checksum, sourceCounts, targetCounts,
+            workspacePayload: promotedWorkspacePayload, resetPendingOutbox,
+            now, runId: `${target}:${Date.now()}`,
+          });
+          stageConsumed = true;
+          return { supported: true, ok: true, cutoverAt: now, checksum, sourceMode: 'sqlite' };
+        },
+      }));
+    } finally {
+      if (!stageConsumed) await clearFinancialNamespaceRowsInTransactionV7(txn, stage);
+    }
+  }));
+};
+
 export const promoteFinancialWorkspaceStageV7 = async ({
   namespace, stageNamespace, checksum, sourceCounts = {}, targetCounts = {}, differences = [],
   workspacePayload = {}, resetPendingOutbox = false, database = null,
@@ -5756,37 +6028,14 @@ export const promoteFinancialWorkspaceStageV7 = async ({
   const db = database || await getLedgerDb();
   if (!db) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
   await ensureFinancialLedgerV7(db);
-  const target = String(namespace || '').trim();
-  const stage = String(stageNamespace || '').trim();
-  if (!target || !stage.includes('::shadow-stage::') || !stage.startsWith(`${target}::shadow-stage::`)) {
-    throw new Error('financial_v7_shadow_promotion_namespace_invalid');
-  }
+  const { target, stage } = assertFinancialStagePromotionNamespacesV7(namespace, stageNamespace);
   if (differences.length) return { supported: true, ok: false, reason: 'shadow_parity_failed' };
   return enqueueWrite(async () => {
     const now = new Date().toISOString();
-    const runId = `${target}:${Date.now()}`;
-    await runLedgerExclusiveTransaction(db, async (txn) => {
-      if (resetPendingOutbox) {
-        await txn.runAsync(`DELETE FROM ledger_outbox_v2 WHERE namespace=? AND acknowledged_at IS NULL`, target);
-      }
-      await clearFinancialNamespaceRowsInTransactionV7(txn, target);
-      await copyFinancialNamespaceFromStageInTransactionV7({
-        database: txn, namespace: target, stageNamespace: stage,
-      });
-      await txn.runAsync(
-        `INSERT INTO ledger_workspace_state_v7
-         (namespace,source_mode,schema_version,shadow_checksum,shadow_verified_at,cutover_at,last_reconciled_at,payload_json,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
-        target, 'sqlite', FINANCIAL_LEDGER_SCHEMA_VERSION, checksum, now, now, now, safeJson(workspacePayload), now,
-      );
-      await txn.runAsync(
-        `INSERT INTO ledger_migration_audits_v7
-         (namespace,run_id,source_checksum,target_checksum,source_counts_json,target_counts_json,differences_json,exact_match,created_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
-        target, runId, checksum, checksum, safeJson(sourceCounts), safeJson(targetCounts), '[]', 1, now,
-      );
-      await clearFinancialNamespaceRowsInTransactionV7(txn, stage);
-    });
+    await runLedgerExclusiveTransaction(db, txn => promoteFinancialWorkspaceStageInTransactionV7(txn, {
+      target, stage, checksum, sourceCounts, targetCounts, workspacePayload,
+      resetPendingOutbox, now, runId: `${target}:${Date.now()}`,
+    }));
     return { supported: true, ok: true, cutoverAt: now, checksum, sourceMode: 'sqlite' };
   });
 };

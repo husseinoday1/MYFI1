@@ -1,14 +1,12 @@
 import { buildFinancialLedgerCommand, FINANCIAL_LEDGER_SCHEMA_VERSION } from './financialLedgerV7Model';
 import {
   canonicalFinancialEntityPayload,
-  discardFinancialWorkspaceStageV7,
   financialLedgerV7Supported,
   getFinancialWorkspaceStateV7,
-  promoteFinancialWorkspaceStageV7,
   proveFinancialLedgerInvariantsV7,
   readFinancialProjectionV7,
+  runFinancialWorkspaceStageSessionV7,
   setFinancialWorkspaceStateV7,
-  stageFinancialWorkspaceV7,
 } from './financialLedgerV7Repository';
 import {
   buildCurrencyFields,
@@ -429,19 +427,20 @@ export const buildFinancialShadowProjectionV7 = ({
   };
 };
 
-export const runFinancialShadowMigrationV7 = async ({
-  namespace = 'guest', workspace = {}, coldArchives = [], database = null, forceReplace = false,
-} = {}) => {
-  if (!database && !financialLedgerV7Supported()) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
-  const currentState = await getFinancialWorkspaceStateV7({ namespace, database });
-  if (currentState?.source_mode === 'sqlite' && !forceReplace) {
-    return { supported: true, ok: true, alreadyCutover: true, checksum: currentState.shadow_checksum, sourceMode: 'sqlite' };
-  }
+const FINANCIAL_STAGE_PARITY_FIELDS_V7 = [
+  'activeTransactions', 'archivedTransactions', 'syntheticTransactions', 'totalLedgerTransactions',
+  'postings', 'entities', 'walletBalances', 'currencyBalances', 'monthlyTotals', 'links',
+];
+
+const prepareFinancialStageProjectionV7 = async ({
+  namespace, stageNamespace, workspace, coldArchives, database, forceReplace,
+  checkUnresolvedFx = true,
+}) => {
   const sourceUnresolvedFx = [
     ...(Array.isArray(workspace?.trans) ? workspace.trans : []),
     ...archiveRows(coldArchives),
   ].filter(transaction => transaction?.fxStatus === 'UNRESOLVED_FX');
-  if (sourceUnresolvedFx.length) {
+  if (checkUnresolvedFx && sourceUnresolvedFx.length) {
     return {
       supported: true,
       ok: false,
@@ -449,7 +448,6 @@ export const runFinancialShadowMigrationV7 = async ({
       differences: sourceUnresolvedFx.slice(0, 20).map(item => ({ field: 'fx', id: item.id })),
     };
   }
-  const stageNamespace = `${namespace}::shadow-stage::v7`;
   const projection = buildFinancialShadowProjectionV7({ namespace: stageNamespace, workspace, coldArchives });
   const expectedIds = new Set(projection.commands.map(command => command.header.id));
   const existing = await readFinancialProjectionV7({ namespace, database });
@@ -463,77 +461,97 @@ export const runFinancialShadowMigrationV7 = async ({
     };
   }
 
-  await stageFinancialWorkspaceV7({
-    stageNamespace, commands: projection.commands, entities: projection.entities,
-    workspacePayload: projection.workspacePayload, database,
+  return { supported: true, ok: true, projection };
+};
+
+const verifyFinancialStageProjectionV7 = async ({ projection, readProjection }) => {
+  const staged = await readProjection();
+  const targetDocument = rawProjectionDocument(staged);
+  const targetChecksum = financialProjectionChecksum(targetDocument);
+  const targetMetrics = metricsFromTarget({
+    projection: staged,
+    sourceMetrics: projection.metrics,
+    baseCurrency: projection.baseCurrency,
   });
-  try {
-    const staged = await readFinancialProjectionV7({ namespace: stageNamespace, database });
-    const targetDocument = rawProjectionDocument(staged);
-    const targetChecksum = financialProjectionChecksum(targetDocument);
-    const targetMetrics = metricsFromTarget({ projection: staged, sourceMetrics: projection.metrics, baseCurrency: projection.baseCurrency });
-    const differences = [];
-    compareMetric(differences, 'checksum', projection.checksum, targetChecksum);
-    for (const field of [
-      'activeTransactions', 'archivedTransactions', 'syntheticTransactions', 'totalLedgerTransactions',
-      'postings', 'entities', 'walletBalances', 'currencyBalances', 'monthlyTotals',
-      'links',
-    ]) compareMetric(differences, field, projection.metrics[field], targetMetrics[field]);
-    if (differences.length) {
-      await discardFinancialWorkspaceStageV7({ stageNamespace, database });
-      return {
-        supported: true, ok: false, reason: 'shadow_parity_failed',
-        sourceChecksum: projection.checksum, targetChecksum, differences,
-        sourceCounts: projection.metrics, targetCounts: targetMetrics,
-      };
-    }
-    // Phase 5 is readiness proof only. A successful shadow comparison must not
-    // make SQLite operationally authoritative; that cutover belongs to a later
-    // gated phase. Keep only the verified checksum/state and discard staging.
-    await discardFinancialWorkspaceStageV7({ stageNamespace, database });
-    const verifiedAt = new Date().toISOString();
-    await setFinancialWorkspaceStateV7({
-      namespace,
-      sourceMode: 'shadow',
-      checksum: projection.checksum,
-      verifiedAt,
-      payload: {
-        ...projection.workspacePayload,
-        migrationReadiness: {
-          status: 'ready',
-          verifiedAt,
-          sourceChecksum: projection.checksum,
-          targetChecksum,
-          sourceCounts: projection.metrics,
-          targetCounts: targetMetrics,
-        },
-      },
-      database,
-    });
-    return {
-      supported: true,
-      ok: true,
-      migrationReady: true,
-      sourceMode: 'shadow',
-      checksum: projection.checksum,
-      sourceChecksum: projection.checksum,
-      targetChecksum,
-      sourceCounts: projection.metrics,
-      targetCounts: targetMetrics,
-      differences: [],
-      verifiedAt,
-      cutover: false,
-    };
-  } catch (error) {
-    await discardFinancialWorkspaceStageV7({ stageNamespace, database }).catch(() => {});
-    throw error;
+  const differences = [];
+  compareMetric(differences, 'checksum', projection.checksum, targetChecksum);
+  for (const field of FINANCIAL_STAGE_PARITY_FIELDS_V7) {
+    compareMetric(differences, field, projection.metrics[field], targetMetrics[field]);
   }
+  return { targetChecksum, targetMetrics, differences };
+};
+
+export const runFinancialShadowMigrationV7 = async ({
+  namespace = 'guest', workspace = {}, coldArchives = [], database = null, forceReplace = false,
+} = {}) => {
+  if (!database && !financialLedgerV7Supported()) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
+  const currentState = await getFinancialWorkspaceStateV7({ namespace, database });
+  if (currentState?.source_mode === 'sqlite' && !forceReplace) {
+    return { supported: true, ok: true, alreadyCutover: true, checksum: currentState.shadow_checksum, sourceMode: 'sqlite' };
+  }
+  const stageNamespace = `${namespace}::shadow-stage::v7`;
+  const prepared = await prepareFinancialStageProjectionV7({
+    namespace, stageNamespace, workspace, coldArchives, database, forceReplace,
+  });
+  if (!prepared.ok) return prepared;
+  const { projection } = prepared;
+  const verification = await runFinancialWorkspaceStageSessionV7({
+    stageNamespace,
+    commands: projection.commands,
+    entities: projection.entities,
+    workspacePayload: projection.workspacePayload,
+    database,
+    task: ({ readProjection }) => verifyFinancialStageProjectionV7({ projection, readProjection }),
+  });
+  const { targetChecksum, targetMetrics, differences } = verification;
+  if (differences.length) {
+    return {
+      supported: true, ok: false, reason: 'shadow_parity_failed',
+      sourceChecksum: projection.checksum, targetChecksum, differences,
+      sourceCounts: projection.metrics, targetCounts: targetMetrics,
+    };
+  }
+  // Phase 5 remains readiness-only. The stage session has already removed its
+  // transaction-local rows before this durable shadow state is written.
+  const verifiedAt = new Date().toISOString();
+  await setFinancialWorkspaceStateV7({
+    namespace,
+    sourceMode: 'shadow',
+    checksum: projection.checksum,
+    verifiedAt,
+    payload: {
+      ...projection.workspacePayload,
+      migrationReadiness: {
+        status: 'ready',
+        verifiedAt,
+        sourceChecksum: projection.checksum,
+        targetChecksum,
+        sourceCounts: projection.metrics,
+        targetCounts: targetMetrics,
+      },
+    },
+    database,
+  });
+  return {
+    supported: true,
+    ok: true,
+    migrationReady: true,
+    sourceMode: 'shadow',
+    checksum: projection.checksum,
+    sourceChecksum: projection.checksum,
+    targetChecksum,
+    sourceCounts: projection.metrics,
+    targetCounts: targetMetrics,
+    differences: [],
+    verifiedAt,
+    cutover: false,
+  };
 };
 
 
 export const runFinancialOperationalCutoverV7 = async ({
   namespace = 'guest', workspace = {}, coldArchives = [], database = null,
-  forceReplace = false, resetPendingOutbox = false, foreignKeyScope = 'database',
+  forceReplace = false, resetPendingOutbox = false, foreignKeyScope = 'database', batchSize,
 } = {}) => {
   if (!database && !financialLedgerV7Supported()) {
     return { supported: false, ok: false, reason: 'sqlite_unavailable', cutover: false };
@@ -553,96 +571,72 @@ export const runFinancialOperationalCutoverV7 = async ({
     };
   }
 
-  const readiness = forceReplace
-    ? { supported: true, ok: true, migrationReady: true, sourceMode: currentState?.source_mode || 'shadow', forceReplace: true }
-    : await runFinancialShadowMigrationV7({
-        namespace, workspace, coldArchives, database, forceReplace: false,
-      });
-  if (!readiness?.ok || readiness?.migrationReady !== true) {
-    return { ...readiness, cutover: false, reason: readiness?.reason || 'migration_not_ready' };
-  }
-
   const stageNamespace = `${namespace}::shadow-stage::v7-cutover`;
-  const projection = buildFinancialShadowProjectionV7({
-    namespace: stageNamespace, workspace, coldArchives,
+  const prepared = await prepareFinancialStageProjectionV7({
+    namespace, stageNamespace, workspace, coldArchives, database, forceReplace,
+    // Preserve the former operational contract: forceReplace bypassed the
+    // standalone readiness pass, including its unresolved-FX source gate.
+    checkUnresolvedFx: !forceReplace,
   });
-  await stageFinancialWorkspaceV7({
+  if (!prepared.ok) {
+    return { ...prepared, cutover: false, reason: prepared.reason || 'migration_not_ready' };
+  }
+  const { projection } = prepared;
+  return runFinancialWorkspaceStageSessionV7({
     stageNamespace,
     commands: projection.commands,
     entities: projection.entities,
     workspacePayload: projection.workspacePayload,
     database,
-  });
+    batchSize,
+    task: async ({ readProjection, proveInvariants, promote }) => {
+      const { targetChecksum, targetMetrics, differences } = await verifyFinancialStageProjectionV7({
+        projection, readProjection,
+      });
+      if (differences.length) {
+        return {
+          supported: true, ok: false, cutover: false, reason: 'final_cutover_parity_failed',
+          sourceChecksum: projection.checksum, targetChecksum, differences,
+          sourceCounts: projection.metrics, targetCounts: targetMetrics,
+        };
+      }
 
-  try {
-    const staged = await readFinancialProjectionV7({ namespace: stageNamespace, database });
-    const targetDocument = rawProjectionDocument(staged);
-    const targetChecksum = financialProjectionChecksum(targetDocument);
-    const targetMetrics = metricsFromTarget({
-      projection: staged,
-      sourceMetrics: projection.metrics,
-      baseCurrency: projection.baseCurrency,
-    });
-    const differences = [];
-    compareMetric(differences, 'checksum', projection.checksum, targetChecksum);
-    for (const field of [
-      'activeTransactions', 'archivedTransactions', 'syntheticTransactions', 'totalLedgerTransactions',
-      'postings', 'entities', 'walletBalances', 'currencyBalances', 'monthlyTotals', 'links',
-    ]) compareMetric(differences, field, projection.metrics[field], targetMetrics[field]);
-    if (differences.length) {
-      await discardFinancialWorkspaceStageV7({ stageNamespace, database });
-      return {
-        supported: true, ok: false, cutover: false, reason: 'final_cutover_parity_failed',
-        sourceChecksum: projection.checksum, targetChecksum, differences,
-        sourceCounts: projection.metrics, targetCounts: targetMetrics,
-      };
-    }
+      const health = await proveInvariants({ foreignKeyScope });
+      if (!health?.ok) {
+        return {
+          supported: true, ok: false, cutover: false, reason: 'financial_v7_health_blocking',
+          health,
+        };
+      }
 
-    const health = await proveFinancialLedgerInvariantsV7({
-      namespace: stageNamespace,
-      database,
-      foreignKeyScope,
-    });
-    if (!health?.ok) {
-      await discardFinancialWorkspaceStageV7({ stageNamespace, database });
-      return {
-        supported: true, ok: false, cutover: false, reason: 'financial_v7_health_blocking',
-        health,
-      };
-    }
-
-    const promoted = await promoteFinancialWorkspaceStageV7({
-      namespace,
-      stageNamespace,
-      checksum: projection.checksum,
-      sourceCounts: projection.metrics,
-      targetCounts: targetMetrics,
-      differences: [],
-      workspacePayload: {
-        ...projection.workspacePayload,
-        operationalCutover: {
-          status: 'active',
-          promotedAt: new Date().toISOString(),
-          sourceChecksum: projection.checksum,
-          targetChecksum,
+      const promoted = await promote({
+        namespace,
+        checksum: projection.checksum,
+        sourceCounts: projection.metrics,
+        targetCounts: targetMetrics,
+        differences: [],
+        workspacePayload: {
+          ...projection.workspacePayload,
+          operationalCutover: {
+            status: 'active',
+            promotedAt: new Date().toISOString(),
+            sourceChecksum: projection.checksum,
+            targetChecksum,
+          },
         },
-      },
-      resetPendingOutbox: !!resetPendingOutbox,
-      database,
-    });
-    return {
-      ...promoted,
-      cutover: promoted?.ok === true,
-      sourceMode: promoted?.ok ? 'sqlite' : 'shadow',
-      health,
-      sourceChecksum: projection.checksum,
-      targetChecksum,
-      sourceCounts: projection.metrics,
-      targetCounts: targetMetrics,
-      differences: [],
-    };
-  } catch (error) {
-    await discardFinancialWorkspaceStageV7({ stageNamespace, database }).catch(() => {});
-    throw error;
-  }
+        resetPendingOutbox: !!resetPendingOutbox,
+      });
+      return {
+        ...promoted,
+        cutover: promoted?.ok === true,
+        sourceMode: promoted?.ok ? 'sqlite' : 'shadow',
+        health,
+        sourceChecksum: projection.checksum,
+        targetChecksum,
+        sourceCounts: projection.metrics,
+        targetCounts: targetMetrics,
+        differences: [],
+      };
+    },
+  });
 };
