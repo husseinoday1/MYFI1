@@ -43,6 +43,40 @@ const failure = (result, fallbackReason) => ({
   reason: result?.reason || fallbackReason,
 });
 
+// This probe is deliberately non-mutating. Startup calls it before reading
+// cold archives: a healthy V7 lab is already the source of truth, so loading
+// every archived year merely to prove the same fact adds a large, avoidable
+// JS allocation. A false result means "rebuild with the archive source", not
+// "clear anything".
+const reusablePerformanceTestLedgerV7 = async ({
+  workspaceNamespace = 'guest',
+  workspace = {},
+} = {}) => {
+  const namespace = getLedgerNamespace(workspaceNamespace, workspace?.cfg || {});
+  const requestedTier = String(workspace?.cfg?.performanceTestTier || '');
+  const currentState = await getFinancialWorkspaceStateV7({ namespace });
+  if (currentState?.source_mode !== 'sqlite' || stateTier(currentState) !== requestedTier) {
+    return null;
+  }
+
+  const health = await getLedgerDataHealth({
+    namespace,
+    walletIds: Array.isArray(workspace?.wallets) ? workspace.wallets.map(item => item.id) : [],
+    expectedActiveCount: Array.isArray(workspace?.trans) ? workspace.trans.length : null,
+  });
+  if (!health?.ok) return null;
+
+  return {
+    supported: true,
+    ok: true,
+    alreadyCutover: true,
+    cutover: true,
+    sourceMode: 'sqlite',
+    checksum: currentState.shadow_checksum || null,
+    health,
+  };
+};
+
 /**
  * Prepare one isolated performance namespace as an operational V7 ledger.
  *
@@ -56,6 +90,10 @@ export const ensurePerformanceTestLedgerV7 = async ({
   workspace = {},
   coldArchives = [],
   forceReplace = false,
+  // `reuseOnly` is startup's non-mutating preflight. It must never fall
+  // through into the disposable rebuild without the caller first loading the
+  // archived source that parity needs.
+  reuseOnly = false,
 } = {}) => {
   // The destructive rebuild below is only authorized for the isolated lab.
   if (workspace?.cfg?.demoMode !== true || workspace?.cfg?.performanceTestMode !== true) {
@@ -68,26 +106,19 @@ export const ensurePerformanceTestLedgerV7 = async ({
   const namespace = getLedgerNamespace(workspaceNamespace, workspace?.cfg || {});
   const requestedTier = String(workspace?.cfg?.performanceTestTier || '');
   const report = (result, phase) => recordAttempt(result, requestedTier, phase);
-  const currentState = await getFinancialWorkspaceStateV7({ namespace });
-  const currentTier = stateTier(currentState);
+  if (!forceReplace) {
+    const reused = await reusablePerformanceTestLedgerV7({ workspaceNamespace, workspace });
+    if (reused) return report(reused, 'reuse');
+  }
 
-  if (!forceReplace && currentState?.source_mode === 'sqlite' && currentTier === requestedTier) {
-    const health = await getLedgerDataHealth({
-      namespace,
-      walletIds: Array.isArray(workspace?.wallets) ? workspace.wallets.map(item => item.id) : [],
-      expectedActiveCount: Array.isArray(workspace?.trans) ? workspace.trans.length : null,
-    });
-    if (health?.ok) {
-      return report({
-        supported: true,
-        ok: true,
-        alreadyCutover: true,
-        cutover: true,
-        sourceMode: 'sqlite',
-        checksum: currentState.shadow_checksum || null,
-        health,
-      }, 'reuse');
-    }
+  if (reuseOnly) {
+    return report({
+      supported: true,
+      ok: false,
+      cutover: false,
+      rebuildRequired: true,
+      reason: 'performance_v7_rebuild_required',
+    }, 'reuse_required');
   }
 
   // This namespace is already isolated by getLedgerNamespace(..., cfg). Clear

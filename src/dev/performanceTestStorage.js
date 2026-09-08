@@ -1,6 +1,7 @@
 // MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE } from '../lib/constants';
+import { markStartupStage } from '../lib/startupTiming';
 
 const STORAGE_VERSION = 2;
 const TRANSACTION_CHUNK_SIZE = 750;
@@ -14,6 +15,13 @@ let scheduledGeneration = 0;
 let scheduledInFlight = Promise.resolve();
 let lastLogicalSnapshot = null;
 let performanceOverlay = null;
+
+// The storage runtime tests deliberately load this module without application
+// imports.  `typeof` keeps that harness valid while the app receives the
+// duration-only mark during an actual cold start.
+const markPerformanceSnapshotStage = name => {
+  if (typeof markStartupStage === 'function') markStartupStage(`performance:${name}`);
+};
 
 const yieldToUi = () => (
   typeof setTimeout === 'function'
@@ -185,57 +193,62 @@ export const flushScheduledPerformanceSnapshot = async () => {
 };
 
 export const readPerformanceSnapshot = async (namespace = 'guest', { newerThan = null } = {}) => {
-  const active = parseJson(await AsyncStorage.getItem(STORAGE.DEMO_ACTIVE), null);
-  if (!active?.active || String(active.namespace || '') !== String(namespace || 'guest')) return null;
-  const minimumStartedAt = Date.parse(String(newerThan || ''));
-  if (Number.isFinite(minimumStartedAt)) {
-    const activeStartedAt = Date.parse(String(active.startedAt || ''));
-    // An intentional reset invalidates only a performance workspace that was
-    // already active when the reset began. A newer, explicitly selected lab
-    // tier remains restartable even though the durable reset marker is kept to
-    // block legacy financial-data recovery for this namespace.
-    if (!Number.isFinite(activeStartedAt) || activeStartedAt <= minimumStartedAt) return null;
+  markPerformanceSnapshotStage('snapshotReadStarted');
+  try {
+    const active = parseJson(await AsyncStorage.getItem(STORAGE.DEMO_ACTIVE), null);
+    if (!active?.active || String(active.namespace || '') !== String(namespace || 'guest')) return null;
+    const minimumStartedAt = Date.parse(String(newerThan || ''));
+    if (Number.isFinite(minimumStartedAt)) {
+      const activeStartedAt = Date.parse(String(active.startedAt || ''));
+      // An intentional reset invalidates only a performance workspace that was
+      // already active when the reset began. A newer, explicitly selected lab
+      // tier remains restartable even though the durable reset marker is kept to
+      // block legacy financial-data recovery for this namespace.
+      if (!Number.isFinite(activeStartedAt) || activeStartedAt <= minimumStartedAt) return null;
+    }
+
+    const raw = await AsyncStorage.getItem(STORAGE.DEMO_DATA);
+    const snapshot = parseJson(raw, null);
+    if (!snapshot) return null;
+
+    const storageMeta = snapshot.performanceStorage;
+    if (Number(storageMeta?.version || 0) !== STORAGE_VERSION) {
+      return snapshot;
+    }
+
+    const chunkCount = Number(storageMeta.chunkCount || 0);
+    const expectedCount = Number(storageMeta.transactionCount || 0);
+    const keys = Array.from({ length: chunkCount }, (_, index) => chunkKey(index));
+    const pairs = keys.length ? await AsyncStorage.multiGet(keys) : [];
+    const transactions = [];
+    for (const [, chunkRaw] of pairs) {
+      const chunk = parseJson(chunkRaw, null);
+      if (!Array.isArray(chunk)) return null;
+      transactions.push(...chunk);
+    }
+    if (transactions.length !== expectedCount) return null;
+
+    const baseSnapshot = {
+      ...snapshot,
+      data: {
+        ...(snapshot.data || {}),
+        trans: transactions,
+      },
+    };
+    const storedOverlay = parseJson(await AsyncStorage.getItem(overlayKey), null);
+    const restored = Number(storedOverlay?.version || 0) === 1 && storedOverlay?.snapshot
+      ? {
+          ...storedOverlay.snapshot,
+          data: {
+            ...(storedOverlay.snapshot.data || {}),
+            trans: [...(storedOverlay.addedTransactions || []), ...transactions],
+          },
+        }
+      : baseSnapshot;
+    lastLogicalSnapshot = restored;
+    performanceOverlay = restored === baseSnapshot ? null : storedOverlay;
+    return restored;
+  } finally {
+    markPerformanceSnapshotStage('snapshotRead');
   }
-
-  const raw = await AsyncStorage.getItem(STORAGE.DEMO_DATA);
-  const snapshot = parseJson(raw, null);
-  if (!snapshot) return null;
-
-  const storageMeta = snapshot.performanceStorage;
-  if (Number(storageMeta?.version || 0) !== STORAGE_VERSION) {
-    return snapshot;
-  }
-
-  const chunkCount = Number(storageMeta.chunkCount || 0);
-  const expectedCount = Number(storageMeta.transactionCount || 0);
-  const keys = Array.from({ length: chunkCount }, (_, index) => chunkKey(index));
-  const pairs = keys.length ? await AsyncStorage.multiGet(keys) : [];
-  const transactions = [];
-  for (const [, chunkRaw] of pairs) {
-    const chunk = parseJson(chunkRaw, null);
-    if (!Array.isArray(chunk)) return null;
-    transactions.push(...chunk);
-  }
-  if (transactions.length !== expectedCount) return null;
-
-  const baseSnapshot = {
-    ...snapshot,
-    data: {
-      ...(snapshot.data || {}),
-      trans: transactions,
-    },
-  };
-  const storedOverlay = parseJson(await AsyncStorage.getItem(overlayKey), null);
-  const restored = Number(storedOverlay?.version || 0) === 1 && storedOverlay?.snapshot
-    ? {
-        ...storedOverlay.snapshot,
-        data: {
-          ...(storedOverlay.snapshot.data || {}),
-          trans: [...(storedOverlay.addedTransactions || []), ...transactions],
-        },
-      }
-    : baseSnapshot;
-  lastLogicalSnapshot = restored;
-  performanceOverlay = restored === baseSnapshot ? null : storedOverlay;
-  return restored;
 };

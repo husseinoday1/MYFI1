@@ -76,6 +76,13 @@ async function run() {
       });
       assert.equal(again.ok, true, JSON.stringify(again));
       assert.equal(again.alreadyCutover, true);
+      // Cold archives are intentionally absent here.  A proven reuse must not
+      // need to hydrate them, and a failed proof must not clear the lab.
+      const reuseOnly = await ensurePerformanceTestLedgerV7({
+        workspaceNamespace: 'guest', workspace: stateFromSnapshot(JSON.parse(JSON.stringify(snapshotFromState(workspace)))), reuseOnly: true,
+      });
+      assert.equal(reuseOnly.ok, true, JSON.stringify(reuseOnly));
+      assert.equal(reuseOnly.alreadyCutover, true);
       const rebuilt = await ensurePerformanceTestLedgerV7({
         workspaceNamespace: 'guest', workspace: stateFromSnapshot(JSON.parse(JSON.stringify(snapshotFromState(workspace)))), coldArchives, forceReplace: true,
       });
@@ -85,6 +92,26 @@ async function run() {
       assert.equal(native.prepare(`SELECT count(*) AS n FROM ${table} WHERE namespace LIKE 'guest::performance-test%'`).get().n, 0, `${table}: lab must not create transport state`);
     }
   }
+  // A tier mismatch on startup is allowed to request a rebuild, but the
+  // preflight itself must never start one without cold archives.  Preserve the
+  // existing row exactly so a future removal of the reuseOnly guard is caught:
+  // that mutation would clear/rebuild this namespace with an empty archive
+  // source before returning.
+  const stateBeforeReuseOnlyMiss = await getFinancialWorkspaceStateV7({ namespace: 'guest::performance-test' });
+  const currentTier = JSON.parse(stateBeforeReuseOnlyMiss.payload_json || '{}')?.cfg?.performanceTestTier;
+  const missingTier = String(currentTier) === '5000' ? '10000' : '5000';
+  const { __performanceArchives: _missingTierArchives, ...missingTierWorkspace } = buildPerformanceTestWorkspace({}, missingTier);
+  const reuseOnlyMiss = await ensurePerformanceTestLedgerV7({
+    workspaceNamespace: 'guest', workspace: missingTierWorkspace, reuseOnly: true,
+  });
+  assert.equal(reuseOnlyMiss.ok, false, JSON.stringify(reuseOnlyMiss));
+  assert.equal(reuseOnlyMiss.rebuildRequired, true, JSON.stringify(reuseOnlyMiss));
+  assert.equal(reuseOnlyMiss.reason, 'performance_v7_rebuild_required');
+  assert.deepEqual(
+    await getFinancialWorkspaceStateV7({ namespace: 'guest::performance-test' }),
+    stateBeforeReuseOnlyMiss,
+    'reuse-only preflight must not clear or rebuild the existing lab without cold archives',
+  );
   // Reproduce a database-wide failure outside the selected fixture. The real
   // invariant checker must still refuse it (never weaken the global FK guard),
   // while the isolated performance stage verifies only relations it materializes.

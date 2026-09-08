@@ -53,7 +53,7 @@ import {
   getFinancialMaintenanceSnapshot,
   subscribeFinancialMaintenance,
 } from './src/lib/financialMaintenanceBarrier';
-import { recordStartupTiming } from './src/lib/startupTiming';
+import { beginStartupStageTiming, recordStartupTiming } from './src/lib/startupTiming';
 
 const FORCE_ONBOARDING = process.env.EXPO_PUBLIC_FORCE_ONBOARDING === '1';
 const FRESH_TEST_MODE = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
@@ -369,6 +369,7 @@ function AppRoot() {
     const mark = (name) => {
       startupMarks[name] = Date.now() - startupClock;
     };
+    mark('startupBegin');
 
     (async () => {
       if (FRESH_TEST_MODE) {
@@ -380,7 +381,12 @@ function AppRoot() {
         return;
       }
 
-      await loadLocal();
+      const endStartupStageTiming = beginStartupStageTiming(mark);
+      try {
+        await loadLocal();
+      } finally {
+        endStartupStageTiming();
+      }
       mark('loadLocal');
       if (!active) return;
 

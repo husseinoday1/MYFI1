@@ -25,6 +25,23 @@
 export const STARTUP_TIMING_VERSION = 1;
 
 let lastStartupTiming = null;
+let activeStartupStageMarker = null;
+
+// A startup owns this marker for the duration of its local mount.  Keeping the
+// hook here lets the store report duration-only sub-stages without threading a
+// callback through every loadLocal caller (many are user/account transitions,
+// not cold start).
+export const beginStartupStageTiming = marker => {
+  const ownedMarker = typeof marker === 'function' ? marker : null;
+  activeStartupStageMarker = ownedMarker;
+  return () => {
+    if (activeStartupStageMarker === ownedMarker) activeStartupStageMarker = null;
+  };
+};
+
+export const markStartupStage = name => {
+  try { activeStartupStageMarker?.(String(name || 'unknown')); } catch {}
+};
 
 /**
  * Record the marks collected during one launch.

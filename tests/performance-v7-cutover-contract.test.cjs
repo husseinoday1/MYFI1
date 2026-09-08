@@ -22,6 +22,7 @@ must(helper.includes('runFinancialOperationalCutoverV7'), 'performance V7 operat
 must(helper.includes('forceReplace: true'), 'performance cutover does not rebuild the requested tier');
 must(helper.includes('getLedgerNamespace(workspaceNamespace'), 'performance cutover is not namespaced through the isolated ledger namespace');
 must(helper.includes('getLedgerDataHealth'), 'performance V7 cutover has no post-promotion health proof');
+must(helper.includes('reuseOnly'), 'performance startup cannot preflight reuse without rebuilding');
 
 must(data.includes('ensurePerformanceTestLedgerV7'), 'enterDemoMode does not use the V7 performance adapter');
 must(!data.includes('replaceLedgerSnapshot'), 'dataSlice still has a direct V6 performance snapshot write');
@@ -47,6 +48,15 @@ must(!demoBranch.includes("throw new Error(performanceLedger.reason || 'performa
 must(demoBranch.includes('lastSyncError: performanceLedgerError'), 'performance bootstrap failure is not surfaced without touching the real vault');
 must(demoBranch.includes('readFinancialWorkspaceV7'), 'same-count performance edits can leave Zustand behind the V7 source of truth');
 must(demoBranch.includes('stateFromFinancialV7'), 'the persisted performance cache is not hydrated from an already-cut-over V7 ledger');
+must(storage.includes("markPerformanceSnapshotStage('snapshotRead')"), 'performance startup does not time snapshot reading');
+must(demoBranch.includes("markStartupStage('performance:stateFromSnapshot')"), 'performance startup does not time snapshot parsing');
+must(demoBranch.includes("markStartupStage('performance:ledgerReuseProof')"), 'performance startup does not time V7 reuse proof');
+must(demoBranch.includes("markStartupStage('performance:coldArchiveExport')"), 'performance startup does not time cold-archive rebuilding');
+must(demoBranch.includes("markStartupStage('performance:ledgerEnsure')"), 'performance startup does not time V7 rebuilding');
+must(demoBranch.includes("markStartupStage('performance:v7Read')"), 'performance startup does not time V7 reading');
+must(demoBranch.includes("markStartupStage('performance:stateFromFinancialV7')"), 'performance startup does not time V7 state hydration');
+must(demoBranch.indexOf('reuseOnly: true') < demoBranch.indexOf('exportColdArchives('), 'performance startup hydrates cold archives before its non-mutating V7 reuse proof');
+must(demoBranch.includes('transactionLimit: null'), 'performance startup must retain the complete V7 read after same-count edits');
 
 must(ledger.includes('isPerformanceTestNamespaceV13'), 'performance namespace transport guard is missing');
 must(ledger.includes('if (isPerformanceTestNamespaceV13(namespace)) return null;'), 'V3 outbox writes are not blocked for performance data');

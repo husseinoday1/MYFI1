@@ -510,7 +510,7 @@ assert(legacySettings.includes('secureTextEntry={!backupPasswordVisible}') && le
 assert(auth.includes('secureTextEntry={!passwordVisible}') && passwordRecovery.includes('secureTextEntry={!passwordVisible}') && passwordRecovery.includes('secureTextEntry={!confirmationVisible}'), 'Authentication and recovery password fields must retain show/hide controls');
 
 /* MYFI_STARTUP_TIMING_DEVICE_EVIDENCE */
-assert(appRoot.includes("import { recordStartupTiming } from './src/lib/startupTiming';"), 'App startup must retain the timing recorder');
+assert(appRoot.includes("from './src/lib/startupTiming';") && appRoot.includes('recordStartupTiming'), 'App startup must retain the timing recorder');
 assert(appRoot.includes("recordStartupTiming(startupMarks, 'completed');") && appRoot.includes("recordStartupTiming(startupMarks, 'failed');"), 'Completed and failed launches must both preserve timing evidence');
 assert(settings.includes("import { readStartupTiming } from '../lib/startupTiming';"), 'Settings must read the in-memory startup timing evidence');
 assert(settings.includes('const showStartupTiming = () => {') && settings.includes('onShowStartupTiming={showStartupTiming}'), 'Settings must wire startup timing into Account');

@@ -42,6 +42,7 @@ import { accountIdentityPatch, ensureProfileIdentity } from '../../lib/accountId
 import { accountIdFromWorkspaceNamespace, resolveWorkspaceTransition, workspaceNamespaceForSession } from '../../lib/accountWorkspace';
 import { readPerformanceSnapshot, schedulePerformanceSnapshotWrite } from '../../dev/performanceTestStorage';
 import { ensurePerformanceTestLedgerV7 } from '../../dev/performanceTestLedgerV7';
+import { markStartupStage } from '../../lib/startupTiming';
 import { exportColdArchives, getColdArchiveNamespace, replaceColdArchives } from '../../lib/localArchiveRepository';
 import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
 import {
@@ -2368,14 +2369,30 @@ export const createSyncSlice = (set, get) => ({
       const demoCfg = demoSnapshot?.cfg || demoSnapshot?.data?.cfg || {};
       if (demoSnapshot && demoCfg.demoMode === true && demoCfg.performanceTestMode === true) {
         let loadedDemo = stateFromSnapshot(demoSnapshot, get().cfg || DEF_CFG);
-        const coldArchives = await exportColdArchives(
-          getColdArchiveNamespace(namespace, loadedDemo.cfg),
-        );
+        markStartupStage('performance:stateFromSnapshot');
+        // A checked V7 ledger is authoritative even when the deferred
+        // performance snapshot has the same count but stale row contents.
+        // First try its non-mutating reuse proof without hydrating every cold
+        // archive.  If that proof fails, only then load archives for parity and
+        // the disposable rebuild.
         let performanceLedger = await ensurePerformanceTestLedgerV7({
           workspaceNamespace: namespace,
           workspace: loadedDemo,
-          coldArchives,
+          reuseOnly: true,
         });
+        markStartupStage('performance:ledgerReuseProof');
+        if (performanceLedger?.rebuildRequired) {
+          const coldArchives = await exportColdArchives(
+            getColdArchiveNamespace(namespace, loadedDemo.cfg),
+          );
+          markStartupStage('performance:coldArchiveExport');
+          performanceLedger = await ensurePerformanceTestLedgerV7({
+            workspaceNamespace: namespace,
+            workspace: loadedDemo,
+            coldArchives,
+          });
+          markStartupStage('performance:ledgerEnsure');
+        }
         if (performanceLedger?.alreadyCutover && performanceLedger?.ok) {
           try {
             // The SQLite ledger may be newer than the deferred performance
@@ -2386,8 +2403,10 @@ export const createSyncSlice = (set, get) => ({
               includeArchived: false,
               transactionLimit: null,
             });
+            markStartupStage('performance:v7Read');
             if (!v7Workspace) throw new Error('performance_v7_read_failed');
             loadedDemo = stateFromFinancialV7(v7Workspace, loadedDemo.cfg);
+            markStartupStage('performance:stateFromFinancialV7');
           } catch (error) {
             performanceLedger = {
               ...performanceLedger,
