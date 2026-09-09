@@ -33,7 +33,7 @@ import { commitmentCycleMonth, commitmentDueISO, deferredCommitmentDueISO, getUp
 import { filterDismissedNotifications, notificationReadKey, pruneNotificationKeys } from '../src/lib/notificationCenter.js';
 import { CATEGORY_FLOWS, getCategoriesForFlow, getDefaultCategoryId, normalizeCategoryFlow } from '../src/lib/categories.js';
 import { buildDecisionItems } from '../src/lib/decisionEngine.js';
-import { dedupeWorkspaceData, normalizeDebtItems, normalizeGoalItems } from '../src/store/domain.js';
+import { dedupeWorkspaceData, normalizeDebtItems, normalizeGoalItems, snapshotFromPerformanceState } from '../src/store/domain.js';
 import { reopenCompletionCommitments } from '../src/lib/trackerLifecycle.js';
 import { mergeWorkspaceStates } from '../src/store/multiDeviceSync.js';
 import {
@@ -353,6 +353,37 @@ assert.deepEqual(
   ['wallet-guest', 'wallet-main'],
   'transactions must remain attached to their own surviving wallet IDs',
 );
+
+const canonicalPerformanceRows = Array.from({ length: 50000 }, (_, index) => ({
+  id: `performance-${index}`,
+  walletId: 'wallet-main',
+}));
+const canonicalPerformanceState = {
+  cfg: { currency: 'IQD', defaultWalletId: 'wallet-main', demoMode: true, performanceTestMode: true },
+  wallets: [{ id: 'wallet-main', currency: 'IQD' }],
+  trans: canonicalPerformanceRows,
+  debts: [], goals: [], commitments: [], trackerTypes: [], trackerItems: [], cats: [],
+};
+const canonicalPerformanceSnapshot = snapshotFromPerformanceState(canonicalPerformanceState, {
+  updatedAt: '2026-09-09T00:00:00.000Z',
+  dirty: true,
+});
+assert.equal(
+  canonicalPerformanceSnapshot.data.trans === canonicalPerformanceRows,
+  true,
+  'the isolated canonical performance snapshot must not scan or clone the full transaction cache',
+);
+assert.equal(canonicalPerformanceSnapshot.dirty, true);
+const guardedRealSnapshot = snapshotFromPerformanceState({
+  ...canonicalPerformanceState,
+  cfg: { ...canonicalPerformanceState.cfg, demoMode: false, performanceTestMode: false },
+  trans: [
+    { id: 'same-id', walletId: 'wallet-main', title: 'old' },
+    { id: 'same-id', walletId: 'wallet-main', title: 'new' },
+  ],
+});
+assert.equal(guardedRealSnapshot.data.trans.length, 1, 'a non-lab caller must retain ordinary snapshot normalization');
+assert.equal(guardedRealSnapshot.data.trans[0].title, 'new', 'the non-lab fallback must preserve normal last-value dedupe semantics');
 
 const annualReport = buildFinancialReport({
   trans: [
