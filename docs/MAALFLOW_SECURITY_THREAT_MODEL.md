@@ -139,7 +139,7 @@ manifest and its payload can both be rewritten. Encryption is what makes A2 tamp
 | ID | Finding | Severity |
 |---|---|---|
 | **F-01** | Credentials are encrypted at rest; the financial ledger is not. The lower-value asset has the stronger protection. Deliberate, but must never be described as "encrypted local database". | High |
-| **F-02** | Was: no `FLAG_SECURE` anywhere, so balances sat in the recent-apps snapshot visible without unlocking the app. **Closed in code** via `src/lib/screenPrivacy.js`, protected by default with an opt-out in Settings. Takes effect only in a native build; unverified on a device. | Closed, unverified |
+| **F-02** | Was: no `FLAG_SECURE` anywhere, so balances sat in the recent-apps snapshot visible without unlocking the app. **Closed in code** by unconditional native `FLAG_SECURE` in `android/app/src/main/java/com/maalflow/app/MainActivity.kt`; it needs no screen-capture dependency or permission. Screenshots and recording are permanently disabled by owner decision, with PDF export from Reports as the sharing/saving alternative. The merged release APK still proves the manifest result. | Closed, pending APK proof |
 | **F-03** | Backup encryption is opt-in. The default path produces a plaintext ledger copy outside the sandbox. | High |
 | **F-04** | OCR/voice: our functions persist nothing, but receipt images and **raw audio** leave the device to OpenAI and Google Gemini. Originally blocking because no smart-capture-specific consent existed — `cfg.accountConsentAccepted` covers account and sync terms, a different thing at a different moment, so a user could photograph a receipt without ever being told where it went. **Client side closed** by the §112 gate below. The Play data-safety declaration remains outstanding and is the owner's to file. | Partly closed |
 | **F-05** | Was: `allowBackup=false` verified in source only. **Closed** — `tools/audit-merged-manifest.cjs` now audits the built APK in CI for package identity, allowBackup, pinned orientation, unexpected permissions and unreviewed exported components. | Closed, pending first run |
@@ -162,8 +162,8 @@ only, never the ledger. The test matrix (first install, reboot, logout, account 
 reinstall, biometric toggle, key loss) is still owed.
 
 **§111 — App lock.** Answered above: it locks the whole tree, re-arms after a 300s
-background delay, and permits device-credential fallback. The unanswered part is the
-recent-app snapshot — F-02.
+background delay, and permits device-credential fallback. The recent-app snapshot is protected
+separately by native `FLAG_SECURE` (F-02), which applies before JavaScript renders.
 
 **§112 — OCR / voice privacy gate.** Implemented in `src/lib/smartCaptureConsent.js`,
 enforced at both capture entry points in `src/components/AddTransModal.js`, and contracted

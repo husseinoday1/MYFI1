@@ -14,29 +14,47 @@
 
 const fs = require('fs');
 
-// Permissions we accept in a release build. Anything outside this set fails the audit
-// rather than being waved through: a dependency quietly adding ACCESS_FINE_LOCATION or
-// READ_CONTACTS is exactly the surprise this gate is for. Adding an entry here is a
-// deliberate act that shows up in review.
+// Permissions we accept in a release build. Each entry records both its product need and
+// its restriction. Anything outside this set fails rather than being waved through.
 const ALLOWED_PERMISSIONS = new Set([
-  // Declared in app.json
+  // App lock; Android gates biometric hardware behind its system authentication boundary.
   'android.permission.USE_BIOMETRIC',
+  // Compatibility fallback for older biometric APIs; Android enforces the same auth boundary.
   'android.permission.USE_FINGERPRINT',
+  // Voice entry only; smart-capture consent runs before Android's runtime microphone prompt.
   'android.permission.RECORD_AUDIO',
+  // Voice recorder audio-session configuration only; normal permission, no external component.
   'android.permission.MODIFY_AUDIO_SETTINGS',
-  // Added by Expo / React Native runtime and the media pickers we use
+  // Supabase and smart-capture HTTPS calls; no exported component gains access from this normal permission.
   'android.permission.INTERNET',
+  // React Native's connectivity checks; read-only normal permission with no user data grant.
   'android.permission.ACCESS_NETWORK_STATE',
+  // Receipt capture; disclosure precedes the Android runtime camera prompt.
   'android.permission.CAMERA',
+  // Local reminders; normal permission and notifications omit financial details when configured.
   'android.permission.VIBRATE',
+  // Expo's local reminder scheduler; held only while Android schedules/delivers local work.
   'android.permission.WAKE_LOCK',
+  // Receipt/avatar selection through ImagePicker on Android 12 and earlier; maxSdkVersion=32 excludes modern releases.
   'android.permission.READ_EXTERNAL_STORAGE',
+  // Legacy camera/image output on Android 9 and earlier; maxSdkVersion=28 excludes scoped-storage releases.
   'android.permission.WRITE_EXTERNAL_STORAGE',
+  // User-approved local reminders; Android's runtime notification prompt restricts delivery on Android 13+.
+  'android.permission.POST_NOTIFICATIONS',
+  // Reschedules local reminders after reboot; Expo's receiver is explicitly non-exported.
+  'android.permission.RECEIVE_BOOT_COMPLETED',
+]);
+
+// These capabilities are not part of MaalFlow's product. Keep a deny-list as well as the
+// allow-list: otherwise a future broad allow-list edit could silently reintroduce one.
+const FORBIDDEN_PERMISSIONS = new Set([
+  'android.permission.FOREGROUND_SERVICE',
+  'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+  'android.permission.READ_APP_BADGE',
+  'android.permission.DETECT_SCREEN_CAPTURE',
   'android.permission.READ_MEDIA_IMAGES',
   'android.permission.READ_MEDIA_VIDEO',
-  'android.permission.POST_NOTIFICATIONS',
   'android.permission.SYSTEM_ALERT_WINDOW',
-  'android.permission.FOREGROUND_SERVICE',
 ]);
 
 const EXPECTED_PACKAGE = 'com.maalflow.app';
@@ -86,6 +104,42 @@ const unexpected = seen.filter(name => name.startsWith('android.permission.') &&
 if (unexpected.length) {
   failures.push(`unexpected permission(s) in the merged manifest:\n    ${unexpected.join('\n    ')}`);
 }
+const forbidden = seen.filter(name => FORBIDDEN_PERMISSIONS.has(name));
+if (forbidden.length) {
+  failures.push(`forbidden permission(s) survived manifest merging:\n    ${forbidden.join('\n    ')}`);
+}
+
+// The ImagePicker dependency declares broad legacy storage permissions. They are necessary
+// only before the system Photo Picker, so inspect the built APK (not source) for their caps.
+const permissionElements = [];
+let currentPermission = null;
+for (const raw of tree.split(/\r?\n/)) {
+  if (/^\s*E: /.test(raw)) {
+    currentPermission = /^\s*E: uses-permission(?:-sdk-\d+)? \(line=/.test(raw)
+      ? { name: null, maxSdkVersion: null }
+      : null;
+    if (currentPermission) permissionElements.push(currentPermission);
+    continue;
+  }
+  if (!currentPermission) continue;
+  const name = raw.match(/A: android:name\([^)]*\)="([^"]+)"/);
+  if (name) currentPermission.name = name[1];
+  const maxSdkVersion = raw.match(/A: android:maxSdkVersion\([^)]*\)=(?:\(type [^)]*\))?"?([^"\n]*)"?/);
+  if (maxSdkVersion) currentPermission.maxSdkVersion = maxSdkVersion[1].trim();
+}
+for (const [name, expected] of [
+  ['android.permission.READ_EXTERNAL_STORAGE', 32],
+  ['android.permission.WRITE_EXTERNAL_STORAGE', 28],
+]) {
+  const entries = permissionElements.filter(item => item.name === name);
+  if (!entries.length) {
+    failures.push(`${name} is absent; ImagePicker needs it on legacy Android releases`);
+    continue;
+  }
+  if (entries.some(item => Number.parseInt(item.maxSdkVersion, 0) !== expected)) {
+    failures.push(`${name} must be capped at maxSdkVersion=${expected} in the merged manifest`);
+  }
+}
 notes.push(`permissions found: ${seen.length}`);
 
 // --- exported components ---
@@ -120,11 +174,14 @@ notes.push(`components: ${exported.length}, exported: ${exportedComponents.lengt
 for (const item of exportedComponents) {
   notes.push(`  exported ${item.kind}: ${item.name || '(unnamed)'}`);
 }
-// Fails closed. The launcher activity is the one component that must be exported; the
-// first release build will list whatever else Expo merges in, and each entry gets
-// reviewed and added to APPROVED_EXPORTED deliberately rather than by default.
+// The launcher is externally reachable only through its launcher/deep-link filters. AndroidX's
+// profile installer must remain exported for system profile installation, but Android restricts
+// it with the signature/privileged DUMP permission. Every other export fails closed.
 const APPROVED_EXPORTED = new Set([
+  // Launcher/deep-link entry point; Android starts it only through declared intent filters.
   'com.maalflow.app.MainActivity',
+  // AndroidX baseline-profile installation; guarded by android.permission.DUMP.
+  'androidx.profileinstaller.ProfileInstallReceiver',
 ]);
 const unreviewedExports = exportedComponents
   .map(item => item.name || '(unnamed)')

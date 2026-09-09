@@ -259,7 +259,6 @@ export const normalizeIncomeAllocationPlan = (plan = {}) => {
 export const DEF_CFG = {
   theme: 'dark', themeMode: 'system', lang: detectSystemLang(), langMode: 'system', currency: 'IQD',
   orientationMode: 'system',
-  allowScreenshots: false,
   monthNameStyle: 'system',
   numberInputFormat: 'system',
   displayName: '', username: '', phone: '', avatarUri: '', avatarPath: '', accountConsentAccepted: false, smartCaptureImageConsent: 0, smartCaptureVoiceConsent: 0,

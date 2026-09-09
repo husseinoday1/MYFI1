@@ -17,6 +17,7 @@ const staticContracts = [
   'account-profile-v44.test.cjs',
   'account-ux-v45.test.cjs',
   'android-native-baseline.test.cjs',
+  'merged-manifest-audit.test.cjs',
   'backfill-normalized.test.cjs',
   'backup-restore-hardening.test.cjs',
   'database-archive-ux-v53.test.cjs',
