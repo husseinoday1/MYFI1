@@ -1,4 +1,4 @@
-// MYFI — the bug class behind the 800 inflation, checked across every tracker.
+// MaalFlow — the bug class behind the 800 inflation, checked across every tracker.
 //
 // The owner asked whether the goal release/undo defect repeats in the other
 // tracker types. It had two halves:

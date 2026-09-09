@@ -1,4 +1,4 @@
--- MYFI — profiles_id_fkey POSTCHECK
+-- MaalFlow — profiles_id_fkey POSTCHECK
 -- Date: 2026-08-20
 -- READ-ONLY. No UPDATE, no DELETE, no ALTER.
 --

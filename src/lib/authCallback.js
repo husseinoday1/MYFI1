@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 
-const AUTH_SCHEME = 'myfi';
+const AUTH_SCHEME = 'maalflow';
 
 export const getAuthRedirectUrl = (kind = 'confirm') => `${AUTH_SCHEME}://auth/${kind}`;
 

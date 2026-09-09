@@ -5,12 +5,12 @@ const assert = require('node:assert/strict');
 const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 let ts;
 try { ts = require('typescript'); }
-catch { console.log('MYFI FULL JS/JSX PARSE: SKIPPED (typescript not installed)'); process.exit(0); }
+catch { console.log('MaalFlow FULL JS/JSX PARSE: SKIPPED (typescript not installed)'); process.exit(0); }
 
 const files = [];
 const walk = dir => {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === '.expo' || entry.name === '.myfi-backups') continue;
+    if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === '.expo' || entry.name === '.maalflow-backups') continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) walk(full);
     else if (/\.(?:js|jsx)$/.test(entry.name)) files.push(full);
@@ -36,4 +36,4 @@ if (failures.length) {
   console.error(failures.join('\n'));
 }
 assert.equal(failures.length, 0, `JS/JSX parse failures: ${failures.length}`);
-console.log(`MYFI FULL JS/JSX PARSE: PASSED (${files.length} files)`);
+console.log(`MaalFlow FULL JS/JSX PARSE: PASSED (${files.length} files)`);

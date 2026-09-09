@@ -12,17 +12,17 @@ const identity = read('src/lib/accountIdentity.js');
 // Account terminology: product language, not implementation language.
 assert(settings.includes("accountCloud: ar ? 'الحساب والهوية' : 'Account & identity'"));
 assert(settings.includes("profileTitle: ar ? 'الملف الشخصي' : 'Profile'"));
-assert(settings.includes("myfiAccountTitle: ar ? 'حساب MYFI' : 'MYFI account'"));
-assert(!settings.includes('MYFI Cloud'));
+assert(settings.includes("maalflowAccountTitle: ar ? 'حساب MaalFlow' : 'MaalFlow account'"));
+assert(!settings.includes('MaalFlow Cloud'));
 assert(!settings.includes('الملف المحلي'));
 assert(!settings.includes('Local profile'));
 
-// Both profile and MYFI account are presented under one root account category.
+// Both profile and MaalFlow account are presented under one root account category.
 const rootStart = settings.indexOf('function RootSettings(');
 const rootEnd = settings.indexOf('function AccountPage(', rootStart);
 const rootSettings = settings.slice(rootStart, rootEnd);
 assert(rootSettings.includes('text={T.accountCloud}'));
-assert(rootSettings.includes('title={T.myfiAccountTitle}'));
+assert(rootSettings.includes('title={T.maalflowAccountTitle}'));
 assert(!rootSettings.includes('text={T.cloud}'));
 
 // Empty name is a placeholder, never a stored fake user name.
@@ -58,4 +58,4 @@ for (const rel of [
   lines.forEach((line, i) => assert(!/[ \t]+$/.test(line), `${rel}:${i + 1} trailing whitespace`));
 }
 
-console.log('MYFI UX POLISH V4.3: PASSED');
+console.log('MaalFlow UX POLISH V4.3: PASSED');

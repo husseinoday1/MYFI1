@@ -31,7 +31,7 @@ jobs:
           printf '%s\n' \
             ".github/workflows/p20-g01-d1-diagnostic-apk.yml" \
             ".github/workflows/p20-g01-phase9-restore-epoch-gate.yml" \
-            "docs/00_MYFI_CANONICAL_AUTHORITY.md" \
+            "docs/00_MAALFLOW_CANONICAL_AUTHORITY.md" \
             "docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_ACCEPTANCE_APK_BUILD_2026-08-19.md" \
             "docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_D1_CUTOVER_BLOCKER_DIAGNOSIS_2026-08-19.md" \
             "docs/04_CURRENT_EVIDENCE/MYFI_P20_G01_D2_RESTORE_EPOCH_V2_DEACTIVATION_ROOTCAUSE_2026-08-19.md" \
@@ -114,7 +114,7 @@ jobs:
           EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
           ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
           test "$ACTUAL" = "$EXPECTED"
-          echo "[PASS] signing certificate matches installed MYFI"
+          echo "[PASS] signing certificate matches installed MaalFlow"
 
       - name: Build signed acceptance APK
         working-directory: android

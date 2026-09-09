@@ -5,8 +5,8 @@ cut from `docs/design-master-consolidation-2026-08-26` @ `945a532`.
 
 **Scope confirmed with the user before writing code:** foundational, reusable
 design elements (colors, typography, spacing, a few true primitives) built on
-the approved tokens in `docs/design/04_MYFI_DESIGN_TOKEN_CATALOG.md` and
-`docs/design/03_MYFI_DESIGN_SYSTEM_CANONICAL.md`. Explicitly **no full screens**
+the approved tokens in `docs/design/04_MAALFLOW_DESIGN_TOKEN_CATALOG.md` and
+`docs/design/03_MAALFLOW_DESIGN_SYSTEM_CANONICAL.md`. Explicitly **no full screens**
 and **no composite screen-layout components** this pass (`GatewayCard`,
 `SummaryCard`, `SectionListRow`, `SelectorRow` — deferred to the screen-by-screen
 migration phase per canonical doc §13). Nothing under `src/lib/financial*` was
@@ -25,8 +25,8 @@ touched.
   implementation line is missing.
 - New branch cut from that point: `impl/design-tokens-foundation-2026-08-26`.
 - The shared working tree had unrelated in-progress uncommitted work from other
-  sessions (`MYFI_ENGINEERING_HANDOFF.md`, `docs/00_MYFI_CANONICAL_AUTHORITY.md`,
-  `docs/MYFI_SECURITY_THREAT_MODEL.md` modified; several new untracked files
+  sessions (`MAALFLOW_ENGINEERING_HANDOFF.md`, `docs/00_MAALFLOW_CANONICAL_AUTHORITY.md`,
+  `docs/MAALFLOW_SECURITY_THREAT_MODEL.md` modified; several new untracked files
   including `.claude/`, root `CLAUDE.md`, nested `CLAUDE.md`s, diagnostic
   scripts). None of it was staged, committed, or modified — only the specific
   files listed below were touched/added.

@@ -9,13 +9,13 @@ export default function BenefitsScreen() {
   const { th, lang, isAr } = useTheme();
   const invite = () => Share.share({
     message: isAr
-      ? 'جرّب MYFI لتنظيم الدخل والمصروف والمتابعات المالية في مكان واحد.'
-      : 'Try MYFI to organize income, spending, and financial follow-ups in one place.',
+      ? 'جرّب MaalFlow لتنظيم الدخل والمصروف والمتابعات المالية في مكان واحد.'
+      : 'Try MaalFlow to organize income, spending, and financial follow-ups in one place.',
   });
 
   return (
     <ScreenScroll th={th}>
-      <PageIntro th={th} lang={lang} icon="gift-outline" title={isAr ? 'المزايا والهدايا' : 'Benefits & Rewards'} subtitle={isAr ? 'مزايا MYFI المتاحة لك وما سيصل إلى حسابك' : 'Your available MYFI benefits and account rewards'} />
+      <PageIntro th={th} lang={lang} icon="gift-outline" title={isAr ? 'المزايا والهدايا' : 'Benefits & Rewards'} subtitle={isAr ? 'مزايا MaalFlow المتاحة لك وما سيصل إلى حسابك' : 'Your available MaalFlow benefits and account rewards'} />
       <View style={[s.card, { backgroundColor: th.card, borderColor: th.border }]}>
         <View style={[s.row, { flexDirection: rowDirection(lang) }]}>
           <View style={[s.icon, { backgroundColor: `${th.warn}18` }]}><Ionicons name="gift-outline" size={20} color={th.warn} /></View>
@@ -28,7 +28,7 @@ export default function BenefitsScreen() {
         <Touchable onPress={invite} style={[s.row, { flexDirection: rowDirection(lang) }]}>
           <View style={[s.icon, { backgroundColor: `${th.transfer}18` }]}><Ionicons name="share-social-outline" size={20} color={th.transfer} /></View>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={[s.title, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'شارك MYFI' : 'Share MYFI'}</Text>
+            <Text style={[s.title, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'شارك MaalFlow' : 'Share MaalFlow'}</Text>
             <Text style={[s.body, { color: th.sub, textAlign: textAlign(lang) }]}>{isAr ? 'أرسل دعوة حقيقية عبر تطبيقات هاتفك.' : 'Send a real invitation through your phone apps.'}</Text>
           </View>
           <Ionicons name={isAr ? 'chevron-back' : 'chevron-forward'} size={18} color={th.faint} />

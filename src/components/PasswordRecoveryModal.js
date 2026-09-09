@@ -70,7 +70,7 @@ export default function PasswordRecoveryModal({ visible, onClose, th, lang = 'ar
           </View>
           <Text style={[s.title, { color: th.text }]}>{ar ? 'كلمة مرور جديدة' : 'New password'}</Text>
           <Text style={[s.body, { color: th.sub }]}>
-            {ar ? 'اكتب كلمة مرور قوية لحساب MYFI.' : 'Choose a strong password for your MYFI account.'}
+            {ar ? 'اكتب كلمة مرور قوية لحساب MaalFlow.' : 'Choose a strong password for your MaalFlow account.'}
           </Text>
           <View style={[s.passwordField, { backgroundColor: th.input, borderColor: th.border }]}>
             <TextInput

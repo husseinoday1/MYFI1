@@ -3,17 +3,17 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(process.argv[2] || path.join(__dirname,'..'));
-const authority = fs.readFileSync(path.join(root,'docs/00_MYFI_CANONICAL_AUTHORITY.md'),'utf8');
-const sync = fs.readFileSync(path.join(root,'docs/MYFI_SYNC_PROTOCOL.md'),'utf8');
+const authority = fs.readFileSync(path.join(root,'docs/00_MAALFLOW_CANONICAL_AUTHORITY.md'),'utf8');
+const sync = fs.readFileSync(path.join(root,'docs/MAALFLOW_SYNC_PROTOCOL.md'),'utf8');
 const addendum = fs.readFileSync(
-  path.join(root,'docs/01_CORE_AUTHORITY/MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM.md'),'utf8'
+  path.join(root,'docs/01_CORE_AUTHORITY/MAALFLOW_P19_SYNC_V2_ACTIVATION_ADDENDUM.md'),'utf8'
 );
 const evidence = fs.readFileSync(
   path.join(root,'docs/04_CURRENT_EVIDENCE/MYFI_P19_001_011_SYNC_V2_EXECUTION_EVIDENCE_2026-08-17.md'),'utf8'
 );
 
 assert(authority.includes('P19_011_AUTHORITY_REGISTRATION'));
-assert(authority.includes('MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM.md'));
+assert(authority.includes('MAALFLOW_P19_SYNC_V2_ACTIVATION_ADDENDUM.md'));
 assert(authority.includes('MYFI_P19_001_011_SYNC_V2_EXECUTION_EVIDENCE_2026-08-17.md'));
 
 for (const token of [
@@ -50,4 +50,4 @@ for (const token of [
   'Phase 9: OPEN',
 ]) assert(evidence.includes(token), `evidence missing token: ${token}`);
 
-console.log('MYFI P19-011 PLAN + EVIDENCE CONTRACT: PASSED');
+console.log('MaalFlow P19-011 PLAN + EVIDENCE CONTRACT: PASSED');

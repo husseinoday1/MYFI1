@@ -63,7 +63,7 @@ const sourceLedger = (overrides = {}) => ({
 
 const built = buildCanonicalBackupV11({ source: sourceLedger(), createdAt: '2026-08-21T00:00:00.000Z' });
 assert.equal(built.ok, true);
-assert.equal(built.backup.kind, 'myfi_canonical_financial_backup');
+assert.equal(built.backup.kind, 'maalflow_canonical_financial_backup');
 assert.equal(built.backup.manifest.format, CANONICAL_BACKUP_V11_FORMAT);
 assert.equal(built.backup.manifest.dataVersion, CANONICAL_BACKUP_V11_DATA_VERSION);
 assert.equal(built.backup.manifest.semanticHashVersion, 2);
@@ -103,9 +103,9 @@ console.log('[PASS] V11 refuses unsupported, incomplete, and anonymous sources')
 
   const moduleText = fs.readFileSync(filename, 'utf8');
   assert.ok(moduleText.includes('readCanonicalBackupSource'), 'V11 must use canonical SQLite source');
-  assert.ok(!moduleText.includes('exportBackup') && !moduleText.includes('saveMyfiPackageToDevice'),
+  assert.ok(!moduleText.includes('exportBackup') && !moduleText.includes('saveMaalFlowPackageToDevice'),
     'P10-006 must not replace the current user-visible export path before its decoder exists');
-  console.log('MYFI P10-006 CANONICAL BACKUP WRITER CONTRACT: PASS');
+  console.log('MaalFlow P10-006 CANONICAL BACKUP WRITER CONTRACT: PASS');
 })().catch(error => {
   console.error(error);
   process.exit(1);

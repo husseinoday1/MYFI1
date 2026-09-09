@@ -1,4 +1,4 @@
-// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
+// MAALFLOW_PERFORMANCE_DATA_RUNTIME_V5_1_2
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE } from '../lib/constants';
 import { markStartupStage } from '../lib/startupTiming';

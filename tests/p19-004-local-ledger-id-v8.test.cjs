@@ -150,4 +150,4 @@ assert.throws(() => db.exec(`
 `), /CHECK constraint failed/);
 
 db.close();
-console.log('MYFI P19-004 LOCAL LEDGER IDENTITY V8 SHADOW: PASSED');
+console.log('MaalFlow P19-004 LOCAL LEDGER IDENTITY V8 SHADOW: PASSED');

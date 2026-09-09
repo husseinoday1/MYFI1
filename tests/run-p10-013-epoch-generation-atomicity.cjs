@@ -160,5 +160,5 @@ const readToken = async namespace => JSON.parse((await db.getFirstAsync(
     'restore path must never bootstrap a missing generation token');
   console.log('[PASS] missing generation fails closed and rolls epoch CAS back');
 
-  console.log('MYFI P10-013 B1 EPOCH + GENERATION ATOMICITY: PASS');
+  console.log('MaalFlow P10-013 B1 EPOCH + GENERATION ATOMICITY: PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => db.close());

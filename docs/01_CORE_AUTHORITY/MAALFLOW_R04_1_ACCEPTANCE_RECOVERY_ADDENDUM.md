@@ -1,0 +1,107 @@
+# MaalFlow R04.1 — Acceptance Recovery Addendum
+
+Status: CLOSED — automated recovery and real-device acceptance passed on 2026-08-17.
+Base: `33cce360a118c54daa88332374da07731e5a0641`
+Implementation branch: `r04-p18-001-blocking-ux`
+Automated recovery evidence through: `ef2f2c6bbe07c71f1e94dd8356338285d0b7abd8`
+
+This addendum does not rewrite the Frozen Master Plan. It records device-proven
+R04 acceptance failures and assigns each item one primary implementation owner.
+
+## Release rule
+
+R04 automated evidence remains valid as baseline evidence only. R04 product
+acceptance is NOT closed. R05 must not begin until R04.1 passes its combined
+automated gate and one real-device acceptance session.
+
+## Internal patch ownership
+
+### P04R1-001 — Account / Ledger Lifecycle Recovery
+
+- Logout ends the local cloud session only.
+- Logout does not delete, hide, replace, or silently remount another local ledger.
+- The active local ledger has an explicit optional cloud-account link.
+- Signed-out use continues on the same active ledger.
+- Same-account re-login reuses that ledger and must not create a Guest merge.
+- Account switching selects an isolated ledger for the target account.
+- Guest→Account transfer is offered only from a true unlinked Guest ledger.
+- Name/photo/local identity remain available after logout.
+- `Account & Security` opens the actual account page, not generic Settings.
+- Delete Account and Delete Local Data remain independent operations.
+
+### P04R1-002 — Multi-Currency + Wallet UX
+
+- Rebuild multi-currency entry/transfer presentation in MaalFlow design language.
+- Explicit source/destination currencies and amounts.
+- Explicit historical FX direction, date and source.
+- Clear base-currency valuation without rewriting history.
+- Wallet create/edit UX: currency, opening balance, scope and current valuation.
+- A wallet valuation rate is reused as an editable transaction suggestion; the
+  user must not calculate or enter the same conversion twice.
+- Entering the source amount calculates the destination amount from the two
+  wallet rates when both are available. The user can overwrite any suggestion.
+- Saving/confirming freezes the reviewed rate and amounts for that transaction;
+  later wallet valuation changes never rewrite historical movements.
+- No false single-total aggregation across unrelated native currencies.
+
+### P18-003 — User-Controlled Feature Surface (pre-Phase-6 UX contract only)
+
+- The user controls which optional financial features are shown or hidden.
+- Hiding a feature changes navigation and entry surfaces only. It never deletes
+  entities, transactions, historical totals, backups, or financial evidence.
+- Feature visibility and Notifications & Reminders are direct Settings Root
+  destinations instead of being buried under Account or unrelated privacy pages.
+- Notification content privacy remains under Security as an independent concern.
+- This patch does not start Phase 6 and does not change the SQLite schema.
+
+### P04R1-003 — Semantic Financial History
+
+- Opening Balance is a visible independent ledger movement, not Income/Expense.
+- Balance Reconciliation first explains/resolves differences; only unresolved
+  deltas become a Balance Adjustment.
+- Generated transaction titles expose semantic type and linked entity.
+- Expense↔Income edits update MaalFlow-generated titles automatically.
+- User-written titles are preserved.
+- Debt/receivable/goal/commitment payment history and details name the linked entity.
+
+### P04R1-004 — Critical UX Consistency + Build Tooling + Combined Gate
+
+- Critical icon/action semantics.
+- Critical financial/account windows use the MaalFlow design system.
+- Permanent controlled EAS CLI build-script fix.
+- Combined R04.1 automated gate.
+- One final physical-device acceptance session.
+
+## Deferred to owning phases
+
+- Smart Entry full reconstruction: Phase 17.
+- Adaptive Smart Budget logic + explainability + MaalFlow-native visual redesign: Phase 17.
+- Multi-device sync is N-device architecture; two devices are only the minimum
+  physical conflict gate: Phase 14.
+- Full accessibility/global UX audit: Phase 18.
+- Performance/reliability: Phase 15.
+- Production security/privacy: Phase 16.
+- Cleanup only: Phase 19.
+- Release Candidate acceptance: Phase 20.
+
+## Acceptance evidence rule
+
+Every device-reported failure follows:
+
+`device before-evidence → regression contract/test → fix → automated after-evidence → final device acceptance`
+
+Static string presence alone is never sufficient to close a device-dependent behavior.
+
+
+<!-- R04_1_CLOSURE_2026_08_17 -->
+## R04.1 Closure — 2026-08-17
+
+- **Status:** CLOSED.
+- **Automated final blocker gate:** PASS (P18-009).
+- **Real-device acceptance:** PASS, user-confirmed.
+- **Accepted device scope:** fresh backup round-trip and rollback; locale-correct Arabic/English transfer direction; actual editable foreign FX equation value.
+- **Financial history rewritten:** NO.
+- **SQLite/schema migration:** NO.
+- **SecureStore reset/clear:** NO.
+- **Existing-user financial data preserved:** YES.
+- **Phase 6 restriction from R04.1:** released by this closure; subsequent work remains governed by canonical authority and the multi-currency policy addendum.

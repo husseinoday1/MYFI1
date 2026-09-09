@@ -1,7 +1,7 @@
-// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
-// MYFI_REAL_STATE_CONSOLIDATED_UX_V5
-// MYFI_SETTINGS_RUNTIME_RECOVERY_V5_0_1
-// MYFI_PERFORMANCE_DATA_LAB_V5_1
+// MAALFLOW_PERFORMANCE_DATA_RUNTIME_V5_1_2
+// MAALFLOW_REAL_STATE_CONSOLIDATED_UX_V5
+// MAALFLOW_SETTINGS_RUNTIME_RECOVERY_V5_0_1
+// MAALFLOW_PERFORMANCE_DATA_LAB_V5_1
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -29,7 +29,7 @@ import { COUNTRIES, CURRENCIES } from '../lib/constants';
 import { Touchable as TouchableOpacity } from '../components/AppPrimitives';
 import ChoiceSheet from '../components/ChoiceSheet';
 import { isBiometricSupported, authenticate } from '../lib/biometric';
-import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
+import { exportMaalFlowPackage, pickMaalFlowPackage, unlockMaalFlowPackage } from '../lib/maalflowFiles';
 import { inspectBackupData } from '../lib/backupData';
 import { decodeCanonicalBackupV11 } from '../lib/financialBackupV11Decoder';
 import { syncDiagnosticCode } from '../lib/syncErrorClassification';
@@ -63,7 +63,7 @@ const pageCopy = (lang = 'ar') => {
     account: ar ? 'الحساب' : 'Account',
     accountSub: ar ? 'معلوماتك، الأمان والمزامنة' : 'Your information, security and sync',
     devices: ar ? 'الأجهزة' : 'Devices',
-    devicesSub: ar ? 'الجلسات المرتبطة بحساب MYFI' : 'Sessions linked to your MYFI account',
+    devicesSub: ar ? 'الجلسات المرتبطة بحساب MaalFlow' : 'Sessions linked to your MaalFlow account',
     preferences: ar ? 'التفضيلات' : 'Preferences',
     preferencesSub: ar ? 'اللغة والمظهر' : 'Language and appearance',
     financial: ar ? 'الإعداد المالي' : 'Financial setup',
@@ -78,7 +78,7 @@ const pageCopy = (lang = 'ar') => {
     securitySub: ar ? 'قفل التطبيق وحماية بياناتك المحلية' : 'App lock and local data protection',
     advanced: ar ? 'إدارة المال والتخطيط' : 'Money & planning management',
     advancedSub: ar ? 'المحافظ والتصنيفات والميزانيات والتنبيهات وترتيب الرئيسية' : 'Wallets, categories, budgets, alerts and Home arrangement',
-    cloud: ar ? 'حساب MYFI' : 'MYFI account',
+    cloud: ar ? 'حساب MaalFlow' : 'MaalFlow account',
     synced: ar ? 'متزامن' : 'Synced',
     syncing: ar ? 'جاري المزامنة' : 'Syncing',
     pending: ar ? 'بانتظار المزامنة' : 'Pending sync',
@@ -119,32 +119,32 @@ const pageCopy = (lang = 'ar') => {
     localProfileSection: ar ? 'الحساب' : 'Account',
     localProfileDeviceSub: ar ? 'الاسم والصورة والمعلومات الأساسية' : 'Name, photo and basic information',
     profileDeviceOnlySub: ar ? 'محفوظ على هذا الجهاز' : 'Saved on this device',
-    profileSyncedSub: ar ? 'متصل بحساب MYFI' : 'Connected to MYFI',
+    profileSyncedSub: ar ? 'متصل بحساب MaalFlow' : 'Connected to MaalFlow',
     profileTitle: ar ? 'معلوماتك' : 'Your information',
     profileSub: ar ? 'الاسم والصورة والمعلومات الأساسية' : 'Name, photo and basic information',
-    myfiAccountTitle: ar ? 'حساب MYFI' : 'MYFI account',
-    myfiAccountSub: ar ? 'المزامنة والاستعادة والأجهزة' : 'Sync, recovery and devices',
-    cloudConnectedTitle: ar ? 'متصل بحساب MYFI' : 'Connected to MYFI',
+    maalflowAccountTitle: ar ? 'حساب MaalFlow' : 'MaalFlow account',
+    maalflowAccountSub: ar ? 'المزامنة والاستعادة والأجهزة' : 'Sync, recovery and devices',
+    cloudConnectedTitle: ar ? 'متصل بحساب MaalFlow' : 'Connected to MaalFlow',
     cloudConnectedSub: ar ? 'المزامنة والاستعادة مفعّلتان لهذا الحساب.' : 'Sync and recovery are enabled for this account.',
     cloudDisconnectedTitle: ar ? 'محفوظ على هذا الجهاز' : 'Saved on this device',
-    cloudDisconnectedSub: ar ? 'اربط حساب MYFI فقط إذا أردت المزامنة والاستعادة على أجهزتك.' : 'Connect MYFI only when you want sync and recovery across devices.',
+    cloudDisconnectedSub: ar ? 'اربط حساب MaalFlow فقط إذا أردت المزامنة والاستعادة على أجهزتك.' : 'Connect MaalFlow only when you want sync and recovery across devices.',
     localCloudNote: ar ? 'حساب واحد ومعلومات واحدة؛ يتغير فقط ما إذا كانت المزامنة مفعّلة أم لا.' : 'One account identity; only sync availability changes.',
     personalAccount: ar ? 'حساب شخصي' : 'Personal account',
     yourInfo: ar ? 'معلوماتك' : 'Your information',
     accountSecurity: ar ? 'الحساب والأمان' : 'Account & security',
     syncDevices: ar ? 'المزامنة والأجهزة' : 'Sync & devices',
     savedOnDevice: ar ? 'محفوظ على هذا الجهاز' : 'Saved on this device',
-    connectedToMyfi: ar ? 'متصل بحساب MYFI' : 'Connected to MYFI',
+    connectedToMaalFlow: ar ? 'متصل بحساب MaalFlow' : 'Connected to MaalFlow',
     connectBenefits: ar ? 'فعّل المزامنة والاستعادة على أجهزتك' : 'Enable sync and recovery across your devices',
-    connectHint: ar ? 'استخدام MYFI لا يحتاج إلى تسجيل دخول. اربط حسابك عندما تريد استعادة بياناتك أو استخدامها على جهاز آخر.' : 'MYFI works without sign-in. Connect your account when you want recovery or another device.',
+    connectHint: ar ? 'استخدام MaalFlow لا يحتاج إلى تسجيل دخول. اربط حسابك عندما تريد استعادة بياناتك أو استخدامها على جهاز آخر.' : 'MaalFlow works without sign-in. Connect your account when you want recovery or another device.',
     editProfile: ar ? 'تعديل المعلومات' : 'Edit information',
     save: ar ? 'حفظ التغييرات' : 'Save changes',
     cancel: ar ? 'إلغاء' : 'Cancel',
     addPhoto: ar ? 'إضافة صورة' : 'Add photo',
     changePhoto: ar ? 'تغيير الصورة' : 'Change photo',
     removePhoto: ar ? 'إزالة الصورة' : 'Remove photo',
-    signInTitle: ar ? 'ربط حساب MYFI' : 'Connect MYFI account',
-    connectAccount: ar ? 'ربط حساب MYFI' : 'Connect MYFI account',
+    signInTitle: ar ? 'ربط حساب MaalFlow' : 'Connect MaalFlow account',
+    connectAccount: ar ? 'ربط حساب MaalFlow' : 'Connect MaalFlow account',
     signInSub: ar ? 'سجّل الدخول أو أنشئ حساباً لتفعيل المزامنة والاستعادة.' : 'Sign in or create an account to enable sync and recovery.',
     signUpProfileHint: ar ? 'سيُحفظ اسمك وصورتك ضمن حسابك ليظهرا على أجهزتك.' : 'Your name and photo will be saved with your account and appear on your devices.',
     signInProfileHint: ar ? 'بعد تسجيل الدخول ستظهر معلومات حسابك وبياناتك المتزامنة على هذا الجهاز.' : 'After sign-in, your account information and synced data will appear on this device.',
@@ -153,7 +153,7 @@ const pageCopy = (lang = 'ar') => {
     password: ar ? 'كلمة المرور' : 'Password',
     forgotPassword: ar ? 'نسيت كلمة المرور' : 'Forgot password',
     signOut: ar ? 'تسجيل الخروج من هذا الجهاز' : 'Sign out on this device',
-    signOutSub: ar ? 'يتم فصل جلسة MYFI فقط؛ تبقى بياناتك المالية محفوظة على هذا الجهاز.' : 'Only the MYFI cloud session is disconnected; your financial data stays on this device.',
+    signOutSub: ar ? 'يتم فصل جلسة MaalFlow فقط؛ تبقى بياناتك المالية محفوظة على هذا الجهاز.' : 'Only the MaalFlow cloud session is disconnected; your financial data stays on this device.',
     signOutOthers: ar ? 'تسجيل الخروج من الجلسات الأخرى' : 'Sign out other sessions',
     signOutOthersSub: ar ? 'يبقى هذا الجهاز مسجلاً بالدخول.' : 'This device stays signed in.',
     thisDevice: ar ? 'هذا الجهاز' : 'This device',
@@ -163,7 +163,7 @@ const pageCopy = (lang = 'ar') => {
     iosDevice: ar ? 'جهاز iPhone / iPad' : 'iPhone / iPad',
     webDevice: ar ? 'جهاز الويب' : 'Web device',
     connectedNow: ar ? 'متصل الآن' : 'Connected now',
-    noCloudSession: ar ? 'سجّل الدخول إلى حساب MYFI لإدارة جلساتك.' : 'Sign in to MYFI to manage your sessions.',
+    noCloudSession: ar ? 'سجّل الدخول إلى حساب MaalFlow لإدارة جلساتك.' : 'Sign in to MaalFlow to manage your sessions.',
     localData: ar ? 'البيانات المحلية' : 'Local data',
     transactions: ar ? 'الحركات' : 'Transactions',
     wallets: ar ? 'المحافظ' : 'Wallets',
@@ -177,12 +177,12 @@ const pageCopy = (lang = 'ar') => {
     archive: ar ? 'الأرشيف الشهري' : 'Monthly archive',
     archiveSub: ar ? 'الوصول إلى الأشهر المؤرشفة' : 'Access archived months',
     deleteLocal: ar ? 'حذف بيانات هذا الجهاز' : 'Delete this device’s data',
-    deleteLocalSub: ar ? 'بياناتك السحابية تبقى محفوظة. سنكمل المزامنة أولاً ثم نحذف نسخة هذا الجهاز فقط.' : 'Your cloud copy stays safe. MYFI syncs first, then removes this device’s copy only.',
+    deleteLocalSub: ar ? 'بياناتك السحابية تبقى محفوظة. سنكمل المزامنة أولاً ثم نحذف نسخة هذا الجهاز فقط.' : 'Your cloud copy stays safe. MaalFlow syncs first, then removes this device’s copy only.',
     cloudRecoveryReady: ar ? 'نسختك السحابية جاهزة' : 'Your cloud copy is ready',
     cloudRecoveryReadySub: ar ? 'حُذفت بيانات هذا الجهاز فقط. اضغط لاستعادة بياناتك المحفوظة.' : 'Only this device was cleared. Restore your saved data when you are ready.',
     restoreCloudData: ar ? 'استعادة بياناتي من السحابة' : 'Restore my cloud data',
     localDeleteComplete: ar ? 'تم حذف بيانات هذا الجهاز. النسخة السحابية لم تتغير.' : 'This device’s data was deleted. Your cloud copy was not changed.',
-    localDeleteSyncRequired: ar ? 'تعذر الحذف لأن MYFI لم ينهِ المزامنة الآمنة. لم نحذف أي بيانات.' : 'MYFI could not complete a safe sync, so nothing was deleted.',
+    localDeleteSyncRequired: ar ? 'تعذر الحذف لأن MaalFlow لم ينهِ المزامنة الآمنة. لم نحذف أي بيانات.' : 'MaalFlow could not complete a safe sync, so nothing was deleted.',
     localRecoveryFailed: ar ? 'تعذر استعادة النسخة السحابية الآن. بقيت بيانات السحابة آمنة ويمكنك المحاولة لاحقًا.' : 'Your cloud copy could not be restored now. It remains safe; try again later.',
     protectBackup: ar ? 'حماية النسخة الاحتياطية' : 'Protect backup',
     encrypted: ar ? 'تشفير بكلمة مرور' : 'Encrypt with password',
@@ -209,7 +209,7 @@ const pageCopy = (lang = 'ar') => {
     fullFinancial: ar ? 'إدارة تفاصيل المال والتخطيط' : 'Manage money & planning details',
     fullFinancialSub: ar ? 'المحافظ والتصنيفات والميزانيات والوحدات والتنبيهات وترتيب الرئيسية.' : 'Wallets, categories, budgets, modules, alerts and Home arrangement.',
     local: ar ? 'محلي' : 'Local',
-    cloudAccount: ar ? 'حساب MYFI' : 'MYFI account',
+    cloudAccount: ar ? 'حساب MaalFlow' : 'MaalFlow account',
     connected: ar ? 'متصل' : 'Connected',
     notSignedIn: ar ? 'غير متصل' : 'Not connected',
     terms: ar ? 'أوافق على شروط الحساب والمزامنة' : 'I agree to account and sync terms',
@@ -229,7 +229,7 @@ const pageCopy = (lang = 'ar') => {
     support: ar ? 'المساعدة والدعم' : 'Help & support',
     helpCenter: ar ? 'مركز المساعدة' : 'Help center',
     helpCenterSub: ar ? 'الدليل، النسخ الاحتياطي، الأمان والتواصل مع الدعم' : 'Guide, backup, security and support contact',
-    guideProfessionalSub: ar ? 'تعلم MYFI حسب المهمة: البداية، الحركات، المتابعات والتقارير.' : 'Learn MYFI by task: getting started, entries, trackers and reports.',
+    guideProfessionalSub: ar ? 'تعلم MaalFlow حسب المهمة: البداية، الحركات، المتابعات والتقارير.' : 'Learn MaalFlow by task: getting started, entries, trackers and reports.',
     contactCenter: ar ? 'التواصل ومركز الدعم' : 'Contact & support',
     contactCenterSub: ar ? 'قنوات الدعم، معلومات التشخيص وملاحظات المنتج' : 'Support channels, diagnostics and product feedback',
     gettingStarted: ar ? 'البدء الصحيح' : 'Getting started',
@@ -240,44 +240,44 @@ const pageCopy = (lang = 'ar') => {
     planningGuideSub: ar ? 'الديون، التوفير، الالتزامات والميزانيات.' : 'Debts, savings, commitments and budgets.',
     reportsGuide: ar ? 'قراءة التقارير' : 'Reading reports',
     reportsGuideSub: ar ? 'الفترة، التدفق النقدي، المقارنة وأين تذهب أموالك.' : 'Periods, cash flow, comparison and where your money goes.',
-    cloudGuide: ar ? 'حساب MYFI والمزامنة' : 'MYFI account & sync',
-    cloudGuideSub: ar ? 'متى تحتاج حساب MYFI وكيف تنتقل بين الأجهزة بأمان.' : 'When to use a MYFI account and how to move safely between devices.',
+    cloudGuide: ar ? 'حساب MaalFlow والمزامنة' : 'MaalFlow account & sync',
+    cloudGuideSub: ar ? 'متى تحتاج حساب MaalFlow وكيف تنتقل بين الأجهزة بأمان.' : 'When to use a MaalFlow account and how to move safely between devices.',
     supportDiagnostics: ar ? 'معلومات تساعد الدعم' : 'Support diagnostics',
     supportDiagnosticsSub: ar ? 'الإصدار، المنصة وحالة الحساب بدون كشف بياناتك المالية.' : 'Version, platform and account state without exposing financial data.',
     productFeedback: ar ? 'ملاحظة أو اقتراح' : 'Feedback or suggestion',
     productFeedbackSub: ar ? 'شارك تجربة الاستخدام أو اقترح تحسيناً للمنتج.' : 'Share a usability issue or suggest a product improvement.',
     guide: ar ? 'دليل الاستخدام' : 'User guide',
-    guideSub: ar ? 'جولة مختصرة وعملية على أهم أجزاء MYFI' : 'A concise practical tour of the key MYFI areas',
+    guideSub: ar ? 'جولة مختصرة وعملية على أهم أجزاء MaalFlow' : 'A concise practical tour of the key MaalFlow areas',
     contactSupport: ar ? 'التواصل مع الدعم' : 'Contact support',
     contactSupportSub: ar ? 'المساعدة الفنية وملاحظات الاستخدام' : 'Technical help and product feedback',
     supportUnavailableTitle: ar ? 'قناة الدعم غير مهيأة' : 'Support channel is not configured',
-    supportUnavailableBody: ar ? 'أضف رابط أو بريد الدعم في إعدادات بيئة MYFI ثم أعد تشغيل التطبيق.' : 'Add the MYFI support URL or email to the environment configuration and restart the app.',
+    supportUnavailableBody: ar ? 'أضف رابط أو بريد الدعم في إعدادات بيئة MaalFlow ثم أعد تشغيل التطبيق.' : 'Add the MaalFlow support URL or email to the environment configuration and restart the app.',
     supportResources: ar ? 'موارد المساعدة' : 'Support resources',
     accountRecovery: ar ? 'الحساب والمزامنة' : 'Account & sync',
-    accountRecoverySub: ar ? 'حساب MYFI، المزامنة والأجهزة' : 'MYFI account, sync and devices',
+    accountRecoverySub: ar ? 'حساب MaalFlow، المزامنة والأجهزة' : 'MaalFlow account, sync and devices',
     backupHelp: ar ? 'النسخ الاحتياطي والاستعادة' : 'Backup & restore',
     backupHelpSub: ar ? 'حفظ نسخة محلية واستعادتها بأمان' : 'Create and restore a local backup safely',
     securityHelp: ar ? 'الخصوصية والأمان' : 'Privacy & security',
     securityHelpSub: ar ? 'قفل التطبيق وحماية البيانات المحلية' : 'App lock and local data protection',
     legal: ar ? 'القانوني والخصوصية' : 'Legal & privacy',
     termsOfUse: ar ? 'شروط الاستخدام' : 'Terms of use',
-    about: ar ? 'حول MYFI' : 'About MYFI',
+    about: ar ? 'حول MaalFlow' : 'About MaalFlow',
     aboutSub: ar ? 'هوية المنتج، الإصدار ومبادئ الخصوصية' : 'Product identity, version and privacy principles',
     aboutTagline: ar ? 'إدارة مالية شخصية أوضح، عملية ومحلية أولاً.' : 'Clear, practical, local-first personal finance.',
-    aboutPurpose: ar ? 'MYFI يجمع الدخل والمصروفات والمحافظ والمتابعات والتقارير في مساحة مالية واحدة، مع مزامنة سحابية اختيارية.' : 'MYFI brings income, spending, wallets, trackers and reports into one financial workspace, with optional cloud sync.',
+    aboutPurpose: ar ? 'MaalFlow يجمع الدخل والمصروفات والمحافظ والمتابعات والتقارير في مساحة مالية واحدة، مع مزامنة سحابية اختيارية.' : 'MaalFlow brings income, spending, wallets, trackers and reports into one financial workspace, with optional cloud sync.',
     localFirstPrinciple: ar ? 'Local-first' : 'Local-first',
-    localFirstPrincipleSub: ar ? 'بياناتك تبدأ على جهازك، واستخدام MYFI لا يتطلب حساباً.' : 'Your data starts on your device; MYFI does not require an account.',
-    cloudPrinciple: ar ? 'حساب MYFI اختياري' : 'MYFI account is optional',
+    localFirstPrincipleSub: ar ? 'بياناتك تبدأ على جهازك، واستخدام MaalFlow لا يتطلب حساباً.' : 'Your data starts on your device; MaalFlow does not require an account.',
+    cloudPrinciple: ar ? 'حساب MaalFlow اختياري' : 'MaalFlow account is optional',
     cloudPrincipleSub: ar ? 'تربطه فقط عندما تريد المزامنة أو الاسترجاع بين الأجهزة.' : 'Connect it only when you want sync or recovery across devices.',
     bilingualPrinciple: ar ? 'عربي وإنكليزي' : 'Arabic & English',
     bilingualPrincipleSub: ar ? 'واجهة ثنائية اللغة مع دعم اتجاه RTL وLTR.' : 'Bilingual interface with RTL and LTR support.',
     versionLabel: ar ? 'الإصدار' : 'Version',
     privacy: ar ? 'سياسة الخصوصية' : 'Privacy policy',
     dangerZone: ar ? 'إدارة الحساب' : 'Account management',
-    deleteAccount: ar ? 'حذف حساب MYFI نهائياً' : 'Permanently delete MYFI account',
+    deleteAccount: ar ? 'حذف حساب MaalFlow نهائياً' : 'Permanently delete MaalFlow account',
     deleteAccountSub: ar ? 'يحذف الحساب والبيانات السحابية، وتبقى بياناتك المالية محفوظة على هذا الجهاز.' : 'Deletes the account and cloud data while keeping your financial data on this device.',
     deleteAccountTitle: ar ? 'حذف الحساب؟' : 'Delete account?',
-    deleteAccountConfirm: ar ? 'سيُحذف حساب MYFI وبياناته السحابية نهائياً. ستبقى بياناتك المالية على هذا الجهاز، وستتوقف المزامنة السحابية.' : 'Your MYFI account and cloud data will be permanently deleted. Your financial data will remain on this device and cloud sync will stop.',
+    deleteAccountConfirm: ar ? 'سيُحذف حساب MaalFlow وبياناته السحابية نهائياً. ستبقى بياناتك المالية على هذا الجهاز، وستتوقف المزامنة السحابية.' : 'Your MaalFlow account and cloud data will be permanently deleted. Your financial data will remain on this device and cloud sync will stop.',
     back: ar ? 'رجوع' : 'Back',
     continueAction: ar ? 'متابعة' : 'Continue',
     deleteAccountDone: ar ? 'تم حذف الحساب. بياناتك المالية ما زالت محفوظة على هذا الجهاز.' : 'Account deleted. Your financial data is still stored on this device.',
@@ -446,7 +446,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
   // matter what dirty/lastSyncError say — those two only reflect the V1
   // fallback's own (unrelated) success. Reading both fields already in store
   // state; this adds no new DB read or sync call. See
-  // docs/04_CURRENT_EVIDENCE/MYFI_SYNC_HONESTY_AND_RECOVERY_DESIGN_2026-09-04.md
+  // docs/04_CURRENT_EVIDENCE/MAALFLOW_SYNC_HONESTY_AND_RECOVERY_DESIGN_2026-09-04.md
   const v2Stuck = !!user && !cfg.demoMode && financialLedgerV7Cutover
     && financialSyncV2Activation?.status === 'failed_before_activation'
     && financialMutationSyncProtocol !== 2;
@@ -938,7 +938,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
         Alert.alert('', L.bioNotAvailable || (isAr ? 'البصمة غير متاحة على هذا الجهاز.' : 'Biometrics are not available on this device.'));
         return;
       }
-      const result = await authenticate(L.bioPrompt || (isAr ? 'تحقق لفتح MYFI' : 'Authenticate to unlock MYFI'));
+      const result = await authenticate(L.bioPrompt || (isAr ? 'تحقق لفتح MaalFlow' : 'Authenticate to unlock MaalFlow'));
       if (!result.success) return;
     }
     await setCfg({ bioLock: value });
@@ -948,7 +948,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
     if (cfg.demoMode || fileBusy) return;
     setFileBusy(true);
     try {
-      await exportMyfiPackage({
+      await exportMaalFlowPackage({
         kind: 'full_backup',
         data: JSON.parse(await exportBackup()),
         label: PRODUCT_NAME,
@@ -987,7 +987,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
     if (fileBusy) return;
     setFileBusy(true);
     try {
-      const picked = await pickMyfiPackage({ kind: 'full_backup' });
+      const picked = await pickMaalFlowPackage({ kind: 'full_backup' });
       if (!picked) return;
       setImportPackage(picked);
       if (picked.passwordRequired) {
@@ -1017,7 +1017,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
     if (backupPasswordMode === 'import' && importPackage) {
       setFileBusy(true);
       try {
-        const unlocked = await unlockMyfiPackage(importPackage, backupPassword, 'full_backup');
+        const unlocked = await unlockMaalFlowPackage(importPackage, backupPassword, 'full_backup');
         setImportPackage(unlocked);
         setBackupPassword('');
         setBackupPasswordMode(null);
@@ -1032,7 +1032,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
   const importPreview = useMemo(() => {
     if (!importPackage?.payload?.data) return null;
     try {
-      if (importPackage.payload.data?.kind === 'myfi_canonical_financial_backup') {
+      if (importPackage.payload.data?.kind === 'maalflow_canonical_financial_backup') {
         const decoded = decodeCanonicalBackupV11(importPackage.payload.data);
         return { valid: decoded?.ok === true, errors: decoded?.ok ? [] : [decoded?.reason || 'invalid'] };
       }
@@ -1139,7 +1139,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
               T.localDeleteComplete,
               isAr
                 ? 'لن نعيد بياناتك تلقائيًا. يمكنك استعادتها الآن أو لاحقًا من هذه الصفحة.'
-                : 'MYFI will not restore data automatically. You can restore it now or later from this page.',
+                : 'MaalFlow will not restore data automatically. You can restore it now or later from this page.',
               [
                 { text: T.later, style: 'cancel' },
                 { text: T.restoreCloudData, onPress: () => restoreCloudData() },
@@ -1153,7 +1153,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
               signedInCloudWorkspace ? T.localDeleteSyncRequired : (
                 isAr
                   ? 'نحتاج إكمال استعادة النسخة السحابية بأمان قبل السماح بحذف هذه البيانات من الجهاز.'
-                  : 'MYFI must complete a safe cloud recovery before local data can be deleted.'
+                  : 'MaalFlow must complete a safe cloud recovery before local data can be deleted.'
               ),
             );
           }
@@ -1187,8 +1187,8 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
         return;
       }
       Alert.alert(isAr ? 'نسخة سحابية موثقة جاهزة' : 'Verified cloud copy is ready', isAr
-        ? 'احتفظ MYFI بنسخة أمان محلية كاملة للدعم. يمكنك الآن استبدال النسخة غير المتزامنة بهذه النسخة السحابية الموثقة.'
-        : 'MYFI kept a complete local safety copy for support. You can now replace the unsynced copy with this verified cloud copy.');
+        ? 'احتفظ MaalFlow بنسخة أمان محلية كاملة للدعم. يمكنك الآن استبدال النسخة غير المتزامنة بهذه النسخة السحابية الموثقة.'
+        : 'MaalFlow kept a complete local safety copy for support. You can now replace the unsynced copy with this verified cloud copy.');
     } finally { setConflictRecoveryBusy(false); }
   };
 
@@ -1197,7 +1197,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
       isAr ? 'استبدال نسخة هذا الجهاز؟' : 'Replace this device copy?',
       isAr
         ? 'سنثبت نسخة السحابة التي تم التحقق منها. احتفظنا بنسخة أمان محلية للدعم، ولن يتغير أي شيء في السحابة.'
-        : 'MYFI will install the verified cloud copy. A local safety copy is retained for support and nothing in the cloud will change.',
+        : 'MaalFlow will install the verified cloud copy. A local safety copy is retained for support and nothing in the cloud will change.',
       [
         { text: T.cancel, style: 'cancel' },
         { text: isAr ? 'استبدال النسخة المحلية' : 'Replace local copy', style: 'destructive', onPress: async () => {
@@ -1248,7 +1248,7 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
         />
         {root ? (
           <View style={s.rootHead}>
-            <Text style={[s.brandEyebrow, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>MYFI</Text>
+            <Text style={[s.brandEyebrow, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>MaalFlow</Text>
             <Text style={[s.rootSubtitle, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'عدّل ما يغيّر تجربتك فعلاً، والباقي يبقى هادئًا.' : 'Change what truly shapes your experience; leave the rest calm.'}</Text>
           </View>
         ) : null}
@@ -1501,8 +1501,8 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
         th={th}
         title={T.importBackup}
         message={isAr
-          ? 'سيُنشئ MYFI نقطة رجوع آمنة، ثم يستعيد محتوى النسخة. ملف النسخة نفسه لن يُحذف.'
-          : 'MYFI will create a safe rollback point, then restore this backup. The backup file itself is not deleted.'}
+          ? 'سيُنشئ MaalFlow نقطة رجوع آمنة، ثم يستعيد محتوى النسخة. ملف النسخة نفسه لن يُحذف.'
+          : 'MaalFlow will create a safe rollback point, then restore this backup. The backup file itself is not deleted.'}
         confirmLabel={isAr ? 'استعادة النسخة الآن' : 'Restore backup now'}
         cancelLabel={T.cancel}
         confirmIcon="checkmark-circle-outline"
@@ -1566,7 +1566,7 @@ function RootSettings({ th, isAr, T, user, cfg, accountName, accountEmail, accou
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text numberOfLines={1} style={[s.accountCardName, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{accountName}</Text>
           <Text numberOfLines={1} style={[s.accountCardEmail, { color: th.sub, textAlign: isAr ? 'right' : 'left', writingDirection: user ? 'ltr' : undefined }]}>
-            {user ? (accountEmail || T.connectedToMyfi) : T.savedOnDevice}
+            {user ? (accountEmail || T.connectedToMaalFlow) : T.savedOnDevice}
           </Text>
           {user ? (
             <View style={[s.syncInline, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
@@ -1629,12 +1629,12 @@ function AccountPage({
         <Text style={[s.profileName, { color: th.text, textAlign: 'center' }]}>{accountName}</Text>
         {user ? (
           <Text style={[s.profileMeta, { color: th.sub, writingDirection: 'ltr', textAlign: 'center' }]}>
-            {accountEmail || T.connectedToMyfi}
+            {accountEmail || T.connectedToMaalFlow}
           </Text>
         ) : null}
         <View style={[s.accountStatusPill, { backgroundColor: user ? th.incBg : th.cardHigh, borderColor: user ? `${th.inc}45` : th.border, flexDirection: isAr ? 'row-reverse' : 'row' }]}>
           <View style={[s.accountStatusDot, { backgroundColor: user ? th.inc : th.sub }]} />
-          <Text style={[s.accountStatusText, { color: user ? th.inc : th.sub }]}>{user ? T.connectedToMyfi : T.savedOnDevice}</Text>
+          <Text style={[s.accountStatusText, { color: user ? th.inc : th.sub }]}>{user ? T.connectedToMaalFlow : T.savedOnDevice}</Text>
         </View>
         <TouchableOpacity onPress={() => setEditIdentity(!editIdentity)} style={[s.editPill, { backgroundColor: th.primSoft }]}>
           <Ionicons name="create-outline" size={14} color={th.primary} />
@@ -1781,7 +1781,7 @@ function DevicesPage({ th, isAr, T, user, syncState, lastSyncedAt, onSignOutOthe
         <View style={[s.deviceIcon, { backgroundColor: th.primSoft }]}><Ionicons name={Platform.OS === 'web' ? 'laptop-outline' : 'phone-portrait-outline'} size={22} color={th.primary} /></View>
         <View style={{ flex: 1 }}>
           <Text style={[s.deviceTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{deviceName}</Text>
-          <Text style={[s.deviceSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>MYFI · {Platform.OS}</Text>
+          <Text style={[s.deviceSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>MaalFlow · {Platform.OS}</Text>
           {user ? <Text style={[s.deviceSub, { color: th.faint, textAlign: isAr ? 'right' : 'left' }]}>{T.lastSync}: {formatSyncTime(lastSyncedAt, isAr ? 'ar' : 'en')}</Text> : null}
           <View style={[s.syncInline, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
             <View style={[s.liveDot, { backgroundColor: user ? th.inc : th.sub }]} />
@@ -1945,16 +1945,16 @@ function GuidePage({ th, isAr, T, onOpenFinancial, onOpenAccount }) {
 }
 
 function ContactPage({ th, isAr, T, user }) {
-  const supportEmail = process.env.EXPO_PUBLIC_MYFI_SUPPORT_EMAIL || '';
-  const supportUrl = process.env.EXPO_PUBLIC_MYFI_SUPPORT_URL || '';
-  const feedbackUrl = process.env.EXPO_PUBLIC_MYFI_FEEDBACK_URL || supportUrl;
-  const privacyUrl = process.env.EXPO_PUBLIC_MYFI_PRIVACY_URL || '';
-  const termsUrl = process.env.EXPO_PUBLIC_MYFI_TERMS_URL || '';
-  const instagramUrl = process.env.EXPO_PUBLIC_MYFI_INSTAGRAM_URL || '';
-  const facebookUrl = process.env.EXPO_PUBLIC_MYFI_FACEBOOK_URL || '';
-  const version = process.env.EXPO_PUBLIC_MYFI_VERSION || '1.0.0';
+  const supportEmail = process.env.EXPO_PUBLIC_MAALFLOW_SUPPORT_EMAIL || '';
+  const supportUrl = process.env.EXPO_PUBLIC_MAALFLOW_SUPPORT_URL || '';
+  const feedbackUrl = process.env.EXPO_PUBLIC_MAALFLOW_FEEDBACK_URL || supportUrl;
+  const privacyUrl = process.env.EXPO_PUBLIC_MAALFLOW_PRIVACY_URL || '';
+  const termsUrl = process.env.EXPO_PUBLIC_MAALFLOW_TERMS_URL || '';
+  const instagramUrl = process.env.EXPO_PUBLIC_MAALFLOW_INSTAGRAM_URL || '';
+  const facebookUrl = process.env.EXPO_PUBLIC_MAALFLOW_FACEBOOK_URL || '';
+  const version = process.env.EXPO_PUBLIC_MAALFLOW_VERSION || '1.0.0';
   const platform = Platform.OS === 'ios' ? 'iOS' : Platform.OS === 'android' ? 'Android' : Platform.OS;
-  const mailUrl = supportEmail ? `mailto:${supportEmail}?subject=${encodeURIComponent('MYFI Support')}&body=${encodeURIComponent(`MYFI ${version} · ${platform} · ${user ? 'MYFI account connected' : 'No MYFI account'}`)}` : '';
+  const mailUrl = supportEmail ? `mailto:${supportEmail}?subject=${encodeURIComponent('MaalFlow Support')}&body=${encodeURIComponent(`MaalFlow ${version} · ${platform} · ${user ? 'MaalFlow account connected' : 'No MaalFlow account'}`)}` : '';
   return (
     <>
       <View style={[s.contactHero, { backgroundColor: th.card, borderColor: th.border }]}>
@@ -1985,9 +1985,9 @@ function DiagnosticRow({ th, isAr, label, value, last = false }) {
 }
 
 function AboutPage({ th, isAr, T, onOpenDiagnostics }) {
-  const version = process.env.EXPO_PUBLIC_MYFI_VERSION || '1.0.0';
-  const privacyUrl = process.env.EXPO_PUBLIC_MYFI_PRIVACY_URL || '';
-  const termsUrl = process.env.EXPO_PUBLIC_MYFI_TERMS_URL || '';
+  const version = process.env.EXPO_PUBLIC_MAALFLOW_VERSION || '1.0.0';
+  const privacyUrl = process.env.EXPO_PUBLIC_MAALFLOW_PRIVACY_URL || '';
+  const termsUrl = process.env.EXPO_PUBLIC_MAALFLOW_TERMS_URL || '';
   const platform = Platform.OS === 'ios' ? 'iOS' : Platform.OS === 'android' ? 'Android' : Platform.OS;
   // Five taps on the version pill — an inconspicuous entry, not a visible menu
   // item, per Planning & Audit's instruction to keep this hidden from normal users.
@@ -2007,21 +2007,21 @@ function AboutPage({ th, isAr, T, onOpenDiagnostics }) {
     <>
       <View style={[s.aboutHero, { backgroundColor: th.card, borderColor: th.border }]}>
         <View style={[s.aboutLogo, { backgroundColor: th.primSoft }]}><Ionicons name="layers" size={32} color={th.primary} /></View>
-        <Text style={[s.aboutBrand, { color: th.text }]}>MYFI</Text>
+        <Text style={[s.aboutBrand, { color: th.text }]}>MaalFlow</Text>
         <Text style={[s.aboutTagline, { color: th.sub }]}>{T.aboutTagline}</Text>
         <TouchableOpacity onPress={onVersionTap} activeOpacity={0.8}>
           <View style={[s.versionPill, { backgroundColor: th.cardHigh }]}><Text style={[s.versionPillText, { color: th.sub }]}>{T.versionLabel} {version} · {platform}</Text></View>
         </TouchableOpacity>
       </View>
-      <View style={[s.aboutStatement, { backgroundColor: th.card, borderColor: th.border }]}><Text style={[s.aboutStatementTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'لماذا MYFI؟' : 'Why MYFI?'}</Text><Text style={[s.aboutPurpose, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.aboutPurpose}</Text></View>
+      <View style={[s.aboutStatement, { backgroundColor: th.card, borderColor: th.border }]}><Text style={[s.aboutStatementTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'لماذا MaalFlow؟' : 'Why MaalFlow?'}</Text><Text style={[s.aboutPurpose, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{T.aboutPurpose}</Text></View>
       <SectionLabel th={th} isAr={isAr} text={isAr ? 'مبادئ المنتج' : 'Product principles'} />
       <MenuGroup th={th}>
         <MenuRow th={th} isAr={isAr} icon="phone-portrait-outline" title={T.localFirstPrinciple} subtitle={T.localFirstPrincipleSub} />
         <MenuRow th={th} isAr={isAr} icon="cloud-outline" title={T.cloudPrinciple} subtitle={T.cloudPrincipleSub} />
         <MenuRow th={th} isAr={isAr} icon="language-outline" title={T.bilingualPrinciple} subtitle={T.bilingualPrincipleSub} last />
       </MenuGroup>
-      {(privacyUrl || termsUrl) ? <><SectionLabel th={th} isAr={isAr} text={T.legal} /><MenuGroup th={th}>{privacyUrl ? <MenuRow th={th} isAr={isAr} icon="document-lock-outline" title={T.privacy} subtitle={isAr ? 'كيف يتعامل MYFI مع بياناتك وخصوصيتك.' : 'How MYFI handles your data and privacy.'} onPress={() => openExternal(privacyUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last={!termsUrl} /> : null}{termsUrl ? <MenuRow th={th} isAr={isAr} icon="document-text-outline" title={T.termsOfUse} subtitle={isAr ? 'شروط استخدام التطبيق والخدمات المرتبطة.' : 'Terms for using the app and connected services.'} onPress={() => openExternal(termsUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last /> : null}</MenuGroup></> : null}
-      <Text style={[s.aboutFooter, { color: th.faint }]}>{isAr ? 'MYFI · إدارة مالية أوضح بدون تعقيد غير ضروري' : 'MYFI · Clearer money management without unnecessary complexity'}</Text>
+      {(privacyUrl || termsUrl) ? <><SectionLabel th={th} isAr={isAr} text={T.legal} /><MenuGroup th={th}>{privacyUrl ? <MenuRow th={th} isAr={isAr} icon="document-lock-outline" title={T.privacy} subtitle={isAr ? 'كيف يتعامل MaalFlow مع بياناتك وخصوصيتك.' : 'How MaalFlow handles your data and privacy.'} onPress={() => openExternal(privacyUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last={!termsUrl} /> : null}{termsUrl ? <MenuRow th={th} isAr={isAr} icon="document-text-outline" title={T.termsOfUse} subtitle={isAr ? 'شروط استخدام التطبيق والخدمات المرتبطة.' : 'Terms for using the app and connected services.'} onPress={() => openExternal(termsUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last /> : null}</MenuGroup></> : null}
+      <Text style={[s.aboutFooter, { color: th.faint }]}>{isAr ? 'MaalFlow · إدارة مالية أوضح بدون تعقيد غير ضروري' : 'MaalFlow · Clearer money management without unnecessary complexity'}</Text>
     </>
   );
 }
@@ -2120,7 +2120,7 @@ function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview,
             <Ionicons name={importPreview?.valid ? 'checkmark-circle-outline' : 'alert-circle-outline'} size={20} color={importPreview?.valid ? th.primary : th.exp} />
             <View style={{ flex: 1 }}>
               <Text style={[s.importTitle, { color: importPreview?.valid ? th.primary : th.exp, textAlign: isAr ? 'right' : 'left' }]}>{importPreview?.valid ? T.backupReady : T.backupInvalid}</Text>
-              <Text style={[s.importFile, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]} numberOfLines={1}>{importPackage.name || 'MYFI backup'}</Text>
+              <Text style={[s.importFile, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]} numberOfLines={1}>{importPackage.name || 'MaalFlow backup'}</Text>
             </View>
           </View>
           <View style={[s.editorActions, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
@@ -2164,7 +2164,7 @@ function DataPage({ th, isAr, T, counts, fileBusy, importPackage, importPreview,
               <MenuRow
                 th={th} isAr={isAr} icon="shield-checkmark-outline" iconColor={th.warn}
                 title={isAr ? 'إصلاح تعارض المزامنة' : 'Repair sync conflict'}
-                subtitle={conflictRecoveryBusy ? (isAr ? 'جارٍ تجهيز نقطة رجوع محلية…' : 'Preparing a local restore point…') : (isAr ? 'نتحقق من السحابة أولًا ولا نستبدل شيئًا دون موافقتك.' : 'MYFI verifies the cloud first and never replaces anything without your confirmation.')}
+                subtitle={conflictRecoveryBusy ? (isAr ? 'جارٍ تجهيز نقطة رجوع محلية…' : 'Preparing a local restore point…') : (isAr ? 'نتحقق من السحابة أولًا ولا نستبدل شيئًا دون موافقتك.' : 'MaalFlow verifies the cloud first and never replaces anything without your confirmation.')}
                 onPress={conflictRecoveryBusy ? null : onPrepareConflictRecovery}
               />
             ) : null}
@@ -2293,14 +2293,14 @@ function BackupExportSheet({
   const subtitle = isProtection
     ? (isAr
         ? 'اختر مستوى حماية الملف قبل إنشاء النسخة. الملف يبقى منطقي وقابل للاستعادة حتى لو تغيّر شكل قاعدة البيانات لاحقاً.'
-        : 'Choose how this file is protected before MYFI creates the backup. The logical format stays restorable across future database changes.')
+        : 'Choose how this file is protected before MaalFlow creates the backup. The logical format stays restorable across future database changes.')
     : (isAr
-        ? 'احفظ نسخة ZIP باسم MYFI داخل الهاتف أو شاركها مع مكان آمن. بياناتك لا تُرسل لأي جهة أثناء الحفظ المحلي.'
-        : 'Save a MYFI ZIP backup on this phone or share it to a safe place. Local saving does not upload your data.');
+        ? 'احفظ نسخة ZIP باسم MaalFlow داخل الهاتف أو شاركها مع مكان آمن. بياناتك لا تُرسل لأي جهة أثناء الحفظ المحلي.'
+        : 'Save a MaalFlow ZIP backup on this phone or share it to a safe place. Local saving does not upload your data.');
   const systemNote = isProtection && saveMode
     ? (isAr
         ? 'بعد هذه الخطوة سيطلب Android اختيار مجلد والسماح بالحفظ. هذه نافذة نظامية ولا يمكن تغيير شكلها.'
-        : 'Next, Android will ask you to choose a folder and allow access. That system screen cannot be styled by MYFI.')
+        : 'Next, Android will ask you to choose a folder and allow access. That system screen cannot be styled by MaalFlow.')
     : null;
   const direction = isAr ? 'row-reverse' : 'row';
 
@@ -2348,7 +2348,7 @@ function BackupExportSheet({
                 <Ionicons name="phone-portrait-outline" size={20} color={th.primary} />
                 <View style={{ flex: 1 }}>
                   <Text style={[s.exportOptionTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'حفظ في الهاتف' : 'Save to phone'}</Text>
-                  <Text style={[s.exportOptionSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'ينشئ ملف MYFI داخل مجلد تختاره أنت.' : 'Create the MYFI file in a folder you choose.'}</Text>
+                  <Text style={[s.exportOptionSub, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>{isAr ? 'ينشئ ملف MaalFlow داخل مجلد تختاره أنت.' : 'Create the MaalFlow file in a folder you choose.'}</Text>
                 </View>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => onSelectDelivery('share')} disabled={busy} style={[s.exportOption, { borderColor: th.border, backgroundColor: th.cardHigh, flexDirection: direction, opacity: busy ? 0.6 : 1 }]}>

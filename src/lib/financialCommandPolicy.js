@@ -1,4 +1,4 @@
-// MYFI_R04_U2_FINANCIAL_COMMAND_POLICY
+// MAALFLOW_R04_U2_FINANCIAL_COMMAND_POLICY
 // Fail-closed semantic guards required before Phase 6 write-path work.
 // Unsupported financial meanings are rejected rather than guessed.
 

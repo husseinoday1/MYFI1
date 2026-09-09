@@ -221,5 +221,5 @@ const stopped = db => readFailedPermanentLedgerMutationsV8({ namespace: NS, ledg
     }), false);
   }
 
-  console.log('MYFI P14 OUTBOX RETRY REPOSITORY: PASSED');
+  console.log('MaalFlow P14 OUTBOX RETRY REPOSITORY: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

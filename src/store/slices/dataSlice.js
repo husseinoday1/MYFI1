@@ -1,5 +1,5 @@
-// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
-// MYFI_PERFORMANCE_DATA_PERSISTENCE_V5_1_1
+// MAALFLOW_PERFORMANCE_DATA_RUNTIME_V5_1_2
+// MAALFLOW_PERFORMANCE_DATA_PERSISTENCE_V5_1_1
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE, DEF_CATS, DEF_CFG, DEF_NOTIF, LEGACY_STORAGE_KEYS, normalizeCfg } from '../../lib/constants';
 import { calcStats, catSpend } from '../../utils/calc';
@@ -42,7 +42,7 @@ import { advanceOrResolveFinancialRestoreEpochV3 } from '../../lib/financialRest
 import { resolveCloudLedgerV2 } from '../../lib/financialMutationSyncV2';
 import { supabase } from '../../lib/supabase';
 
-const RESET_MARKER_PREFIX = 'MYFI_INTENTIONAL_RESET_V1';
+const RESET_MARKER_PREFIX = 'MAALFLOW_INTENTIONAL_RESET_V1';
 const syncBaseNamespace = namespace => `sync-base:${String(namespace || GUEST_NAMESPACE)}`;
 const backupRestoreRollbackNamespace = namespace => `backup-restore-rollback:${String(namespace || GUEST_NAMESPACE)}`;
 const resetMarkerKey = namespace => `${RESET_MARKER_PREFIX}:${String(namespace || GUEST_NAMESPACE)}`;
@@ -58,7 +58,7 @@ const readResetMarker = async namespace => {
 };
 const isPendingLocalCloudRecoveryForUser = (marker, userId) => marker?.localCloudRecoveryRequired === true
   && String(marker?.localCloudRecoveryAccountId || '') === String(userId || '');
-const canonicalBackupCandidate = value => value?.kind === 'myfi_canonical_financial_backup';
+const canonicalBackupCandidate = value => value?.kind === 'maalflow_canonical_financial_backup';
 const withRestoreNetworkTimeout = async (promise, code, timeoutMs = 10000) => {
   let timer = null;
   try {

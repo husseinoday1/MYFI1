@@ -15,11 +15,11 @@ const dataSlice = read('src/store/slices/dataSlice.js');
 assert(!app.includes('FirstUseGuideModal') && settings.includes('function GuidePage') && settings.includes("onOpen('guide')"), 'The user guide must remain available in Settings without interrupting first use after onboarding');
 assert(settings.includes('onOpenGuide') && settings.includes('T.guide'), 'Settings must expose the task-based user guide');
 assert(settings.includes('T.support') && settings.includes('MenuGroup'), 'Settings must contain a grouped Help area');
-assert(settings.includes("about: ar ? 'حول MYFI' : 'About MYFI'"), 'Settings must contain About MYFI');
-assert(settings.includes('EXPO_PUBLIC_MYFI_INSTAGRAM_URL') && settings.includes('EXPO_PUBLIC_MYFI_FACEBOOK_URL'), 'Social shortcuts must use real configurable URLs');
+assert(settings.includes("about: ar ? 'حول MaalFlow' : 'About MaalFlow'"), 'Settings must contain About MaalFlow');
+assert(settings.includes('EXPO_PUBLIC_MAALFLOW_INSTAGRAM_URL') && settings.includes('EXPO_PUBLIC_MAALFLOW_FACEBOOK_URL'), 'Social shortcuts must use real configurable URLs');
 assert.equal(settings.includes('الهوية، المزامنة وتسجيل الدخول'), false, 'Verbose settings section subtitles must be removed');
-assert.equal(settings.includes('اضبط MYFI حسب طريقة استخدامك'), false, 'Verbose usage subtitle must be removed');
-assert.equal(history.includes('historyEyebrow'), false, 'History must not show a decorative MYFI eyebrow');
+assert.equal(settings.includes('اضبط MaalFlow حسب طريقة استخدامك'), false, 'Verbose usage subtitle must be removed');
+assert.equal(history.includes('historyEyebrow'), false, 'History must not show a decorative MaalFlow eyebrow');
 // The approved flow is deliberately five screens: Welcome with its explicit
 // language choice -> three visual personalization questions -> financial essentials.
 // Privacy is visible in Essentials, not an extra blocking screen.
@@ -34,11 +34,11 @@ assert.equal(/skipCurrent|T\.skip|skipButton|skipText/.test(onboarding), false, 
 assert.equal(onboarding.includes('اللغة والمظهر والتاريخ يتبعون جهازك'), false, 'Onboarding must not explain automatic device preferences');
 assert(settings.includes('T.gettingStarted') && settings.includes('T.dailyMoney') && settings.includes('T.planningGuide') && settings.includes('T.reportsGuide'), 'Guide must teach the core financial workflow by task');
 
-assert(backup.includes("MYFI_BACKUP_KIND = 'myfi_financial_backup'"), 'Backup must be explicitly financial');
+assert(backup.includes("MAALFLOW_BACKUP_KIND = 'maalflow_financial_backup'"), 'Backup must be explicitly financial');
 assert(backup.includes('pickFinancialBackupConfig'), 'Backup must whitelist financial config');
 assert(dataSlice.includes('buildFinancialBackup'), 'Export must use the financial backup builder');
 assert(dataSlice.includes('mergeFinancialBackupConfig'), 'Restore must preserve non-financial settings');
 assert(dataSlice.includes('notif: current.notif'), 'Restore must preserve notification preferences');
 assert.equal(/trans, debts, goals, wallets, commitments, cats, cfg, notif/.test(dataSlice), false, 'Export must not serialize the full config or notifications');
 
-console.log('MYFI Batch 7 product-readiness contract passed.');
+console.log('MaalFlow Batch 7 product-readiness contract passed.');

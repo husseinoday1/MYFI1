@@ -9,7 +9,7 @@ import { ScreenScroll, PageIntro, SectionTitle, SurfaceCard, IconContainer, Empt
 import { RADIUS, SHADOW, SPACE, weight } from '../lib/tokens';
 
 // Payment History — Follow-ups section named in
-// docs/design/07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md ("Payment History").
+// docs/design/07_MAALFLOW_SCREEN_DESIGN_SPECIFICATIONS.md ("Payment History").
 // Read-only aggregation of existing payment records: debt.payments[]
 // (already written by trackersSlice's debt-payment action) and transactions
 // already carrying a commitmentId (already written by the existing

@@ -1,4 +1,4 @@
--- MYFI P19-003
+-- MaalFlow P19-003
 -- Harden V1 mutation acknowledgement semantics without changing the wire shape.
 -- Exact retries are acknowledged; same mutation_id with different content fails.
 -- This migration is backward-compatible with current V1 clients.

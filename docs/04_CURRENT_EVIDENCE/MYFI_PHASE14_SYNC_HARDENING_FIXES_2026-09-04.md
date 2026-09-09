@@ -5,7 +5,7 @@ Phase 14 الكامل. باقي بنود التدقيق تبقى مُتتبَّ�
 retention و§93 mutation retention مؤجَّلان لِـ Phase 15/16، وسيناريوهات §91
 غير المُختبَرة تأتي بعد هذين الإصلاحين).
 
-المرجع: `docs/01_CORE_AUTHORITY/MYFI_MASTER_PLAN_FROZEN.md` §86، §92.
+المرجع: `docs/01_CORE_AUTHORITY/MAALFLOW_MASTER_PLAN_FROZEN.md` §86، §92.
 
 ---
 

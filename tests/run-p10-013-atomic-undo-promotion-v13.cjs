@@ -231,5 +231,5 @@ const snapshotDb = async () => {
   assert.equal(await meta(`canonical_restore_stage_v13:${stageNamespace}`),null);
   assert.equal((await all('SELECT id FROM ledger_financial_transactions_v7 WHERE namespace=?', stageNamespace)).length,0);
   console.log('[PASS] B5 success atomically promotes new state, swaps Undo pointer, references checkpoint and advances epoch+generation');
-  console.log('MYFI P10-013 B5 ATOMIC UNDO PROMOTION: PASS');
+  console.log('MaalFlow P10-013 B5 ATOMIC UNDO PROMOTION: PASS');
 })().catch(err => { console.error(err); process.exitCode=1; }).finally(()=>db.close());

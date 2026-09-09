@@ -81,7 +81,7 @@ For a device-reported defect:
 
 ## Immediate status rule
 
-`01_CORE_AUTHORITY/MYFI_R04_1_ACCEPTANCE_RECOVERY_ADDENDUM.md` remains the active acceptance-recovery
+`01_CORE_AUTHORITY/MAALFLOW_R04_1_ACCEPTANCE_RECOVERY_ADDENDUM.md` remains the active acceptance-recovery
 overlay unless a newer committed project document explicitly supersedes it.
 
 R04/R04.1 product acceptance must not be declared closed solely from automated evidence.
@@ -94,7 +94,7 @@ R04/R04.1 product acceptance must not be declared closed solely from automated e
 
 Before any next release/phase transition:
 1. verify exact Git state;
-2. reconcile this delta with `01_CORE_AUTHORITY/MYFI_RELEASE_GATE_STATUS_AR.md`;
+2. reconcile this delta with `01_CORE_AUTHORITY/MAALFLOW_RELEASE_GATE_STATUS_AR.md`;
 3. update device evidence;
 4. follow the Frozen Master Plan / active addendum gate order.
 
@@ -105,5 +105,5 @@ Before any next release/phase transition:
 - Real-device acceptance: PASS.
 - R04.1: CLOSED.
 - Phase 6 R04.1 hold: RELEASED after closure documentation gates/commit.
-- New canonical policy added: `MYFI_MULTI_CURRENCY_FINANCIAL_POLICY_ADDENDUM.md`.
+- New canonical policy added: `MAALFLOW_MULTI_CURRENCY_FINANCIAL_POLICY_ADDENDUM.md`.
 - No financial data rewrite, schema migration, SecureStore reset, or existing-user data loss is introduced by this documentation package.

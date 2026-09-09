@@ -98,4 +98,4 @@ for (const rel of ['src/screens/HistoryScreen.js', 'src/screens/ArchiveScreen.js
   assert(count >= 2, `${rel} must guard both its single-row and bulk-selection delete confirmations`);
 }
 
-console.log('MYFI GOAL RELEASE DELETE NOTICE: PASSED');
+console.log('MaalFlow GOAL RELEASE DELETE NOTICE: PASSED');

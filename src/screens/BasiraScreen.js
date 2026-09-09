@@ -105,7 +105,7 @@ export default function BasiraScreen({ onOpenHistory, onOpenFollowUps }) {
   return (
     <ScreenScroll th={th} bottom={104}>
       <View style={s.heading}>
-        <Text style={[s.title, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'بصيرة MYFI' : 'MYFI Insight'}</Text>
+        <Text style={[s.title, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'بصيرة MaalFlow' : 'MaalFlow Insight'}</Text>
         <Text style={[s.subtitle, { color: th.sub, textAlign: textAlign(lang) }]}>
           {isAr ? 'تحليل محلي قابل للتحقق من حركاتك.' : 'Local analysis you can verify from your activity.'}
         </Text>

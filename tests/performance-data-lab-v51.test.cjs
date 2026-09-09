@@ -36,7 +36,7 @@ must(sync.includes('if (current.cfg.demoMode)'), 'local demo persistence boundar
 must(sync.includes('schedulePerformanceSnapshotWrite(demoSnapshot'), 'test data must use the coalesced isolated performance persistence boundary');
 must(storage.includes('STORAGE.DEMO_DATA'), 'test data must persist separately from the real vault');
 
-must(settings.includes('MYFI_PERFORMANCE_DATA_LAB_V5_1'), 'settings V5.1 marker missing');
+must(settings.includes('MAALFLOW_PERFORMANCE_DATA_LAB_V5_1'), 'settings V5.1 marker missing');
 // CHANGED 2026-09-06 by owner instruction. The lab was __DEV__-only, which
 // meant §96/§98/§100 could never be measured from an installed build -- and
 // those numbers only exist on a real device. Every diagnostic surface in this
@@ -52,4 +52,4 @@ must(settings.includes('PERFORMANCE_TEST_TIERS.map'), 'five-tier selector missin
 must(settings.includes('onExitTestData'), 'return-to-real-data action missing');
 must(settings.includes('التصدير والاستعادة معطلان أثناء بيانات الاختبار'), 'backup isolation notice missing');
 
-console.log('MYFI PERFORMANCE DATA LAB V5.1: PASSED');
+console.log('MaalFlow PERFORMANCE DATA LAB V5.1: PASSED');

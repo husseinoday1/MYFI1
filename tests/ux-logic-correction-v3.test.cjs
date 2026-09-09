@@ -10,7 +10,7 @@ const trackers = read('src/screens/TrackersLabScreen.js');
 
 // Settings: local profile and cloud account must be visibly separate.
 assert(settings.includes("localProfileSection: ar ? 'الملف المحلي'"), 'Missing explicit local-profile section');
-assert(settings.includes("cloudDisconnectedTitle: ar ? 'لا يوجد حساب MYFI Cloud مربوط'"), 'Missing explicit disconnected cloud state');
+assert(settings.includes("cloudDisconnectedTitle: ar ? 'لا يوجد حساب MaalFlow Cloud مربوط'"), 'Missing explicit disconnected cloud state');
 assert(settings.includes('T.localCloudNote'), 'Missing local-vs-cloud explanation');
 assert(settings.includes('T.cloudDisconnectedTitle'), 'Cloud disconnected card is not rendered');
 assert(settings.includes('T.cloudConnectedTitle'), 'Cloud connected card is not rendered');
@@ -47,4 +47,4 @@ for (const type of ["trackerType: 'owed'", "trackerType: 'receivable'", "tracker
 }
 assert(!trackers.includes('s.addTrackerAction'), 'Single Add tracker UX from V2 is still present');
 
-console.log('MYFI UX LOGIC CORRECTION V3 contract: PASSED');
+console.log('MaalFlow UX LOGIC CORRECTION V3 contract: PASSED');

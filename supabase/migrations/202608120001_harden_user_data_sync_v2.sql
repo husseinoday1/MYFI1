@@ -1,4 +1,4 @@
--- MYFI V4: harden legacy snapshot sync for multi-device use.
+-- MaalFlow V4: harden legacy snapshot sync for multi-device use.
 -- Idempotent migration. Direct client writes are disabled; authenticated writes go through sync_user_data_v2.
 
 create table if not exists public.user_data (

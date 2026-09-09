@@ -21,9 +21,9 @@ for (const rel of [
   'src/store/slices/dataSlice.js',
 ]) must(exists(rel), `cumulative prerequisite missing: ${rel}`);
 
-must(read('src/lib/transactionIndex.js').includes('MYFI_TRANSACTION_INDEX_V5_3'), 'V5.3 transaction index is not installed');
-must(read('src/dev/performanceTestStorage.js').includes('MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2'), 'persistent performance-test storage prerequisite is missing');
-must(read('App.js').includes('MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2'), 'performance-test runtime App prerequisite is missing');
+must(read('src/lib/transactionIndex.js').includes('MAALFLOW_TRANSACTION_INDEX_V5_3'), 'V5.3 transaction index is not installed');
+must(read('src/dev/performanceTestStorage.js').includes('MAALFLOW_PERFORMANCE_DATA_RUNTIME_V5_1_2'), 'persistent performance-test storage prerequisite is missing');
+must(read('App.js').includes('MAALFLOW_PERFORMANCE_DATA_RUNTIME_V5_1_2'), 'performance-test runtime App prerequisite is missing');
 must(read('src/lib/history.js').includes('getVisibleHistoryTransactions'), 'V5.2 large-ledger history helper is missing');
 must(read('src/components/MultiSelect.js').includes('new Set(ids)'), 'V5.2 large-ledger MultiSelect optimization is missing');
 // §102: see database-archive-ux-v53 — this asserted on a comment, not on the pragma.
@@ -37,7 +37,7 @@ const owned = [
   'src/components/AddTransModal.js', 'src/components/MultiSelect.js',
   'src/lib/backupData.js', 'src/lib/constants.js', 'src/lib/csv.js', 'src/lib/decisionEngine.js',
   'src/lib/financialForecast.js', 'src/lib/history.js', 'src/lib/localArchiveRepository.js', 'src/lib/modules.js',
-  'src/lib/myfiFiles.js', 'src/lib/pdf.js', 'src/lib/productIdentity.js', 'src/lib/transactionIndex.js',
+  'src/lib/maalflowFiles.js', 'src/lib/pdf.js', 'src/lib/productIdentity.js', 'src/lib/transactionIndex.js',
   'src/lib/wallets.js', 'src/screens/ArchiveScreen.js', 'src/screens/HistoryScreen.js', 'src/screens/HomeScreen.js',
   'src/screens/ReportsScreen.js', 'src/screens/SettingsLegacyScreen.js', 'src/screens/SettingsScreen.js',
   'src/store/slices/dataSlice.js', 'src/store/slices/managementSlice.js', 'src/store/slices/useSyncSlice.js', 'src/utils/calc.js',
@@ -56,4 +56,4 @@ for (const rel of owned) {
   }
 }
 
-console.log('MYFI DATABASE + ARCHIVE UX V5.3.1 CUMULATIVE: PASSED');
+console.log('MaalFlow DATABASE + ARCHIVE UX V5.3.1 CUMULATIVE: PASSED');

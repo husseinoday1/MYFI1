@@ -33,4 +33,4 @@ for (const [rel, text] of [['src/screens/SettingsScreen.js', settings], ['src/sc
   text.split(/\r?\n/).forEach((line, i) => assert(!/[ \t]+$/.test(line), `${rel}:${i + 1} trailing whitespace`));
 }
 
-console.log('MYFI SETTINGS FLAT NAVIGATION V5: PASSED');
+console.log('MaalFlow SETTINGS FLAT NAVIGATION V5: PASSED');

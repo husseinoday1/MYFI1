@@ -109,4 +109,4 @@ const base = {
   assert.equal(result.cursor, 10);
 }
 
-console.log('MYFI P19-013 ATOMIC V2 COMMAND MODEL: PASSED');
+console.log('MaalFlow P19-013 ATOMIC V2 COMMAND MODEL: PASSED');

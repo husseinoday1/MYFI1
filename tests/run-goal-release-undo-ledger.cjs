@@ -1,4 +1,4 @@
-// MYFI — the release/undo cycle that inflated a wallet by 800.
+// MaalFlow — the release/undo cycle that inflated a wallet by 800.
 //
 // Reported from a real device 2026-09-06: a 200 goal, released and undone four
 // times, left the wallet 800 higher, and the released amount never came back
@@ -151,5 +151,5 @@ const add = (id, { kind = 'goal_release', goalId = GOAL, hidden = true, deleted 
     'the in-memory list must drop them too, not wait for a reload',
   );
 
-  console.log('MYFI GOAL RELEASE UNDO LEDGER LOOKUP: PASSED');
+  console.log('MaalFlow GOAL RELEASE UNDO LEDGER LOOKUP: PASSED');
 })();

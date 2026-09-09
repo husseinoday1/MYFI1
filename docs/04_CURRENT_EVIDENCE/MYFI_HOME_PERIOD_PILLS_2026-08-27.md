@@ -1,7 +1,7 @@
 # Home: REF-01 period pills + health-pill relocation (2026-08-27)
 
 Priority 4 of the Planning & Audit batch. User-approved design (REF-01,
-`docs/design/14_MYFI_APPROVED_VISUAL_REFERENCE_REGISTER.md`), not an open
+`docs/design/14_MAALFLOW_APPROVED_VISUAL_REFERENCE_REGISTER.md`), not an open
 option. Health-pill not deleted — relocated to Needs Attention.
 
 Session: Implementation 5. Branch `impl/nav-shell-step3-2026-08-26`.

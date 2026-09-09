@@ -1,4 +1,4 @@
-// MYFI — preparing and confirming the adoption of a different cloud identity.
+// MaalFlow — preparing and confirming the adoption of a different cloud identity.
 //
 // Sibling of financialV2ConflictRecoveryV1, for the case that one refuses by
 // design: the account already has a cloud ledger from another device or

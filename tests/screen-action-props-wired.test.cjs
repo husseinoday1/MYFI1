@@ -73,4 +73,4 @@ for (const screen of ['HistoryScreen', 'ReportsScreen']) {
 }
 console.log('[PASS] the no-op defaults that hide this failure are still accounted for');
 
-console.log('MYFI SCREEN ACTION PROPS CONTRACT: PASS');
+console.log('MaalFlow SCREEN ACTION PROPS CONTRACT: PASS');

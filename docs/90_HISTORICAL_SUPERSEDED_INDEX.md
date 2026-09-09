@@ -5,7 +5,7 @@ These files were reviewed but intentionally omitted from the clean canonical pac
 
 | File | Classification | Reason |
 |---|---|---|
-| MYFI_MASTER_PLAN_FROZEN_WITH_USER_AUDIT_ADDENDUM_REV2_2026-08-15.md | SUPERSEDED | Replaced by newly supplied `MYFI_MASTER_PLAN_FROZEN.md` plus active R04.1/current delta overlays. |
+| MAALFLOW_MASTER_PLAN_FROZEN_WITH_USER_AUDIT_ADDENDUM_REV2_2026-08-15.md | SUPERSEDED | Replaced by newly supplied `MAALFLOW_MASTER_PLAN_FROZEN.md` plus active R04.1/current delta overlays. |
 | MYFI_USER_NOTES_RECONCILIATION_REV2_2026-08-15.md | SUPERSEDED | Replaced by newly supplied reconciliation plus latest device overlay. |
 | MYFI_CODEX_TAKEOVER_HANDOFF_2026-08-16.md | SUPERSEDED | Generated handoff contained older authority/phase assumptions. |
 | CODEX_START_HERE.txt | SUPERSEDED | Replaced by canonical START_HERE. |

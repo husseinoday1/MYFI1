@@ -50,4 +50,4 @@ assert(ledgerPageCoversFallback([{id:'a'},{id:'b'}], [{id:'a'},{id:'b'}], 250) =
 assert(ledgerPageCoversFallback([{id:'a'}], [{id:'a'},{id:'b'}], 250) === false, 'incomplete ledger page must fail parity');
 assert(ledgerPageCoversFallback([], [], 250) === true, 'empty ledger and fallback should be accepted');
 
-console.log('MYFI R02 financial safety contracts PASS');
+console.log('MaalFlow R02 financial safety contracts PASS');

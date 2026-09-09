@@ -75,4 +75,4 @@ assert.match(details, /transaction\.entityNameSnapshot/);
 assert.match(history, /TRANSACTION_SEMANTIC_KIND\.OPENING_BALANCE,[\s\S]*TRANSACTION_SEMANTIC_KIND\.BALANCE_ADJUSTMENT/);
 assert.match(archive, /filter\(item => getTransactionSemanticKind\(item\) !== TRANSACTION_SEMANTIC_KIND\.OPENING_BALANCE\)/);
 
-console.log('MYFI P18-004 SEMANTIC FINANCIAL HISTORY: PASSED');
+console.log('MaalFlow P18-004 SEMANTIC FINANCIAL HISTORY: PASSED');

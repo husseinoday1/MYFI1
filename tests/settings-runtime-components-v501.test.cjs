@@ -6,7 +6,7 @@ const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const rel = 'src/screens/SettingsScreen.js';
 const source = fs.readFileSync(path.join(root, rel), 'utf8');
 
-assert(source.includes('MYFI_SETTINGS_RUNTIME_RECOVERY_V5_0_1'), 'V5.0.1 recovery marker missing');
+assert(source.includes('MAALFLOW_SETTINGS_RUNTIME_RECOVERY_V5_0_1'), 'V5.0.1 recovery marker missing');
 for (const name of ['Avatar', 'SectionLabel', 'MenuGroup', 'MenuRow', 'SwitchRow', 'InfoRow']) {
   assert(new RegExp(`function\\s+${name}\\s*\\(`).test(source), `${name} is referenced by Settings but not defined`);
 }
@@ -47,4 +47,4 @@ source.split(/\r?\n/).forEach((line, index) => {
   assert(!/[ \t]+$/.test(line), `${rel}:${index + 1} trailing whitespace`);
 });
 
-console.log('MYFI SETTINGS RUNTIME COMPONENT CONTRACT V5.0.1: PASSED');
+console.log('MaalFlow SETTINGS RUNTIME COMPONENT CONTRACT V5.0.1: PASSED');

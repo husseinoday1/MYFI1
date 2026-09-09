@@ -99,7 +99,7 @@ runs went unnoticed here because local `test:gate` was green and nobody opened A
 
 ## Standing rules in force
 
-Six of them, in `docs/00_MYFI_CANONICAL_AUTHORITY.md`: CI-only acceptance builds;
+Six of them, in `docs/00_MAALFLOW_CANONICAL_AUTHORITY.md`: CI-only acceptance builds;
 counter/epoch logic tested across two consecutive iterations; `/code-review` clean
 before push, not after; CI gates keyed on ancestry plus a repo-tracked allowlist rather
 than a hard-coded commit; a confirmed green CI run id before calling anything done; and

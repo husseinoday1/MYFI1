@@ -81,5 +81,5 @@ const good = {
   assert.equal(v2.mode,'v2_bootstrap');
   assert.equal(v2.requiresBootstrapImport,true);
 
-  console.log('MYFI P19-012 CLOUD RECOVERY SOURCE RUNTIME: PASSED');
+  console.log('MaalFlow P19-012 CLOUD RECOVERY SOURCE RUNTIME: PASSED');
 })().catch(error=>{console.error(error);process.exit(1);});

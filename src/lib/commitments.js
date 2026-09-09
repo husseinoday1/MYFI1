@@ -32,7 +32,7 @@ const normalizeSubType = (value) =>
 // carry a stale plan size after being reclassified.
 // Not an amortization schedule: this is a plain count of cycles, with no
 // interest/principal split (see the R04 contract freeze note in
-// docs/MYFI_FINANCIAL_CONTRACT.md).
+// docs/MAALFLOW_FINANCIAL_CONTRACT.md).
 // Fails closed to null on anything out of range rather than clamping: a
 // clamped 1200 would render as "600 of 600 left", a plan size the user never
 // entered and cannot tell is wrong (contract rule 5, no silent repair).

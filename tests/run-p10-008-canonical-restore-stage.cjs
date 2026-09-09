@@ -165,7 +165,7 @@ const decoded = {
   }
   assert.ok(moduleText.includes('semanticHashCanonicalV2'), 'stage must prove V2 semantic equality');
   assert.ok(moduleText.includes('cold_archive_years'), 'stage must include cold archive data');
-  console.log('MYFI P10-008 CANONICAL RESTORE STAGE CONTRACT: PASS');
+  console.log('MaalFlow P10-008 CANONICAL RESTORE STAGE CONTRACT: PASS');
 })().catch(error => {
   console.error(error);
   process.exit(1);

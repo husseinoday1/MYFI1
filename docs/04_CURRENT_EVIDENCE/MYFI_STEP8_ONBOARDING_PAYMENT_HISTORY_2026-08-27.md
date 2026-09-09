@@ -17,7 +17,7 @@ set their account type — the existing Settings path remains, untouched.
 
 ## Step 8 — Onboarding account-type selector removed
 
-Per `docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md` §7
+Per `docs/design/06_MAALFLOW_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md` §7
 (LOCKED), which explicitly prohibits a Personal/Business/Dual selector
 during onboarding.
 

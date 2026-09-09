@@ -1,4 +1,4 @@
--- MYFI: profile identity schema repair
+-- MaalFlow: profile identity schema repair
 -- Fixes PostgREST/Supabase schema-cache errors around display_name.
 -- Safe to run more than once.
 

@@ -31,4 +31,4 @@ assert.doesNotMatch(
   'V2 transaction payload must not embed independently revised entity mutations',
 );
 
-console.log('MYFI P19-006 LOCAL V2 SHADOW DUAL-WRITE CONTRACT: PASSED');
+console.log('MaalFlow P19-006 LOCAL V2 SHADOW DUAL-WRITE CONTRACT: PASSED');

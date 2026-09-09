@@ -93,7 +93,7 @@ async function run() {
   } = require('../src/lib/financialLedgerV7Migration');
   const { snapshotFromState, stateFromSnapshot } = require('../src/store/domain');
   const { storeColdArchiveYears, exportColdArchives, clearColdArchives } = require('../src/lib/localArchiveRepository');
-  const verifyRebuild = process.env.MYFI_TEST_VERIFY_REBUILD !== '0';
+  const verifyRebuild = process.env.MAALFLOW_TEST_VERIFY_REBUILD !== '0';
   const fixture = buildPerformanceTestWorkspace({}, '200');
 
   // Reproduce a device that completed V12 before this release. Its recorded
@@ -303,7 +303,7 @@ async function run() {
   await assertLabBatchRows('200', 0, 1, 1);
   await assertLabBatchRows('200', -1, 1, 1);
 
-  for (const tier of (process.env.MYFI_TEST_TIERS || '200').split(',')) {
+  for (const tier of (process.env.MAALFLOW_TEST_TIERS || '200').split(',')) {
     const { __performanceArchives, ...workspace } = buildPerformanceTestWorkspace({}, tier);
     await clearColdArchives('guest::performance-test');
     if (__performanceArchives.length) await storeColdArchiveYears({ namespace: 'guest::performance-test', archives: __performanceArchives });

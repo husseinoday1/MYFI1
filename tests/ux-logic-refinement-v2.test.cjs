@@ -22,8 +22,8 @@ assert(financial.includes("'المنطقة والعملة' : 'Region & currency'
 const rootSettings = settings.slice(settings.indexOf('function RootSettings'), settings.indexOf('function AccountPage'));
 assert(rootSettings.includes('user ? (') && rootSettings.includes('T.signInTitle') && !rootSettings.includes('title={T.currency}'), 'Root Settings must avoid duplicate base currency and collapse local cloud controls');
 const account = settings.slice(settings.indexOf('function AccountPage'), settings.indexOf('function DevicesPage'));
-assert(account.includes('أنت تستخدم MYFI محلياً') && account.includes('T.signInTitle'), 'Local Account must show one clear local-state explanation and connect action');
-assert(!settings.includes("<Text style={[s.version, { color: th.faint }]}>MYFI ·"), 'Settings must not duplicate the version footer');
+assert(account.includes('أنت تستخدم MaalFlow محلياً') && account.includes('T.signInTitle'), 'Local Account must show one clear local-state explanation and connect action');
+assert(!settings.includes("<Text style={[s.version, { color: th.faint }]}>MaalFlow ·"), 'Settings must not duplicate the version footer');
 assert(home.includes("attentionItems.length ? <React.Fragment") && home.includes("activeGoals.length ? <React.Fragment"), 'Home must hide empty attention and savings sections');
 assert(home.includes("Number(snapshot.month.inc || 0) === 0 ? `0 ${sym}`") && home.includes("Number(snapshot.month.exp || 0) === 0 ? `0 ${sym}`"), 'Home zero metrics must not show artificial plus/minus signs');
 assert(home.includes("isAr ? 'أضف أول حركة' : 'Add first entry'"), 'Home empty state must include a first-entry CTA');
@@ -32,4 +32,4 @@ assert(trackers.includes('addTrackerAction') && trackers.includes('onNewTracker?
 assert(trackers.includes('{trackers.length ? (') && trackers.includes('currentTrackers.length && summaryTiles.length'), 'Trackers filters and summary must reveal only when data exists');
 assert(reports.includes('emptyReportState') && reports.includes("reportEntryCount === 0 ? { display: 'none' } : null"), 'Reports must show one no-data state instead of rows of zeros');
 assert(reports.includes("reportEntryCount > 0 && setSheet('share')"), 'Report sharing must be disabled when the period has no data');
-console.log('MYFI UX LOGIC REFINEMENT V2 contract: PASSED');
+console.log('MaalFlow UX LOGIC REFINEMENT V2 contract: PASSED');

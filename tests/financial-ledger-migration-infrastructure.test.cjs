@@ -71,4 +71,4 @@ assert.equal(db.prepare("SELECT amount_minor FROM ledger_postings_v7 WHERE names
 assert.equal(db.prepare("SELECT date_iso FROM ledger_financial_transactions_v7 WHERE namespace='upgrade' AND id='tx'").get().date_iso, '2026-08-15');
 
 db.close();
-console.log('MYFI reusable schema migration infrastructure + idempotent V7 adoption passed.');
+console.log('MaalFlow reusable schema migration infrastructure + idempotent V7 adoption passed.');

@@ -41,7 +41,7 @@ three times.
 
 ### `App.js`
 - `trackers` (the primary, locked Follow-ups nav tab — `BASE_TABS`/`HUB_TABS`,
-  per `docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md` §1)
+  per `docs/design/06_MAALFLOW_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md` §1)
   now renders `FollowUpsHubScreen` instead of `TrackersLabScreen` directly —
   the exact same pattern `mymoney` already uses for `MyMoneyScreen`.
 - **Caught before it shipped:** the full/unfiltered `TrackersLabScreen`

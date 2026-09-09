@@ -67,4 +67,4 @@ assert.ok(archive.includes('replaceColdArchiveNamespaceFromStageInTransaction({'
   'the existing archive replacement API must delegate to the extracted primitive');
 console.log('[PASS] existing wrappers delegate to the same primitives; no parallel promotion SQL remains');
 
-console.log('MYFI P10-009 TRANSACTION-SCOPED PROMOTION PRIMITIVES CONTRACT: PASS');
+console.log('MaalFlow P10-009 TRANSACTION-SCOPED PROMOTION PRIMITIVES CONTRACT: PASS');

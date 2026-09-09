@@ -10,8 +10,8 @@ import { buildDecisionItems } from './decisionEngine';
 import { BRAND_GREEN } from './theme';
 import { filterByActiveScope, getModules, isExpenseFlow } from './modules';
 
-const CHANNEL_ID = 'myfi-reminders';
-const THROTTLE_KEY = 'MYFI_ALERT_THROTTLE_V1';
+const CHANNEL_ID = 'maalflow-reminders';
+const THROTTLE_KEY = 'MAALFLOW_ALERT_THROTTLE_V1';
 const isWeb = Platform.OS === 'web';
 const isExpoGo = !!Constants.expoGoConfig || Constants.appOwnership === 'expo';
 const isExpoGoAndroid = Platform.OS === 'android' && isExpoGo;
@@ -41,7 +41,7 @@ const loadNotifications = async () => {
         return notificationsApi;
       })
       .catch(error => {
-        console.warn('[MYFI] expo-notifications unavailable in this runtime:', error?.message || error);
+        console.warn('[MaalFlow] expo-notifications unavailable in this runtime:', error?.message || error);
         notificationsLoad = null;
         return null;
       });
@@ -56,12 +56,12 @@ const localText = (lang) => {
       ? 'الإشعارات لا تعمل على الويب. جرّبها من الهاتف أو من APK.'
       : 'Notifications are not supported on web. Test them on phone or APK.',
     expoGoUnsupported: ar
-      ? 'إشعارات MYFI الكاملة تحتاج Development Build على Android. Expo Go يبقى مناسباً لاختبار الواجهة فقط.'
-      : 'Full MYFI notifications require an Android development build. Expo Go remains suitable for UI testing.',
+      ? 'إشعارات MaalFlow الكاملة تحتاج Development Build على Android. Expo Go يبقى مناسباً لاختبار الواجهة فقط.'
+      : 'Full MaalFlow notifications require an Android development build. Expo Go remains suitable for UI testing.',
     denied: ar
       ? 'الإشعارات غير مفعلة من إعدادات النظام.'
       : 'Notifications are disabled in system settings.',
-    dailyTitle: ar ? 'MYFI' : 'MYFI',
+    dailyTitle: ar ? 'MaalFlow' : 'MaalFlow',
     dailyEmpty: ar ? 'لا تنس تسجيل مصاريف اليوم' : "Don't forget to log today's expenses",
     dailyAvg: ar ? 'معدل إنفاقك' : 'Daily average',
     logToday: ar ? 'سجل مصاريف اليوم' : "Log today's expenses",
@@ -74,7 +74,7 @@ const localText = (lang) => {
 const ensureAndroidChannel = async (Notifications) => {
   if (Platform.OS !== 'android' || !Notifications) return;
   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-    name: 'MYFI reminders',
+    name: 'MaalFlow reminders',
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: BRAND_GREEN,
@@ -166,7 +166,7 @@ export const sendTestNotification = async (lang = 'ar') => {
   const ar = lang === 'ar';
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: 'MYFI',
+      title: 'MaalFlow',
       body: ar ? 'الإشعارات تعمل بشكل صحيح' : 'Notifications are working',
       sound: 'default',
     },
@@ -199,8 +199,8 @@ export const checkDecisionAlerts = async ({
 
   let fired = 0;
   const privateBody = (cfg.lang || 'ar') === 'ar'
-    ? 'لديك تحديث مالي يحتاج مراجعتك داخل MYFI.'
-    : 'A financial update needs your review in MYFI.';
+    ? 'لديك تحديث مالي يحتاج مراجعتك داخل MaalFlow.'
+    : 'A financial update needs your review in MaalFlow.';
   for (const item of decisions) {
     const key = `decision-${item.fingerprint || item.id}`;
     if (!(await canFire(key, item.throttleHours || 12))) continue;
@@ -231,7 +231,7 @@ export const checkRecurringAlerts = async (lang = 'ar', trans = []) => {
   const first = due[0];
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: ar ? 'MYFI - تذكير تكرار شهري' : 'MYFI - recurring reminder',
+      title: ar ? 'MaalFlow - تذكير تكرار شهري' : 'MaalFlow - recurring reminder',
       body: due.length === 1
         ? (ar
           ? `${first.title} تنتظر قبولك أو تعديلك لهذا الشهر`
@@ -265,7 +265,7 @@ export const checkCommitmentAlerts = async (lang = 'ar', commitments = [], notif
     : '';
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: ar ? 'MYFI - تذكير التزام شهري' : 'MYFI - monthly commitment reminder',
+      title: ar ? 'MaalFlow - تذكير التزام شهري' : 'MaalFlow - monthly commitment reminder',
       body: due.length === 1
         ? (ar
           ? `${first.name} يحتاج تسجيل دفع أو مراجعة${deferredText}`

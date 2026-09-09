@@ -23,11 +23,11 @@ for (const rel of tests) {
     console.error(`RELEASE GATE MISSING: ${rel}`);
     process.exit(1);
   }
-  console.log(`\n[MYFI RELEASE GATE] ${rel}`);
+  console.log(`\n[MaalFlow RELEASE GATE] ${rel}`);
   const result = spawnSync(process.execPath, [file, root], { cwd: root, stdio: 'inherit' });
   if (result.error || result.status !== 0) {
-    console.error(`MYFI RELEASE GATE FAILED: ${rel}`);
+    console.error(`MaalFlow RELEASE GATE FAILED: ${rel}`);
     process.exit(result.status || 1);
   }
 }
-console.log('\nMYFI FINANCIAL CORE PHASE 2+3 RELEASE GATE: PASSED');
+console.log('\nMaalFlow FINANCIAL CORE PHASE 2+3 RELEASE GATE: PASSED');

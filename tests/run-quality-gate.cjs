@@ -128,7 +128,7 @@ const runtimeTests = [
   ['SQLITE_SCHEMA_RUNTIME', 'financial_ledger_v7_ddl_and_constraints', 'financial-ledger-v7-schema.test.cjs'],
   ['SCHEMA_MIGRATION_RUNTIME', 'financial_schema_migration_recovery', 'financial-ledger-migration-runtime.test.cjs'],
   ['UNIT_RUNTIME', 'forecasting', 'run-forecasting-fix.cjs'],
-  ['UNIT_RUNTIME', 'myfi_flow', 'run-myfi-flow.cjs'],
+  ['UNIT_RUNTIME', 'maalflow_flow', 'run-maalflow-flow.cjs'],
   ['UNIT_RUNTIME', 'tracker_builder_contract', 'run-tracker-builder.cjs'],
   ['UNIT_RUNTIME', 'tracker_builder_store', 'run-tracker-builder-store.cjs'],
   ['UNIT_RUNTIME', 'native_kv_queue', 'run-native-kv-queue.cjs'],

@@ -24,7 +24,7 @@ assert(settings.includes('بياناتك المالية ما زالت محفوظ
 assert(sync.includes('sameWorkspaceData(localOnly, restored)'), 'Local preservation must verify the copied workspace before cloud deletion.');
 assert(sync.includes('rollbackLocalWorkspaceAfterAccountDeletionFailure'), 'Failed cloud deletion must roll back the temporary guest copy.');
 
-assert(db.includes("LEDGER_DB_NAME = 'myfi-ledger-v2.db'"), 'Financial core must share the existing MYFI SQLite database file.');
+assert(db.includes("LEDGER_DB_NAME = 'maalflow-ledger-v2.db'"), 'Financial core must share the existing MaalFlow SQLite database file.');
 assert(db.includes('PRAGMA journal_mode = WAL'), 'Financial-core SQLite must use WAL.');
 assert(archive.includes('getLedgerDb'), 'Cold archive and financial core should use the shared SQLite connection.');
 assert(ledger.includes('CREATE TABLE IF NOT EXISTS ledger_transactions'), 'Active relational ledger table is missing.');
@@ -69,4 +69,4 @@ if (ts) {
   assert.equal(transfer.transferRate, 1310);
 }
 
-console.log('MYFI FINANCIAL CORE PHASE 1 SAFETY COMPATIBILITY: PASSED');
+console.log('MaalFlow FINANCIAL CORE PHASE 1 SAFETY COMPATIBILITY: PASSED');

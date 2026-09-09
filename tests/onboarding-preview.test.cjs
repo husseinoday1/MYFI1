@@ -32,4 +32,4 @@ assert.equal(mixed.balance, 'إجمالي الرصيد');
 assert.equal(mixed.rows[1].label, 'المشروع');
 assert.equal(mixed.rows[1].value, '550 €');
 
-console.log('MYFI onboarding preview reacts to currency and usage profile.');
+console.log('MaalFlow onboarding preview reacts to currency and usage profile.');

@@ -1,4 +1,4 @@
-// MYFI_ACTIVE_SQLITE_LEDGER_V6
+// MAALFLOW_ACTIVE_SQLITE_LEDGER_V6
 // SQLite is the durable local transaction engine. Zustand remains a UI/cache
 // compatibility layer while screens migrate to SQL queries.
 import { Platform } from 'react-native';
@@ -1209,7 +1209,7 @@ const diffTransactionArraysFast = (before = [], after = []) => {
   const right = Array.isArray(after) ? after : [];
   if (left === right) return { changed: [], removed: [] };
 
-  // Most MYFI mutations preserve row order and object identity for untouched rows.
+  // Most MaalFlow mutations preserve row order and object identity for untouched rows.
   // Detect those paths without building maps/fingerprints for thousands of records.
   if (left.length === right.length) {
     let sameOrder = true;

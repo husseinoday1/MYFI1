@@ -191,7 +191,7 @@ const { readCanonicalBackupSource, CANONICAL_BACKUP_SOURCE_VERSION } = compiled.
   }
   console.log('[PASS] no writing repository function is reachable from the read model');
 
-  console.log('MYFI P10-001 CANONICAL BACKUP SOURCE CONTRACT: PASS');
+  console.log('MaalFlow P10-001 CANONICAL BACKUP SOURCE CONTRACT: PASS');
 })().catch(error => {
   console.error(error);
   process.exit(1);

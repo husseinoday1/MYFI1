@@ -164,5 +164,5 @@ const intentOf = db => JSON.parse(db.native.prepare('SELECT value FROM ledger_v7
   assert.equal(pending(busy.db).length, 4, 'a running restore must leave the outbox untouched');
   busy.db.native.close();
 
-  console.log('MYFI P20 V2 LEGACY OUTBOX DISCARD RUNTIME: PASSED');
+  console.log('MaalFlow P20 V2 LEGACY OUTBOX DISCARD RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

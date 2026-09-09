@@ -54,7 +54,7 @@ assert.ok(fs.existsSync(script), 'the shared scope script must exist');
 // explicitly rather than reporting a misleading scope-gate assertion failure.
 const bashExecutable = process.platform === 'win32'
   ? [
-    process.env.MYFI_BASH_PATH,
+    process.env.MAALFLOW_BASH_PATH,
     'C:\\Program Files\\Git\\bin\\bash.exe',
     'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
     'bash',
@@ -68,7 +68,7 @@ const bash = (cwd, args) => spawnSync(bashExecutable, [script, ...args], {
 });
 
 const makeRepo = (files) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'myfi-scope-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maalflow-scope-'));
   const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
   git('init', '-q');
   git('config', 'user.email', 'test@example.com');
@@ -184,4 +184,4 @@ const writeAllowlist = (dir, entries) => {
   console.log('[PASS] a missing, empty, or unreachable baseline fails closed');
 }
 
-console.log('MYFI CI SOURCE SCOPE GUARD CONTRACT: PASS');
+console.log('MaalFlow CI SOURCE SCOPE GUARD CONTRACT: PASS');

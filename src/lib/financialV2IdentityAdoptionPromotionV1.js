@@ -1,4 +1,4 @@
-// MYFI — the promotion for adopting a DIFFERENT cloud ledger identity.
+// MaalFlow — the promotion for adopting a DIFFERENT cloud ledger identity.
 //
 // Sibling of promotePreparedCloudConflictRecoveryV1, deliberately not a
 // parameter on it. That one requires the local ledger identity to EQUAL the

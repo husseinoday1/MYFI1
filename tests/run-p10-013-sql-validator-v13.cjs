@@ -69,5 +69,5 @@ const codes=result=>new Set(result.issues.map(x=>x.code));
 
   await assert.rejects(()=>validator.proveRestoreNamespaceSqlV13({database:db,namespace:'user:live'}),/restore_sql_validator_input_invalid/);
   console.log('[PASS] validator refuses active namespaces');
-  console.log('MYFI P10-013 SQL VALIDATOR V13: PASS');
+  console.log('MaalFlow P10-013 SQL VALIDATOR V13: PASS');
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>db.close());

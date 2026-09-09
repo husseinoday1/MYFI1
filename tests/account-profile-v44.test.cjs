@@ -28,6 +28,6 @@ assert(
 assert(sync.includes('workspaceNamespaceForSession'), 'User/workspace boundary is not wired');
 assert(boundary.includes('workspace:${id}'), 'Future workspace namespace boundary missing');
 assert(migration.includes('public.profiles'), 'profiles migration missing');
-assert(migration.includes('myfi-avatars'), 'avatar bucket migration missing');
+assert(migration.includes('maalflow-avatars'), 'avatar bucket migration missing');
 assert(migration.includes('workspace_id / workspace_members'), 'future room boundary note missing');
-console.log('MYFI ACCOUNT PROFILE ARCHITECTURE V4.4: PASSED');
+console.log('MaalFlow ACCOUNT PROFILE ARCHITECTURE V4.4: PASSED');

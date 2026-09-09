@@ -77,7 +77,7 @@ const copy = (lang) => {
     net: ar ? 'صافي الدخل' : 'Net income',
     reportsTitle: ar ? 'التقارير والتحليلات' : 'Reports & Analytics',
     reportsSubtitle: ar ? 'اقرأ وضعك المالي بوضوح' : 'Understand your financial picture clearly',
-    openBasira: ar ? 'افتح بصيرة MYFI' : 'Open MYFI Insight',
+    openBasira: ar ? 'افتح بصيرة MaalFlow' : 'Open MaalFlow Insight',
     openBasiraHint: ar ? 'قارن أي فترات وافهم الاتجاهات والأسباب بعمق.' : 'Compare any periods and explore trends and reasons in depth.',
     overview: ar ? 'نظرة عامة' : 'Overview',
     moreDetails: ar ? 'تفاصيل إضافية' : 'More details',
@@ -642,7 +642,7 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
         Alert.alert('', C.exportFailed);
       }
     };
-    Alert.alert(ar ? 'تصدير تقرير MYFI' : 'Export MYFI report', ar ? 'اختر مكان حفظ التقرير.' : 'Choose where to save the report.', [
+    Alert.alert(ar ? 'تصدير تقرير MaalFlow' : 'Export MaalFlow report', ar ? 'اختر مكان حفظ التقرير.' : 'Choose where to save the report.', [
       { text: ar ? 'إلغاء' : 'Cancel', style: 'cancel' },
       { text: ar ? 'حفظ في الهاتف' : 'Save to phone', onPress: () => createReport('save') },
       { text: ar ? 'مشاركة' : 'Share', onPress: () => createReport('share') },
@@ -817,7 +817,7 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
               <Ionicons name="bar-chart-outline" size={25} color={th.primary} />
             </View>
             <Text style={[s.emptyReportTitle, { color: th.text }]}>{ar ? 'لا توجد بيانات لهذه الفترة' : 'No data for this period'}</Text>
-            <Text style={[s.emptyReportBody, { color: th.sub }]}>{ar ? 'هذه الفترة فارغة. أضف حركة واحدة، وسيبني MYFI التقرير والتفاصيل تلقائياً.' : 'This period is empty. Add one entry and MYFI will build the report and details automatically.'}</Text>
+            <Text style={[s.emptyReportBody, { color: th.sub }]}>{ar ? 'هذه الفترة فارغة. أضف حركة واحدة، وسيبني MaalFlow التقرير والتفاصيل تلقائياً.' : 'This period is empty. Add one entry and MaalFlow will build the report and details automatically.'}</Text>
             <View style={[s.emptyReportActions, { flexDirection: rowDir }]}>
               <TouchableOpacity onPress={onAddIncome} style={[s.emptyReportAction, { backgroundColor: th.incBg, borderColor: `${th.inc}44` }]}>
                 <FinancialDirectionMark kind="income" color={th.inc} size={17} lang={cfg.lang} />
@@ -865,7 +865,7 @@ export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = (
               <SummaryMetric label={C.net} value={stats.bal} color={stats.bal >= 0 ? th.inc : th.exp} th={th} lang={cfg.lang} currency={cfg.currency} sym={sym} />
             </View>
             {modules.wallets ? (
-              /* MYFI_REPORT_WALLET_INLINE */
+              /* MAALFLOW_REPORT_WALLET_INLINE */
               <WalletBalanceCard
                 cfg={cfg}
                 compact
@@ -1997,7 +1997,7 @@ const s = StyleSheet.create({
   compareDone: { minHeight: 48, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, marginTop: 4 },
   compareDoneText: { fontSize: 13, ...weight('900') },
 
-  /* MYFI_COMPARE_PRO_STYLES_V3_START */
+  /* MAALFLOW_COMPARE_PRO_STYLES_V3_START */
   proCompareModeBar: { minHeight: 46, borderRadius: RADIUS.md, padding: 4, gap: 4, marginBottom: 12 },
   proCompareModeBtn: { flex: 1, minWidth: 0, minHeight: 38, borderRadius: RADIUS.sm, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 8 },
   proCompareModeText: { fontSize: 12, lineHeight: 17, ...weight('900') },
@@ -2073,6 +2073,6 @@ const s = StyleSheet.create({
   expandedChartIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   expandedChartTitle: { flex: 1, fontSize: 16, lineHeight: 22, ...weight('900') },
   expandedChartClose: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  /* MYFI_COMPARE_PRO_STYLES_V3_END */
+  /* MAALFLOW_COMPARE_PRO_STYLES_V3_END */
 
 });

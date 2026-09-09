@@ -77,4 +77,4 @@ const previewCallers = sourceFiles.filter(rel => read(rel).includes('previewNorm
 assert.deepEqual(previewCallers, ['src/store/slices/useSyncSlice.js'],
   'previewNormalizedCloud must remain uncalled — reviving it would revive the dead V6 tables');
 
-console.log('MYFI P13 LEGACY MIRROR RETIREMENT: PASSED');
+console.log('MaalFlow P13 LEGACY MIRROR RETIREMENT: PASSED');

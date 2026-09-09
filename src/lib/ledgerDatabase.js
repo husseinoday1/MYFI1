@@ -1,10 +1,10 @@
-// MYFI_FINANCIAL_CORE_PHASE1
-// Shared native SQLite connection for MYFI financial-core repositories.
+// MAALFLOW_FINANCIAL_CORE_PHASE1
+// Shared native SQLite connection for MaalFlow financial-core repositories.
 // Web keeps the existing local-vault path until SQLite web support is intentionally enabled.
 import { Platform } from 'react-native';
 import * as SQLite from 'expo-sqlite';
 
-export const LEDGER_DB_NAME = 'myfi-ledger-v2.db';
+export const LEDGER_DB_NAME = 'maalflow-ledger-v2.db';
 let dbPromise = null;
 let ledgerWriteQueue = Promise.resolve();
 // Raised only while a runLedgerReadTransaction task is executing. See enqueueLedgerWrite.
@@ -38,7 +38,7 @@ export const clearP10CloneLedgerDbOverride = database => {
   return true;
 };
 
-// expo-sqlite exposes one native connection to all MYFI repositories. Every
+// expo-sqlite exposes one native connection to all MaalFlow repositories. Every
 // schema mutation and write transaction must share this queue; repository-local
 // queues can overlap and cause nested BEGIN/ROLLBACK failures.
 export const enqueueLedgerWrite = task => {
@@ -59,7 +59,7 @@ export const flushLedgerWrites = () => ledgerWriteQueue.catch(() => undefined);
 
 // P19-015A1: transaction scope only. Callers must already own the shared write queue.
 // The callback result is captured explicitly because expo-sqlite's exclusive API
-// resolves after commit and does not serve as MYFI's domain return-value channel.
+// resolves after commit and does not serve as MaalFlow's domain return-value channel.
 export async function runLedgerExclusiveTransaction(database, task) {
   if (!database || typeof database.withExclusiveTransactionAsync !== 'function') {
     throw new Error('ledger_exclusive_transaction_unavailable');
@@ -80,7 +80,7 @@ export async function runLedgerExclusiveTransaction(database, task) {
 // checksum at all. Financial truth has to be read at a single instant.
 //
 // This shares the write queue instead of running alongside writes. WAL gives a reader
-// a stable snapshot only on its own connection, and MYFI deliberately has exactly one
+// a stable snapshot only on its own connection, and MaalFlow deliberately has exactly one
 // (see getLedgerDb) — opening a second BEGIN on it while a write transaction is live
 // is the nested-transaction failure enqueueLedgerWrite exists to prevent. The cost is
 // an export that waits its turn; the alternative is a backup that is quietly wrong.
@@ -134,7 +134,7 @@ export async function getLedgerDb() {
       // the SQLite default FULL depending on whether that bootstrap had run yet
       // in this process — a durability guarantee that varied by call order. It
       // is pinned here instead. Reason + benchmark + crash-safety evidence:
-      // docs/04_CURRENT_EVIDENCE/MYFI_PHASE15_SQLITE_CONFIG_AUDIT_2026-09-04.md.
+      // docs/04_CURRENT_EVIDENCE/MAALFLOW_PHASE15_SQLITE_CONFIG_AUDIT_2026-09-04.md.
       // Short version: with WAL, NORMAL still survives an app/process crash; it
       // trades only the last commits against an OS crash or power loss, and
       // measured 41x faster than FULL on the per-command commit path that every

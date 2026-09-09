@@ -5,7 +5,7 @@
 // run 3c): after an epoch advance the identity reported restoreEpoch=2 /
 // protocolVersion=2 while readFinancialSyncProtocolV8 reported
 // activeProtocolVersion=1 with stale activation evidence still naming epoch 1,
-// and nothing flagged it as a recovery event. MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM
+// and nothing flagged it as a recovery event. MAALFLOW_P19_SYNC_V2_ACTIVATION_ADDENDUM
 // forbids automatic fallback to V1 after durable activated_at.
 
 const assert = require('node:assert/strict');
@@ -314,7 +314,7 @@ const {
   assert.equal(never.activationState, 'NOT_YET_ACTIVATED');
   console.log('[PASS] never-activated ledger is NOT_YET_ACTIVATED, not a recovery event');
 
-  console.log('MYFI P20-G01-D2 RESTORE-EPOCH ACTIVATION REGRESSION: PASS');
+  console.log('MaalFlow P20-G01-D2 RESTORE-EPOCH ACTIVATION REGRESSION: PASS');
 })().catch(error => {
   console.error(error);
   process.exit(1);

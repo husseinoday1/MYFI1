@@ -103,5 +103,5 @@ Module._load = originalLoad;
   assert.equal(changed.ok, false);
   assert.equal(changed.reason, 'financial_v2_conflict_recovery_cloud_changed');
   assert.equal(promotionCalls, 0, 'a changed cloud source may never be promoted from an old intent');
-  console.log('MYFI P20 V2 CONFLICT RECOVERY PREPARATION: PASSED');
+  console.log('MaalFlow P20 V2 CONFLICT RECOVERY PREPARATION: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

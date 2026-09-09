@@ -243,7 +243,7 @@ const analysisText = (analysis: ReturnType<typeof normalizeAnalysis>) => [
 
 
 const VOICE_PROMPT = (today: string, currency: string, lang: string, transcriptHint = "") => `
-You are MYFI's financial-voice understanding engine.
+You are MaalFlow's financial-voice understanding engine.
 Today on the user's phone is ${today || "unknown"}. App currency is ${currency || "unknown"}. UI language is ${lang || "unknown"}.
 ${transcriptHint ? `A speech-to-text transcript is provided below. Analyze it semantically and correct number-word interpretation when needed:\n${transcriptHint}` : ""}
 
@@ -358,7 +358,7 @@ const analyzeOpenAiTranscript = async ({
     text: {
       format: {
         type: "json_schema",
-        name: "myfi_financial_voice",
+        name: "maalflow_financial_voice",
         strict: true,
         schema: ANALYSIS_SCHEMA,
       },

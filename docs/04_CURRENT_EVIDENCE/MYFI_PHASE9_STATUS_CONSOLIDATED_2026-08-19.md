@@ -65,7 +65,7 @@ Pushed: 2026-08-19 10:41 +0300
 Verified via: git fetch --all && git branch -r --sort=-committerdate
 ```
 
-Per the Evidence Freshness Rule (`docs/00_MYFI_CANONICAL_AUTHORITY.md`),
+Per the Evidence Freshness Rule (`docs/00_MAALFLOW_CANONICAL_AUTHORITY.md`),
 re-run that verification before trusting this file — a newer branch may
 already exist.
 
@@ -113,7 +113,7 @@ already built and signed the acceptance APK hours earlier, and the MYFI
 Implementation session independently verified it (SHA-256 match, valid v2
 signature matching the installed app, gate strings present in the bundle).
 **This is exactly the kind of staleness the Evidence Freshness Rule in
-`00_MYFI_CANONICAL_AUTHORITY.md` exists to catch** — this doc is proof the
+`00_MAALFLOW_CANONICAL_AUTHORITY.md` exists to catch** — this doc is proof the
 rule is needed, and also proof it works once someone re-verifies.
 
 1. ✅ **DONE** — Build the signed P20-G01 acceptance APK. Verified: SHA-256

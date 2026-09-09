@@ -1,6 +1,6 @@
-// MYFI P10-014A-001-R2 — diagnostic-only entrypoint.
+// MaalFlow P10-014A-001-R2 — diagnostic-only entrypoint.
 // This file is selected only by the P10-014A CI workflow.
-// It registers the normal MYFI app through the ordinary root entry and starts the
+// It registers the normal MaalFlow app through the ordinary root entry and starts the
 // Strategy B device harness once the isolated fresh-test workspace is ready.
 
 import '../../index';

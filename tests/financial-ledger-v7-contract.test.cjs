@@ -31,4 +31,4 @@ assert(migration.includes('coldArchives') && migration.includes('syntheticMigrat
 assert(mutationSync.includes('sync_financial_mutations_v1') && mutationSync.includes('applyRemoteLedgerMutationsV7'), 'V7 mutation sync client missing');
 assert(cloudMutationMigration.includes('financial_mutations_v1') && cloudMutationMigration.includes('auth.uid()'), 'Authenticated mutation sync schema/RPC missing');
 
-console.log('MYFI Financial Ledger V7 static contract passed.');
+console.log('MaalFlow Financial Ledger V7 static contract passed.');

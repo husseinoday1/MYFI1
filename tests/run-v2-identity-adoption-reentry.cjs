@@ -1,4 +1,4 @@
-// MYFI — draining the re-entry queue after a cloud identity is adopted.
+// MaalFlow — draining the re-entry queue after a cloud identity is adopted.
 //
 // This is where the mutations the owner chose to KEEP actually come back. If
 // this loses one, the adoption has quietly destroyed a real financial entry --
@@ -186,5 +186,5 @@ const queueOf = db => {
     assert.equal(result.empty, true);
   }
 
-  console.log('MYFI V2 IDENTITY ADOPTION REENTRY SQLITE RUNTIME: PASSED');
+  console.log('MaalFlow V2 IDENTITY ADOPTION REENTRY SQLITE RUNTIME: PASSED');
 })();

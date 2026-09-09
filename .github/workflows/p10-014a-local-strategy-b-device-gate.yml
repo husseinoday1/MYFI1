@@ -91,10 +91,10 @@ jobs:
           fs.writeFileSync(pkgPath,JSON.stringify(pkg,null,2)+'\n');
 
           const gradle=fs.readFileSync('android/app/build.gradle','utf8');
-          if((gradle.split("applicationId 'com.myfi.app'").length-1)!==1) {
+          if((gradle.split("applicationId 'com.maalflow.app'").length-1)!==1) {
             throw new Error('[FAIL] original applicationId contract missing');
           }
-          if(gradle.includes("applicationId 'com.myfi.app.p10a'")) {
+          if(gradle.includes("applicationId 'com.maalflow.app.p10a'")) {
             throw new Error('[FAIL] isolated diagnostic applicationId is forbidden in R5');
           }
 
@@ -102,12 +102,12 @@ jobs:
           let strings=fs.readFileSync(stringsPath,'utf8');
           const re=/<string name="app_name">[^<]*<\/string>/;
           if(!re.test(strings)) throw new Error('[FAIL] app_name missing');
-          strings=strings.replace(re,'<string name="app_name">MYFI P10 Clone Probe</string>');
+          strings=strings.replace(re,'<string name="app_name">MaalFlow P10 Clone Probe</string>');
           fs.writeFileSync(stringsPath,strings);
           NODE
           test "$(node -p "require('./package.json').main")" = "src/dev/p10_014aCloneProbeEntry.js"
-          grep -Fq "applicationId 'com.myfi.app'" android/app/build.gradle
-          ! grep -Fq "applicationId 'com.myfi.app.p10a'" android/app/build.gradle
+          grep -Fq "applicationId 'com.maalflow.app'" android/app/build.gradle
+          ! grep -Fq "applicationId 'com.maalflow.app.p10a'" android/app/build.gradle
           echo "[PASS] same-package clone probe selected without applicationId change"
 
       - name: Verify Android diagnostic bundle
@@ -160,7 +160,7 @@ jobs:
           test -x "$AAPT"
           BADGING="$("$AAPT" dump badging "$APK" | head -1)"
           echo "$BADGING"
-          echo "$BADGING" | grep -Fq "package: name='com.myfi.app'"
+          echo "$BADGING" | grep -Fq "package: name='com.maalflow.app'"
           VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
           VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
           test -n "$VERSION_CODE"
@@ -181,7 +181,7 @@ jobs:
             echo "BuildCommit=$(git rev-parse HEAD)"
             echo "Branch=$(git branch --show-current)"
             echo "DiagnosticEntry=src/dev/p10_014aCloneProbeEntry.js"
-            echo "ApplicationId=com.myfi.app"
+            echo "ApplicationId=com.maalflow.app"
             echo "VersionCode=$VERSION_CODE"
             echo "VersionName=$VERSION_NAME"
             echo "OriginalDatabaseMode=PREVERIFIED_FILE_URI_THEN_QUERY_ONLY_LOGICAL_IMMUTABILITY_SOURCE"

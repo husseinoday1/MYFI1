@@ -155,9 +155,9 @@ const more = fs.readFileSync(path.join(srcRoot, 'screens', 'MoreScreen.js'), 'ut
 const followUpsHub = fs.readFileSync(path.join(srcRoot, 'screens', 'FollowUpsHubScreen.js'), 'utf8');
 const paymentHistory = fs.readFileSync(path.join(srcRoot, 'screens', 'PaymentHistoryScreen.js'), 'utf8');
 const onboarding = fs.readFileSync(path.join(srcRoot, 'screens', 'OnboardingScreen.js'), 'utf8');
-const customizeMyfi = fs.readFileSync(path.join(srcRoot, 'screens', 'CustomizeMyfiScreen.js'), 'utf8');
+const customizeMaalFlow = fs.readFileSync(path.join(srcRoot, 'screens', 'CustomizeMaalFlowScreen.js'), 'utf8');
 
-/* MYFI_ONBOARDING_DELEGATED_CURRENT_CONTRACT */
+/* MAALFLOW_ONBOARDING_DELEGATED_CURRENT_CONTRACT */
 assert(
   onboarding.includes('LanguagePicker')
     && onboarding.includes('WelcomeSlide')
@@ -191,7 +191,7 @@ assert(reports.includes('STAGE4A_EXECUTIVE_SUMMARY'), 'Reports must show a visib
 assert(reports.includes('netSummaryCard') && reports.includes('stats.bal'), 'Reports top summary must focus on real report-model net income');
 assert.equal(reports.includes('executiveMetrics'), false, 'Reports top summary must not repeat income and expense mini-cards');
 assert(reports.includes('defaultExpanded = true'), 'Report sections must show their results immediately while remaining collapsible');
-assert.equal((reports.match(/MYFI_REPORT_WALLET_INLINE/g) || []).length, 1, 'Reports must render the wallet summary once');
+assert.equal((reports.match(/MAALFLOW_REPORT_WALLET_INLINE/g) || []).length, 1, 'Reports must render the wallet summary once');
 assert(walletBalanceCard.includes("{ar ? 'المحجوز' : 'Reserved'}"), 'Wallet summaries must expose reserved savings as a first-class metric');
 assert(walletBalanceCard.includes('defaultPill'), 'Wallet list must identify the default wallet without overloading the wallet icon');
 assert(notificationCenter.includes('selectionBar') && notificationCenter.includes('deleteSelectedButton'), 'Notifications must expose a clear select/delete-selected workflow');
@@ -212,8 +212,8 @@ assert.equal(myMoney.includes('onOpenWallets'), false, 'Wallet management must n
 assert.equal(myMoney.includes('QuickShortcut'), false, 'My Money must not repeat its gateways in a separate shortcut strip');
 assert(myMoney.includes('خطة توزيع الدخل') && myMoney.includes('onOpenIncomeAllocation'), 'Income allocation must remain a real My Money destination');
 ['onOpenWallets', 'onOpenCategories', 'onOpenBenefits'].forEach(callback => assert(more.includes(callback), `More must preserve ${callback} discoverability`));
-assert(more.includes('onOpenCustomize') && appRoot.includes("customize: <CustomizeMyfiScreen />"), 'More must route to the dedicated MYFI personalization screen');
-assert(customizeMyfi.includes('enabledModules') && customizeMyfi.includes('homeSections') && customizeMyfi.includes('Hiding never deletes your data'), 'MYFI customization must control real modules and Home visibility without deleting records');
+assert(more.includes('onOpenCustomize') && appRoot.includes("customize: <CustomizeMaalFlowScreen />"), 'More must route to the dedicated MaalFlow personalization screen');
+assert(customizeMaalFlow.includes('enabledModules') && customizeMaalFlow.includes('homeSections') && customizeMaalFlow.includes('Hiding never deletes your data'), 'MaalFlow customization must control real modules and Home visibility without deleting records');
 assert(myMoney.includes("item.key !== 'budget' || modules.budgets"), 'Hiding the budget module must actually remove its My Money gateway');
 assert.equal(more.includes('onOpenSubscriptions'), false, 'Subscriptions must not be duplicated in More');
 assert.equal(more.includes('onOpenBasira'), false, 'Basira belongs to My Money and must not be duplicated in More');
@@ -313,7 +313,7 @@ assert(
   'Important states must remain visible for due items or financial-health warnings',
 );
 
-/* MYFI_STAGE3_FINAL_VISUAL_CONTRACT */
+/* MAALFLOW_STAGE3_FINAL_VISUAL_CONTRACT */
 assert(
   /selectFieldBlock\s*:\s*\{\s*flex:\s*1,\s*flexBasis:\s*0,\s*minWidth:\s*0,\s*height:\s*64/.test(newItemModal)
     && /selectField\s*:\s*\{\s*minHeight:\s*64,\s*height:\s*64/.test(newItemModal)
@@ -339,7 +339,7 @@ assert.equal(home.includes('importantS.factCard'), false, 'Home commitment cards
 assert.equal(home.includes('renderCommitmentRow'), false, 'Home must not keep the obsolete Pay-only commitment row renderer');
 
 
-/* MYFI_STAGE4_AB_COMPACT_REFINEMENT */
+/* MAALFLOW_STAGE4_AB_COMPACT_REFINEMENT */
 assert(
   /action:\s*\{[^}]*height:\s*34/.test(home)
     && /card:\s*\{[^}]*paddingHorizontal:\s*8,\s*paddingVertical:\s*7/.test(home),
@@ -358,7 +358,7 @@ assert(demoData.includes('demo_linked_goal') && demoData.includes('savings: []')
 assert(demoData.includes('demo_recurring_streaming_prev') && demoData.includes('demo_recurring_side_income_prev'), 'Demo workspace must include due recurring expense and income examples');
 
 
-/* MYFI_STAGE4_SETTINGS_DATE_WALLET_REFINEMENT */
+/* MAALFLOW_STAGE4_SETTINGS_DATE_WALLET_REFINEMENT */
 assert(settings.includes("label: T.useDeviceSetting") && settings.includes('subtitle={languageNote}') && settings.includes('subtitle={themeNote}'), 'Language/appearance must show the resolved value and keep device-following as a note/action');
 assert(newItemModal.includes("planDate: ar ? 'تاريخ الدفع' : 'Payment date'"), 'Commitments must label their selected day as Payment date');
 assert.equal(newItemModal.includes('monthOnly'), false, 'Commitment creation and linked commitments must use a normal day-level date picker');
@@ -373,7 +373,7 @@ assert(home.includes("'الرصيد المتاح' : 'Available balance'"), 'Home
 assert(walletBalanceCard.includes("'الكلي' : 'Total'") && walletBalanceCard.includes("محجوز للتوفير") && walletBalanceCard.includes("'المتاح' : 'Available'"), 'Detailed wallet balance breakdown must remain available inside the wallet list');
 
 
-/* MYFI_STAGE4_MASTER_REFINEMENT */
+/* MAALFLOW_STAGE4_MASTER_REFINEMENT */
 assert(constants.includes("{ key: 'saving', visible: true }") && constants.includes("{ key: 'net', visible: true }"), 'Home month summary must include Savings and Net by default');
 assert(constants.includes('HOME_LAYOUT_VERSION = 3'), 'Home layout must migrate existing profiles to the restored four-card summary');
 assert(home.includes("item.key === 'saving'") && home.includes('monthSavingTotal'), 'Home must calculate and render actual current-month goal savings');
@@ -396,7 +396,7 @@ assert(home.includes('stopRecurringFromHome'), 'Important recurring entries must
 assert(home.includes("isAr ? 'تسجيل الآن' : 'Record now'"), 'Important recurring entries must expose a direct Record now action');
 assert(home.includes("isAr ? 'إيقاف التكرار' : 'Stop recurring'"), 'Important recurring entries must expose Stop recurring without deleting history');
 
-/* MYFI_IDENTITY_REFRESH_V4 */
+/* MAALFLOW_IDENTITY_REFRESH_V4 */
 assert(home.includes('const recentLimit = 3;'), 'Home recent activity must show exactly three transactions');
 assert(home.includes('savingPanel') && home.includes('savingSummary') && home.includes('savingGoalRow'), 'Home savings must use the same compact panel hierarchy as other Home sections');
 assert(history.includes('typeRail') && history.includes('typeChip') && history.includes('historyHead'), 'History must use the refreshed direct-filter visual hierarchy');
@@ -408,11 +408,11 @@ assert.equal(reports.includes('<View style={[s.reportInsightList'), false, 'Repo
 assert(settings.includes('profileHero') && settings.includes('AccountPage') && settings.includes('AuthModal'), 'Account must use a dedicated professional profile screen with optional cloud connection');
 
 
-/* MYFI_STAGE5_FOUNDATION */
+/* MAALFLOW_STAGE5_FOUNDATION */
 assert(settings.includes('MenuGroup') && settings.includes('SectionLabel') && !settings.includes('accessibilityState={{ expanded }}'), 'Settings must use flat grouped navigation instead of nested collapsible cards');
 assert(settings.indexOf('accountCard') < settings.indexOf('T.general'), 'Account identity card must be first on the Settings index');
 assert(settings.includes('profileAvatarWrap') && settings.includes('cameraButton') && settings.includes('editPill'), 'Account must use an avatar-first profile surface with direct edit affordance');
-assert(settings.includes('Connect MYFI account') && settings.includes("account: ar ? 'الحساب' : 'Account'") && !settings.includes('Local profile'), 'Account UX must keep one identity and expose MYFI connection only as an optional capability');
+assert(settings.includes('Connect MaalFlow account') && settings.includes("account: ar ? 'الحساب' : 'Account'") && !settings.includes('Local profile'), 'Account UX must keep one identity and expose MaalFlow connection only as an optional capability');
 assert(history.includes('historyFilterAction') && history.includes('filterCountBadge'), 'History advanced filters must be reachable from the compact header action');
 assert(history.includes('dayHeader') && history.includes('rowFirst') && history.includes('rowLast'), 'History transactions must read as grouped ledger rows rather than isolated floating cards');
 assert(history.includes("diff === 0") && history.includes("diff === 1"), 'History day labels must use Today/Yesterday semantics when applicable');
@@ -431,7 +431,7 @@ assert(/إزالة|Remove/.test(settings), 'Account must expose an explicit Remo
 assert(!/الحساب، التفضيلات، الأمان والبيانات في مكان واحد/.test(settings), 'Settings must not use the old explanatory marketing subtitle');
 
 
-/* MYFI_STAGE5B_HISTORY_LEDGER_V2 */
+/* MAALFLOW_STAGE5B_HISTORY_LEDGER_V2 */
 const transactionDetails = fs.readFileSync(path.join(srcRoot, 'components', 'TransactionDetailsModal.js'), 'utf8');
 assert(history.includes('historyToolbar') && history.includes('searchBox') && history.includes('historyFilterAction'), 'History search and advanced filters must share one compact toolbar');
 assert(history.includes('dayCountBadge') && history.includes('rowSignals'), 'History must use compact day-group and transaction-signal hierarchy');
@@ -443,7 +443,7 @@ assert(transactionDetails.includes('actionRow') && transactionDetails.includes('
 assert(transactionDetails.includes('C.delete') && transactionDetails.includes('trash-outline'), 'Transaction details must expose a clear destructive delete action');
 
 
-/* MYFI_STAGE6_CONSOLIDATED_UX */
+/* MAALFLOW_STAGE6_CONSOLIDATED_UX */
 assert(appRoot.includes("const INTERNAL_DEMO_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_INTERNAL_DEMO === '1';"), 'Demo tools must be gated behind an explicit internal development flag');
 // CHANGED 2026-09-06. The literal condition this pinned
 // (INTERNAL_DEMO_ENABLED && cfg.demoMode) is gone, but what it protected --
@@ -489,7 +489,7 @@ assert.equal(reports.includes('visibleReportRows.map((item, index) =>'), false, 
 assert.equal(reports.includes('s.reportCompareRow'), false, 'Comparison must not use a visually different top-level row');
 assert.equal(reports.includes('reportCompareText'), false, 'Legacy comparison-row styling must be removed');
 
-/* MYFI_UX_POLISH_INCOME_EXPENSE_AND_PASSWORDS */
+/* MAALFLOW_UX_POLISH_INCOME_EXPENSE_AND_PASSWORDS */
 assert(appPrimitives.includes("{income ? '+' : '-'}"), 'Income and expense direction must render as explicit plus/minus marks');
 assert(home.includes("backgroundColor: th.incBg") && home.includes("backgroundColor: th.expBg"), 'Home income and expense actions must use semantic green/red surfaces');
 assert(history.includes("direction: 'income', color: th.inc") && history.includes("direction: 'expense', color: th.exp"), 'History income and expense choices must use green plus/red minus semantics');
@@ -509,7 +509,7 @@ assert(archive.includes('secureTextEntry={!archivePasswordVisible}') && archive.
 assert(legacySettings.includes('secureTextEntry={!backupPasswordVisible}') && legacySettings.includes("backupPasswordVisible ? 'eye-off-outline' : 'eye-outline'"), 'Legacy backup password must have a show/hide control');
 assert(auth.includes('secureTextEntry={!passwordVisible}') && passwordRecovery.includes('secureTextEntry={!passwordVisible}') && passwordRecovery.includes('secureTextEntry={!confirmationVisible}'), 'Authentication and recovery password fields must retain show/hide controls');
 
-/* MYFI_STARTUP_TIMING_DEVICE_EVIDENCE */
+/* MAALFLOW_STARTUP_TIMING_DEVICE_EVIDENCE */
 assert(appRoot.includes("from './src/lib/startupTiming';") && appRoot.includes('recordStartupTiming'), 'App startup must retain the timing recorder');
 assert(appRoot.includes("recordStartupTiming(startupMarks, 'completed');") && appRoot.includes("recordStartupTiming(startupMarks, 'failed');"), 'Completed and failed launches must both preserve timing evidence');
 assert(settings.includes("import { readStartupTiming } from '../lib/startupTiming';"), 'Settings must read the in-memory startup timing evidence');
@@ -519,7 +519,7 @@ assert(startupTiming.includes('stepMs: durations') && startupTiming.includes('re
 assert.equal(startupTiming.includes('AsyncStorage'), false, 'Startup timing must stay in-memory and never persist stale diagnostic evidence');
 assert.equal(startupTiming.includes('amount'), false, 'Startup timing diagnostic must not include financial values');
 
-/* MYFI_GLOBAL_MAINTENANCE_VISIBILITY_AND_STARTUP */
+/* MAALFLOW_GLOBAL_MAINTENANCE_VISIBILITY_AND_STARTUP */
 const syncSlice = fs.readFileSync(path.join(srcRoot, 'store', 'slices', 'useSyncSlice.js'), 'utf8');
 const maintenanceBarrier = fs.readFileSync(path.join(srcRoot, 'lib', 'financialMaintenanceBarrier.js'), 'utf8');
 assert(maintenanceBarrier.includes("presentation = 'blocking'") && maintenanceBarrier.includes('visible: !!visibleMaintenance'), 'Maintenance must keep write fencing separate from whether a full-screen overlay is shown');
@@ -528,4 +528,4 @@ assert(syncSlice.includes('hasSteadyFinancialCloudRecoveryStateV2') && syncSlice
 assert(syncSlice.includes("deferProfileHydration = false") && syncSlice.includes('hydrateProfileWhenSafe'), 'Startup may render durable local data before optional cloud profile hydration');
 assert(appRoot.includes('unchangedSession: true') && appRoot.includes('deferProfileHydration: true'), 'Duplicate cold-start auth events must not repeat workspace/profile hydration');
 
-console.log('MYFI modal and settings UI contract: all assertions passed');
+console.log('MaalFlow modal and settings UI contract: all assertions passed');

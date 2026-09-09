@@ -96,4 +96,4 @@ assert(
   'D-21: entry amount visual tone must track income/expense type',
 );
 
-console.log('MYFI R04 P18-001 blocking UX acceptance contract: PASSED');
+console.log('MaalFlow R04 P18-001 blocking UX acceptance contract: PASSED');

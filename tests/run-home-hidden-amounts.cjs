@@ -98,4 +98,4 @@ console.log('[PASS] the three renders reported from the device stay masked');
   console.log('[PASS] the guard still catches the original unmasked render');
 }
 
-console.log('MYFI HOME HIDDEN AMOUNTS CONTRACT: PASS');
+console.log('MaalFlow HOME HIDDEN AMOUNTS CONTRACT: PASS');

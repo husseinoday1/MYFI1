@@ -325,7 +325,7 @@ const testSlicePreserveCurrentRehydration = async fixture => {
   const rootStart = settings.indexOf('function RootSettings(');
   const rootEnd = settings.indexOf('\n\nfunction AccountPage(', rootStart);
   const rootSettings = settings.slice(rootStart, rootEnd);
-  assert.match(rootSettings, /title=\{T\.about\}[\s\S]*onPress=\{\(\) => onOpen\('about'\)\}/, 'RootSettings must expose an About MYFI route');
+  assert.match(rootSettings, /title=\{T\.about\}[\s\S]*onPress=\{\(\) => onOpen\('about'\)\}/, 'RootSettings must expose an About MaalFlow route');
 };
 
 (async () => {
@@ -438,5 +438,5 @@ const testSlicePreserveCurrentRehydration = async fixture => {
   assert.equal(restoreRejected.reason, 'financial_v2_conflict_recovery_resume_restore_intent_active');
 
   await testSliceResumeRouting();
-  console.log('MYFI P20 V2 CONFLICT RECOVERY RESUME SQLITE RUNTIME: PASSED');
+  console.log('MaalFlow P20 V2 CONFLICT RECOVERY RESUME SQLITE RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

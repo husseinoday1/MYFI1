@@ -4,13 +4,13 @@
 tip `6cd1886` (pushed).
 **Authorized by:** Planning & Audit, `docs/04_CURRENT_EVIDENCE/MYFI_SCREEN_MIGRATION_SEQUENCING_DECISION_2026-08-26.md`
 (on the `docs/canonical-hygiene-2026-08-26` branch), per
-`docs/design/12_MYFI_DESIGN_MIGRATION_ROADMAP.md` step 3.
+`docs/design/12_MAALFLOW_DESIGN_MIGRATION_ROADMAP.md` step 3.
 
 ## What changed
 
 - `App.js`: `BASE_TABS` restructured from 5 tabs (home/history/trackers/reports/settings)
   to 4 (home/mymoney/trackers-labeled-"Follow-ups"/more), per
-  `docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md` §1 (LOCKED).
+  `docs/design/06_MAALFLOW_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md` §1 (LOCKED).
   History, Reports, Settings, and two new destinations (Wallets & Accounts,
   Plan & Budget) remain valid `screens` keys, reached only via My Money/More
   gateways — a "back to hub" bar (`HUB_TABS`/`SECONDARY_SCREEN_KEYS`) renders
@@ -93,7 +93,7 @@ out and re-shared the two reference images:
   from existing semantic tokens (`th.transfer`, `th.primary`). Purple/orange
   have no semantic token (income/expense/transfer/warning/danger don't fit) —
   reused the **already-approved** muted category-palette target hex values
-  from `docs/design/04_MYFI_DESIGN_TOKEN_CATALOG.md` (`#8D7CB8`, `#C99860`)
+  from `docs/design/04_MAALFLOW_DESIGN_TOKEN_CATALOG.md` (`#8D7CB8`, `#C99860`)
   rather than inventing new colors. No confirmed dark-theme variant exists yet
   for these two (the catalog's contrast pass is explicitly deferred) —
   flagged as a known gap, not silently assumed.

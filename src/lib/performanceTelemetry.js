@@ -1,4 +1,4 @@
-// MYFI Phase 15 §97 — baseline p50/p95 for the four operations that matter.
+// MaalFlow Phase 15 §97 — baseline p50/p95 for the four operations that matter.
 //
 // Diagnostic only. Nothing here changes behaviour; it records how long four
 // named operations took and reports percentiles over a bounded sample.

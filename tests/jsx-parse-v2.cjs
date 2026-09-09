@@ -32,4 +32,4 @@ for (const rel of files) {
   }
 }
 if (failed) process.exit(1);
-console.log('MYFI JSX parse V2: PASSED');
+console.log('MaalFlow JSX parse V2: PASSED');

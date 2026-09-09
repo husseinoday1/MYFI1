@@ -23,5 +23,5 @@ Module._load = originalLoad;
 (async () => {
   const done = await compiled.exports.recoverVerifiedBootstrapWithArchiveV2({ supabase: { rpc: async () => ({}) }, namespace: 'user:coordinator', accountId: 'account-1' });
   assert.equal(done.ok, true); assert.equal(fetches, 2, 'source must be read again immediately before local promotion'); assert.equal(promoted, 1);
-  console.log('MYFI P20 PHASE 12-D BOOTSTRAP RECOVERY COORDINATOR: PASSED');
+  console.log('MaalFlow P20 PHASE 12-D BOOTSTRAP RECOVERY COORDINATOR: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

@@ -71,7 +71,7 @@ evaluation was not attempted.
 
 Checked `OnboardingScreen.js` (390 lines, 3 slides: `HeroSlide` →
 `InsightSlide` → `QuickSetupSlide`) against
-`docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md` §7 (LOCKED
+`docs/design/06_MAALFLOW_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md` §7 (LOCKED
 6-step flow: Welcome → What matters to you first? → Customize your
 experience → Create first wallet → Privacy first → Everything is ready).
 

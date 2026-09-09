@@ -117,4 +117,4 @@ const pruneBlock = mutationSync.slice(pruneCallAt - 200, pruneCallAt + 400);
 assert(pruneBlock.includes('catch (retentionError)'),
   'a retention failure must not turn a completed sync into a failed one');
 
-console.log('MYFI P14 SYNC RESUME CONTRACT: PASSED');
+console.log('MaalFlow P14 SYNC RESUME CONTRACT: PASSED');

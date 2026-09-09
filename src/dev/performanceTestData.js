@@ -1,4 +1,4 @@
-// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
+// MAALFLOW_PERFORMANCE_DATA_RUNTIME_V5_1_2
 import { FLOW_TYPES } from '../lib/modules';
 import { normalizeTransactionTag } from '../lib/transactionTags';
 import { archivedWalletMovement, demoDate, yearOf } from '../store/domain';

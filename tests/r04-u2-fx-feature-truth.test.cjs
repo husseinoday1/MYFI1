@@ -145,4 +145,4 @@ assert(!openBlock.includes('debt_interest_fee_components_not_enforced'), 'Debt c
 assert(!openBlock.includes('explicit_refund_reversal_command_not_implemented'), 'Refund/reversal gap must be closed by P04U2-003');
 assert(contractSource.includes("FINANCIAL_DOMAIN_CONTRACT_VERSION = 'R04-U2-3'"), 'P04U2-003 contract version missing');
 
-console.log('MYFI P04U2-002 FX + feature-toggle financial-truth enforcement: PASSED');
+console.log('MaalFlow P04U2-002 FX + feature-toggle financial-truth enforcement: PASSED');

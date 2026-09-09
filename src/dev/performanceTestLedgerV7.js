@@ -1,4 +1,4 @@
-// MYFI Phase 15 — the performance lab must exercise the same V7 projection
+// MaalFlow Phase 15 — the performance lab must exercise the same V7 projection
 // and operational cutover that a real local workspace uses.
 
 import { activeLedgerSupported, getLedgerDataHealth, getLedgerNamespace } from '../lib/activeLedgerRepository';

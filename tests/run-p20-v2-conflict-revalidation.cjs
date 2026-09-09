@@ -196,5 +196,5 @@ const inboxOf = db => db.native.prepare('SELECT mutation_id,apply_status FROM le
     db.native.close();
   }
 
-  console.log('MYFI P20 V2 CONFLICT REVALIDATION RUNTIME: PASSED');
+  console.log('MaalFlow P20 V2 CONFLICT REVALIDATION RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

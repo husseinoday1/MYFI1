@@ -262,10 +262,10 @@
 
 ## 15. مراجع داخلية
 
-- `docs/MYFI_SYNC_PROTOCOL.md`
-- `docs/MYFI_DATA_OWNERSHIP.md`
+- `docs/MAALFLOW_SYNC_PROTOCOL.md`
+- `docs/MAALFLOW_DATA_OWNERSHIP.md`
 - `docs/04_CURRENT_EVIDENCE/MYFI_PHASE12_SEMANTIC_ROUND_TRIP_AUDIT_2026-08-30.md`
-- `docs/01_CORE_AUTHORITY/MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM.md`
+- `docs/01_CORE_AUTHORITY/MAALFLOW_P19_SYNC_V2_ACTIVATION_ADDENDUM.md`
 - `src/lib/financialBootstrapV2.js`
 - `src/lib/financialLedgerV7Repository.js`
 - `src/store/slices/useSyncSlice.js`

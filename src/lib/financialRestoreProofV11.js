@@ -7,7 +7,7 @@ import { sha256 } from '@noble/hashes/sha2';
 import { bytesToHex } from '@noble/hashes/utils';
 import { CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS } from './financialBackupV11';
 
-export const CANONICAL_RESTORE_PROOF_V11_DOMAIN = 'MYFI:P10-012:RESTORE-PROOF:V1';
+export const CANONICAL_RESTORE_PROOF_V11_DOMAIN = 'MAALFLOW:P10-012:RESTORE-PROOF:V1';
 
 const text = value => String(value ?? '').trim();
 const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);

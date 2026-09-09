@@ -4,7 +4,7 @@ import { getSymbol } from './constants';
 import { isRTL, textAlignFor, rowDirFor } from './layout';
 
 // Single shared theme-access hook. Replaces the manual `TH[cfg.theme] || TH.dark`
-// pattern repeated across 19 screens (see docs/design/03_MYFI_DESIGN_SYSTEM_CANONICAL.md
+// pattern repeated across 19 screens (see docs/design/03_MAALFLOW_DESIGN_SYSTEM_CANONICAL.md
 // §1 — "Confirmed gap, not a redesign"). This is additive only: it does not change
 // any screen yet, screens keep working exactly as before until they opt in.
 //

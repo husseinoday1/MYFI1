@@ -1,4 +1,4 @@
--- MYFI Phase 12-A — immutable, owner-bound cold-archive snapshots.
+-- MaalFlow Phase 12-A — immutable, owner-bound cold-archive snapshots.
 --
 -- This is deliberately separate from financial_bootstrap_rows_v2: finalized
 -- Bootstrap manifests are immutable and older ones contain no archive rows.

@@ -1,4 +1,4 @@
-// MYFI — the performance lab must actually stay on outside a __DEV__ build.
+// MaalFlow — the performance lab must actually stay on outside a __DEV__ build.
 //
 // Reported from a real device 2026-09-06, the same day the lab was opened up
 // in SettingsScreen.js for Phase 15 §96/§98/§100: pressing a tier flickered and

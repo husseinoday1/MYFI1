@@ -23,4 +23,4 @@ assert.match(repository, /includeWorkspaceState = false/,
   'transaction helper needs an explicit workspace copy opt-in');
 assert.match(repository, /if \(includeWorkspaceState\)/);
 
-console.log('MYFI P20 PHASE 12-D BOOTSTRAP RECOVERY ATOMIC PROMOTION CONTRACT: PASSED');
+console.log('MaalFlow P20 PHASE 12-D BOOTSTRAP RECOVERY ATOMIC PROMOTION CONTRACT: PASSED');

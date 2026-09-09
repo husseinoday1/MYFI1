@@ -1,4 +1,4 @@
-// MYFI Phase 15 §97 — the baseline p50/p95 instrument.
+// MaalFlow Phase 15 §97 — the baseline p50/p95 instrument.
 //
 // Runs the real module (not source-string matching) because the whole value of
 // this instrument is arithmetic: a percentile that is subtly wrong produces

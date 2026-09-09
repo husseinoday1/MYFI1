@@ -1,4 +1,4 @@
-// MYFI_REAL_STATE_CONSOLIDATED_UX_V5
+// MAALFLOW_REAL_STATE_CONSOLIDATED_UX_V5
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, TextInput, Switch, Alert, Pressable, StyleSheet, Modal, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -20,7 +20,7 @@ import ActionMenu from '../components/ActionMenu';
 import DateField from '../components/DateField';
 import { parseMoneyInput, parseNumberInput, preserveNumberInputDraft } from '../lib/numberInput';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
-import { exportMyfiPackage, pickMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
+import { exportMaalFlowPackage, pickMaalFlowPackage, unlockMaalFlowPackage } from '../lib/maalflowFiles';
 import { PRODUCT_NAME } from '../lib/productIdentity';
 import { inspectBackupData } from '../lib/backupData';
 import { decodeCanonicalBackupV11 } from '../lib/financialBackupV11Decoder';
@@ -128,7 +128,7 @@ const UI = {
     exportBackup: 'تصدير نسخة احتياطية',
     importBackup: 'استيراد نسخة احتياطية',
     pasteBackup: 'الصق محتوى النسخة الاحتياطية',
-    importWarning: 'سيُنشئ MYFI نقطة رجوع آمنة ثم يستعيد محتوى النسخة الاحتياطية.',
+    importWarning: 'سيُنشئ MaalFlow نقطة رجوع آمنة ثم يستعيد محتوى النسخة الاحتياطية.',
     pasteClipboard: 'لصق من الحافظة',
     clearImport: 'إلغاء اختيار الملف',
     previewBackup: 'معاينة النسخة',
@@ -142,7 +142,7 @@ const UI = {
     backupCurrency: 'العملة',
     replaceNow: 'استعادة النسخة الآن',
     deleteAll: 'حذف كل البيانات',
-    deleteConfirm: 'سيتم حذف كل بيانات MYFI من هذا الجهاز.',
+    deleteConfirm: 'سيتم حذف كل بيانات MaalFlow من هذا الجهاز.',
     optional: 'اختياري',
     connected: 'متصل',
     notConnected: 'غير متصل',
@@ -156,7 +156,7 @@ const UI = {
     passwordLength: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.',
     invalidCredentials: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
     verificationTitle: 'الحساب غير مفعّل بعد',
-    verificationPending: 'أرسلنا رابط التفعيل إلى بريدك. افتحه على هذا الهاتف لإكمال التسجيل والعودة إلى MYFI.',
+    verificationPending: 'أرسلنا رابط التفعيل إلى بريدك. افتحه على هذا الهاتف لإكمال التسجيل والعودة إلى MaalFlow.',
     verificationUnconfirmed: 'لم يتم إنشاء حساب جديد. قد يكون البريد مستخدماً أو غير صالح؛ تحقق من البريد وحاول تسجيل الدخول أو الاستعادة.',
     close: 'إغلاق',
     loginSuccess: 'تم تسجيل الدخول بنجاح.',
@@ -271,7 +271,7 @@ const UI = {
     backupCurrency: 'Currency',
     replaceNow: 'Restore backup now',
     deleteAll: 'Delete all data',
-    deleteConfirm: 'All MYFI data on this device will be deleted.',
+    deleteConfirm: 'All MaalFlow data on this device will be deleted.',
     optional: 'Optional',
     connected: 'Connected',
     notConnected: 'Not connected',
@@ -285,7 +285,7 @@ const UI = {
     passwordLength: 'Password must be at least 8 characters.',
     invalidCredentials: 'Email or password is incorrect.',
     verificationTitle: 'Account not active yet',
-    verificationPending: 'We sent an activation link. Open it on this phone to finish registration and return to MYFI.',
+    verificationPending: 'We sent an activation link. Open it on this phone to finish registration and return to MaalFlow.',
     verificationUnconfirmed: 'No new account was created. The email may already be used or invalid; check the address, then try sign-in or recovery.',
     close: 'Close',
     loginSuccess: 'Signed in successfully.',
@@ -316,14 +316,14 @@ const previewBackupText = (text = '', lang = 'ar') => {
 
   try {
     const data = JSON.parse(raw);
-    if (data?.kind === 'myfi_canonical_financial_backup') {
+    if (data?.kind === 'maalflow_canonical_financial_backup') {
       const decoded = decodeCanonicalBackupV11(data);
       const counts = decoded?.manifest?.counts || {};
       return {
         valid: decoded?.ok === true,
         empty: false,
         error: decoded?.ok ? '' : (decoded?.reason || 'invalid_backup'),
-        name: 'MYFI V11',
+        name: 'MaalFlow V11',
         currency: decoded?.data?.financialConfig?.currency || '',
         months: [],
         entries: Number(counts.transactions || 0) + Number(counts.coldArchiveRecords || 0),
@@ -337,8 +337,8 @@ const previewBackupText = (text = '', lang = 'ar') => {
     const messageFor = code => {
       if (code === 'backup_version_newer') {
         return lang === 'ar'
-          ? 'هذه النسخة أُنشئت بإصدار أحدث من MYFI.'
-          : 'This backup was created by a newer MYFI version.';
+          ? 'هذه النسخة أُنشئت بإصدار أحدث من MaalFlow.'
+          : 'This backup was created by a newer MaalFlow version.';
       }
       if (code === 'backup_config_missing') {
         return lang === 'ar'
@@ -439,8 +439,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
     Alert.alert(
       isAr ? `لماذا هذا الاقتراح؟ · ${catName}` : `Why this suggestion? · ${catName}`,
       isAr
-        ? `اعتمد MYFI على ${suggestion.monthsUsed} أشهر صالحة من تاريخك، مع وزن أعلى للأشهر الأحدث واستبعاد ${suggestion.outliersIgnored} قيمة استثنائية. الاتجاه ${trend}. الاقتراح لا يغيّر ميزانيتك إلا إذا اخترت تطبيقه.`
-        : `MYFI used ${suggestion.monthsUsed} valid historical months, weighted recent months more heavily, and ignored ${suggestion.outliersIgnored} outlier value(s). The pattern is ${trend}. Nothing changes unless you apply the suggestion.`,
+        ? `اعتمد MaalFlow على ${suggestion.monthsUsed} أشهر صالحة من تاريخك، مع وزن أعلى للأشهر الأحدث واستبعاد ${suggestion.outliersIgnored} قيمة استثنائية. الاتجاه ${trend}. الاقتراح لا يغيّر ميزانيتك إلا إذا اخترت تطبيقه.`
+        : `MaalFlow used ${suggestion.monthsUsed} valid historical months, weighted recent months more heavily, and ignored ${suggestion.outliersIgnored} outlier value(s). The pattern is ${trend}. Nothing changes unless you apply the suggestion.`,
     );
   };
   const showFinancial = (key) => !financialOnly || financialSection === 'all' || financialSection === key;
@@ -1281,7 +1281,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
     if (fileBusy) return;
     setFileBusy(true);
     try {
-      await exportMyfiPackage({
+      await exportMaalFlowPackage({
         kind: 'full_backup',
         data: JSON.parse(await exportBackup()),
         label: PRODUCT_NAME,
@@ -1338,7 +1338,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
     if (fileBusy) return;
     setFileBusy(true);
     try {
-      const picked = await pickMyfiPackage({ kind: 'full_backup' });
+      const picked = await pickMaalFlowPackage({ kind: 'full_backup' });
       if (picked?.passwordRequired) {
         setImportPackage(picked);
         setBackupPassword('');
@@ -1370,7 +1370,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
       if (!backupPassword || !importPackage) return;
       setFileBusy(true);
       try {
-        const unlocked = await unlockMyfiPackage(importPackage, backupPassword, 'full_backup');
+        const unlocked = await unlockMaalFlowPackage(importPackage, backupPassword, 'full_backup');
         setImportPackage(unlocked);
         setBackupPasswordMode(null);
         setBackupPassword('');
@@ -1636,7 +1636,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
     <ContentShell {...contentShellProps}>
       {!embedded ? (
         <View style={s.settingsHead}>
-          <Text style={[s.settingsEyebrow, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>MYFI</Text>
+          <Text style={[s.settingsEyebrow, { color: th.primary, textAlign: isAr ? 'right' : 'left' }]}>MaalFlow</Text>
           <Text style={[s.settingsTitle, { color: th.text, textAlign: isAr ? 'right' : 'left' }]}>{T.title || L.settings}</Text>
         </View>
       ) : null}
@@ -1661,7 +1661,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
                 <View style={[s.accountProfileStatus, { backgroundColor: user ? th.incBg : th.primSoft }]}>
                   <View style={[s.statusDot, { backgroundColor: user ? th.inc : th.primary }]} />
                   <Text style={{ color: user ? th.inc : th.primary, fontSize: 10, ...weight('900') }}>
-                    {user ? (isAr ? 'حساب MYFI' : 'MYFI account') : (isAr ? 'محلي' : 'Local')}
+                    {user ? (isAr ? 'حساب MaalFlow' : 'MaalFlow account') : (isAr ? 'محلي' : 'Local')}
                   </Text>
                 </View>
               </View>
@@ -1759,7 +1759,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
                         <Ionicons name="cloud-outline" size={17} color={th.primary} />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>{isAr ? 'ربط حساب MYFI' : 'Connect a MYFI account'}</Text>
+                        <Text style={{ color: th.text, fontSize: 13, ...weight('900'), textAlign: isAr ? 'right' : 'left' }}>{isAr ? 'ربط حساب MaalFlow' : 'Connect a MaalFlow account'}</Text>
                         <Text style={{ color: th.sub, fontSize: 10, lineHeight: 15, marginTop: 1, textAlign: isAr ? 'right' : 'left' }}>{isAr ? 'للمزامنة والاسترجاع على أكثر من جهاز.' : 'For sync and recovery across devices.'}</Text>
                       </View>
                     </View>
@@ -2105,7 +2105,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
             </View>
 
             <Text style={[s.miniLabel, { color: th.sub, textAlign: isAr ? 'right' : 'left' }]}>
-              {isAr ? 'ميزانية مستقلة لكل شهر. MYFI يقترح فقط، وأنت تقرر.' : 'Each month has its own budget. MYFI suggests; you decide.'}
+              {isAr ? 'ميزانية مستقلة لكل شهر. MaalFlow يقترح فقط، وأنت تقرر.' : 'Each month has its own budget. MaalFlow suggests; you decide.'}
             </Text>
             {getCategoriesForFlow(cats, CATEGORY_FLOWS.EXPENSE).map(cat => {
               const row = budgetRows.find(item => item.categoryId === cat.id);
@@ -2141,7 +2141,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
                     <TouchableOpacity onPress={() => showBudgetSuggestionWhy(cat, suggestion)} style={{ alignSelf: isAr ? 'flex-end' : 'flex-start', flexDirection: isAr ? 'row-reverse' : 'row', gap: 4, alignItems: 'center' }}>
                       <Ionicons name="information-circle-outline" size={14} color={th.primary} />
                       <Text style={{ color: th.primary, fontSize: 10, ...weight('800') }}>
-                        {isAr ? `اقتراح MYFI ${formatMoneyNumber(suggestion.amount, cfg.currency, cfg.lang)}` : `MYFI suggestion ${formatMoneyNumber(suggestion.amount, cfg.currency, cfg.lang)}`}
+                        {isAr ? `اقتراح MaalFlow ${formatMoneyNumber(suggestion.amount, cfg.currency, cfg.lang)}` : `MaalFlow suggestion ${formatMoneyNumber(suggestion.amount, cfg.currency, cfg.lang)}`}
                       </Text>
                     </TouchableOpacity>
                   ) : null}
@@ -2150,7 +2150,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
             })}
             <View style={{ flexDirection: isAr ? 'row-reverse' : 'row', gap: 8, flexWrap: 'wrap' }}>
               <TouchableOpacity onPress={() => applySuggestedBudgets(budgetDate)} style={[s.smallAction, { backgroundColor: th.primSoft, flexGrow: 1 }]}>
-                <Text style={{ color: th.primary, ...weight('900') }}>{isAr ? 'تطبيق اقتراح MYFI' : 'Apply MYFI suggestion'}</Text>
+                <Text style={{ color: th.primary, ...weight('900') }}>{isAr ? 'تطبيق اقتراح MaalFlow' : 'Apply MaalFlow suggestion'}</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={async () => {
                 const copied = await copyPreviousMonthBudgets(budgetDate);
@@ -2502,7 +2502,7 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
 
 
       <Text style={{ color: th.faint, fontSize: 12, textAlign: 'center', marginTop: 2 }}>
-        MYFI · {L.appVersion} 1.0.0
+        MaalFlow · {L.appVersion} 1.0.0
       </Text>
       </>) : null}
     </ContentShell>
@@ -2961,8 +2961,8 @@ export default function SettingsScreen({ onOpenArchive, tabs = [], embedded = fa
             <View>
               <Text style={{ color: th.sub, fontSize: 11, lineHeight: 18, marginBottom: 7, textAlign: isAr ? 'right' : 'left' }}>
                 {isAr
-                  ? `هذه المحفظة تبقى بعملة ${newWalletCurrency} ولا تغيّر العملة الأساسية ${cfg.currency}. السعر أدناه للتقييم الحالي فقط؛ عند تسجيل حركة مالية بعملة مختلفة سيطلب MYFI تأكيد السعر التاريخي للحركة ولن يعيد كتابة الماضي لاحقاً.`
-                  : `This wallet stays in ${newWalletCurrency} and does not change the ${cfg.currency} base currency. The rate below is for current valuation only; MYFI asks you to confirm the historical rate when recording a foreign-currency transaction and never rewrites past transactions later.`}
+                  ? `هذه المحفظة تبقى بعملة ${newWalletCurrency} ولا تغيّر العملة الأساسية ${cfg.currency}. السعر أدناه للتقييم الحالي فقط؛ عند تسجيل حركة مالية بعملة مختلفة سيطلب MaalFlow تأكيد السعر التاريخي للحركة ولن يعيد كتابة الماضي لاحقاً.`
+                  : `This wallet stays in ${newWalletCurrency} and does not change the ${cfg.currency} base currency. The rate below is for current valuation only; MaalFlow asks you to confirm the historical rate when recording a foreign-currency transaction and never rewrites past transactions later.`}
               </Text>
               <TextInput
                 value={newWalletRate}

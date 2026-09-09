@@ -93,4 +93,4 @@ const openBlock = contract.slice(openStart, openEnd);
 assert(!openBlock.includes('debt_interest_fee_components_not_enforced'), 'Debt-component gap remains open');
 assert(!openBlock.includes('explicit_refund_reversal_command_not_implemented'), 'Refund/reversal gap remains open');
 
-console.log('MYFI R04 U-2 domain/storage contract freeze: PASSED');
+console.log('MaalFlow R04 U-2 domain/storage contract freeze: PASSED');

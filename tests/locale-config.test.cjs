@@ -13,4 +13,4 @@ assert(constants.includes("code:'ILS'") && constants.includes("sym:'₪'") && co
 assert(!/code:'IL'|name:'إسرائيل'|nameEn:'Israel'|Israeli shekel/.test(constants), 'Israel must not be reintroduced as a country or currency label');
 assert(constants.includes("code:'PS'") && constants.includes("flag:'🇵🇸', currency:'JOD'"), 'Palestine must use a supported default currency');
 
-console.log('MYFI locale configuration: PASSED');
+console.log('MaalFlow locale configuration: PASSED');

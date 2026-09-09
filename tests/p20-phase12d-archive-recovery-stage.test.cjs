@@ -11,4 +11,4 @@ assert.match(source, /markFinancialArchiveRecoveryImportReadyV11/);
 assert.match(source, /financial-archive-recovery-stage-v1/);
 assert.match(reader, /onVerifiedRow/);
 assert.match(reader, /financial_archive_snapshot_readback_callback_invalid/);
-console.log('MYFI P20 PHASE 12-D ARCHIVE RECOVERY STAGE CONTRACT: PASSED');
+console.log('MaalFlow P20 PHASE 12-D ARCHIVE RECOVERY STAGE CONTRACT: PASSED');

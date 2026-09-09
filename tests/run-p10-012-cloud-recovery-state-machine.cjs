@@ -52,7 +52,7 @@ const deriveCanonicalRestoreProofDigestV11 = ({ operationId, ledgerId, fromEpoch
   }
   const ordered = Object.fromEntries(countKeys.map(key => [key, Number(counts[key])]));
   return crypto.createHash('sha256').update(JSON.stringify({
-    domain: 'MYFI:P10-012:RESTORE-PROOF:V1', operationId: String(operationId).toLowerCase(),
+    domain: 'MAALFLOW:P10-012:RESTORE-PROOF:V1', operationId: String(operationId).toLowerCase(),
     ledgerId: String(ledgerId), fromEpoch: Number(fromEpoch), toEpoch: Number(toEpoch),
     semanticHash: String(semanticHash).toLowerCase(), validatorVersion: Number(validatorVersion), counts: ordered,
   })).digest('hex');
@@ -300,5 +300,5 @@ const adaptersFor = (operation, controls = {}) => {
   assert.deepEqual(switchedCalls, { server: 0, promote: 0, reload: 0, activate: 0 });
   console.log('[PASS] an account switch cannot adopt or advance another account restore');
 
-  console.log('MYFI P10-012 CLOUD RECOVERY STATE MACHINE: PASS');
+  console.log('MaalFlow P10-012 CLOUD RECOVERY STATE MACHINE: PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => database.close());

@@ -1,9 +1,9 @@
 // V11 adds user-defined tracker definitions and their items. They remain in
 // the financial backup so a restore cannot silently keep money movements but
 // lose the rule which gives a custom tracker its meaning.
-export const MYFI_BACKUP_DATA_VERSION = 11;
-export const MYFI_BACKUP_KIND = 'myfi_financial_backup';
-export const MYFI_BACKUP_FORMAT = 'MYFI_LOGICAL_BACKUP';
+export const MAALFLOW_BACKUP_DATA_VERSION = 11;
+export const MAALFLOW_BACKUP_KIND = 'maalflow_financial_backup';
+export const MAALFLOW_BACKUP_FORMAT = 'MAALFLOW_LOGICAL_BACKUP';
 
 const COLLECTION_KEYS = ['trans', 'debts', 'goals', 'wallets', 'commitments', 'cats', 'trackerTypes', 'trackerItems'];
 const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -131,13 +131,13 @@ export const buildFinancialBackup = ({
     archives: logicalChecksum(archives),
   };
   return {
-    kind: MYFI_BACKUP_KIND,
-    v: MYFI_BACKUP_DATA_VERSION,
-    schemaVersion: MYFI_BACKUP_DATA_VERSION,
+    kind: MAALFLOW_BACKUP_KIND,
+    v: MAALFLOW_BACKUP_DATA_VERSION,
+    schemaVersion: MAALFLOW_BACKUP_DATA_VERSION,
     exportedAt,
     manifest: {
-      format: MYFI_BACKUP_FORMAT,
-      schemaVersion: MYFI_BACKUP_DATA_VERSION,
+      format: MAALFLOW_BACKUP_FORMAT,
+      schemaVersion: MAALFLOW_BACKUP_DATA_VERSION,
       financialEngineVersion: 7,
       createdAt: exportedAt,
       collections: Object.fromEntries(Object.entries(financialData).map(([key, value]) => [key, value.length])),
@@ -188,7 +188,7 @@ export const summarizeBackupData = (data = {}) => {
     customTrackerTypes: trackerTypes.length,
     customTrackerItems: trackerItems.length,
     currency: financialConfig.currency || '',
-    legacy: Number(data.v || 0) > 0 && Number(data.v || 0) < MYFI_BACKUP_DATA_VERSION,
+    legacy: Number(data.v || 0) > 0 && Number(data.v || 0) < MAALFLOW_BACKUP_DATA_VERSION,
   };
 };
 
@@ -205,7 +205,7 @@ export const inspectBackupData = (data) => {
   // and archive validation entirely — drop the field and the whole block is bypassed.
   //
   // Required only of payloads that present themselves as a full logical backup. This
-  // same function also inspects year-archive payloads (myfiFiles.js:307 runs it over
+  // same function also inspects year-archive payloads (maalflowFiles.js:307 runs it over
   // every package kind), and those legitimately carry no version — demanding one there
   // refused a valid archive, which the quality gate caught. Keying on the sections the
   // version gate actually protects closes the bypass without breaking the other
@@ -216,15 +216,15 @@ export const inspectBackupData = (data) => {
   if (data.v != null) {
     const version = Number(data.v);
     if (!Number.isInteger(version) || version < 1) errors.push('backup_version_invalid');
-    else if (version > MYFI_BACKUP_DATA_VERSION) errors.push('backup_version_newer');
+    else if (version > MAALFLOW_BACKUP_DATA_VERSION) errors.push('backup_version_newer');
   }
 
-  if (Number(data.v || 0) >= MYFI_BACKUP_DATA_VERSION && data.kind && data.kind !== MYFI_BACKUP_KIND) {
+  if (Number(data.v || 0) >= MAALFLOW_BACKUP_DATA_VERSION && data.kind && data.kind !== MAALFLOW_BACKUP_KIND) {
     errors.push('backup_kind_invalid');
   }
 
   if (Number(data.v || 0) >= 10) {
-    if (data.manifest?.format !== MYFI_BACKUP_FORMAT || Number(data.manifest?.schemaVersion) !== Number(data.v)) {
+    if (data.manifest?.format !== MAALFLOW_BACKUP_FORMAT || Number(data.manifest?.schemaVersion) !== Number(data.v)) {
       errors.push('backup_manifest_invalid');
     }
     if (!isObject(data.financialData) || !isObject(data.checksums)) {

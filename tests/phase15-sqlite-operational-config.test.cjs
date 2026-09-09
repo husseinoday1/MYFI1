@@ -1,4 +1,4 @@
-// MYFI Phase 15 / §102 — SQLite Operational Configuration.
+// MaalFlow Phase 15 / §102 — SQLite Operational Configuration.
 //
 // §102 requires the five operational settings to be audited and not changed
 // casually. This test pins two properties that a future edit could break
@@ -127,14 +127,14 @@ try { ({ DatabaseSync } = require('node:sqlite')); } catch { /* flagged or absen
 // would quietly skip on every CI run while passing locally — i.e. the numbers the
 // §102 audit cites could rot without anyone noticing, which is the whole failure
 // mode this test exists to prevent. Retry once in a child process with the flag.
-if (!DatabaseSync && !process.env.MYFI_P15_SQLITE_FLAG_RETRY) {
+if (!DatabaseSync && !process.env.MAALFLOW_P15_SQLITE_FLAG_RETRY) {
   const { spawnSync } = require('node:child_process');
   const retry = spawnSync(
     process.execPath,
     ['--experimental-sqlite', __filename, root],
     {
       stdio: 'inherit',
-      env: { ...process.env, MYFI_P15_SQLITE_FLAG_RETRY: '1' },
+      env: { ...process.env, MAALFLOW_P15_SQLITE_FLAG_RETRY: '1' },
     },
   );
   process.exit(retry.status === null ? 1 : retry.status);
@@ -145,15 +145,15 @@ if (!DatabaseSync) {
   // failure, so a skip here would leave the benchmark silently unrun while the gate
   // reported PASS — exactly how the cited numbers would rot unnoticed.
   assert(
-    process.env.MYFI_ALLOW_NO_SQLITE === '1',
+    process.env.MAALFLOW_ALLOW_NO_SQLITE === '1',
     `§102 benchmark could not run: node:sqlite unavailable on ${process.version}, `
     + 'including after retrying with --experimental-sqlite. Node 22.5+ is required. '
-    + 'Set MYFI_ALLOW_NO_SQLITE=1 to accept static-only §102 checks.',
+    + 'Set MAALFLOW_ALLOW_NO_SQLITE=1 to accept static-only §102 checks.',
   );
   console.log(`SKIP (opted out): node:sqlite unavailable on ${process.version}, static §102 assertions only`);
 } else {
   const measure = (mode, rows, batched) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'myfi-p15-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maalflow-p15-'));
     const db = new DatabaseSync(path.join(dir, 'bench.db'));
     db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     db.exec(`PRAGMA synchronous = ${mode};`);

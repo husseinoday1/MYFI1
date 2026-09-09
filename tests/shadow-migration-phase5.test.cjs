@@ -27,4 +27,4 @@ assert(sync.includes("financialLedgerV7Cutover: migration.sourceMode === 'sqlite
 assert(sync.includes("if (v7State?.source_mode === 'sqlite')"), 'Already-cutover installed devices must remain readable; Phase 5 must not destructively downgrade them.');
 assert(repo.includes("CHECK(source_mode IN ('shadow','sqlite'))"), 'Workspace state schema must retain explicit shadow/sqlite modes.');
 
-console.log('MYFI PHASE 5 SHADOW MIGRATION READINESS CONTRACT: PASSED');
+console.log('MaalFlow PHASE 5 SHADOW MIGRATION READINESS CONTRACT: PASSED');

@@ -2,7 +2,7 @@
 
 **النطاق: Stage C و Stage D فقط. Stage E (حذف الكود + `DROP` الجداول) خارج
 النطاق صراحةً ومؤجَّل إلى حساب Supabase الجديد / Phase 16.** المرجع:
-`docs/01_CORE_AUTHORITY/MYFI_MASTER_PLAN_FROZEN.md` §82.
+`docs/01_CORE_AUTHORITY/MAALFLOW_MASTER_PLAN_FROZEN.md` §82.
 
 كل ادعاء أدناه تحققتُ منه مباشرة في الكود أو في المخطط الإنتاجي قبل تدوينه.
 

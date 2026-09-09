@@ -18,7 +18,7 @@ import DateField from '../components/DateField';
 import { ScreenScroll, PageIntro, SectionTitle, SurfaceCard, Touchable, IconContainer, rowDirection, textAlign } from '../components/AppPrimitives';
 
 // Plan & Budget — My Money gateway 3. Per
-// docs/design/07_MYFI_SCREEN_DESIGN_SPECIFICATIONS.md: month selector, donut/
+// docs/design/07_MAALFLOW_SCREEN_DESIGN_SPECIFICATIONS.md: month selector, donut/
 // summary of budget vs. spent vs. remaining, category breakdown. Reuses the
 // exact same store actions and src/lib/budgets.js functions already used by
 // the existing Settings > Financial > Monthly budgets section
@@ -105,7 +105,7 @@ export default function PlanBudgetScreen() {
 
       <SectionTitle th={th} lang={lang}>{isAr ? 'حسب التصنيف' : 'By category'}</SectionTitle>
       <Text style={{ color: th.sub, fontSize: 11, textAlign: textAlign(lang), marginBottom: 10 }}>
-        {isAr ? 'ميزانية مستقلة لكل شهر. MYFI يقترح فقط، وأنت تقرر.' : 'Each month has its own budget. MYFI suggests; you decide.'}
+        {isAr ? 'ميزانية مستقلة لكل شهر. MaalFlow يقترح فقط، وأنت تقرر.' : 'Each month has its own budget. MaalFlow suggests; you decide.'}
       </Text>
 
       <View style={{ gap: 8, marginBottom: 14 }}>
@@ -154,8 +154,8 @@ export default function PlanBudgetScreen() {
                   <Ionicons name="information-circle-outline" size={14} color={th.primary} />
                   <Text style={{ color: th.primary, fontSize: 10, fontWeight: '800' }}>
                     {isAr
-                      ? `اقتراح MYFI ${formatMoneyNumber(suggestion.amount, cfg.currency, cfg.lang)}`
-                      : `MYFI suggestion ${formatMoneyNumber(suggestion.amount, cfg.currency, cfg.lang)}`}
+                      ? `اقتراح MaalFlow ${formatMoneyNumber(suggestion.amount, cfg.currency, cfg.lang)}`
+                      : `MaalFlow suggestion ${formatMoneyNumber(suggestion.amount, cfg.currency, cfg.lang)}`}
                   </Text>
                 </View>
               ) : null}
@@ -166,7 +166,7 @@ export default function PlanBudgetScreen() {
 
       <View style={{ flexDirection: rowDirection(lang), gap: 8, flexWrap: 'wrap' }}>
         <Touchable onPress={() => applySuggestedBudgets(budgetDate)} style={[s.smallAction, { backgroundColor: th.primSoft, flexGrow: 1 }]}>
-          <Text style={{ color: th.primary, fontWeight: '900' }}>{isAr ? 'تطبيق اقتراح MYFI' : 'Apply MYFI suggestion'}</Text>
+          <Text style={{ color: th.primary, fontWeight: '900' }}>{isAr ? 'تطبيق اقتراح MaalFlow' : 'Apply MaalFlow suggestion'}</Text>
         </Touchable>
         <Touchable
           onPress={async () => {

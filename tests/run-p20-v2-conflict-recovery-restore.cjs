@@ -258,5 +258,5 @@ const assertLiveStillPromoted = (db, message) => {
   assert.equal(count(interrupted.db, 'ledger_financial_transactions_v7', STAGE), 2, 'a rolled-back attempt must keep the checkpoint');
   interrupted.db.native.close();
 
-  console.log('MYFI P20 V2 CONFLICT RECOVERY RESTORE RUNTIME: PASSED');
+  console.log('MaalFlow P20 V2 CONFLICT RECOVERY RESTORE RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

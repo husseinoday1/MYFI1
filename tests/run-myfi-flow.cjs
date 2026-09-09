@@ -16,7 +16,7 @@ require.extensions['.js'] = (targetModule, filename) => {
   originalJs(targetModule, filename);
 };
 
-const filename = path.join(__dirname, 'myfi-flow.test.mjs');
+const filename = path.join(__dirname, 'maalflow-flow.test.mjs');
 const Module = require('node:module');
 const testModule = new Module(filename, module);
 testModule.filename = filename;

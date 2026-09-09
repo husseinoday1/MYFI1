@@ -1,4 +1,4 @@
-// MYFI_R04_U2_DOMAIN_CONTRACT_V1
+// MAALFLOW_R04_U2_DOMAIN_CONTRACT_V1
 // Pre-Phase-6 contract freeze. This module defines financial meaning only.
 // It does not activate SQLite-first writes or perform operational cutover.
 

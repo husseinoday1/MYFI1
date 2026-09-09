@@ -107,7 +107,7 @@ const db = new AsyncSqlite();
       assert.ok(plan.some(row => /USING (?:COVERING )?INDEX/i.test(row.detail)), `${table} must use its primary-key index`);
       assert.equal(plan.some(row => /TEMP B-TREE/i.test(row.detail)), false, `${table} must not build a temporary sort for each batch`);
     }
-    console.log('MYFI P10-013 BOUNDED CANONICAL ROW SOURCE: PASS');
+    console.log('MaalFlow P10-013 BOUNDED CANONICAL ROW SOURCE: PASS');
   } finally {
     db.close();
   }

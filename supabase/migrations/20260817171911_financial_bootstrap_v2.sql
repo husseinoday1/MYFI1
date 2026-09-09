@@ -1,4 +1,4 @@
--- MYFI P19-010 — verified, resumable V2 bootstrap protocol.
+-- MaalFlow P19-010 — verified, resumable V2 bootstrap protocol.
 -- V2 remains inactive in the application store. This migration adds only the
 -- bootstrap transport required before controlled activation.
 

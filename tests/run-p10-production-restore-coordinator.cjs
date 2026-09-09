@@ -161,5 +161,5 @@ const pendingIntent = () => ({
   });
   assert.equal(marked.ok, true);
   assert.equal(JSON.parse(meta.get(`canonical_restore_promotion_v13:${namespace}`)).status, 'v2_activated');
-  console.log('MYFI P10 PRODUCTION RESTORE COORDINATOR: PASS');
+  console.log('MaalFlow P10 PRODUCTION RESTORE COORDINATOR: PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; });

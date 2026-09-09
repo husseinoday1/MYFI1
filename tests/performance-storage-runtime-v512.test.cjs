@@ -18,7 +18,7 @@ const AsyncStorage = {
   multiRemove: async keys => { keys.forEach(key => store.delete(key)); },
   removeItem: async key => { store.delete(key); },
 };
-const STORAGE = { DEMO_DATA: 'MYFI_DEMO_DATA_V1', DEMO_ACTIVE: 'MYFI_DEMO_ACTIVE_V1' };
+const STORAGE = { DEMO_DATA: 'MAALFLOW_DEMO_DATA_V1', DEMO_ACTIVE: 'MAALFLOW_DEMO_ACTIVE_V1' };
 const sandbox = { module: { exports: {} }, exports: {}, AsyncStorage, STORAGE, Date, JSON, Array, Number, String };
 vm.createContext(sandbox);
 vm.runInContext(source, sandbox, { filename: file });
@@ -36,8 +36,8 @@ const { writePerformanceSnapshot, readPerformanceSnapshot, clearPerformanceSnaps
   });
 
   await writePerformanceSnapshot(makeSnapshot(2201), { namespace: 'guest', tier: '2201' });
-  if (!store.has('MYFI_DEMO_DATA_V1:CHUNK:0') || !store.has('MYFI_DEMO_DATA_V1:CHUNK:2')) throw new Error('chunked write failed');
-  const meta = JSON.parse(store.get('MYFI_DEMO_DATA_V1'));
+  if (!store.has('MAALFLOW_DEMO_DATA_V1:CHUNK:0') || !store.has('MAALFLOW_DEMO_DATA_V1:CHUNK:2')) throw new Error('chunked write failed');
+  const meta = JSON.parse(store.get('MAALFLOW_DEMO_DATA_V1'));
   if ((meta.data.trans || []).length !== 0) throw new Error('metadata entry still contains the huge transaction array');
   if (meta.performanceStorage.chunkCount !== 3) throw new Error('wrong chunk count');
 
@@ -47,11 +47,11 @@ const { writePerformanceSnapshot, readPerformanceSnapshot, clearPerformanceSnaps
   if (await readPerformanceSnapshot('other') !== null) throw new Error('namespace isolation failed');
 
   await writePerformanceSnapshot(makeSnapshot(500), { namespace: 'guest', tier: '500' });
-  if (store.has('MYFI_DEMO_DATA_V1:CHUNK:1') || store.has('MYFI_DEMO_DATA_V1:CHUNK:2')) throw new Error('stale chunks were not removed');
+  if (store.has('MAALFLOW_DEMO_DATA_V1:CHUNK:1') || store.has('MAALFLOW_DEMO_DATA_V1:CHUNK:2')) throw new Error('stale chunks were not removed');
   const smaller = await readPerformanceSnapshot('guest');
   if (!smaller || smaller.data.trans.length !== 500) throw new Error('smaller rewrite failed');
 
   await clearPerformanceSnapshot();
   if (store.size !== 0) throw new Error(`performance storage cleanup left ${store.size} keys`);
-  console.log('MYFI PERFORMANCE STORAGE RUNTIME V5.1.2: PASSED');
+  console.log('MaalFlow PERFORMANCE STORAGE RUNTIME V5.1.2: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

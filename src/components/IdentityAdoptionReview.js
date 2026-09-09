@@ -1,4 +1,4 @@
-// MYFI — reviewing pending mutations before adopting a different cloud ledger.
+// MaalFlow — reviewing pending mutations before adopting a different cloud ledger.
 //
 // This is the screen that stands between the owner's queued financial entries
 // and a replacement of their local ledger. Three real accounts reached the

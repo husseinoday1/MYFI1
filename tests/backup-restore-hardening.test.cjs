@@ -8,14 +8,14 @@ const source = fs.readFileSync(backupDataPath, 'utf8');
 
 const transformed = source
   .replace(/export const /g, 'const ')
-  + '\nmodule.exports = { MYFI_BACKUP_DATA_VERSION, MYFI_BACKUP_KIND, buildFinancialBackup, inspectBackupData, pickFinancialBackupConfig, mergeFinancialBackupConfig, sanitizeBackupCategories };';
+  + '\nmodule.exports = { MAALFLOW_BACKUP_DATA_VERSION, MAALFLOW_BACKUP_KIND, buildFinancialBackup, inspectBackupData, pickFinancialBackupConfig, mergeFinancialBackupConfig, sanitizeBackupCategories };';
 
 const moduleObj = { exports: {} };
 new Function('module', 'exports', transformed)(moduleObj, moduleObj.exports);
 
 const {
-  MYFI_BACKUP_DATA_VERSION,
-  MYFI_BACKUP_KIND,
+  MAALFLOW_BACKUP_DATA_VERSION,
+  MAALFLOW_BACKUP_KIND,
   buildFinancialBackup,
   inspectBackupData,
   pickFinancialBackupConfig,
@@ -23,8 +23,8 @@ const {
   sanitizeBackupCategories,
 } = moduleObj.exports;
 
-assert.equal(MYFI_BACKUP_DATA_VERSION, 11);
-assert.equal(MYFI_BACKUP_KIND, 'myfi_financial_backup');
+assert.equal(MAALFLOW_BACKUP_DATA_VERSION, 11);
+assert.equal(MAALFLOW_BACKUP_KIND, 'maalflow_financial_backup');
 
 const sourceCfg = {
   currency: 'IQD',
@@ -57,7 +57,7 @@ const base = buildFinancialBackup({
   trackerItems: [{ id: 'item-phone', typeId: 'type-installments', name: 'Phone', status: 'active' }],
 });
 
-assert.equal(base.kind, MYFI_BACKUP_KIND);
+assert.equal(base.kind, MAALFLOW_BACKUP_KIND);
 assert.equal(base.cfg, undefined);
 assert.equal(base.notif, undefined);
 assert.equal(JSON.stringify(base).includes('Oday'), false);
@@ -65,7 +65,7 @@ assert.equal(JSON.stringify(base).includes('oday'), false);
 assert.equal(JSON.stringify(base).includes('+964'), false);
 assert.equal(JSON.stringify(base).includes('private.jpg'), false);
 assert.equal(inspectBackupData(base).valid, true);
-assert.equal(base.manifest.format, 'MYFI_LOGICAL_BACKUP');
+assert.equal(base.manifest.format, 'MAALFLOW_LOGICAL_BACKUP');
 assert.equal(base.manifest.financialEngineVersion, 7);
 assert.ok(base.checksums.financialData);
 assert.ok(base.checksums.financialConfig);
@@ -191,4 +191,4 @@ const cats = sanitizeBackupCategories(
 );
 assert(cats.some(item => item.id === 'other'));
 
-console.log('MYFI financial backup boundary tests passed.');
+console.log('MaalFlow financial backup boundary tests passed.');

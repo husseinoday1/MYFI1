@@ -1,4 +1,4 @@
--- MYFI — profiles_id_fkey → ON DELETE CASCADE
+-- MaalFlow — profiles_id_fkey → ON DELETE CASCADE
 -- Date: 2026-08-20
 --
 -- ***  DO NOT RUN until 01_PRECHECK.sql output has been read and shows        ***

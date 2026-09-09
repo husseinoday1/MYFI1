@@ -419,7 +419,7 @@ export async function runP19RestoreEpochDeviceGate({ getState } = {}) {
       // maintenanceBlockedMs to get the production lock window.
       handshakeMarks.localHandshakeMs = Number(handshakeMarks.beginMs || 0) + handshakeMarks.commitMs;
     }
-    console.log('[MYFI:RESTORE_EPOCH_HANDSHAKE_TIMING]', JSON.stringify(handshakeMarks));
+    console.log('[MAALFLOW:RESTORE_EPOCH_HANDSHAKE_TIMING]', JSON.stringify(handshakeMarks));
   };
   const beginStarted = Date.now();
   const intent = await beginLedgerRestoreEpochV8({

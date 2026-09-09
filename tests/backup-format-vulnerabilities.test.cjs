@@ -58,15 +58,15 @@ function loadBackupDataModule() {
     Error,
   });
 
-  new vm.Script(`${source}\nmodule.exports = {\n  MYFI_BACKUP_DATA_VERSION,\n  MYFI_BACKUP_KIND,\n  MYFI_BACKUP_FORMAT,\n  buildFinancialBackup,\n  inspectBackupData,\n};`, { filename: SOURCE_PATH }).runInContext(context);
+  new vm.Script(`${source}\nmodule.exports = {\n  MAALFLOW_BACKUP_DATA_VERSION,\n  MAALFLOW_BACKUP_KIND,\n  MAALFLOW_BACKUP_FORMAT,\n  buildFinancialBackup,\n  inspectBackupData,\n};`, { filename: SOURCE_PATH }).runInContext(context);
 
   return moduleShim.exports;
 }
 
 const {
-  MYFI_BACKUP_DATA_VERSION,
-  MYFI_BACKUP_KIND,
-  MYFI_BACKUP_FORMAT,
+  MAALFLOW_BACKUP_DATA_VERSION,
+  MAALFLOW_BACKUP_KIND,
+  MAALFLOW_BACKUP_FORMAT,
   buildFinancialBackup,
   inspectBackupData,
 } = loadBackupDataModule();
@@ -202,15 +202,15 @@ test('invalid version is rejected', () => {
   expectInvalid(inspectBackupData(backup), 'backup_version_invalid');
 });
 
-test('backup newer than MYFI_BACKUP_DATA_VERSION is rejected', () => {
+test('backup newer than MAALFLOW_BACKUP_DATA_VERSION is rejected', () => {
   const backup = validBackup();
-  backup.v = MYFI_BACKUP_DATA_VERSION + 1;
+  backup.v = MAALFLOW_BACKUP_DATA_VERSION + 1;
   expectInvalid(inspectBackupData(backup), 'backup_version_newer');
 });
 
 test('invalid kind is rejected for current-format backup', () => {
   const backup = validBackup();
-  backup.kind = `${MYFI_BACKUP_KIND}_tampered`;
+  backup.kind = `${MAALFLOW_BACKUP_KIND}_tampered`;
   expectInvalid(inspectBackupData(backup), 'backup_kind_invalid');
 });
 
@@ -220,7 +220,7 @@ test('invalid kind is rejected for current-format backup', () => {
 
 test('manifest with wrong format is rejected', () => {
   const backup = validBackup();
-  backup.manifest.format = `${MYFI_BACKUP_FORMAT}_BROKEN`;
+  backup.manifest.format = `${MAALFLOW_BACKUP_FORMAT}_BROKEN`;
   expectInvalid(inspectBackupData(backup), 'backup_manifest_invalid');
 });
 

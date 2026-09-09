@@ -136,7 +136,7 @@ const isCanonicalRestoreOperationIdV11 = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8
 const deriveCanonicalRestoreProofDigestV11 = ({ operationId, ledgerId, fromEpoch, toEpoch, semanticHash, validatorVersion, counts: proofCounts }) => {
   const orderedCounts = Object.fromEntries(proofCountKeys.map(key => [key, Number(proofCounts[key])]));
   return crypto.createHash('sha256').update(JSON.stringify({
-    domain: 'MYFI:P10-012:RESTORE-PROOF:V1',
+    domain: 'MAALFLOW:P10-012:RESTORE-PROOF:V1',
     operationId: String(operationId).toLowerCase(), ledgerId: String(ledgerId),
     fromEpoch: Number(fromEpoch), toEpoch: Number(toEpoch), semanticHash: String(semanticHash).toLowerCase(),
     validatorVersion: Number(validatorVersion), counts: orderedCounts,
@@ -416,7 +416,7 @@ const snapshot = async () => {
   });
   assert.equal(second.ok, true, 'a second sequential restore epoch must also commit');
   assert.equal((await database.getFirstAsync(`SELECT restore_epoch FROM ledger_sync_identity_v8 WHERE namespace=?`, namespace)).restore_epoch, 9);
-  console.log('MYFI P10-010 ATOMIC LOCAL PROMOTION: PASS');
+  console.log('MaalFlow P10-010 ATOMIC LOCAL PROMOTION: PASS');
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;

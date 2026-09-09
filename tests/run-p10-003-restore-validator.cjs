@@ -169,4 +169,4 @@ assert.equal(archivedResult.ok, true,
   `archived without a recorded year must still restore: ${JSON.stringify(archivedResult.errors)}`);
 console.log('[PASS] archived-without-a-year is accepted; a year with no archive timestamp is not');
 
-console.log('MYFI P10-003 RESTORE STRUCTURAL VALIDATOR CONTRACT: PASS');
+console.log('MaalFlow P10-003 RESTORE STRUCTURAL VALIDATOR CONTRACT: PASS');

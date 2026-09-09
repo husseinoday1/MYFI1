@@ -1,4 +1,4 @@
-// MYFI — the year filter that silently emptied every History SQL page.
+// MaalFlow — the year filter that silently emptied every History SQL page.
 //
 // Found 2026-09-05 on a brand-new, fully synced account with no conflict of any
 // kind: History's SQL read returned zero rows on every single query, while the

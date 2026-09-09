@@ -153,5 +153,5 @@ const checkpointNamespace = `${namespace}::restore-checkpoint::${checkpointId}`;
   assert.equal(sourceText.includes('getAllAsync'),false,'bounded checkpoint path must not use getAllAsync');
   assert.equal(sourceText.includes('INSERT INTO ledger_financial_transactions_v7'),true,'financial payload copy remains SQL-native');
   console.log('[PASS] bounded SQL-native checkpoint reaches PROVING with exact counts and stripped workspace preferences');
-  console.log('MYFI P10-013 B3 BOUNDED CHECKPOINT: PASS');
+  console.log('MaalFlow P10-013 B3 BOUNDED CHECKPOINT: PASS');
 })().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.close());

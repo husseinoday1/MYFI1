@@ -11,7 +11,7 @@ const legacy = read('src/screens/SettingsLegacyScreen.js');
 const identity = read('src/lib/accountIdentity.js');
 const deleteModal = read('src/components/AccountDeleteModal.js');
 
-assert(onboarding.includes('dashboardCard'), 'Welcome must show a real MYFI-style financial dashboard visual');
+assert(onboarding.includes('dashboardCard'), 'Welcome must show a real MaalFlow-style financial dashboard visual');
 assert(onboarding.includes('insightCard'), 'Second onboarding screen must explain spending insight');
 assert(onboarding.includes('cloudVisual') && onboarding.includes('quickSetupCard'), 'Third onboarding screen must combine trust/cloud with quick setup');
 assert(onboarding.includes('[0, 1, 2].map') && onboarding.includes("step === 2 ? T.start : T.next"), 'Onboarding must remain exactly three concise steps');
@@ -36,6 +36,6 @@ assert(identity.includes('uploadProfileAvatar') && identity.includes('removeProf
 assert(deleteModal.includes('Delete permanently') && deleteModal.includes('حذف نهائي'), 'Permanent account deletion requires a confirmation modal');
 
 assert(settings.includes('T.guide') && settings.includes('T.about'), 'Settings must keep Guide and About entry points');
-assert(settings.includes('EXPO_PUBLIC_MYFI_INSTAGRAM_URL') && settings.includes('EXPO_PUBLIC_MYFI_FACEBOOK_URL'), 'Configured social links must stay available');
+assert(settings.includes('EXPO_PUBLIC_MAALFLOW_INSTAGRAM_URL') && settings.includes('EXPO_PUBLIC_MAALFLOW_FACEBOOK_URL'), 'Configured social links must stay available');
 
-console.log('MYFI DESIGN REFINEMENT V1 contract passed.');
+console.log('MaalFlow DESIGN REFINEMENT V1 contract passed.');

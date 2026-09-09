@@ -201,7 +201,7 @@ const inTransaction = task => db.withExclusiveTransactionAsync(task);
       /financial_live_generation_missing/,
       'registration must not overwrite an existing malformed/null token',
     );
-    console.log('MYFI P10-013 LIVE GENERATION FOUNDATION: PASS');
+    console.log('MaalFlow P10-013 LIVE GENERATION FOUNDATION: PASS');
   } finally {
     db.close();
   }

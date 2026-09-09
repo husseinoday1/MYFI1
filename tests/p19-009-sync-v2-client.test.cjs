@@ -39,4 +39,4 @@ assert.match(repo,/financial_v2_remote_command_incomplete/);
 assert.match(repo,/ledger_id,restore_epoch,mutation_id,command_id,command_sequence,server_sequence/);
 assert.match(repo,/Math\.max\(value,item\.commandSequence\)/);
 
-console.log('MYFI P19-009 INACTIVE SYNC V2 CLIENT CONTRACT: PASSED');
+console.log('MaalFlow P19-009 INACTIVE SYNC V2 CLIENT CONTRACT: PASSED');

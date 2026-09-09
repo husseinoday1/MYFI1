@@ -62,4 +62,4 @@ assert.equal(sameWorkspaceData(state({ cfg: { currency: 'IQD', lang: 'ar' } }), 
   assert.ok(conflicts.some(x => String(x.path).includes('cfg.currency')), 'scalar conflict should be recorded');
 }
 
-console.log('MYFI SYNC CORE V4: PASSED');
+console.log('MaalFlow SYNC CORE V4: PASSED');

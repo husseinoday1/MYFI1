@@ -153,7 +153,7 @@ const parseNumber = (value = '', line = '') => {
         decimalSeparator = last.char;
       }
     } else if (currency === 'IQD' && singleSeparatorKind === '.') {
-      // The Iraqi banking screenshots used by MYFI show IQD minor units with a
+      // The Iraqi banking screenshots used by MaalFlow show IQD minor units with a
       // dot: 660.000 IQD = 660, not 660000.
       // Keep this rule restricted to an explicit IQD currency context.
       if (separatorCount === 1 && trailingDigits === 3) {

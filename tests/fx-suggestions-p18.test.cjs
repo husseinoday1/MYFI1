@@ -52,4 +52,4 @@ const unresolved = fx.buildTransferFxSuggestion({ fromWallet: { currency: 'USD' 
 assert.equal(unresolved.available, false);
 assert.equal(unresolved.targetAmount, null);
 
-console.log('MYFI P18-003 FX SUGGESTION RUNTIME: PASSED');
+console.log('MaalFlow P18-003 FX SUGGESTION RUNTIME: PASSED');

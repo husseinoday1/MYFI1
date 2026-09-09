@@ -1,4 +1,4 @@
-// MYFI — sync-status honesty for a stuck V2 activation.
+// MaalFlow — sync-status honesty for a stuck V2 activation.
 //
 // Before this: SettingsScreen's syncState was computed only from
 // demoMode/user/syncing/online/lastSyncError/dirty. When V2 activation fails

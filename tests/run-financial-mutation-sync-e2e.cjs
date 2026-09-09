@@ -7,9 +7,9 @@ const env = Object.fromEntries(envText.split(/\r?\n/).filter(line => line && !li
   const index = line.indexOf('=');
   return [line.slice(0, index), line.slice(index + 1)];
 }));
-const credentialsPath = process.env.MYFI_TEST_CREDENTIAL_FILE;
-const credentials = process.env.MYFI_TEST_EMAIL && process.env.MYFI_TEST_PASSWORD
-  ? { email: process.env.MYFI_TEST_EMAIL, password: process.env.MYFI_TEST_PASSWORD }
+const credentialsPath = process.env.MAALFLOW_TEST_CREDENTIAL_FILE;
+const credentials = process.env.MAALFLOW_TEST_EMAIL && process.env.MAALFLOW_TEST_PASSWORD
+  ? { email: process.env.MAALFLOW_TEST_EMAIL, password: process.env.MAALFLOW_TEST_PASSWORD }
   : credentialsPath ? JSON.parse(fs.readFileSync(credentialsPath, 'utf8')) : null;
 if (!credentials) throw new Error('Temporary staging credentials are required.');
 

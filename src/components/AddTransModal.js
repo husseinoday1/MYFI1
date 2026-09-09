@@ -1829,8 +1829,8 @@ export default function AddTransModal({
                 ) : null}
                 <Text style={[s.selectDetail, { color: th.sub, textAlign: align, marginTop: 6 }]}>
                   {cfg.lang === 'ar'
-                    ? `MYFI يحفظ مبالغ التحويل وسعره بتاريخ ${dateISO}. تغيير أسعار المحافظ لاحقاً لا يعيد كتابة هذه الحركة.`
-                    : `MYFI freezes the transfer amounts and rate on ${dateISO}. Future wallet-rate changes do not rewrite this transaction.`}
+                    ? `MaalFlow يحفظ مبالغ التحويل وسعره بتاريخ ${dateISO}. تغيير أسعار المحافظ لاحقاً لا يعيد كتابة هذه الحركة.`
+                    : `MaalFlow freezes the transfer amounts and rate on ${dateISO}. Future wallet-rate changes do not rewrite this transaction.`}
                 </Text>
                 {transferValidationMessage ? (
                   <Text style={[s.selectDetail, { color: th.exp, textAlign: align, marginTop: 7, ...weight('900') }]}>

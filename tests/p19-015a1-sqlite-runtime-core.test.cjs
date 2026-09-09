@@ -66,4 +66,4 @@ assert(v7.includes("migrationId: '0011_archive_recovery_import'"), 'V11 archive 
 assert(v7.includes("migrationId: '0012_archive_recovery_stage_rows'"), 'V12 archive receipt migration missing');
 assert(v7.includes("migrationId: '0013_posting_transaction_index'"), 'V13 posting-transaction index migration missing');
 
-console.log('MYFI P19-015A1 SQLITE RUNTIME CORE CONTRACT: PASSED');
+console.log('MaalFlow P19-015A1 SQLITE RUNTIME CORE CONTRACT: PASSED');

@@ -7,7 +7,7 @@ const harness = fs.readFileSync(path.join(root, 'src/dev/financialLedgerV7Device
 const settings = fs.readFileSync(path.join(root, 'src/screens/SettingsScreen.js'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'App.js'), 'utf8');
 
-assert.match(harness, /__myfi_v7_device_harness__/);
+assert.match(harness, /__maalflow_v7_device_harness__/);
 assert.match(harness, /clearFinancialWorkspaceV7/);
 assert.match(harness, /finally\s*\{/);
 assert.match(harness, /idempotency_failed/);
@@ -24,7 +24,7 @@ assert.match(harness, /pending\.length === 4/);
 assert.doesNotMatch(settings, /runFinancialLedgerV7DeviceHarness/);
 assert.doesNotMatch(settings, /Test SQLite V7 on this device/);
 assert.match(app, /__DEV__[\s\S]*EXPO_PUBLIC_R01_DEVICE_GATE/);
-assert.match(app, /MYFI:R01_DEVICE_GATE\] PASS/);
+assert.match(app, /MAALFLOW:R01_DEVICE_GATE\] PASS/);
 assert.match(app, /import\('\.\/src\/dev\/financialLedgerV7DeviceHarness'\)/);
 
-console.log('MYFI Financial Ledger V7 native device harness contract passed.');
+console.log('MaalFlow Financial Ledger V7 native device harness contract passed.');

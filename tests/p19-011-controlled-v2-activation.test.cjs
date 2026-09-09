@@ -113,4 +113,4 @@ assert.ok(
   'legacy activation-evidence key must never be written again',
 );
 
-console.log('MYFI P19-011R1 VERIFIED READBACK + CONTROLLED V2 ACTIVATION: PASSED');
+console.log('MaalFlow P19-011R1 VERIFIED READBACK + CONTROLLED V2 ACTIVATION: PASSED');

@@ -104,7 +104,7 @@ jobs:
           EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
           ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
           test "$ACTUAL" = "$EXPECTED"
-          echo "[PASS] signing certificate matches installed MYFI"
+          echo "[PASS] signing certificate matches installed MaalFlow"
 
       - name: Build signed diagnostic APK
         working-directory: android

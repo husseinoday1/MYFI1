@@ -207,5 +207,5 @@ const inboxStatuses = db => db.native.prepare('SELECT apply_status FROM ledger_i
   assert.equal(pagedGapResult.reason, 'financial_v2_remote_cas_conflict');
   pagedGap.native.close();
 
-  console.log('MYFI P20 V2 SHADOW SEQUENTIAL COMMANDS RUNTIME: PASSED');
+  console.log('MaalFlow P20 V2 SHADOW SEQUENTIAL COMMANDS RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

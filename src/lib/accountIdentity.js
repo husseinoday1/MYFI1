@@ -1,5 +1,5 @@
-const RESERVED_USERNAMES = new Set(['admin', 'support', 'myfi', 'root', 'system']);
-export const PROFILE_AVATAR_BUCKET = 'myfi-avatars';
+const RESERVED_USERNAMES = new Set(['admin', 'support', 'maalflow', 'root', 'system']);
+export const PROFILE_AVATAR_BUCKET = 'maalflow-avatars';
 
 export const cleanDisplayName = (value = '') => String(value || '')
   .trim()
@@ -31,9 +31,9 @@ export const normalizePhone = (value = '') => String(value || '')
 export const deriveUsername = ({ user, cfg } = {}) => {
   const metadata = user?.user_metadata || {};
   const emailStem = String(user?.email || '').split('@')[0];
-  const candidate = cfg?.username || metadata.username || metadata.preferred_username || emailStem || 'myfi_user';
+  const candidate = cfg?.username || metadata.username || metadata.preferred_username || emailStem || 'maalflow_user';
   const normalized = normalizeUsername(candidate);
-  return isValidUsername(normalized) ? normalized : 'myfi_user';
+  return isValidUsername(normalized) ? normalized : 'maalflow_user';
 };
 
 export const deriveDisplayName = ({ user, cfg } = {}) => {
@@ -42,7 +42,7 @@ export const deriveDisplayName = ({ user, cfg } = {}) => {
   const fromCfg = cleanDisplayName(cfg?.displayName || (/^(المستخدم|user)$/i.test(legacyName) ? '' : legacyName));
   const fromUser = cleanDisplayName(metadata.full_name || metadata.name || metadata.displayName);
   const fromEmail = cleanDisplayName(String(user?.email || '').split('@')[0]);
-  return fromCfg || fromUser || fromEmail || 'MYFI';
+  return fromCfg || fromUser || fromEmail || 'MAALFLOW';
 };
 
 export const accountPublicId = ({ user, cfg } = {}) => `@${deriveUsername({ user, cfg })}`;

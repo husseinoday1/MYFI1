@@ -617,7 +617,7 @@ const run = async () => {
   assert.equal(archiveDb.committed, true);
   assert.equal(liveGeneration(archiveDb), 1, `archive generation=${liveGeneration(archiveDb)}`);
 
-  console.log('MYFI Financial Ledger V7 repository runtime mock passed.');
+  console.log('MaalFlow Financial Ledger V7 repository runtime mock passed.');
 };
 
 run().catch(error => {

@@ -17,7 +17,7 @@ must('src/store/slices/useSyncSlice.js', /cleanupDeletedAccountLocalNamespace/, 
 mustNot('src/screens/SettingsScreen.js', /clearVaultSnapshot\s*\(\s*namespaceForUser\s*\(\s*user\s*\)\s*\)/, 'delete-account UI clears financial vault directly');
 
 // Active SQLite financial engine and write/read migration.
-must('src/lib/activeLedgerRepository.js', /MYFI_ACTIVE_SQLITE_LEDGER_V6/, 'active ledger marker missing');
+must('src/lib/activeLedgerRepository.js', /MAALFLOW_ACTIVE_SQLITE_LEDGER_V6/, 'active ledger marker missing');
 must('src/lib/activeLedgerRepository.js', /CREATE TABLE IF NOT EXISTS ledger_transactions/, 'relational transactions table missing');
 must('src/lib/activeLedgerRepository.js', /CREATE TABLE IF NOT EXISTS ledger_wallets/, 'relational wallets table missing');
 must('src/lib/activeLedgerRepository.js', /CREATE TABLE IF NOT EXISTS ledger_outbox/, 'sync outbox missing');
@@ -46,7 +46,7 @@ must('src/screens/ReportsScreen.js', /catSpend\(periodTrans, cats\)/, 'Reports h
 mustNot('src/screens/ReportsScreen.js', /periodStatsOverride/, 'Reports can overwrite hydrated totals with a stale SQL projection');
 
 // Real multi-currency money model.
-must('src/lib/financialCoreV2.js', /MYFI_FINANCIAL_CORE_V2/, 'Financial Core V2 marker missing');
+must('src/lib/financialCoreV2.js', /MAALFLOW_FINANCIAL_CORE_V2/, 'Financial Core V2 marker missing');
 must('src/lib/financialCoreV2.js', /buildCurrencyFields/, 'native/base amount fields missing');
 must('src/lib/financialCoreV2.js', /buildTransferCurrencyFields/, 'cross-currency transfer model missing');
 must('src/lib/financialCoreV2.js', /feeBaseAmount/, 'cross-currency transfer fee base value missing');
@@ -92,7 +92,7 @@ must('src/dev/performanceTestData.js', /tier\.mode === 'active'/, 'active-ledger
 must('src/dev/performanceTestData.js', /currentDayCap/, 'performance generator current-day cap missing');
 
 // Phase 2/3 deliberately does not deploy cloud schema or remove V5.3 archive/backup behavior.
-must('src/lib/localArchiveRepository.js', /MYFI_LOCAL_COLD_ARCHIVE_V5_3/, 'V5.3 cold archive baseline was removed during Phase 2/3');
+must('src/lib/localArchiveRepository.js', /MAALFLOW_LOCAL_COLD_ARCHIVE_V5_3/, 'V5.3 cold archive baseline was removed during Phase 2/3');
 must('src/store/slices/dataSlice.js', /await storeColdArchiveYear/, 'existing safe archive persistence path was removed');
 must('src/store/slices/dataSlice.js', /if \(!archiveStored\) return false/, 'archive can remove hot data before SQLite archive succeeds');
 
@@ -122,4 +122,4 @@ assert.equal(transfer.transferToAmount, 131000, 'transfer target amount wrong');
 assert.equal(transfer.transferRate, 1310, 'transfer historical rate wrong');
 assert.equal(transfer.feeBaseAmount, 2620, 'transfer fee base value wrong');
 
-console.log('MYFI FINANCIAL CORE PHASE 2+3: PASSED');
+console.log('MaalFlow FINANCIAL CORE PHASE 2+3: PASSED');

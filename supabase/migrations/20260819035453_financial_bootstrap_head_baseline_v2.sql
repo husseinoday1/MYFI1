@@ -1,4 +1,4 @@
--- MYFI P19 FINAL — seed V2 entity-head revisions from the finalized bootstrap baseline.
+-- MaalFlow P19 FINAL — seed V2 entity-head revisions from the finalized bootstrap baseline.
 --
 -- Root cause fixed here:
 --   finalize_financial_bootstrap_v2() verifies and finalizes the immutable bootstrap

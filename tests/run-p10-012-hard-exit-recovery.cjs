@@ -42,7 +42,7 @@ const inspect = (filename) => {
   }
 };
 
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'myfi-p10-012-real-hard-exit-'));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'maalflow-p15-012-real-hard-exit-'));
 try {
   for (const [boundary, expectedStatus, promoted] of boundaries) {
     const filename = path.join(temp, `${boundary}.sqlite`);
@@ -51,8 +51,8 @@ try {
       encoding: 'utf8',
       env: {
         ...process.env,
-        MYFI_P10_012_RUNTIME_DB_FILE: filename,
-        MYFI_P10_012_HARD_EXIT_BOUNDARY: boundary,
+        MAALFLOW_P10_012_RUNTIME_DB_FILE: filename,
+        MAALFLOW_P10_012_HARD_EXIT_BOUNDARY: boundary,
       },
     });
     assert.equal(killed.status, 86, `${boundary} must literally terminate the real financial worker: ${killed.stderr}`);
@@ -67,8 +67,8 @@ try {
       encoding: 'utf8',
       env: {
         ...process.env,
-        MYFI_P10_012_RUNTIME_DB_FILE: filename,
-        MYFI_P10_012_RUNTIME_RESUME: '1',
+        MAALFLOW_P10_012_RUNTIME_DB_FILE: filename,
+        MAALFLOW_P10_012_RUNTIME_RESUME: '1',
       },
     });
     assert.equal(resumed.status, 0, `${boundary} must resume through real P10-010/011: ${resumed.stderr}`);
@@ -80,7 +80,7 @@ try {
     assert.deepEqual(completed.archives, [2025]);
   }
   console.log(`[PASS] ${boundaries.length} literal exits preserve/resume real hot ledger, archive, epoch and canonical reload`);
-  console.log('MYFI P10-012 REAL FINANCIAL HARD-EXIT RECOVERY: PASS');
+  console.log('MaalFlow P10-012 REAL FINANCIAL HARD-EXIT RECOVERY: PASS');
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
 }

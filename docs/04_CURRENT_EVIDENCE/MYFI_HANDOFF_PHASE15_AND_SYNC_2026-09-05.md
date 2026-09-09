@@ -33,7 +33,7 @@ From the audit in `MYFI_PHASE15_GAP_ANALYSIS_2026-09-04.md`.
 | §96 Dataset tiers | PARTIAL, unchanged | tiers generate; still target the pre-cutover store |
 | §97 p50/p95 metrics | **DONE (instrumented)** | `historyReadPathTelemetry.js`, commit `443569a` |
 | §98 Memory metrics | **NOT DONE** | see §5 — needs a device, cannot be faked |
-| §99 SLO doc | DONE earlier | `MYFI_PERFORMANCE_SLO.md` |
+| §99 SLO doc | DONE earlier | `MAALFLOW_PERFORMANCE_SLO.md` |
 | §100 100K policy | PARTIAL, unchanged | generates in Node, unobserved on device |
 | §101 Reliability probes | DONE earlier | 5 fault probes in CI |
 | §102 SQLite config | DONE earlier | found + fixed a real durability bug (`070f5d9`) |

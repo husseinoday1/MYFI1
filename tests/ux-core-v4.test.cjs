@@ -42,4 +42,4 @@ assert.ok(reports.includes('onAddIncome'));
 assert.ok(app.includes('<HistoryScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc}'));
 assert.ok(app.includes('<ReportsScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc}'));
 
-console.log('MYFI UX CORE V4: PASSED');
+console.log('MaalFlow UX CORE V4: PASSED');

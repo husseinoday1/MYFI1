@@ -54,4 +54,4 @@ assert.match(sync, /status: 'local_data_deleted_pending_recovery'/);
 assert.ok(gate.includes('p20-local-reset-v2-interlock.test.cjs'));
 assert.ok(gate.includes('run-p20-local-reset-v2-interlock.cjs'));
 
-console.log('MYFI P20 LOCAL RESET V2 INTERLOCK CONTRACT: PASSED');
+console.log('MaalFlow P20 LOCAL RESET V2 INTERLOCK CONTRACT: PASSED');

@@ -82,7 +82,7 @@
 
 ### 3.7 المساحة العائلية القديمة لا تصلح للبناء عليها
 
-`src/screens/SpaceScreen.js` شاشة يتيمة تستدعي جداول `family_rooms` و`room_members` القديمة، وتطلب بيانات أعضاء بصورة واسعة. `docs/design/05_MYFI_COMPONENT_ARCHITECTURE.md` يصنفها صراحة كميزة مهجورة/يتيمة.
+`src/screens/SpaceScreen.js` شاشة يتيمة تستدعي جداول `family_rooms` و`room_members` القديمة، وتطلب بيانات أعضاء بصورة واسعة. `docs/design/05_MAALFLOW_COMPONENT_ARCHITECTURE.md` يصنفها صراحة كميزة مهجورة/يتيمة.
 
 في المقابل، `supabase/migrations/202608010001_create_normalized_core.sql` يحتوي أساسًا أحدث:
 

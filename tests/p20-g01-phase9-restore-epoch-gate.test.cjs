@@ -78,4 +78,4 @@ assert(workflow.includes('npm run test:gate:runtime'));
 assert(workflow.includes('npm run verify:android'));
 assert(workflow.includes('DeviceAcceptance=PENDING'));
 
-console.log('MYFI P20-G01 PHASE 9 RESTORE-EPOCH DEVICE GATE CONTRACT: PASSED');
+console.log('MaalFlow P20-G01 PHASE 9 RESTORE-EPOCH DEVICE GATE CONTRACT: PASSED');

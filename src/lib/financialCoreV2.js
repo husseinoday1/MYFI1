@@ -1,4 +1,4 @@
-// MYFI_FINANCIAL_CORE_V2
+// MAALFLOW_FINANCIAL_CORE_V2
 // Pure money/multi-currency helpers. Keep this module dependency-light so it can
 // be exercised by Node contract tests without React Native or Expo.
 import { currencyFractionDigits, roundCurrency } from './money';

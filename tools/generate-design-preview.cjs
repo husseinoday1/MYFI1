@@ -5,9 +5,9 @@ const { chromium } = require('playwright');
 
 const workspace = path.resolve(__dirname, '..');
 const outDir = path.join(workspace, 'output', 'pdf');
-const htmlPath = path.join(outDir, 'myfi-design-preview.html');
-const pdfPath = path.join(outDir, 'myfi-design-preview.pdf');
-const previewPngPath = path.join(outDir, 'myfi-design-preview-cover.png');
+const htmlPath = path.join(outDir, 'maalflow-design-preview.html');
+const pdfPath = path.join(outDir, 'maalflow-design-preview.pdf');
+const previewPngPath = path.join(outDir, 'maalflow-design-preview-cover.png');
 const fontUrl = pathToFileURL(path.join(workspace, 'assets', 'fonts', 'Cairo.ttf')).href;
 
 fs.mkdirSync(outDir, { recursive: true });
@@ -74,7 +74,7 @@ const screenGrid = (items) => `<div class="screen-grid">${items.join('')}</div>`
 
 const pages = [
   page({
-    kicker: 'MYFI - معاينة قبل التطبيق',
+    kicker: 'MaalFlow - معاينة قبل التطبيق',
     title: 'ملف تصويت للتصميم بعد آخر الملاحظات',
     subtitle: 'هذه ليست نسخة نهائية من التطبيق. هي صور تفصيلية مقترحة حتى توافق على الشكل والمنطق قبل التنفيذ الكامل.',
     phones: screenGrid([
@@ -95,7 +95,7 @@ const pages = [
     subtitle: 'اختصار الواجهات الكثيرة، مع تسجيل الدخول ونوع الحساب من البداية.',
     phones: screenGrid([
       phone({
-        title: 'مرحبا بك في MYFI',
+        title: 'مرحبا بك في MaalFlow',
         tone: 'blue',
         meta: '✦',
         rows: [
@@ -146,7 +146,7 @@ const pages = [
         meta: '@',
         rows: [
           { label: 'الاسم', value: 'Hussein', strong: true },
-          { label: 'اليوزر نيم', value: '@hussein_myfi' },
+          { label: 'اليوزر نيم', value: '@hussein_maalflow' },
           { label: 'البريد', value: 'user@email.com' },
           { label: 'المزامنة', value: 'آخر تحديث الآن' },
         ],
@@ -542,7 +542,7 @@ const html = `<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <title>MYFI Design Preview</title>
+  <title>MaalFlow Design Preview</title>
   <style>
     @font-face { font-family: CairoLocal; src: url("${fontUrl}") format("truetype"); }
     * { box-sizing: border-box; }

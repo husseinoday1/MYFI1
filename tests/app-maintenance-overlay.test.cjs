@@ -68,4 +68,4 @@ assert.ok(
 );
 console.log('[PASS] the startup splash is left alone');
 
-console.log('MYFI APP MAINTENANCE OVERLAY CONTRACT: PASS');
+console.log('MaalFlow APP MAINTENANCE OVERLAY CONTRACT: PASS');

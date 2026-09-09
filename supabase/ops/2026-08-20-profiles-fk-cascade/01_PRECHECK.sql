@@ -1,4 +1,4 @@
--- MYFI — profiles_id_fkey drift PRECHECK
+-- MaalFlow — profiles_id_fkey drift PRECHECK
 -- Date: 2026-08-20
 -- READ-ONLY. No UPDATE, no DELETE, no ALTER, no DDL of any kind.
 --

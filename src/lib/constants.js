@@ -1,32 +1,38 @@
 import { normalizeMonthNameStyle } from './months';
 
 export const STORAGE = {
-  DATA:      'MYFI_DATA_V1',
-  SETTINGS:  'MYFI_SETTINGS_V1',
-  CATS:      'MYFI_CATS_V1',
-  LOCAL_TS:  'MYFI_TS_V1',
-  SYNC_TS:   'MYFI_SYNC_TS_V1',
-  RECOVERY:  'MYFI_RECOVERY_V1',
-  ROLLBACK:  'MYFI_IMPORT_ROLLBACK_V1',
-  NOTIF:     'MYFI_NOTIF_V1',
-  BIOMETRIC: 'MYFI_BIO_V1',
-  ONBOARD:   'MYFI_ONBOARD_V1',
-  FAB_POS:   'MYFI_FAB_POS_V1',
-  DEMO_REAL: 'MYFI_DEMO_REAL_V1',
+  DATA:      'MAALFLOW_DATA_V1',
+  SETTINGS:  'MAALFLOW_SETTINGS_V1',
+  CATS:      'MAALFLOW_CATS_V1',
+  LOCAL_TS:  'MAALFLOW_TS_V1',
+  SYNC_TS:   'MAALFLOW_SYNC_TS_V1',
+  RECOVERY:  'MAALFLOW_RECOVERY_V1',
+  ROLLBACK:  'MAALFLOW_IMPORT_ROLLBACK_V1',
+  NOTIF:     'MAALFLOW_NOTIF_V1',
+  BIOMETRIC: 'MAALFLOW_BIO_V1',
+  ONBOARD:   'MAALFLOW_ONBOARD_V1',
+  FAB_POS:   'MAALFLOW_FAB_POS_V1',
+  DEMO_REAL: 'MAALFLOW_DEMO_REAL_V1',
   // Phase 15 §97. Cold start yields exactly one sample per launch, so its
   // p50/p95 is meaningless without carrying a bounded ring across launches.
   // Durations only -- no financial data, no identifiers.
-  PERF_COLD_START: 'MYFI_PERF_COLD_START_V1',
-  DEMO_DATA: 'MYFI_DEMO_DATA_V1',
-  DEMO_ACTIVE: 'MYFI_DEMO_ACTIVE_V1',
+  PERF_COLD_START: 'MAALFLOW_PERF_COLD_START_V1',
+  DEMO_DATA: 'MAALFLOW_DEMO_DATA_V1',
+  DEMO_ACTIVE: 'MAALFLOW_DEMO_ACTIVE_V1',
 };
 
+// Single-brand storage surface. The pre-launch MaalFlow rename also changed the
+// Android applicationId (com.maalflow.app -> com.maalflow.app), so a MaalFlow build
+// gets a fresh private storage directory and can never observe a key written by
+// any earlier build. Older brand keys are therefore unreachable, not merely
+// deprecated, and carrying them forward would only preserve retired names.
+// Data preservation across renames becomes a real requirement after Phase 16.
 export const LEGACY_STORAGE_KEYS = {
-  data: [STORAGE.DATA, 'TERRA_DATA_V1', 'FINANCE_DATA_V1', 'MY_FINANCE_DATA_V1', 'MYFI_APP_DATA_V1'],
-  settings: [STORAGE.SETTINGS, 'TERRA_SETTINGS_V1', 'FINANCE_SETTINGS_V1', 'MY_FINANCE_SETTINGS_V1', 'MYFI_APP_SETTINGS_V1'],
-  cats: [STORAGE.CATS, 'TERRA_CATS_V1', 'FINANCE_CATS_V1', 'MY_FINANCE_CATS_V1', 'MYFI_APP_CATS_V1'],
-  notif: [STORAGE.NOTIF, 'TERRA_NOTIF_V1', 'FINANCE_NOTIF_V1', 'MY_FINANCE_NOTIF_V1', 'MYFI_APP_NOTIF_V1'],
-  recovery: [STORAGE.RECOVERY, 'TERRA_RECOVERY_V1', 'FINANCE_RECOVERY_V1', 'MY_FINANCE_RECOVERY_V1', 'MYFI_APP_RECOVERY_V1'],
+  data: [STORAGE.DATA],
+  settings: [STORAGE.SETTINGS],
+  cats: [STORAGE.CATS],
+  notif: [STORAGE.NOTIF],
+  recovery: [STORAGE.RECOVERY],
 };
 
 export const detectSystemLang = () => {

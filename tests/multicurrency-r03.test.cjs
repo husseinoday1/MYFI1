@@ -106,4 +106,4 @@ if (ts) {
   assert.equal(unresolved.toBaseRate, null);
 }
 
-console.log('MYFI R03 MULTI-CURRENCY CONTRACT: PASSED');
+console.log('MaalFlow R03 MULTI-CURRENCY CONTRACT: PASSED');

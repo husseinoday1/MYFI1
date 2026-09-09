@@ -210,5 +210,5 @@ const createConflictPromotionFixture = namespace => {
   assert.equal(changedMutationResult.reason, 'financial_v2_conflict_recovery_promotion_pending_state_changed');
   assert.equal(changedMutation.db.native.prepare('SELECT COUNT(*) AS n FROM ledger_outbox_v3 WHERE ledger_id=?').get(changedMutation.fixture.oldLedger).n, 1, 'content-change rejection must not discard the outbox row');
   changedMutation.db.native.close();
-  console.log('MYFI P20 PHASE 12-D ATOMIC BOOTSTRAP + ARCHIVE PROMOTION SQLITE RUNTIME: PASSED');
+  console.log('MaalFlow P20 PHASE 12-D ATOMIC BOOTSTRAP + ARCHIVE PROMOTION SQLITE RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

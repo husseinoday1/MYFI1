@@ -10,4 +10,4 @@ assert.match(source, /financial_v2_bootstrap_recovery_source_changed/);
 assert.match(source, /financial_archive_recovery_source_changed/);
 assert.match(source, /promoteVerifiedBootstrapRecoveryV2/);
 assert.doesNotMatch(source, /useSyncSlice|set\(|navigation|Alert/);
-console.log('MYFI P20 PHASE 12-D RECOVERY COORDINATOR CONTRACT: PASSED');
+console.log('MaalFlow P20 PHASE 12-D RECOVERY COORDINATOR CONTRACT: PASSED');

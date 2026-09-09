@@ -55,7 +55,7 @@ number on each payment. Reasons, in order of weight:
 
 This is a plain count of cycles. It is explicitly **not** an amortization
 schedule — no interest/principal split — per the R04 contract freeze note in
-`docs/MYFI_FINANCIAL_CONTRACT.md`.
+`docs/MAALFLOW_FINANCIAL_CONTRACT.md`.
 
 ## Financial impact check
 

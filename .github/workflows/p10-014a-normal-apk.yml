@@ -1,4 +1,4 @@
-name: P10-014A Normal MYFI APK
+name: P10-014A Normal MaalFlow APK
 
 on:
   workflow_dispatch:
@@ -6,14 +6,14 @@ on:
     branches:
       - impl/p10-014a-local-strategy-b-device-gate-2026-08-22
       # Temporary explicit test branch: produces the normal, update-compatible
-      # MYFI APK through GitHub Actions instead of a local machine build.
+      # MaalFlow APK through GitHub Actions instead of a local machine build.
       - fix/pui-001-r2-onboarding-reader-recent-transactions
 
 permissions:
   contents: read
 
 jobs:
-  build-normal-myfi-apk:
+  build-normal-maalflow-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 70
     steps:
@@ -27,8 +27,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(node -p "require('./package.json').main")" = "index.js"
-          grep -Fq "applicationId 'com.myfi.app'" android/app/build.gradle
-          echo "[PASS] normal MYFI entry and application id verified"
+          grep -Fq "applicationId 'com.maalflow.app'" android/app/build.gradle
+          echo "[PASS] normal MaalFlow entry and application id verified"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -112,19 +112,19 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
           BADGING="$("$AAPT" dump badging "$APK" | head -1)"
           echo "$BADGING"
-          echo "$BADGING" | grep -Fq "package: name='com.myfi.app'"
+          echo "$BADGING" | grep -Fq "package: name='com.maalflow.app'"
           VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
           VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
           test -n "$VERSION_CODE"
           SHA="$(sha256sum "$APK" | awk '{print $1}')"
           SIZE="$(stat -c%s "$APK")"
           {
-            echo "BuildType=NORMAL_MYFI_RELEASE"
+            echo "BuildType=NORMAL_MAALFLOW_RELEASE"
             echo "DiagnosticEntry=NO"
             echo "ProductionRestoreWiring=YES"
             echo "Phase10ClosureCandidate=YES"
             echo "ApplicationEntry=index.js"
-            echo "ApplicationId=com.myfi.app"
+            echo "ApplicationId=com.maalflow.app"
             echo "BuildCommit=$(git rev-parse HEAD)"
             echo "Branch=$(git branch --show-current)"
             echo "VersionCode=$VERSION_CODE"
@@ -133,16 +133,16 @@ jobs:
             echo "InstallMode=ADB_INSTALL_R_PRESERVE_DATA"
             echo "SHA256=$SHA"
             echo "SizeBytes=$SIZE"
-          } | tee MYFI-normal-apk-evidence.txt
+          } | tee MaalFlow-normal-apk-evidence.txt
           sha256sum "$APK" > app-release.apk.sha256
 
-      - name: Upload normal MYFI APK
+      - name: Upload normal MaalFlow APK
         uses: actions/upload-artifact@v4
         with:
-          name: MYFI-P10-014A-normal-release
+          name: MaalFlow-P10-014A-normal-release
           path: |
             android/app/build/outputs/apk/release/app-release.apk
             app-release.apk.sha256
-            MYFI-normal-apk-evidence.txt
+            MaalFlow-normal-apk-evidence.txt
           if-no-files-found: error
           retention-days: 7

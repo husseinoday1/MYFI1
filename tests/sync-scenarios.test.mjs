@@ -72,4 +72,4 @@ const converged = merge(reconnect.state, reconnect.state);
 assert.equal(converged.conflicts.length, 0);
 assert.equal(sameWorkspaceData(converged.state, reconnect.state), true, 'merged phones must converge to one stable state');
 
-console.log('MYFI sync scenario tests passed: offline merge, field conflicts, deletion policy, nested payments, convergence.');
+console.log('MaalFlow sync scenario tests passed: offline merge, field conflicts, deletion policy, nested payments, convergence.');

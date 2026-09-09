@@ -108,4 +108,4 @@ assert(contractSource.includes("currentRelease: 'reject_until_explicit_reference
 assert(activeSource.includes("IN ('income','expense','commitment_payment')"), 'Summary semantic flow whitelist missing');
 assert(!activeSource.includes("IN ('income','expense','commitment_payment','debt_payment')"), 'Debt principal leaked into P&L summary');
 
-console.log('MYFI P04U2-003 debt component + reversal safe-rejection policy: PASSED');
+console.log('MaalFlow P04U2-003 debt component + reversal safe-rejection policy: PASSED');

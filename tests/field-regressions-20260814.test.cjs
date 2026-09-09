@@ -60,4 +60,4 @@ assert.match(pdf, /PRODUCT_FILE_PREFIX/);
 assert.match(pdf, /Financial_Report/);
 assert.match(constants, /theme: 'dark', themeMode: 'system'/);
 
-console.log('MYFI 2026-08-14 field regressions contract passed.');
+console.log('MaalFlow 2026-08-14 field regressions contract passed.');

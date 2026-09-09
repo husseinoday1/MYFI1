@@ -29,6 +29,6 @@ export async function applyOrientationMode(mode = 'system') {
     return;
   }
 
-  // "system": MYFI follows the device/user rotation preference.
+  // "system": MaalFlow follows the device/user rotation preference.
   await ScreenOrientation.unlockAsync();
 }

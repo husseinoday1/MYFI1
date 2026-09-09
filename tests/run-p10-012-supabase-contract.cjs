@@ -140,5 +140,5 @@ const event = Object.freeze({
     'cloud migration must not store semantic proof inputs or financial payloads');
   console.log('[PASS] migration draft binds owner/operation/proof and explicitly narrows grants and the legacy RPC');
 
-  console.log('MYFI P10-012 SUPABASE CONTRACT: PASS');
+  console.log('MaalFlow P10-012 SUPABASE CONTRACT: PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; });

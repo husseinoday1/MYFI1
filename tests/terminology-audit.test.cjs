@@ -40,4 +40,4 @@ for (const [ar, en] of required) {
   assert(ui.includes(en), `Missing canonical English term: ${en}`);
 }
 
-console.log('MYFI terminology audit passed.');
+console.log('MaalFlow terminology audit passed.');

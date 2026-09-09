@@ -341,7 +341,7 @@ const sourceInput = {
   });
   assert.equal(absentArchive.status, 'ready', 'no archive head is a normal ready empty archive');
   db.native.close();
-  console.log('MYFI P20 PHASE 12-C BOOTSTRAP RECOVERY SESSION SQLITE RUNTIME: PASSED');
+  console.log('MaalFlow P20 PHASE 12-C BOOTSTRAP RECOVERY SESSION SQLITE RUNTIME: PASSED');
 })().catch(error => {
   console.error(error);
   process.exit(1);

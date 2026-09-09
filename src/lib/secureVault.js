@@ -12,11 +12,11 @@ import {
 import { createSecureUuidV4 } from './secureUuid';
 import { enqueueNativeKvOperation } from './nativeKvQueue';
 
-const VAULT_KEY_ID = 'MYFI_VAULT_MASTER_KEY_V1';
-const WEB_KEY_ID = 'MYFI_WEB_VAULT_MASTER_KEY_V1';
-const DEVICE_ID = 'MYFI_DEVICE_ID_V1';
-const VAULT_PREFIX = 'MYFI_ENCRYPTED_SNAPSHOT_V1';
-const AUTH_PREFIX = 'MYFI_ENCRYPTED_AUTH_V1';
+const VAULT_KEY_ID = 'MAALFLOW_VAULT_MASTER_KEY_V1';
+const WEB_KEY_ID = 'MAALFLOW_WEB_VAULT_MASTER_KEY_V1';
+const DEVICE_ID = 'MAALFLOW_DEVICE_ID_V1';
+const VAULT_PREFIX = 'MAALFLOW_ENCRYPTED_SNAPSHOT_V1';
+const AUTH_PREFIX = 'MAALFLOW_ENCRYPTED_AUTH_V1';
 const PREVIOUS_SUFFIX = ':previous';
 const BACKUP_SUFFIXES = [':previous:1', ':previous:2', ':previous:3'];
 const LEGACY_PREVIOUS_SUFFIX = ':previous';

@@ -95,4 +95,4 @@ if (fs.existsSync(gatePath)) {
   console.log('[PASS] restore-epoch gate summarises coordinator and sync results');
 }
 
-console.log('MYFI DEV DIAGNOSTIC PAYLOAD PRIVACY CONTRACT: PASS');
+console.log('MaalFlow DEV DIAGNOSTIC PAYLOAD PRIVACY CONTRACT: PASS');

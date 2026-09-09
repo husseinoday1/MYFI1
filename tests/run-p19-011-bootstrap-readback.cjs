@@ -105,7 +105,7 @@ const makeSupabase = rows => ({
   assert.equal(corrupted.reason,'financial_v2_bootstrap_readback_row_hash_mismatch');
   assert.equal(corruptedRows.length,1,'a corrupted row must never reach the recovery stage callback');
 
-  console.log('MYFI P19-011R1 BOOTSTRAP READBACK RUNTIME: PASSED');
+  console.log('MaalFlow P19-011R1 BOOTSTRAP READBACK RUNTIME: PASSED');
 })().catch(error => {
   console.error(error);
   process.exit(1);

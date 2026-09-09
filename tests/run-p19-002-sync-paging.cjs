@@ -105,7 +105,7 @@ const response = ({ seq = 0, hasMore = false }) => ({
   assert.equal(stalledResult.pages, 1);
   assert.equal(stalledResult.hasMore, true);
 
-  console.log('MYFI P19-002 SYNC PAGING RUNTIME: PASSED');
+  console.log('MaalFlow P19-002 SYNC PAGING RUNTIME: PASSED');
 })().catch(error => {
   console.error(error);
   process.exit(1);

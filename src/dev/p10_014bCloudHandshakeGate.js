@@ -1,4 +1,4 @@
-// MYFI P10-014B — disposable-device proof-bound cloud handshake.
+// MaalFlow P10-014B — disposable-device proof-bound cloud handshake.
 // This gate is inert unless the CI/device build explicitly enables it. It never
 // reads or prints financial payloads and refuses to call Supabase for a non-empty
 // account. The cloud advance and local epoch CAS are one reviewed acceptance pair.

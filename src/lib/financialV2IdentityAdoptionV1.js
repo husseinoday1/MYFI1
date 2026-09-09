@@ -1,4 +1,4 @@
-// MYFI — adopting a DIFFERENT cloud ledger identity.
+// MaalFlow — adopting a DIFFERENT cloud ledger identity.
 //
 // Deliberately a separate path from prepareVerifiedCloudConflictRecoveryV1.
 // That one is correct for its own case and must not be loosened: it requires

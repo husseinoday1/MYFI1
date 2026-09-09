@@ -1,4 +1,4 @@
--- MYFI P10-012 — proof-bound restore epoch handshake (additive draft).
+-- MaalFlow P10-012 — proof-bound restore epoch handshake (additive draft).
 -- This migration is intentionally not applied by the P10-012 implementation task.
 -- It stores only opaque operation/proof identifiers, never semantic hashes, counts
 -- or financial payloads.

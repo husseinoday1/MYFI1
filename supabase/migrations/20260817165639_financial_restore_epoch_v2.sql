@@ -1,4 +1,4 @@
--- MYFI P19-008 — Restore Epoch V2 handshake.
+-- MaalFlow P19-008 — Restore Epoch V2 handshake.
 -- Old epoch mutations remain immutable audit history. The active ledger epoch
 -- advances atomically, so clients cannot pull/replay a superseded epoch.
 

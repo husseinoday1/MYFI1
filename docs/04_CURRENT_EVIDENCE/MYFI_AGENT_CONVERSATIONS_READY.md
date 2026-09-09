@@ -10,7 +10,7 @@ For each conversation below: open a new chat, paste the FIRST MESSAGE, then the 
 Skill: `myfi-planner`
 Goal: scoped plan within frozen sequence; no execution code.
 First message:
-> اقرأ skill: myfi-planner وتبع ما فيه. ننتظر مهمة تخطيط من المنسّق. اقرأ docs/00_MYFI_CANONICAL_AUTHORITY.md و docs/01_CORE_AUTHORITY/MYFI_MASTER_PLAN_FROZEN.md أولاً.
+> اقرأ skill: myfi-planner وتبع ما فيه. ننتظر مهمة تخطيط من المنسّق. اقرأ docs/00_MAALFLOW_CANONICAL_AUTHORITY.md و docs/01_CORE_AUTHORITY/MAALFLOW_MASTER_PLAN_FROZEN.md أولاً.
 
 ## 2. MYFI Implementer (المنفّذ)
 Skill: `myfi-implementer`

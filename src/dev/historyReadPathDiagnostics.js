@@ -1,7 +1,7 @@
-// MYFI Phase 15 — History read-path diagnostics collector.
+// MaalFlow Phase 15 — History read-path diagnostics collector.
 //
 // Answers the two questions the read-cutover sizing could not answer from source
-// alone (docs/04_CURRENT_EVIDENCE/MYFI_PHASE15_READ_CUTOVER_SIZING_2026-09-04.md):
+// alone (docs/04_CURRENT_EVIDENCE/MAALFLOW_PHASE15_READ_CUTOVER_SIZING_2026-09-04.md):
 //
 //   1. Is THIS device actually cut over — is ledger_workspace_state_v7.source_mode
 //      'sqlite' for the live namespace, or is it still 'shadow'? Everything about

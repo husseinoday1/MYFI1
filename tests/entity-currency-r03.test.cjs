@@ -82,4 +82,4 @@ assert.throws(() => core.buildEntityCurrencyFields({
   entityBaseRate: 1310,
 }), /wallet_historical_base_rate_required/);
 
-console.log('MYFI R03 ENTITY CURRENCY / GUEST MERGE CONTRACT: PASSED');
+console.log('MaalFlow R03 ENTITY CURRENCY / GUEST MERGE CONTRACT: PASSED');

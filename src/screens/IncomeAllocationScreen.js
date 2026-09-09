@@ -7,7 +7,7 @@ import { formatMoneyNumber } from '../lib/money';
 import { parseMoneyInput, preserveNumberInputDraft } from '../lib/numberInput';
 import { DEF_INCOME_ALLOCATION_PLAN, INCOME_ALLOCATION_BUCKETS, normalizeIncomeAllocationPlan } from '../lib/constants';
 import { CATEGORY_FLOWS, getCategoriesForFlow } from '../lib/categories';
-import { buildMyfiFlowPreview } from '../lib/myfiFlow';
+import { buildMaalFlowFlowPreview } from '../lib/maalflowFlow';
 import DateField from '../components/DateField';
 import { AppButton, ScreenScroll, SectionTitle, SurfaceCard, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
 import { RADIUS, SPACE, weight } from '../lib/tokens';
@@ -37,7 +37,7 @@ const clampPercent = (value) => Math.max(0, Math.min(100, Math.round(Number(valu
 
 export default function IncomeAllocationScreen() {
   const { th, lang, cfg, isAr } = useTheme();
-  const { cats, commitments, applyMyfiFlowPlan } = useStore();
+  const { cats, commitments, applyMaalFlowFlowPlan } = useStore();
   const stored = normalizeIncomeAllocationPlan(cfg.incomeAllocationPlan || DEF_INCOME_ALLOCATION_PLAN);
   const [strategy, setStrategy] = useState(stored.strategy);
   const [incomeText, setIncomeText] = useState(stored.income > 0 ? String(stored.income) : '');
@@ -64,7 +64,7 @@ export default function IncomeAllocationScreen() {
     ...next,
     [key]: income * (clampPercent(allocations[key]) / 100),
   }), {}), [income, allocations]);
-  const preview = useMemo(() => buildMyfiFlowPreview({
+  const preview = useMemo(() => buildMaalFlowFlowPreview({
     income,
     allocations,
     categoryBindings,
@@ -101,7 +101,7 @@ export default function IncomeAllocationScreen() {
 
   const save = async () => {
     if (!valid) return;
-    const result = await applyMyfiFlowPlan({
+    const result = await applyMaalFlowFlowPlan({
       strategy,
       income,
       allocations: INCOME_ALLOCATION_BUCKETS.reduce((next, key) => ({ ...next, [key]: clampPercent(allocations[key]) }), {}),
@@ -115,7 +115,7 @@ export default function IncomeAllocationScreen() {
   return (
     <ScreenScroll th={th}>
       <View style={s.heading}>
-        <Text style={[s.title, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'MYFI Flow' : 'MYFI Flow'}</Text>
+        <Text style={[s.title, { color: th.text, textAlign: textAlign(lang) }]}>{isAr ? 'تدفّق الدخل' : 'Income Flow'}</Text>
         <Text style={[s.subtitle, { color: th.sub, textAlign: textAlign(lang) }]}>
           {isAr ? 'خطتك المالية الحية: راجع الأثر ثم اربطها بميزانياتك.' : 'Your live money plan: review the impact, then connect it to real budgets.'}
         </Text>

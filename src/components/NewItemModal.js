@@ -46,7 +46,7 @@ const modalCopy = (lang = 'ar') => {
     previousDebt: ar ? 'لا، دين قديم' : 'No, an old debt',
     receivedDebt: ar ? 'نعم، استلمت المبلغ' : 'Yes, I received it',
     lentDebt: ar ? 'نعم، أعطيت المبلغ' : 'Yes, I gave it',
-    previousHint: ar ? 'اخترها إذا هذا دين من قبل ما تستخدم MYFI — رصيدك الحالي ما يتغيّر.' : 'Pick this if the debt existed before you used MYFI — your current balance stays the same.',
+    previousHint: ar ? 'اخترها إذا هذا دين من قبل ما تستخدم MaalFlow — رصيدك الحالي ما يتغيّر.' : 'Pick this if the debt existed before you used MaalFlow — your current balance stays the same.',
     receivedHint: ar ? 'اخترها إذا الفلوس دخلت حسابك الحين — رصيدك يرتفع بقيمة الدين.' : 'Pick this if the money entered your account now — your balance goes up by the debt amount.',
     lentHint: ar ? 'اخترها إذا الفلوس خرجت من حسابك الحين — رصيدك ينزل بقيمة الدين.' : 'Pick this if the money left your account now — your balance goes down by the debt amount.',
     savingReservedHint: ar
@@ -299,7 +299,7 @@ export default function NewItemModal({ visible, kind, onClose, preset = null }) 
     { value: true, label: T.monthlyRepeat, icon: 'repeat-outline', color: th.warn },
     { value: false, label: T.oneTimeRepeat, icon: 'ellipse-outline', color: th.warn },
   ];
-  // Classification only (docs/04_CURRENT_EVIDENCE/MYFI_STEP8_ONBOARDING_PAYMENT_HISTORY_2026-08-27.md
+  // Classification only (docs/04_CURRENT_EVIDENCE/MAALFLOW_STEP8_ONBOARDING_PAYMENT_HISTORY_2026-08-27.md
   // follow-up) — does not change repeat/lifecycle/payment logic, just tags
   // the commitment so Follow-ups can show it distinctly.
   const commitmentSubTypeOptions = [

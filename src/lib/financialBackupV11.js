@@ -3,7 +3,7 @@
 // This is intentionally an internal writer only. The current Settings export remains
 // V10 until the paired strict decoder and staged restore path exist. Publishing a
 // format before it can be safely decoded and promoted would create a file users
-// reasonably expect to restore but MYFI cannot yet prove it can restore.
+// reasonably expect to restore but MaalFlow cannot yet prove it can restore.
 
 import { readCanonicalBackupSource } from './financialBackupV2';
 import {
@@ -14,7 +14,7 @@ import {
   semanticMetricsV2,
 } from './financialSemanticProjection';
 
-export const CANONICAL_BACKUP_V11_FORMAT = 'MYFI_CANONICAL_LEDGER_BACKUP';
+export const CANONICAL_BACKUP_V11_FORMAT = 'MAALFLOW_CANONICAL_LEDGER_BACKUP';
 export const CANONICAL_BACKUP_V11_DATA_VERSION = 11;
 export const CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS = Object.freeze([
   'transactions',
@@ -79,7 +79,7 @@ export const buildCanonicalBackupV11 = ({ source, createdAt = new Date().toISOSt
     ok: true,
     // No package-transport metadata belongs in this logical document. The paired
     // package adapter will supply encryption/ZIP bytes and its own byte hash later.
-    backup: { kind: 'myfi_canonical_financial_backup', manifest, data },
+    backup: { kind: 'maalflow_canonical_financial_backup', manifest, data },
     semanticHash,
     metrics,
   };

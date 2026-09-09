@@ -200,5 +200,5 @@ const meta = (db, key) => {
     f.db.native.close();
   }
 
-  console.log('MYFI P20 V2 LEGACY OUTBOX ACK RUNTIME: PASSED');
+  console.log('MaalFlow P20 V2 LEGACY OUTBOX ACK RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

@@ -122,5 +122,5 @@ const count = (db, table, namespace) => Number(db.native.prepare(`SELECT COUNT(*
   const repeated = await createFinancialConflictRecoveryCheckpointV1({ namespace: NS, checkpointId: ID, database: db });
   assert.equal(repeated.ok, false);
   assert.equal(repeated.reason, 'financial_v2_conflict_checkpoint_already_exists');
-  console.log('MYFI P20 V2 CONFLICT RECOVERY CHECKPOINT RUNTIME: PASSED');
+  console.log('MaalFlow P20 V2 CONFLICT RECOVERY CHECKPOINT RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

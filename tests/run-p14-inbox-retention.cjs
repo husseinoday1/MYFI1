@@ -210,5 +210,5 @@ const prune = (db, now = NOW) => pruneLedgerInboxV8({ ledgerId: LEDGER, restoreE
     db.native.close();
   }
 
-  console.log('MYFI P14 INBOX RETENTION: PASSED');
+  console.log('MaalFlow P14 INBOX RETENTION: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /*
- * Backfill the legacy MYFI JSON snapshot into the normalized staging schema.
+ * Backfill the legacy MaalFlow JSON snapshot into the normalized staging schema.
  * Dry-run is the default. Applying requires --apply and a staging service key.
  */
 
@@ -402,7 +402,7 @@ const parseArgs = argv => {
   return args;
 };
 
-const usage = () => `MYFI normalized backfill
+const usage = () => `MaalFlow normalized backfill
 
 Dry-run:
   node tools/backfill-normalized.cjs --input ./snapshot.json --user-id <auth-user-uuid>
@@ -479,7 +479,7 @@ const ensureWorkspace = async (client, args, normalized) => {
   const { data, error } = await client.from('workspaces').insert({
     ...(args.workspaceId ? { id: args.workspaceId } : {}),
     owner_id: userId,
-    name: safeName(normalized.cfg.name, 'MYFI'),
+    name: safeName(normalized.cfg.name, 'MaalFlow'),
     kind,
     base_currency: normalized.cfg.currency || 'IQD',
     app_settings: normalized.cfg,
@@ -694,7 +694,7 @@ const run = async argv => {
   const plannedReport = buildPlannedRowsReport(normalized, built);
   const plannedComparison = compareReports(sourceReport, plannedReport);
   const report = {
-    tool: 'myfi-normalized-backfill',
+    tool: 'maalflow-normalized-backfill',
     mode: args.apply ? 'apply' : 'dry-run',
     generatedAt: new Date().toISOString(),
     input: path.resolve(process.cwd(), args.input),

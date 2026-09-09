@@ -7,7 +7,7 @@ import { weight } from '../lib/tokens';
 const copy = (lang) => {
   const ar = lang === 'ar';
   return {
-    title: ar ? 'دليل MYFI' : 'MYFI guide',
+    title: ar ? 'دليل MaalFlow' : 'MaalFlow guide',
     skip: ar ? 'تخطي' : 'Skip',
     next: ar ? 'التالي' : 'Next',
     done: ar ? 'ابدأ' : 'Start',

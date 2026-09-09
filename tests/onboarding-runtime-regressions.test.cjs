@@ -22,4 +22,4 @@ assert(!/skipCurrent|T\.skip|skipButton|skipText/.test(onboarding), 'Onboarding 
 assert(constants.includes('navigator') && constants.includes('nav?.languages'), 'System language detection must prefer device navigator languages');
 assert(constants.includes("return 'en';"), 'Language detection fallback must be English, not Arabic');
 
-console.log('MYFI onboarding runtime regressions passed.');
+console.log('MaalFlow onboarding runtime regressions passed.');

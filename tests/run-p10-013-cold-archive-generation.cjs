@@ -94,6 +94,6 @@ const archiveYear = year => ({
     await assert.rejects(archive.storeColdArchiveYear({ namespace: broken, ...archiveYear(2022) }), /financial_live_generation_malformed/);
     assert.equal(await db.getFirstAsync('SELECT year FROM cold_archive_years WHERE namespace=?', broken), null,
       'generation failure rolls back the cold archive mutation too');
-    console.log('MYFI P10-013 COLD ARCHIVE GENERATION: PASS');
+    console.log('MaalFlow P10-013 COLD ARCHIVE GENERATION: PASS');
   } finally { db.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

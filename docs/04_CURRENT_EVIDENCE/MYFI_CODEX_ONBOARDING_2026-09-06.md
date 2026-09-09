@@ -108,13 +108,13 @@ here is enough to not violate one by accident.
 
 ## 2. Where the real context lives (read these, don't re-derive)
 
-1. `docs/00_MYFI_CANONICAL_AUTHORITY.md` — the authority order (A0–A7)
+1. `docs/00_MAALFLOW_CANONICAL_AUTHORITY.md` — the authority order (A0–A7)
    for resolving any conflict between docs.
-2. `docs/01_CORE_AUTHORITY/MYFI_MASTER_PLAN_FROZEN.md` — the phase
+2. `docs/01_CORE_AUTHORITY/MAALFLOW_MASTER_PLAN_FROZEN.md` — the phase
    roadmap and architecture. Append-only for amendments (see its own
    §195/§196/§197 for the pattern — never edit history in place, add a
    new dated section and say what it changes).
-3. `MYFI_ENGINEERING_HANDOFF.md` (repo root) — general engineering
+3. `MAALFLOW_ENGINEERING_HANDOFF.md` (repo root) — general engineering
    orientation, written 2026-08-19. **It says of itself: "this file will
    go stale, the repo will not."** Treat it as background, not current
    state — this document (§3 below) and the two files in §4 are more

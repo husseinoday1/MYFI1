@@ -2,7 +2,7 @@
 
 ## موقع MYFI التسويقي
 
-توجد صفحة الهبوط التعريفية في `website/index.html` مع تصميم RTL متجاوب، نموذج تسجيل اهتمام، أقسام المزايا والخصوصية والأسئلة الشائعة. توجد خطة التسويق الكاملة في `docs/MYFI_MARKETING_PLAN_AR.md`.
+توجد صفحة الهبوط التعريفية في `website/index.html` مع تصميم RTL متجاوب، نموذج تسجيل اهتمام، أقسام المزايا والخصوصية والأسئلة الشائعة. توجد خطة التسويق الكاملة في `docs/MAALFLOW_MARKETING_PLAN_AR.md`.
 
 للمعاينة محلياً من مجلد المشروع:
 
@@ -130,7 +130,7 @@ tmp/                   ملفات العمل المؤقتة، ولا ترفع إ
 - [الخطة المستقبلية والإصدار الأول](docs/FUTURE_ROADMAP_AND_RELEASE_PLAN_AR.md)
 - [خطة دليل المستخدم والدعم](docs/USER_GUIDE_AND_SUPPORT_PLAN_AR.md)
 - [مواصفات الإدخال الذكي](docs/smart-capture.md)
-- [مخطط المنتج](MYFI_PRODUCT_BLUEPRINT.md)
+- [مخطط المنتج](MAALFLOW_PRODUCT_BLUEPRINT.md)
 
 ## الملفات المؤقتة
 

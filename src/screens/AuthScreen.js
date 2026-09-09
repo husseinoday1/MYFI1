@@ -228,7 +228,7 @@ export default function AuthScreen({ onSkip }) {
         {/* Logo */}
         <View style={s.logoWrap}>
           <Text style={s.emoji}>🌿</Text>
-          <Text style={[s.logo, { color: th.primary }]}>MYFI</Text>
+          <Text style={[s.logo, { color: th.primary }]}>MaalFlow</Text>
           <Text style={[s.tagline, { color: th.sub }]}>{S.tagline}</Text>
         </View>
 

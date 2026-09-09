@@ -75,5 +75,5 @@ const { stageFinancialArchiveRecoveryImportV2 } = compiled.exports;
   const interrupted = await stageFinancialArchiveRecoveryImportV2({ supabase: { rpc: async () => ({}) }, namespace: 'user:archive-stage', accountId: 'account-1', bootstrapSource: { ledgerId: 'ledger-archive-stage', restoreEpoch: 5 } });
   assert.equal(interrupted.ok, false); assert.equal(interrupted.reason, 'network_interrupted');
   assert.equal(calls.fail, 1, 'an interrupted archive read must clear its private stage before retry');
-  console.log('MYFI P20 PHASE 12-D ARCHIVE RECOVERY PRIVATE STAGE: PASSED');
+  console.log('MaalFlow P20 PHASE 12-D ARCHIVE RECOVERY PRIVATE STAGE: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

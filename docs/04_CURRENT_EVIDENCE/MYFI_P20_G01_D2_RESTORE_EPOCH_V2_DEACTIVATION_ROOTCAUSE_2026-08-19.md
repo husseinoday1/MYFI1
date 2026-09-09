@@ -160,7 +160,7 @@ activation:
   activation would no longer be backed by its own bootstrap evidence.
 
 That is a change to the sync/recovery contract, which per
-`docs/00_MYFI_CANONICAL_AUTHORITY.md` is a **PLAN CHANGE PROPOSAL** for the
+`docs/00_MAALFLOW_CANONICAL_AUTHORITY.md` is a **PLAN CHANGE PROPOSAL** for the
 Planning & Audit session to rule on, not an Implementation judgement call. The
 gate's try/catch scope (defect 3) is a separate, self-contained fix that can land
 independently either way.

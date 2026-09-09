@@ -60,4 +60,4 @@ assert.equal(resolveSystemNumberInputFormat('ar-IQ-u-nu-latn'), NUMBER_INPUT_FOR
 assert.equal(resolveSystemNumberInputFormat('de-DE'), NUMBER_INPUT_FORMATS.COMMA_DECIMAL);
 assert.equal(resolveSystemNumberInputFormat('fr-FR'), NUMBER_INPUT_FORMATS.COMMA_DECIMAL);
 
-console.log('MYFI number input contract: PASSED');
+console.log('MaalFlow number input contract: PASSED');

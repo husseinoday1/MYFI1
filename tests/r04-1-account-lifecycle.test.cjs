@@ -108,4 +108,4 @@ const app = read('App.js');
 assert(app.includes('settingsOpenRequest'), 'App shell has no Settings deep-link request');
 assert(app.includes("openSettingsPage('account')") || app.includes('onOpenSettingsPage={openSettingsPage}'), 'Home cannot request the Account page');
 
-console.log('MYFI R04.1 P04R1-001 ACCOUNT/LIFECYCLE REGRESSION: PASSED');
+console.log('MaalFlow R04.1 P04R1-001 ACCOUNT/LIFECYCLE REGRESSION: PASSED');

@@ -49,7 +49,7 @@ export default function MyMoneyScreen({
       key: 'basira',
       icon: 'sparkles-outline',
       tone: th.primary,
-      title: isAr ? 'بصيرة MYFI' : 'MYFI Basira',
+      title: isAr ? 'بصيرة MaalFlow' : 'MaalFlow Basira',
       description: isAr ? 'اكتشف ما تغيّر ولماذا من بياناتك الفعلية' : 'Discover what changed and why from your real data',
       onPress: onOpenBasira,
     },

@@ -114,5 +114,5 @@ const intentOf = db => JSON.parse(db.native.prepare('SELECT value FROM ledger_v7
     early.db.native.close();
   }
 
-  console.log('MYFI P20 V2 CONFLICT INTENT RETIRE RUNTIME: PASSED');
+  console.log('MaalFlow P20 V2 CONFLICT INTENT RETIRE RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

@@ -1,6 +1,6 @@
 export const STR = {
   ar:{
-    app:'MYFI', home:'الرئيسية', debts:'الدين', goals:'الأهداف',
+    app:'MaalFlow', home:'الرئيسية', debts:'الدين', goals:'الأهداف',
     reports:'التقارير', archive:'الأرشيف', settings:'الإعدادات',
     balance:'الرصيد الكلي', income:'الإيرادات', expense:'المصاريف',
     monthExp:'هذا الشهر', recent:'آخر الحركات',
@@ -24,7 +24,7 @@ export const STR = {
     continueOffline:'متابعة بدون حساب',
     nameLabel:'الاسم', exportPDF:'تصدير PDF',
     months:['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'],
-    notifTitle:'MYFI 🌿', notifBody:'لا تنسَ تسجيل مصاريف اليوم',
+    notifTitle:'MaalFlow 🌿', notifBody:'لا تنسَ تسجيل مصاريف اليوم',
     selectCountry:'اختر دولتك', of:'من', done:'تم',
     familyRoom:'الغرفة المشتركة', createRoom:'إنشاء غرفة',
     joinRoom:'انضم لغرفة', roomCode:'كود الغرفة',
@@ -84,18 +84,18 @@ export const STR = {
     newCategory:'+ تصنيف جديد', categoryNameLabel:'اسم التصنيف', chooseIcon:'اختر أيقونة', chooseColor:'اختر لوناً',
 
     // البصمة
-    bioPrompt:'تحقق من هويتك لفتح MYFI', bioFallback:'استخدم رمز القفل', bioNotAvailable:'البصمة غير متوفرة على هذا الجهاز',
+    bioPrompt:'تحقق من هويتك لفتح MaalFlow', bioFallback:'استخدم رمز القفل', bioNotAvailable:'البصمة غير متوفرة على هذا الجهاز',
     unlockApp:'فتح التطبيق', tryAgain:'حاول مرة أخرى',
 
     // البداية / Onboarding
     onboardTitle1:'تحكّم بأموالك بثقة', onboardBody1:'سجّل دخلك ومصاريفك بثوانٍ وتابع رصيدك لحظة بلحظة',
     onboardTitle2:'دين عليّ ودين لي وأهدافك بمكان واحد', onboardBody2:'تابع السداد والتحصيل والتوفير لأهدافك بكل سهولة',
     next:'التالي', skip:'تخطي', getStarted:'ابدأ الآن',
-    welcomeTitle:'مرحباً بك في MYFI', welcomeBody:'ابدأ رحلتك نحو الاستقرار المالي بإضافة أول معاملة لك',
+    welcomeTitle:'مرحباً بك في MaalFlow', welcomeBody:'ابدأ رحلتك نحو الاستقرار المالي بإضافة أول معاملة لك',
     addFirstTrans:'+ إضافة معاملة',
   },
   en:{
-    app:'MYFI', home:'Dashboard', debts:'Debts', goals:'Goals',
+    app:'MaalFlow', home:'Dashboard', debts:'Debts', goals:'Goals',
     reports:'Reports', archive:'Archive', settings:'Settings',
     balance:'Total Balance', income:'Income', expense:'Expenses',
     monthExp:'This Month', recent:'Recent transactions',
@@ -119,7 +119,7 @@ export const STR = {
     continueOffline:'Continue Offline',
     nameLabel:'Name', exportPDF:'Export PDF',
     months:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
-    notifTitle:'MYFI 🌿', notifBody:"Don't forget to log today's expenses",
+    notifTitle:'MaalFlow 🌿', notifBody:"Don't forget to log today's expenses",
     selectCountry:'Select your country', of:'of', done:'Done',
     familyRoom:'Shared Room', createRoom:'Create Room',
     joinRoom:'Join a Room', roomCode:'Room Code',
@@ -171,13 +171,13 @@ export const STR = {
     appVersion:'Version', monthlyArchive:'Monthly Archive', editProfile:'Edit Profile',
     newCategory:'+ New Category', categoryNameLabel:'Category Name', chooseIcon:'Choose Icon', chooseColor:'Choose Color',
 
-    bioPrompt:'Verify your identity to unlock MYFI', bioFallback:'Use lock code', bioNotAvailable:'Biometrics not available on this device',
+    bioPrompt:'Verify your identity to unlock MaalFlow', bioFallback:'Use lock code', bioNotAvailable:'Biometrics not available on this device',
     unlockApp:'Unlock', tryAgain:'Try Again',
 
     onboardTitle1:'Control your money with confidence', onboardBody1:'Log income and expenses in seconds and track your balance live',
     onboardTitle2:'Debts and goals in one place', onboardBody2:'Track your debt payments and goal savings with ease',
     next:'Next', skip:'Skip', getStarted:'Get Started',
-    welcomeTitle:'Welcome to MYFI', welcomeBody:'Start your journey to financial stability by adding your first transaction',
+    welcomeTitle:'Welcome to MaalFlow', welcomeBody:'Start your journey to financial stability by adding your first transaction',
     addFirstTrans:'+ Add Transaction',
   },
 };

@@ -149,5 +149,5 @@ const rejects = async (supabase, expected, message) => {
     'no local identity must fail closed',
   );
 
-  console.log('MYFI P14 PROTOCOL COMPATIBILITY GATE: PASSED');
+  console.log('MaalFlow P14 PROTOCOL COMPATIBILITY GATE: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

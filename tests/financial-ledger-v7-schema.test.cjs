@@ -40,4 +40,4 @@ assert.throws(() => db.exec(`
 `), /FOREIGN KEY/);
 
 db.close();
-console.log('MYFI Financial Ledger V7 SQLite DDL/runtime constraints passed.');
+console.log('MaalFlow Financial Ledger V7 SQLite DDL/runtime constraints passed.');

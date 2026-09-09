@@ -5,9 +5,9 @@ const { chromium } = require('playwright');
 const outDir = path.resolve(__dirname, '..', 'output', 'pdf');
 fs.mkdirSync(outDir, { recursive: true });
 
-const htmlPath = path.join(outDir, 'myfi-current-ui-fixes-preview.html');
-const pdfPath = path.join(outDir, 'myfi-current-ui-fixes-preview.pdf');
-const coverPath = path.join(outDir, 'myfi-current-ui-fixes-preview-cover.png');
+const htmlPath = path.join(outDir, 'maalflow-current-ui-fixes-preview.html');
+const pdfPath = path.join(outDir, 'maalflow-current-ui-fixes-preview.pdf');
+const coverPath = path.join(outDir, 'maalflow-current-ui-fixes-preview-cover.png');
 
 const chromeCandidates = [
   process.env.CHROME_PATH,
@@ -109,10 +109,10 @@ const pages = [];
 
 pages.push(page(
   0,
-  'MYFI - معاينة بنفس تصميم التطبيق الحالي',
-  'هذه ليست واجهة جديدة؛ هي نفس لغة MYFI الحالية مع التعديلات التي جمعتها منك حتى نصوّت عليها قبل التنفيذ.',
+  'MaalFlow - معاينة بنفس تصميم التطبيق الحالي',
+  'هذه ليست واجهة جديدة؛ هي نفس لغة MaalFlow الحالية مع التعديلات التي جمعتها منك حتى نصوّت عليها قبل التنفيذ.',
   `<div class="cover-grid">
-    <div class="cover-card green"><h2>نفس الستايل</h2><p>أخضر MYFI، كروت بيضاء، خلفية فاتحة، حقول موحدة، وشريط تنقل سفلي مثل التطبيق.</p></div>
+    <div class="cover-card green"><h2>نفس الستايل</h2><p>أخضر MaalFlow، كروت بيضاء، خلفية فاتحة، حقول موحدة، وشريط تنقل سفلي مثل التطبيق.</p></div>
     <div class="cover-card red"><h2>الملاحظات</h2><p>أصلحنا ازدواج التصنيفات، رسائل الدخول، الحساب، المتابعات، التقارير، الأرشيف، التشفير، والدمج.</p></div>
     <div class="cover-card amber"><h2>طريقة التصويت</h2><p>اكتب رقم الصفحة أو اسم الشاشة: موافق، عدّل، أو ادمجها مع شاشة ثانية.</p></div>
     <div class="cover-card blue"><h2>قبل البرمجة</h2><p>بعد موافقتك نطبق التصميم داخل التطبيق الحقيقي، ثم نبني نسخة اختبار جديدة على الهاتف.</p></div>
@@ -125,7 +125,7 @@ pages.push(page(
   'الترحيب أول مرة',
   'نختصر الواجهات الكثيرة، ونضيف تسجيل الدخول ونوع الحساب من البداية بدون إجبار.',
   `<div class="phones three">
-    ${phone({ title: 'أهلاً بك في MYFI', subtitle: 'إعداد سريع من 3 خطوات', tone: 'green', children: `
+    ${phone({ title: 'أهلاً بك في MaalFlow', subtitle: 'إعداد سريع من 3 خطوات', tone: 'green', children: `
       ${field('نوع الحساب', 'شخصي', 'شخصي / عمل / شخصي + عمل')}
       <div class="chips">${chip('شخصي', true)}${chip('عمل')}${chip('مزدوج')}</div>
       ${field('الدولة والعملة', 'العراق · IQD')}
@@ -133,7 +133,7 @@ pages.push(page(
     `, footer: '<div class="actions"><button class="secondary">تخطي</button><button class="green">التالي</button></div>' })}
     ${phone({ title: 'الحساب اختياري', subtitle: 'المزامنة والنسخ لاحقاً', tone: 'blue', children: `
       ${field('الاسم', 'Hussein')}
-      ${field('اليوزر نيم', 'hussein_myfi', 'فريد للربط بالغرف مستقبلاً')}
+      ${field('اليوزر نيم', 'hussein_maalflow', 'فريد للربط بالغرف مستقبلاً')}
       ${field('الدخول', 'بريد + كلمة مرور')}
       <div class="notice">يمكن استخدام التطبيق محلياً الآن، وتفعيل الحساب متى ما تريد.</div>
     `, footer: '<div class="actions"><button class="secondary">محلياً</button><button class="blue">دخول</button></div>' })}
@@ -162,7 +162,7 @@ pages.push(page(
     ` })}
     ${phone({ title: 'حسابي', subtitle: 'هوية واضحة للغرف لاحقاً', active: 'settings', tone: 'blue', children: `
       ${field('الاسم', 'Hussein')}
-      ${field('اليوزر نيم', 'hussein_myfi', 'فريد ولا يتكرر')}
+      ${field('اليوزر نيم', 'hussein_maalflow', 'فريد ولا يتكرر')}
       ${field('البريد', 'user@email.com')}
       ${field('الحالة', 'متصل · آخر مزامنة الآن')}
       <div class="notice blue">اليوزر نيم يستخدم للغرف والمشاركة لاحقاً.</div>
@@ -309,7 +309,7 @@ pages.push(page(
       ${field('المحفظة والتصنيف', 'الكاش · سكن')}
     ` })}
   </div>`,
-  'هذه هي الصفحة التي قلت عنها “طبقها حرفياً” لكن بأسلوب MYFI الحقيقي.'
+  'هذه هي الصفحة التي قلت عنها “طبقها حرفياً” لكن بأسلوب MaalFlow الحقيقي.'
 ));
 
 pages.push(page(
@@ -385,7 +385,7 @@ pages.push(page(
       ${field('زر رجوع الهاتف', 'يغلق الأرشيف فقط')}
       ${field('لا يحدث', 'لا يخرج من البرنامج')}
       ${field('زر داخل الشاشة', 'رجوع واضح في الأعلى')}
-      ${listRow('ملف للقراءة فقط', 'archive_2025.myfi', 'blue')}
+      ${listRow('ملف للقراءة فقط', 'archive_2025.maalflow', 'blue')}
     ` })}
     ${phone({ title: 'مراجعة الدمج', subtitle: 'تنبيه متأخر', active: 'settings', tone: 'amber', children: `
       ${field('بعد الدمج', 'انتظار 30 - 60 ثانية')}
@@ -408,7 +408,7 @@ pages.push(page(
   'دليل المستخدم والمصطلحات',
   'صفحة بسيطة داخل الإعدادات تشرح الاستخدام أول مرة ومعاني كلمات البرنامج.',
   `<div class="phones three">
-    ${phone({ title: 'دليل MYFI', subtitle: 'موجود في الإعدادات', active: 'settings', tone: 'green', children: `
+    ${phone({ title: 'دليل MaalFlow', subtitle: 'موجود في الإعدادات', active: 'settings', tone: 'green', children: `
       ${listRow('ابدأ بسرعة', 'محفظة، دخل، صرف')}
       ${listRow('المتابعات', 'دين، توفير، التزام')}
       ${listRow('التقارير', 'قراءة الدخل والصرف')}
@@ -461,7 +461,7 @@ const html = `<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8" />
-  <title>MYFI Current UI Fixes Preview</title>
+  <title>MaalFlow Current UI Fixes Preview</title>
   <style>
     @font-face {
       font-family: CairoLocal;

@@ -193,5 +193,5 @@ assert.ok(syncStart >= 0 && gateCall > syncStart && cloudRecovery > gateCall,
 (async () => {
   await testIntentGate();
   await testSyncInterlock();
-  console.log('MYFI P20 V2 CONFLICT RECOVERY SYNC INTERLOCK: PASSED');
+  console.log('MaalFlow P20 V2 CONFLICT RECOVERY SYNC INTERLOCK: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

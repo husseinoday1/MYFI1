@@ -168,7 +168,7 @@ const runMaintenance = async ({ options, raise = null, dirty = true }) => {
     'a second real cutover resumes again, identically to the first');
 
   global.setTimeout = realSetTimeout;
-  console.log('MYFI FINANCIAL MAINTENANCE RESUME WIRING: PASSED');
+  console.log('MaalFlow FINANCIAL MAINTENANCE RESUME WIRING: PASSED');
 })().catch(error => {
   global.setTimeout = realSetTimeout;
   console.error(error);

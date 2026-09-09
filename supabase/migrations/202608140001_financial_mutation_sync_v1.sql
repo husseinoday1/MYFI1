@@ -1,4 +1,4 @@
--- MYFI Financial Ledger V7 mutation sync.
+-- MaalFlow Financial Ledger V7 mutation sync.
 -- The existing user_data snapshot remains available as a compatibility fallback
 -- until two-device mutation sync has been verified in production.
 

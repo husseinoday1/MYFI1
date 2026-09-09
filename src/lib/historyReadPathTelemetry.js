@@ -1,4 +1,4 @@
-// MYFI Phase 15 — History read-path telemetry.
+// MaalFlow Phase 15 — History read-path telemetry.
 //
 // Diagnostic only. This module counts; it changes no behaviour, and nothing here
 // decides what History renders.

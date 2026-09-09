@@ -243,7 +243,7 @@ const analysisText = (analysis: ReturnType<typeof normalizeAnalysis>) => [
 
 
 const IMAGE_PROMPT = (today: string, currency: string, lang: string) => `
-You are MYFI's financial-image understanding engine.
+You are MaalFlow's financial-image understanding engine.
 Today on the user's phone is ${today || "unknown"}. App currency is ${currency || "unknown"}. UI language is ${lang || "unknown"}.
 
 Analyze the IMAGE AS A FINANCIAL SOURCE, not as generic OCR.
@@ -284,7 +284,7 @@ CORE RULES:
 4B. BANK "TRANSACTION DETAILS" SCREENS:
    A screen explicitly showing Transaction type + Transaction date + Amount + Transaction reference
    is strong evidence of a completed/posting transaction unless the screen itself says pending/failed/cancelled.
-   Prefer the field labeled "Transaction date" over "Value date" for MYFI's transaction date.
+   Prefer the field labeled "Transaction date" over "Value date" for MaalFlow's transaction date.
    Examples:
    - Transaction type "POS - Purchase" with a negative amount => expense/outgoing.
    - Transaction type "Salary Domiciliation" with a positive amount => income/incoming, category salary.
@@ -368,7 +368,7 @@ const callOpenAiVision = async ({
     text: {
       format: {
         type: "json_schema",
-        name: "myfi_financial_image",
+        name: "maalflow_financial_image",
         strict: true,
         schema: ANALYSIS_SCHEMA,
       },

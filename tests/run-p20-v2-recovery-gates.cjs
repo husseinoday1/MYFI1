@@ -169,4 +169,4 @@ assert.equal(setupOnlyLegacyRowV1(financialRow(1)), false);
 assert.equal(setupOnlyLegacyRowV1({ sequence_id: 1, entity_type: 'workspace', entity_id: 'other', operation: 'upsert' }), false);
 assert.equal(setupOnlyLegacyRowV1(null), false);
 
-console.log('MYFI P20 V2 RECOVERY GATES RUNTIME: PASSED');
+console.log('MaalFlow P20 V2 RECOVERY GATES RUNTIME: PASSED');

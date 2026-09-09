@@ -92,4 +92,4 @@ assert.match(
   'evidence must record that the EAS Free-plan Android build quota caused the build failure'
 );
 
-console.log('MYFI P19-012R1 EMPTY-SHELL CLOUD RECOVERY CONTRACT: PASSED');
+console.log('MaalFlow P19-012R1 EMPTY-SHELL CLOUD RECOVERY CONTRACT: PASSED');

@@ -18,7 +18,7 @@ const worker = path.join(root, 'tests/run-p14-outbox-restart-worker.cjs');
 
 const runWorker = (file, env) => spawnSync(process.execPath, [worker, root], {
   cwd: root, encoding: 'utf8',
-  env: { ...process.env, MYFI_P14_OUTBOX_DB_FILE: file, ...env },
+  env: { ...process.env, MAALFLOW_P14_OUTBOX_DB_FILE: file, ...env },
 });
 
 // Read the file directly, without going through the repository, so the
@@ -34,14 +34,14 @@ const inspect = (file) => {
 };
 
 const resumeReport = (file) => {
-  const resumed = runWorker(file, { MYFI_P14_OUTBOX_RESUME: '1' });
+  const resumed = runWorker(file, { MAALFLOW_P14_OUTBOX_RESUME: '1' });
   assert.equal(resumed.status, 0, `resume must succeed: ${resumed.stderr}`);
   const line = resumed.stdout.split(/\r?\n/).find(item => item.includes('P14_OUTBOX_RESUME'));
   assert.ok(line, `resume must report its state: ${resumed.stdout}`);
   return JSON.parse(line);
 };
 
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'myfi-p14-outbox-restart-'));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'maalflow-p15-outbox-restart-'));
 try {
   // 1) The scenario itself: the app is killed the instant a mutation is queued,
   //    before anything syncs. On reopen the mutation must still be there and
@@ -49,7 +49,7 @@ try {
   //    force-close.
   {
     const file = path.join(temp, 'after_commit.sqlite');
-    const killed = runWorker(file, { MYFI_P14_OUTBOX_BOUNDARY: 'after_commit' });
+    const killed = runWorker(file, { MAALFLOW_P14_OUTBOX_BOUNDARY: 'after_commit' });
     assert.equal(killed.status, 86, `the worker must literally terminate: ${killed.stderr}`);
 
     const onDisk = inspect(file);
@@ -69,7 +69,7 @@ try {
   //    resets its retry history into an immediate hot retry.
   {
     const file = path.join(temp, 'after_failed_attempt.sqlite');
-    const killed = runWorker(file, { MYFI_P14_OUTBOX_BOUNDARY: 'after_failed_attempt' });
+    const killed = runWorker(file, { MAALFLOW_P14_OUTBOX_BOUNDARY: 'after_failed_attempt' });
     assert.equal(killed.status, 86, `the worker must literally terminate: ${killed.stderr}`);
 
     const onDisk = inspect(file);
@@ -92,7 +92,7 @@ try {
   //    resurrect work that already completed and upload it a second time.
   {
     const file = path.join(temp, 'after_ack.sqlite');
-    const killed = runWorker(file, { MYFI_P14_OUTBOX_BOUNDARY: 'after_ack' });
+    const killed = runWorker(file, { MAALFLOW_P14_OUTBOX_BOUNDARY: 'after_ack' });
     assert.equal(killed.status, 86, `the worker must literally terminate: ${killed.stderr}`);
 
     const onDisk = inspect(file);
@@ -104,7 +104,7 @@ try {
     assert.equal(report.acknowledged, 0);
   }
 
-  console.log('MYFI P14 OUTBOX RESTART: PASSED');
+  console.log('MaalFlow P14 OUTBOX RESTART: PASSED');
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
 }

@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 
-export const FONT_FAMILY = 'MYFI-Cairo';
+export const FONT_FAMILY = 'MaalFlow-Cairo';
 
 export const TYPE = {
   hero: 28,
@@ -43,7 +43,7 @@ export const RADIUS = {
 
 // Tinted rounded container behind an action icon (Quick Add circles, list-row
 // leading icons). Formalizes the ad hoc per-screen pattern noted in
-// docs/design/04_MYFI_DESIGN_TOKEN_CATALOG.md ("icon.container.*").
+// docs/design/04_MAALFLOW_DESIGN_TOKEN_CATALOG.md ("icon.container.*").
 export const ICON_CONTAINER = {
   sm: { size: 30, radius: RADIUS.md },
   md: { size: 38, radius: RADIUS.md },

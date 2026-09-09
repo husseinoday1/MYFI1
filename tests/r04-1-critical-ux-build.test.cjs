@@ -50,4 +50,4 @@ const app = read('App.js');
 assert.match(app, /<DecisionModal[\s\S]*confirmIcon="checkmark-circle-outline"[\s\S]*cancelIcon="arrow-undo-outline"/);
 assert.doesNotMatch(app, /text: ar \? 'رجوع' : 'Roll back',[\s\S]{0,120}style: 'destructive'/);
 
-console.log('MYFI P04R1-004 CRITICAL UX + CONTROLLED EAS BUILD: PASSED');
+console.log('MaalFlow P04R1-004 CRITICAL UX + CONTROLLED EAS BUILD: PASSED');

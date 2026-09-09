@@ -53,4 +53,4 @@ assert(archiveStageDdl, 'V12 archive recovery receipt DDL missing');
 assert.match(archiveStageDdl[1], /archive_year/);
 assert.match(archiveStageDdl[1], /ON DELETE CASCADE/);
 
-console.log('MYFI P20 PHASE 12-C BOOTSTRAP RECOVERY SESSION CONTRACT: PASSED');
+console.log('MaalFlow P20 PHASE 12-C BOOTSTRAP RECOVERY SESSION CONTRACT: PASSED');

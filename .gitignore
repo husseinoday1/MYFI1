@@ -53,7 +53,7 @@ tmp/
 *.db
 *.sqlite
 *.sqlite3
-.myfi-backups/
+.maalflow-backups/
 
 # Tools / Binaries
 tools/supabase-cli/supabase.exe

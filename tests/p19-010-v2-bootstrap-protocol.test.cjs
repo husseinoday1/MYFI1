@@ -70,4 +70,4 @@ if (!p19011Present) {
 assert(gate.includes('p19-010-v2-bootstrap-protocol.test.cjs'),
   'P19-010 contract is not registered in quality gate');
 
-console.log('MYFI P19-010 VERIFIED V2 BOOTSTRAP PROTOCOL: PASSED');
+console.log('MaalFlow P19-010 VERIFIED V2 BOOTSTRAP PROTOCOL: PASSED');

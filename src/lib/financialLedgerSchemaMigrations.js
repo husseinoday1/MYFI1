@@ -1,4 +1,4 @@
-// MYFI Phase 2: reusable, crash-aware SQLite schema migration infrastructure.
+// MaalFlow Phase 2: reusable, crash-aware SQLite schema migration infrastructure.
 // Financial writes call ensureFinancialLedgerV7 before their own transaction,
 // so no financial mutation can proceed while a required schema migration fails.
 import { enqueueLedgerWrite, flushLedgerWrites, runLedgerExclusiveTransaction } from './ledgerDatabase';

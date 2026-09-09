@@ -1,4 +1,4 @@
-// MYFI_MULTI_CURRENCY_FOUNDATION_PHASE1
+// MAALFLOW_MULTI_CURRENCY_FOUNDATION_PHASE1
 // Rate convention: 1 unit of sourceCurrency = rate units of targetCurrency.
 import { CURRENCIES } from './constants';
 import { roundCurrency } from './money';

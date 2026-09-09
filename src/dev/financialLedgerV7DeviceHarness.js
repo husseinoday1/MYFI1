@@ -32,7 +32,7 @@ export async function runFinancialLedgerV7DeviceHarness() {
   assertHarness(Platform.OS === 'android' || Platform.OS === 'ios', 'native_platform_required');
   const startedAt = Date.now();
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  const namespace = `__myfi_v7_device_harness__:${runId}`;
+  const namespace = `__maalflow_v7_device_harness__:${runId}`;
   const dateISO = new Date().toISOString().slice(0, 10);
   const now = new Date().toISOString();
   const usdWallet = {

@@ -1,6 +1,6 @@
-// MYFI P10-014A-001-R5.2 — fail-closed same-package / cloned-database probe.
+// MaalFlow P10-014A-001-R5.2 — fail-closed same-package / cloned-database probe.
 //
-// The APK keeps applicationId com.myfi.app only to enter the original app sandbox.
+// The APK keeps applicationId com.maalflow.app only to enter the original app sandbox.
 // The original ledger is opened query-only solely as the source of SQLite's backup API.
 // All Strategy B work, migrations, fixtures, global currency writes and cleanup occur
 // on a disposable clone database selected through the R5 diagnostic override.
@@ -357,9 +357,9 @@ async function runCloneProbe() {
         sourceFingerprintBeforeKill,
       }));
     }
-    globalThis.__MYFI_P10_014A_CLONE_NONCE__ = cloneNonce;
-    globalThis.__MYFI_P10_014A_CLONE_DB_NAME__ = cloneName;
-    globalThis.__MYFI_P10_014A_KILL_WINDOW__ = killWindow;
+    globalThis.__MAALFLOW_P10_014A_CLONE_NONCE__ = cloneNonce;
+    globalThis.__MAALFLOW_P10_014A_CLONE_DB_NAME__ = cloneName;
+    globalThis.__MAALFLOW_P10_014A_KILL_WINDOW__ = killWindow;
     setP10CloneLedgerDbOverride(clone);
     overrideEnabled = true;
 
@@ -394,9 +394,9 @@ async function runCloneProbe() {
     if (overrideEnabled) {
       try { clearP10CloneLedgerDbOverride(clone); } catch {}
     }
-    try { delete globalThis.__MYFI_P10_014A_CLONE_NONCE__; } catch {}
-    try { delete globalThis.__MYFI_P10_014A_CLONE_DB_NAME__; } catch {}
-    try { delete globalThis.__MYFI_P10_014A_KILL_WINDOW__; } catch {}
+    try { delete globalThis.__MAALFLOW_P10_014A_CLONE_NONCE__; } catch {}
+    try { delete globalThis.__MAALFLOW_P10_014A_CLONE_DB_NAME__; } catch {}
+    try { delete globalThis.__MAALFLOW_P10_014A_KILL_WINDOW__; } catch {}
     try { await source?.closeAsync?.(); } catch {}
     try { await clone?.closeAsync?.(); } catch {}
     try {

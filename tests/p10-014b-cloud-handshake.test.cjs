@@ -48,4 +48,4 @@ assert.match(rpcClient, /abortSignal\(controller\.signal\)/,
   'proof-bound RPC must be abortable');
 assert.match(rpcClient, /DEFAULT_RPC_TIMEOUT_MS = 10000/,
   'proof-bound RPC must have a bounded default timeout');
-console.log('MYFI P10-014B CLOUD HANDSHAKE CONTRACT: PASS');
+console.log('MaalFlow P10-014B CLOUD HANDSHAKE CONTRACT: PASS');

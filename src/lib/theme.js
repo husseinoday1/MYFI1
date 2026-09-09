@@ -1,7 +1,7 @@
 export const BRAND_GREEN = '#138A57';
 
 // Semantic financial roles are independently assignable, even where two of them
-// currently resolve to the same literal. Per 04_MYFI_DESIGN_TOKEN_CATALOG.md:
+// currently resolve to the same literal. Per 04_MAALFLOW_DESIGN_TOKEN_CATALOG.md:
 // changing the brand color must never silently change the income color, and
 // destructive-action red must be able to diverge from expense red later without
 // touching either call site.

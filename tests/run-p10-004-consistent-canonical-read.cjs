@@ -94,7 +94,7 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
 
   {
     // Serialisation with writes is the whole reason this shares the write queue:
-    // MYFI has one connection, and a second BEGIN on it while a write transaction is
+    // MaalFlow has one connection, and a second BEGIN on it while a write transaction is
     // live is the nested-transaction failure the queue exists to prevent.
     const order = [];
     const slowWrite = enqueueLedgerWrite(async () => {
@@ -254,7 +254,7 @@ const { runLedgerReadTransaction, enqueueLedgerWrite, flushLedgerWrites } = ledg
     'a refusal that depends only on its argument must not open a transaction or read anything');
   console.log('[PASS] the isolated-handle refusal happens before any read');
 
-  console.log('MYFI P10-004 CONSISTENT CANONICAL READ CONTRACT: PASS');
+  console.log('MaalFlow P10-004 CONSISTENT CANONICAL READ CONTRACT: PASS');
 })().catch(error => {
   console.error(error);
   process.exit(1);

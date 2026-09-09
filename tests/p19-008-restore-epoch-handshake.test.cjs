@@ -43,4 +43,4 @@ assert.match(sql, /grant execute on function public\.advance_financial_restore_e
 assert.doesNotMatch(sql, /delete from public\.financial_mutations_v2/i);
 assert.doesNotMatch(sql, /delete from public\.financial_mutations_v1/i);
 
-console.log('MYFI P19-008 RESTORE EPOCH HANDSHAKE CONTRACT: PASSED');
+console.log('MaalFlow P19-008 RESTORE EPOCH HANDSHAKE CONTRACT: PASSED');

@@ -163,4 +163,4 @@ const plan = (attempts, options = {}) => outboxRetryPlanV1({
     'the default-now cutoff must still be a real timestamp');
 }
 
-console.log('MYFI P14 OUTBOX RETRY POLICY RUNTIME: PASSED');
+console.log('MaalFlow P14 OUTBOX RETRY POLICY RUNTIME: PASSED');

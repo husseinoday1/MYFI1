@@ -146,7 +146,7 @@ const isCanonicalRestoreOperationIdV11 = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8
 const deriveCanonicalRestoreProofDigestV11 = ({ operationId, ledgerId, fromEpoch, toEpoch, semanticHash, validatorVersion, counts }) => {
   const orderedCounts = Object.fromEntries(countKeys.map(key => [key, Number(counts[key])]));
   return crypto.createHash('sha256').update(JSON.stringify({
-    domain: 'MYFI:P10-012:RESTORE-PROOF:V1', operationId: String(operationId).toLowerCase(),
+    domain: 'MAALFLOW:P10-012:RESTORE-PROOF:V1', operationId: String(operationId).toLowerCase(),
     ledgerId: String(ledgerId), fromEpoch: Number(fromEpoch), toEpoch: Number(toEpoch),
     semanticHash: String(semanticHash).toLowerCase(), validatorVersion: Number(validatorVersion), counts: orderedCounts,
   })).digest('hex');
@@ -267,10 +267,10 @@ const coordinatorAdapters = () => ({
 });
 
 (async () => {
-  const externalFilename = String(process.env.MYFI_P10_012_RUNTIME_DB_FILE || '').trim();
-  const resumeExternal = process.env.MYFI_P10_012_RUNTIME_RESUME === '1';
-  const hardExitBoundary = String(process.env.MYFI_P10_012_HARD_EXIT_BOUNDARY || '').trim();
-  const temp = externalFilename ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'myfi-p10-011-'));
+  const externalFilename = String(process.env.MAALFLOW_P10_012_RUNTIME_DB_FILE || '').trim();
+  const resumeExternal = process.env.MAALFLOW_P10_012_RUNTIME_RESUME === '1';
+  const hardExitBoundary = String(process.env.MAALFLOW_P10_012_HARD_EXIT_BOUNDARY || '').trim();
+  const temp = externalFilename ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'maalflow-p15-011-'));
   const filename = externalFilename || path.join(temp, 'restart.sqlite');
   try {
     database = new AsyncSqlite(filename); globalThis.__P10_DB__ = database;
@@ -280,7 +280,7 @@ const coordinatorAdapters = () => ({
       });
       assert.equal(resumed.ok, true, JSON.stringify(resumed));
       assert.equal(resumed.status, 'v2_activated');
-      console.log('MYFI P10-012 REAL FINANCIAL HARD-EXIT RESUME: PASS');
+      console.log('MaalFlow P10-012 REAL FINANCIAL HARD-EXIT RESUME: PASS');
       return;
     }
     await database.execAsync(`${repository.FINANCIAL_LEDGER_V7_SCHEMA_SQL}\n${repository.FINANCIAL_LEDGER_V8_SYNC_IDENTITY_SQL}`);
@@ -374,7 +374,7 @@ const coordinatorAdapters = () => ({
     assert.equal(finalRecovery.pending, false);
     assert.equal(finalRecovery.recovery.reconciliationRequired, false);
     console.log('[PASS] P10-012 crosses real P10-010 COMMIT, real P10-011 restart reload and shadow-only activation');
-    console.log('MYFI P10-011 POST-COMMIT RESTART/RECOVERY: PASS');
+    console.log('MaalFlow P10-011 POST-COMMIT RESTART/RECOVERY: PASS');
   } finally {
     try { database?.close(); } catch {}
     if (temp) fs.rmSync(temp, { recursive: true, force: true });

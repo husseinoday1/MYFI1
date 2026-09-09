@@ -1,6 +1,6 @@
-// MYFI Phase 15 / §101 — SQLite reliability probes that actually execute.
+// MaalFlow Phase 15 / §101 — SQLite reliability probes that actually execute.
 //
-// §101 lists eleven fault categories. Before this file, MYFI's coverage of them was:
+// §101 lists eleven fault categories. Before this file, MaalFlow's coverage of them was:
 //
 //   - real probe code for DB-busy, lock contention and disk-full, living in
 //     src/dev/phase10RestoreBenchmarkHarness.js — but scoped to the Phase 10
@@ -13,14 +13,14 @@
 //     un-checkpointed WAL.
 //
 // This file closes the last group by running real faults against real SQLite in
-// CI, under MYFI's own pragma set (WAL + foreign_keys=ON + busy_timeout=5000 +
+// CI, under MaalFlow's own pragma set (WAL + foreign_keys=ON + busy_timeout=5000 +
 // synchronous=NORMAL, per §102).
 //
 // WHAT THIS DOES AND DOES NOT PROVE — read before citing it as evidence.
 //
 // It runs desktop SQLite through node:sqlite, not Android's expo-sqlite. Both are
 // the same SQLite library and the same WAL/FK/synchronous semantics, so this is
-// real evidence that MYFI's chosen configuration survives these faults. It is NOT
+// real evidence that MaalFlow's chosen configuration survives these faults. It is NOT
 // evidence about Android's storage stack, about expo-sqlite's bindings, or about
 // power loss — a SIGKILL kills the process but leaves the OS page cache intact,
 // so it exercises application-crash durability only. The power-loss half of
@@ -37,16 +37,16 @@ try { ({ DatabaseSync } = require('node:sqlite')); } catch { /* flagged or absen
 
 // CI runs Node 22, where node:sqlite is behind --experimental-sqlite. Re-exec once
 // with the flag rather than skipping silently. See the sibling §102 config test.
-if (!DatabaseSync && process.env.MYFI_ALLOW_NO_SQLITE === '1') {
+if (!DatabaseSync && process.env.MAALFLOW_ALLOW_NO_SQLITE === '1') {
   console.log(`SKIP (opted out): node:sqlite unavailable on ${process.version}; §101 probes not run`);
   process.exit(0);
 }
 
-if (!DatabaseSync && !process.env.MYFI_P15_SQLITE_FLAG_RETRY) {
+if (!DatabaseSync && !process.env.MAALFLOW_P15_SQLITE_FLAG_RETRY) {
   const retry = spawnSync(
     process.execPath,
     ['--experimental-sqlite', __filename, ...process.argv.slice(2)],
-    { stdio: 'inherit', env: { ...process.env, MYFI_P15_SQLITE_FLAG_RETRY: '1' } },
+    { stdio: 'inherit', env: { ...process.env, MAALFLOW_P15_SQLITE_FLAG_RETRY: '1' } },
   );
   process.exit(retry.status === null ? 1 : retry.status);
 }
@@ -61,7 +61,7 @@ if (!DatabaseSync) {
   assert.fail(
     `§101 probes could not run: node:sqlite unavailable on ${process.version}, `
     + 'including after retrying with --experimental-sqlite. Node 22.5+ is required. '
-    + 'Set MYFI_ALLOW_NO_SQLITE=1 to downgrade this to a skip if you genuinely need to '
+    + 'Set MAALFLOW_ALLOW_NO_SQLITE=1 to downgrade this to a skip if you genuinely need to '
     + 'run the gate on an older Node — but then the §101 evidence is NOT being produced.',
   );
 }
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS child(
 );
 `;
 
-const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'myfi-p15-101-'));
+const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'maalflow-p15-101-'));
 const cleanup = [];
 const newDbPath = name => {
   const dir = fs.mkdtempSync(path.join(workdir, `${name}-`));
@@ -98,7 +98,7 @@ const quickCheck = db => {
 };
 
 // Runs `body` (a JS source string) in a child process that has already opened the
-// database with MYFI's pragmas as `db`.
+// database with MaalFlow's pragmas as `db`.
 //
 // The body must print REACHED_KILL_POINT immediately before killing itself, and
 // assertKilled() below checks for it. Without that marker a probe that asserts

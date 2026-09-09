@@ -1,4 +1,4 @@
-// MYFI — undoing a goal release, and refusing the delete that used to do nothing.
+// MaalFlow — undoing a goal release, and refusing the delete that used to do nothing.
 //
 // The owner reported: completed a goal, used the completion action to transfer
 // the money to a wallet, then deleted every transaction linked to the goal --

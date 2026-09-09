@@ -6,8 +6,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $workspace = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$imagePath = Join-Path $workspace '.tmp-myfi-cloud-receipt.png'
-$audioPath = Join-Path $workspace '.tmp-myfi-cloud-voice.wav'
+$imagePath = Join-Path $workspace '.tmp-maalflow-cloud-receipt.png'
+$audioPath = Join-Path $workspace '.tmp-maalflow-cloud-voice.wav'
 $cliPath = Join-Path $workspace 'tools\supabase-cli\supabase.exe'
 $cliCommand = $null
 $baseUrl = "https://$ProjectRef.supabase.co"
@@ -36,7 +36,7 @@ try {
   $titleFont = New-Object System.Drawing.Font('Arial',42,[System.Drawing.FontStyle]::Bold)
   $bodyFont = New-Object System.Drawing.Font('Arial',34)
   $brush = [System.Drawing.Brushes]::Black
-  $graphics.DrawString('MYFI TEST RECEIPT',$titleFont,$brush,55,50)
+  $graphics.DrawString('MaalFlow TEST RECEIPT',$titleFont,$brush,55,50)
   $graphics.DrawString('COFFEE SHOP',$bodyFont,$brush,55,145)
   $graphics.DrawString('TOTAL 12500 IQD',$titleFont,$brush,55,245)
   $image.Save($imagePath,[System.Drawing.Imaging.ImageFormat]::Png)
@@ -59,7 +59,7 @@ try {
   $serviceKey = ($keys | Where-Object { $_.name -eq 'service_role' }).api_key
   if (-not $serviceKey) { throw 'Supabase service role key was unavailable.' }
 
-  $email = 'myfi-cloud-e2e-' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + '@example.com'
+  $email = 'maalflow-cloud-e2e-' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + '@example.com'
   $password = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N')
   $adminHeaders = @{ apikey = $serviceKey; Authorization = 'Bearer ' + $serviceKey }
   $createBody = @{ email = $email; password = $password; email_confirm = $true } | ConvertTo-Json
@@ -68,10 +68,10 @@ try {
   if (-not $userId) { throw 'Temporary user creation failed.' }
   Write-Output 'temporary-user: created'
 
-  $env:MYFI_TEST_EMAIL = $email
-  $env:MYFI_TEST_PASSWORD = $password
-  $env:MYFI_TEST_IMAGE_FILE = $imagePath
-  $env:MYFI_TEST_AUDIO_FILE = $audioPath
+  $env:MAALFLOW_TEST_EMAIL = $email
+  $env:MAALFLOW_TEST_PASSWORD = $password
+  $env:MAALFLOW_TEST_IMAGE_FILE = $imagePath
+  $env:MAALFLOW_TEST_AUDIO_FILE = $audioPath
   & $NodePath (Join-Path $PSScriptRoot 'run-cloud-integration.cjs')
   $snapshotExitCode = $LASTEXITCODE
   & $NodePath (Join-Path $PSScriptRoot 'run-financial-mutation-sync-e2e.cjs')
@@ -91,10 +91,10 @@ finally {
     if (-not $resolved.StartsWith($workspacePrefix,[System.StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe cleanup target.' }
     if (Test-Path -LiteralPath $resolved) { Remove-Item -LiteralPath $resolved -Force }
   }
-  Remove-Item Env:MYFI_TEST_EMAIL -ErrorAction SilentlyContinue
-  Remove-Item Env:MYFI_TEST_PASSWORD -ErrorAction SilentlyContinue
-  Remove-Item Env:MYFI_TEST_IMAGE_FILE -ErrorAction SilentlyContinue
-  Remove-Item Env:MYFI_TEST_AUDIO_FILE -ErrorAction SilentlyContinue
+  Remove-Item Env:MAALFLOW_TEST_EMAIL -ErrorAction SilentlyContinue
+  Remove-Item Env:MAALFLOW_TEST_PASSWORD -ErrorAction SilentlyContinue
+  Remove-Item Env:MAALFLOW_TEST_IMAGE_FILE -ErrorAction SilentlyContinue
+  Remove-Item Env:MAALFLOW_TEST_AUDIO_FILE -ErrorAction SilentlyContinue
   $serviceKey = $null
   Write-Output 'temporary-files: removed'
 }

@@ -76,5 +76,5 @@ const {syncFinancialMutationsV2}=mod.exports;
  const conflict=await syncFinancialMutationsV2({supabase:conflictSupabase,namespace:'user:test',deviceId:'device-a'});
  assert.equal(conflict.ok,false);
  assert.equal(conflict.reason,'financial_v2_revision_conflict');
- console.log('MYFI P19-009 SYNC V2 CLIENT RUNTIME: PASSED');
+ console.log('MaalFlow P19-009 SYNC V2 CLIENT RUNTIME: PASSED');
 })().catch(e=>{console.error(e);process.exit(1);});

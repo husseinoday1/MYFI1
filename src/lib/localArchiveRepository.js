@@ -1,8 +1,8 @@
-// MYFI_LOCAL_COLD_ARCHIVE_V5_3
+// MAALFLOW_LOCAL_COLD_ARCHIVE_V5_3
 // Completed years live here as a relational, indexed cold archive instead of
 // remaining in the hot Zustand transaction array. This database is a local
 // performance/archive layer; the encrypted vault remains the active workspace
-// safety boundary and external MYFI archive packages remain portable backups.
+// safety boundary and external MaalFlow archive packages remain portable backups.
 import { enqueueLedgerWrite, getLedgerDb, runLedgerExclusiveTransaction } from './ledgerDatabase';
 // Operational pragmas belong to the shared connection and are set only in
 // ledgerDatabase.getLedgerDb() (§102): WAL, foreign_keys, busy_timeout, synchronous.
@@ -278,7 +278,7 @@ export const loadColdArchiveYear = async ({
   const trans = rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
   return {
     payload: {
-      format: 'MYFI',
+      format: 'MAALFLOW',
       schemaVersion: 1,
       kind: 'year_archive',
       createdAt: header.archived_at,
@@ -291,7 +291,7 @@ export const loadColdArchiveYear = async ({
     passwordRequired: false,
     kind: 'year_archive',
     localArchive: true,
-    name: `MYFI Local Archive ${targetYear}`,
+    name: `MaalFlow Local Archive ${targetYear}`,
   };
 };
 
@@ -315,7 +315,7 @@ export const clearColdArchiveNamespaceInTransaction = async ({ database, namespa
   const target = String(namespace || '').trim();
   if (!database || !target) throw new Error('cold_archive_transaction_namespace_invalid');
 
-  // Do not rely on ON DELETE CASCADE here. Some existing MYFI databases may have
+  // Do not rely on ON DELETE CASCADE here. Some existing MaalFlow databases may have
   // been created from an older cold-archive table shape, and CREATE TABLE IF NOT
   // EXISTS cannot retrofit a missing foreign-key action. Promotion must therefore
   // remove child rows explicitly before removing archive headers.

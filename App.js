@@ -1,4 +1,4 @@
-﻿// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
+﻿// MAALFLOW_PERFORMANCE_DATA_RUNTIME_V5_1_2
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Appearance, BackHandler, I18nManager, Image, Linking, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -30,7 +30,7 @@ import ArchiveScreen from './src/screens/ArchiveScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import MyMoneyScreen from './src/screens/MyMoneyScreen';
 import MoreScreen from './src/screens/MoreScreen';
-import CustomizeMyfiScreen from './src/screens/CustomizeMyfiScreen';
+import CustomizeMaalFlowScreen from './src/screens/CustomizeMaalFlowScreen';
 import WalletsAccountsScreen from './src/screens/WalletsAccountsScreen';
 import PaymentHistoryScreen from './src/screens/PaymentHistoryScreen';
 import PlanBudgetScreen from './src/screens/PlanBudgetScreen';
@@ -68,7 +68,7 @@ const INTERNAL_DEMO_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_INTERNAL_DEMO =
 const R01_DEVICE_GATE_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_R01_DEVICE_GATE === '1';
 let r01DeviceGateStarted = false;
 
-// 4-tab primary navigation per docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md
+// 4-tab primary navigation per docs/design/06_MAALFLOW_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md
 // §1 (LOCKED): Home / My Money / Follow-ups / More. History, Reports, and
 // Settings moved off the primary bar into My Money/More gateways (see the
 // `screens` map below and HUB_TABS/back-affordance handling) — their own
@@ -121,7 +121,7 @@ class BootErrorBoundary extends React.Component {
     return (
       <View style={s.crashScreen}>
         <Ionicons name="warning-outline" size={42} color="#F0A84A" />
-        <Text style={s.crashTitle}>MYFI could not start</Text>
+        <Text style={s.crashTitle}>MaalFlow could not start</Text>
         <Text style={s.crashBody}>Close the app and open it again. Your saved data remains on this device.</Text>
         <Text style={s.crashDetails} numberOfLines={5}>
           {String(this.state.error?.message || this.state.error || '')}
@@ -208,8 +208,8 @@ function AppRoot() {
     r01DeviceGateStarted = true;
     import('./src/dev/financialLedgerV7DeviceHarness')
       .then(({ runFinancialLedgerV7DeviceHarness }) => runFinancialLedgerV7DeviceHarness())
-      .then(result => console.info('[MYFI:R01_DEVICE_GATE] PASS', JSON.stringify(result)))
-      .catch(error => console.error('[MYFI:R01_DEVICE_GATE] FAIL', String(error?.message || error)));
+      .then(result => console.info('[MAALFLOW:R01_DEVICE_GATE] PASS', JSON.stringify(result)))
+      .catch(error => console.error('[MAALFLOW:R01_DEVICE_GATE] FAIL', String(error?.message || error)));
   }, [ready]);
 
   useEffect(() => {
@@ -398,7 +398,7 @@ function AppRoot() {
 
       const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
         queueAuthTransition(session?.user ?? null).catch(error => {
-          console.warn('[MYFI:STARTUP_AUTH_TRANSITION]', String(error?.message || error || 'auth_transition_failed'));
+          console.warn('[MAALFLOW:STARTUP_AUTH_TRANSITION]', String(error?.message || error || 'auth_transition_failed'));
         });
       });
       authSubscription = listener?.subscription || null;
@@ -411,7 +411,7 @@ function AppRoot() {
         // Mark the failure too. A missing getSession mark would otherwise read the
         // same whether the call threw in 20ms or hung for 8 seconds first.
         mark('getSessionFailed');
-        console.warn('[MYFI:STARTUP_SESSION]', String(error?.message || error || 'session_read_failed'));
+        console.warn('[MAALFLOW:STARTUP_SESSION]', String(error?.message || error || 'session_read_failed'));
         await queueAuthTransition(null);
       }
 
@@ -448,14 +448,14 @@ function AppRoot() {
           JSON.stringify(exportOperationDurationsV1(PERFORMANCE_OPERATIONS.COLD_START)),
         );
       } catch {}
-      console.log('[MYFI:STARTUP_TIMING]', JSON.stringify(startupMarks));
+      console.log('[MAALFLOW:STARTUP_TIMING]', JSON.stringify(startupMarks));
     })().catch(error => {
       // A launch that failed part-way is the one we most want numbers from, so the
       // marks collected before the throw are reported here too.
       mark('failed');
       recordStartupTiming(startupMarks, 'failed');
-      console.log('[MYFI:STARTUP_TIMING]', JSON.stringify(startupMarks));
-      console.error('[MYFI:STARTUP_BARRIER]', String(error?.message || error || 'startup_failed'));
+      console.log('[MAALFLOW:STARTUP_TIMING]', JSON.stringify(startupMarks));
+      console.error('[MAALFLOW:STARTUP_BARRIER]', String(error?.message || error || 'startup_failed'));
       if (active) setReady(true);
     });
 
@@ -541,8 +541,8 @@ function AppRoot() {
     Alert.alert(
       ar ? 'مراجعة دمج البيانات' : 'Review data merge',
       ar
-        ? `توجد بيانات محفوظة على هذا الجهاز قبل تسجيل الدخول. إذا وافقت، سيضيف MYFI المعلومات المختلفة فقط، ويدمج المعلومات المكررة حتى لا تظهر مرتين. ${previewLine} سنحفظ نقطة رجوع قبل التنفيذ.`
-        : `Data saved on this device was found before sign-in. If you continue, MYFI will add only different information; duplicates are merged without repetition. ${previewLine} A rollback point will be saved before the change.`,
+        ? `توجد بيانات محفوظة على هذا الجهاز قبل تسجيل الدخول. إذا وافقت، سيضيف MaalFlow المعلومات المختلفة فقط، ويدمج المعلومات المكررة حتى لا تظهر مرتين. ${previewLine} سنحفظ نقطة رجوع قبل التنفيذ.`
+        : `Data saved on this device was found before sign-in. If you continue, MaalFlow will add only different information; duplicates are merged without repetition. ${previewLine} A rollback point will be saved before the change.`,
       [
         {
           text: ar ? 'إبقاؤها منفصلة' : 'Keep separate',
@@ -651,12 +651,12 @@ function AppRoot() {
   };
 
   useEffect(() => {
-    AsyncStorage.getItem('MYFI_READ_NOTIFICATIONS_V1')
+    AsyncStorage.getItem('MAALFLOW_READ_NOTIFICATIONS_V1')
       .then(raw => {
         if (!raw) return;
         const safe = pruneNotificationKeys(sanitizeNotificationReadKeys(JSON.parse(raw)));
         setReadNotifKeys(safe);
-        AsyncStorage.setItem('MYFI_READ_NOTIFICATIONS_V1', JSON.stringify(safe)).catch(() => {});
+        AsyncStorage.setItem('MAALFLOW_READ_NOTIFICATIONS_V1', JSON.stringify(safe)).catch(() => {});
       })
       .catch(() => {});
   }, []);
@@ -674,14 +674,14 @@ function AppRoot() {
   useEffect(() => {
     const cleanExpiredNotificationKeys = async () => {
       try {
-        const entries = await AsyncStorage.multiGet(['MYFI_READ_NOTIFICATIONS_V1', NOTIFICATION_DISMISSED_STORAGE_KEY]);
+        const entries = await AsyncStorage.multiGet(['MAALFLOW_READ_NOTIFICATIONS_V1', NOTIFICATION_DISMISSED_STORAGE_KEY]);
         const values = new Map(entries);
-        const nextRead = pruneNotificationKeys(sanitizeNotificationReadKeys(JSON.parse(values.get('MYFI_READ_NOTIFICATIONS_V1') || '[]')));
+        const nextRead = pruneNotificationKeys(sanitizeNotificationReadKeys(JSON.parse(values.get('MAALFLOW_READ_NOTIFICATIONS_V1') || '[]')));
         const nextDismissed = pruneNotificationKeys(sanitizeNotificationReadKeys(JSON.parse(values.get(NOTIFICATION_DISMISSED_STORAGE_KEY) || '[]')));
         setReadNotifKeys(current => JSON.stringify(current) === JSON.stringify(nextRead) ? current : nextRead);
         setDismissedNotifKeys(current => JSON.stringify(current) === JSON.stringify(nextDismissed) ? current : nextDismissed);
         await AsyncStorage.multiSet([
-          ['MYFI_READ_NOTIFICATIONS_V1', JSON.stringify(nextRead)],
+          ['MAALFLOW_READ_NOTIFICATIONS_V1', JSON.stringify(nextRead)],
           [NOTIFICATION_DISMISSED_STORAGE_KEY, JSON.stringify(nextDismissed)],
         ]);
       } catch {}
@@ -691,7 +691,7 @@ function AppRoot() {
   }, []);
 
   useEffect(() => {
-    // MYFI mirrors its rows and text direction explicitly. Forcing the native
+    // MaalFlow mirrors its rows and text direction explicitly. Forcing the native
     // RTL flag here asks React Native/Expo Go to restart the whole app when the
     // onboarding language is saved. On some Expo Go builds that restart never
     // stabilizes and becomes a reload loop. Allow RTL capability, but never
@@ -701,7 +701,7 @@ function AppRoot() {
 
   useEffect(() => {
     if (fontsLoaded) applyGlobalFont();
-    if (fontError) console.warn('[MYFI] Cairo font failed to load; falling back to system font.', fontError);
+    if (fontError) console.warn('[MaalFlow] Cairo font failed to load; falling back to system font.', fontError);
   }, [fontsLoaded, fontError]);
 
   useEffect(() => {
@@ -772,8 +772,8 @@ function AppRoot() {
     return (
       <View style={s.splash}>
         <StatusBar style="light" />
-        <Image source={require('./assets/myfi-splash-logo.png')} style={s.splashLogo} resizeMode="contain" />
-        <Text style={s.splashTitle}>MYFI</Text>
+        <Image source={require('./assets/maalflow-splash-logo.png')} style={s.splashLogo} resizeMode="contain" />
+        <Text style={s.splashTitle}>MaalFlow</Text>
         <Text style={s.splashSubtitle}>
           {cfg.lang === 'ar' ? 'أموالك بوضوح' : 'Your finances, clearly'}
         </Text>
@@ -925,7 +925,7 @@ function AppRoot() {
     setShowNotif(true);
     const next = Array.from(new Set([...readNotifKeys, ...notifKeys])).slice(-80);
     setReadNotifKeys(next);
-    await AsyncStorage.setItem('MYFI_READ_NOTIFICATIONS_V1', JSON.stringify(next));
+    await AsyncStorage.setItem('MAALFLOW_READ_NOTIFICATIONS_V1', JSON.stringify(next));
   };
 
   const dismissNotifications = async (keys = []) => {
@@ -1136,7 +1136,7 @@ function AppRoot() {
       />
     ),
     wallets: <WalletsAccountsScreen />,
-    customize: <CustomizeMyfiScreen />,
+    customize: <CustomizeMaalFlowScreen />,
     categories: <CategoriesScreen />,
     benefits: <BenefitsScreen />,
     budget: <PlanBudgetScreen />,

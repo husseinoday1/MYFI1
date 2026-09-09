@@ -22,7 +22,7 @@ export default function MoreScreen({
       items: [
         {
           key: 'customize', icon: 'options-outline', tone: th.primary,
-          title: isAr ? 'تخصيص MYFI' : 'Customize MYFI',
+          title: isAr ? 'تخصيص MaalFlow' : 'Customize MaalFlow',
           description: isAr ? 'اختر ما تتابعه وما يظهر في الرئيسية' : 'Choose what you follow and what appears on Home',
           onPress: onOpenCustomize,
         },
@@ -76,7 +76,7 @@ export default function MoreScreen({
       items: [
         {
           key: 'guide', icon: 'book-outline', tone: th.primary,
-          title: isAr ? 'دليل MYFI' : 'MYFI guide',
+          title: isAr ? 'دليل MaalFlow' : 'MaalFlow guide',
           description: isAr ? 'إجابات عملية حسب المهمة التي تريد إنجازها' : 'Practical help for the task you want to finish',
           onPress: () => onOpenSettingsPage?.('guide'),
         },

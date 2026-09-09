@@ -46,7 +46,7 @@ mid-check. **That is the first thing to check.**
 |---|---|
 | CI run `32718230827`, commit `ed436ef` | **True.** Run is on `ed436ef`, completed/success. |
 | `ed436ef` is the accepted build | True, but note HEAD is one commit later (`d2ed3ae`), so the accepted build is not the tip. |
-| Docs modified locally, not pushed | **True.** `MYFI_ENGINEERING_HANDOFF.md`, `docs/00_MYFI_CANONICAL_AUTHORITY.md`, `docs/MYFI_SECURITY_THREAT_MODEL.md` are modified and uncommitted, plus ~15 untracked files including new CLAUDE.md files and P10-014A planning docs. |
+| Docs modified locally, not pushed | **True.** `MAALFLOW_ENGINEERING_HANDOFF.md`, `docs/00_MAALFLOW_CANONICAL_AUTHORITY.md`, `docs/MAALFLOW_SECURITY_THREAT_MODEL.md` are modified and uncommitted, plus ~15 untracked files including new CLAUDE.md files and P10-014A planning docs. |
 | `test:gate` 120/0/11 | **Not verified.** I did not run it this session. |
 
 ## A correction I made to my own analysis

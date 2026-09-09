@@ -57,4 +57,4 @@ assert.equal(consumeMaintenanceResumeSignal(), 'financial_maintenance_resume');
 __resetMaintenanceResumeSignalForTests();
 assert.equal(consumeMaintenanceResumeSignal(), null, 'the test reset itself must leave no signal pending');
 
-console.log('MYFI FINANCIAL MAINTENANCE RESUME SIGNAL RUNTIME: PASSED');
+console.log('MaalFlow FINANCIAL MAINTENANCE RESUME SIGNAL RUNTIME: PASSED');

@@ -12,7 +12,7 @@ const must = (condition, message) => {
 
 const sync = read('src/store/slices/useSyncSlice.js');
 const app = read('App.js');
-const ownership = read('docs/MYFI_DATA_OWNERSHIP.md');
+const ownership = read('docs/MAALFLOW_DATA_OWNERSHIP.md');
 
 must(sync.includes("import { Platform } from 'react-native';"),
   'native platform selection for active ledger identity storage is missing');
@@ -43,4 +43,4 @@ must(ownership.includes('active local ledger namespace is persisted independentl
 must(ownership.includes('Ledger identity يجب أن تبقى مستقلة عن Supabase user id'),
   'Data Ownership contract no longer states ledger/auth identity independence');
 
-console.log('MYFI P19-001 OFFLINE LEDGER IDENTITY CONTRACT: PASSED');
+console.log('MaalFlow P19-001 OFFLINE LEDGER IDENTITY CONTRACT: PASSED');

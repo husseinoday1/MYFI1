@@ -121,7 +121,7 @@ const makeSupabase = ({ rows, manifestHash, archivePresent = true }) => ({
     () => buildFinancialArchiveSnapshotRowsV2([{ year: 2025, scope: 'personal', data: { trans: [{ id: 'same' }, { id: 'same' }] } }]),
     /financial_archive_snapshot_transaction_duplicate/,
   );
-  console.log('MYFI P20 PHASE 12-A ARCHIVE READBACK RUNTIME: PASSED');
+  console.log('MaalFlow P20 PHASE 12-A ARCHIVE READBACK RUNTIME: PASSED');
 })().catch(error => {
   console.error(error);
   process.exit(1);

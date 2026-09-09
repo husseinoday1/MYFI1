@@ -16,7 +16,7 @@ const indexRaw = read('src/lib/transactionIndex.js');
 const perf = read('src/dev/performanceTestData.js');
 const repo = read('src/lib/localArchiveRepository.js');
 const data = read('src/store/slices/dataSlice.js');
-const files = read('src/lib/myfiFiles.js');
+const files = read('src/lib/maalflowFiles.js');
 const csv = read('src/lib/csv.js');
 const pdf = read('src/lib/pdf.js');
 const backup = read('src/lib/backupData.js');
@@ -75,13 +75,13 @@ must(modules.includes('if (getActiveScope(cfg) === SCOPES.ALL) return source;'),
 // Portable archive speed/save and output identity.
 must(files.includes("compression: 'deflate-base64-v1'") && files.includes('level: encrypted ? 0 : 6'), 'Encrypted archive still wastes CPU compressing ciphertext');
 must(files.includes('StorageAccessFramework') && files.includes('requestDirectoryPermissionsAsync') && files.includes('createFileAsync'), 'Android direct archive save is missing');
-must(archive.includes('حفظ في الهاتف') && archive.includes('saveMyfiPackageToDevice'), 'Archive screen does not offer direct phone saving');
+must(archive.includes('حفظ في الهاتف') && archive.includes('saveMaalFlowPackageToDevice'), 'Archive screen does not offer direct phone saving');
 must(csv.includes("'app'") && csv.includes('PRODUCT_NAME') && csv.includes('PRODUCT_FILE_PREFIX'), 'CSV output is not centrally branded');
 must(pdf.includes('PRODUCT_NAME'), 'PDF output is not centrally branded');
 must(files.includes('PRODUCT_FILE_PREFIX') && files.includes('PRODUCT_NAME'), 'Archive/backup output is not centrally branded');
 
 // Cold years are carried inside full backup/restore so archiving cannot create a backup data-loss gap.
-must(backup.includes('MYFI_BACKUP_DATA_VERSION = 11'), 'Logical backup schema was not advanced for custom tracker data');
+must(backup.includes('MAALFLOW_BACKUP_DATA_VERSION = 11'), 'Logical backup schema was not advanced for custom tracker data');
 must(backup.includes('coldArchives'), 'Full backup schema does not include cold archives');
 must(data.includes('exportColdArchives') && data.includes('replaceColdArchives'), 'Backup/restore does not carry cold archive data');
 must(repo.includes('restore-stage'), 'Cold archive restore does not stage before replacing active archive data');
@@ -123,7 +123,7 @@ must(api.getTransactionsThroughDate(prependedRows, '2026-08-14') === prependedIn
 
 // Runtime logical backup v10 preserves cold archive rows.
 let backupSource = backup.replace(/export const /g, 'const ');
-backupSource += '\nmodule.exports = { MYFI_BACKUP_DATA_VERSION, buildFinancialBackup, inspectBackupData, summarizeBackupData };\n';
+backupSource += '\nmodule.exports = { MAALFLOW_BACKUP_DATA_VERSION, buildFinancialBackup, inspectBackupData, summarizeBackupData };\n';
 const bctx = { module: { exports: {} }, exports: {}, Array, Object, Number, String, Set, Map, Date };
 vm.createContext(bctx);
 vm.runInContext(backupSource, bctx, { filename: 'backupData.js' });
@@ -136,4 +136,4 @@ const inspection = bctx.module.exports.inspectBackupData(b);
 must(inspection.valid, 'Backup v10 with cold archive failed validation');
 must(inspection.entries === 2 && inspection.activeEntries === 1 && inspection.archivedEntries === 1, 'Backup summary lost active/cold transaction counts');
 
-console.log('MYFI DATABASE + ARCHIVE UX V5.3: PASSED');
+console.log('MaalFlow DATABASE + ARCHIVE UX V5.3: PASSED');

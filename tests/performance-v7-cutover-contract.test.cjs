@@ -72,4 +72,4 @@ must(
   'performance archive writes can create a live sync identity',
 );
 
-console.log('MYFI PERFORMANCE V7 CUTOVER CONTRACT: PASSED');
+console.log('MaalFlow PERFORMANCE V7 CUTOVER CONTRACT: PASSED');

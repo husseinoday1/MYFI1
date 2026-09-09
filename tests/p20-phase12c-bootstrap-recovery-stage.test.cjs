@@ -14,4 +14,4 @@ for (const token of [
   'financial_v2_bootstrap_recovery_stage_manifest_mismatch',
 ]) assert(source.includes(token), `missing Phase 12-C recovery-stage token: ${token}`);
 assert.doesNotMatch(source, /activateFinancialSyncProtocolV2V8|adoptUnbootstrappedCloudLedgerIdentityV8|clearFinancialNamespace/);
-console.log('MYFI P20 PHASE 12-C BOOTSTRAP RECOVERY PRIVATE STAGE CONTRACT: PASSED');
+console.log('MaalFlow P20 PHASE 12-C BOOTSTRAP RECOVERY PRIVATE STAGE CONTRACT: PASSED');

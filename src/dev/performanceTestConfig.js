@@ -1,4 +1,4 @@
-// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
+// MAALFLOW_PERFORMANCE_DATA_RUNTIME_V5_1_2
 export const PERFORMANCE_TEST_TIERS = [
   { id: '200', mode: 'longterm', transactions: 200, months: 24, labelAr: 'خفيف', labelEn: 'Light', purposeAr: 'سنتان لفحص الشاشات والتقارير والأرشفة', purposeEn: 'Two years for screens, reports, and archive checks' },
   { id: '1000', mode: 'longterm', transactions: 1000, months: 36, labelAr: 'متوسط', labelEn: 'Medium', purposeAr: 'ثلاث سنوات لاختبار الاستخدام المتكرر والفلاتر', purposeEn: 'Three years for repeated use and filtering' },

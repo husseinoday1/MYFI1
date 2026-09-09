@@ -1,4 +1,4 @@
-// MYFI Phase 10 / P10-014A-001 — local Strategy B real-device acceptance harness.
+// MaalFlow Phase 10 / P10-014A-001 — local Strategy B real-device acceptance harness.
 // Acceptance-only code. It is inert unless BOTH diagnostic build flags are enabled.
 // It never calls Supabase and never counts synthetic server proof as cloud evidence.
 // All financial rows created by this harness live under disposable workspace:p10a-*
@@ -277,7 +277,7 @@ const withRestoreTransaction = (database, task) => (
 
 const assertCloneDatabaseBinding = async database => {
   if (!P10_014A_CLONE_PROBE_FLAG) return null;
-  const nonce = text(globalThis?.__MYFI_P10_014A_CLONE_NONCE__);
+  const nonce = text(globalThis?.__MAALFLOW_P10_014A_CLONE_NONCE__);
   assertGate(nonce && nonce.length >= 16 && nonce.length <= 120, 'clone_nonce_missing');
   const row = await database.getFirstAsync(
     'SELECT value FROM ledger_v7_meta WHERE key=? LIMIT 1',
@@ -1665,7 +1665,7 @@ const runMaintenanceInterlockScenario = async () => {
 };
 
 const runRealSqliteBusyScenario = async database => {
-  const cloneDatabaseName = text(globalThis?.__MYFI_P10_014A_CLONE_DB_NAME__);
+  const cloneDatabaseName = text(globalThis?.__MAALFLOW_P10_014A_CLONE_DB_NAME__);
   assertGate(/^p10-014a-r5-clone-\d{13}-[a-z0-9]{8}\.db$/.test(cloneDatabaseName),
     'sqlite_busy_clone_name_invalid');
   const probeKey = `p10_014a_sqlite_busy_probe:${uuid()}`;
@@ -1897,7 +1897,7 @@ export async function runPhase10RestoreKillWindowHarness({ killWindow } = {}) {
   assertGate(PHASE10_RESTORE_BENCHMARK_ENABLED, 'acceptance_build_flags_required');
   assertGate(P10_014A_CLONE_PROBE_FLAG, 'kill_window_clone_probe_required');
   assertGate(PROCESS_KILL_WINDOWS.includes(killWindow), 'kill_window_invalid');
-  assertGate(globalThis?.__MYFI_P10_014A_KILL_WINDOW__ === killWindow,
+  assertGate(globalThis?.__MAALFLOW_P10_014A_KILL_WINDOW__ === killWindow,
     'kill_window_global_binding_mismatch');
 
   const database = await getLedgerDb();

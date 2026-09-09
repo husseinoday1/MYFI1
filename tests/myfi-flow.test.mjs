@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { buildMyfiFlowPreview, buildMyfiFlowSavePlan, normalizeMyfiFlowPlan } from '../src/lib/myfiFlow.js';
+import { buildMaalFlowFlowPreview, buildMaalFlowFlowSavePlan, normalizeMaalFlowFlowPlan } from '../src/lib/maalflowFlow.js';
 
 const categories = [{ id: 'food' }, { id: 'rent' }, { id: 'fun' }];
 const allocations = { needs: 60, wants: 20, savings: 20, debt: 0, investment: 0 };
 
-const preview = buildMyfiFlowPreview({
+const preview = buildMaalFlowFlowPreview({
   income: 1_000_000,
   allocations,
   categories,
@@ -26,23 +26,23 @@ assert.deepEqual(preview.budgetChanges, [
 ]);
 assert.deepEqual(preview.unboundBuckets, ['savings'], 'unlinked funding must never silently create a budget');
 
-const malformed = buildMyfiFlowPreview({ income: 100, allocations: { needs: 70, wants: 20 }, categories });
+const malformed = buildMaalFlowFlowPreview({ income: 100, allocations: { needs: 70, wants: 20 }, categories });
 assert.equal(malformed.valid, false, 'an incomplete allocation cannot be applied');
 assert.equal(malformed.budgetChanges.length, 0, 'an unbound plan must not invent category budgets');
 
-const saved = buildMyfiFlowSavePlan({
+const saved = buildMaalFlowFlowSavePlan({
   strategy: 'balanced', income: 1000, allocations: { needs: 50, wants: 30, savings: 20 },
   categoryBindings: { needs: [{ categoryId: 'food', weight: 1 }, { categoryId: 'missing', weight: 1 }] },
   categories, period: '2026-08',
 });
 assert.equal(saved.categoryBindings.needs.length, 1, 'unknown category references are removed at save time');
 assert.equal(saved.categoryBindings.needs[0].weight, 1, 'remaining bindings are renormalized without changing the user plan');
-assert.equal(normalizeMyfiFlowPlan(saved, { categoryIds: ['food'] }).period, '2026-08');
+assert.equal(normalizeMaalFlowFlowPlan(saved, { categoryIds: ['food'] }).period, '2026-08');
 
-const duplicateBindingPlan = normalizeMyfiFlowPlan({
+const duplicateBindingPlan = normalizeMaalFlowFlowPlan({
   allocations,
   categoryBindings: { needs: [{ categoryId: 'food', weight: 1 }], wants: [{ categoryId: 'food', weight: 1 }] },
 }, { categoryIds: ['food'] });
 assert.deepEqual(duplicateBindingPlan.categoryBindings.wants, [], 'one category cannot receive two Flow allocations silently');
 
-console.log('MYFI Flow tests passed');
+console.log('MaalFlow Flow tests passed');

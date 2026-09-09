@@ -16,4 +16,4 @@ assert(settings.includes("const rotationNote = cfg.orientationMode === 'system' 
 assert(settings.includes("title={T.rotation} subtitle={rotationNote} value={rotationValue} onPress={() => onChoice('orientation')}"));
 assert(!settings.includes("value={cfg.orientationMode === 'portrait' ? T.fixedPortrait : T.system}"));
 settings.split(/\r?\n/).forEach((line,i)=>assert(!/[ \t]+$/.test(line),`SettingsScreen.js:${i+1} trailing whitespace`));
-console.log('MYFI SYSTEM IDENTITY SETTINGS V4.6: PASSED');
+console.log('MaalFlow SYSTEM IDENTITY SETTINGS V4.6: PASSED');

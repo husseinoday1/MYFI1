@@ -31,7 +31,7 @@ const refused = (reason, detail = {}) => ({ supported: true, ok: false, reason, 
  */
 export const decodeCanonicalBackupV11 = (candidate) => {
   if (!isObject(candidate)) return refused('canonical_backup_document_invalid');
-  if (candidate.kind !== 'myfi_canonical_financial_backup') {
+  if (candidate.kind !== 'maalflow_canonical_financial_backup') {
     return refused('canonical_backup_kind_invalid');
   }
   const manifest = candidate.manifest;

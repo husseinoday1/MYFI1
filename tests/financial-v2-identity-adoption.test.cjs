@@ -1,4 +1,4 @@
-// MYFI — adopting a different cloud ledger identity: the decision layer.
+// MaalFlow — adopting a different cloud ledger identity: the decision layer.
 //
 // Three real accounts sat permanently blocked on 2026-09-05 behind
 // financial_v2_ledger_id_conflict, with the owner's real mutations stuck in

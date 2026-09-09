@@ -56,4 +56,4 @@ assert.notEqual(deriveCanonicalRestoreProofDigestV11({ ...base, semanticHash: 'b
 assert.notEqual(deriveCanonicalRestoreProofDigestV11({ ...base, counts: { ...base.counts, postings: 4 } }), first);
 assert.throws(() => deriveCanonicalRestoreProofDigestV11({ ...base, counts: {} }), /canonical_restore_proof_input_invalid/);
 assert.throws(() => deriveCanonicalRestoreProofDigestV11({ ...base, operationId: 'not-a-uuid' }), /canonical_restore_proof_input_invalid/);
-console.log('MYFI P10-012 OPAQUE RESTORE PROOF: PASS');
+console.log('MaalFlow P10-012 OPAQUE RESTORE PROOF: PASS');

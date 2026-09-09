@@ -143,7 +143,7 @@ const seedIdentity = db => db.native.prepare(
   assert.equal(evidenceResult.metadataCount, 1);
   assert.equal(withEvidence.writeCalls, 0);
 
-  console.log('MYFI P20 LOCAL RESET V2 INTERLOCK RUNTIME: PASSED');
+  console.log('MaalFlow P20 LOCAL RESET V2 INTERLOCK RUNTIME: PASSED');
 })().catch(error => {
   console.error(error);
   process.exit(1);

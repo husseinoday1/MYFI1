@@ -244,7 +244,7 @@ export const smartCaptureReasonMessage = (reason, lang = 'ar') => {
   const messages = {
     multiple_transactions: ar
       ? 'الصورة تحتوي أكثر من حركة مالية. حالياً افتح حركة واحدة بصورة منفصلة حتى لا يتم اختيار مبلغ بالخطأ.'
-      : 'The image contains multiple financial transactions. For now, use an image with one transaction so MYFI does not choose the wrong amount.',
+      : 'The image contains multiple financial transactions. For now, use an image with one transaction so MaalFlow does not choose the wrong amount.',
     not_transaction: ar
       ? 'تم فهم الصورة، لكنها لا تبدو إثباتاً لحركة مالية مكتملة. لم يتم افتراض دخل أو مصروف.'
       : 'The image was understood, but it does not look like evidence of a completed financial transaction. No income or expense was assumed.',
@@ -255,8 +255,8 @@ export const smartCaptureReasonMessage = (reason, lang = 'ar') => {
       ? 'المبلغ واضح لكن اتجاه الحركة غير محسوم. اختر دخل أو مصروف يدوياً.'
       : 'The amount is clear but the transaction direction is ambiguous. Choose income or expense manually.',
     currency_mismatch: ar
-      ? 'عملة المصدر تختلف عن عملة MYFI الحالية. راجع المبلغ والمحفظة قبل الحفظ.'
-      : 'The source currency differs from the current MYFI currency. Review the amount and wallet before saving.',
+      ? 'عملة المصدر تختلف عن عملة MaalFlow الحالية. راجع المبلغ والمحفظة قبل الحفظ.'
+      : 'The source currency differs from the current MaalFlow currency. Review the amount and wallet before saving.',
   };
   return messages[reason] || (ar ? 'راجع الحقول المستخرجة قبل الحفظ.' : 'Review the extracted fields before saving.');
 };

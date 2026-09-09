@@ -215,7 +215,7 @@ export function IconContainer({ th, icon, tone, size = 'md', plain = false, soli
 }
 
 // Small labeled/colored indicator (type pills, status badges). One primitive
-// covering both use cases named in 03_MYFI_DESIGN_SYSTEM_CANONICAL.md §8,
+// covering both use cases named in 03_MAALFLOW_DESIGN_SYSTEM_CANONICAL.md §8,
 // differentiated by fill vs. outline.
 export function Badge({ th, label, tone, variant = 'fill', icon, style, textStyle }) {
   const accent = tone || th.primary;

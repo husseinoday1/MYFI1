@@ -4,8 +4,8 @@ const assert = require('assert');
 const root = path.resolve(__dirname, '..');
 const read = p => fs.readFileSync(path.join(root,p),'utf8');
 
-assert(fs.existsSync(path.join(root,'docs/01_CORE_AUTHORITY/MYFI_MASTER_PLAN_FROZEN.md')), 'canonical frozen plan missing');
-assert(fs.existsSync(path.join(root,'docs/01_CORE_AUTHORITY/MYFI_USER_NOTES_RECONCILIATION_CANONICAL_2026-08-16.md')), 'canonical reconciliation missing');
+assert(fs.existsSync(path.join(root,'docs/01_CORE_AUTHORITY/MAALFLOW_MASTER_PLAN_FROZEN.md')), 'canonical frozen plan missing');
+assert(fs.existsSync(path.join(root,'docs/01_CORE_AUTHORITY/MAALFLOW_USER_NOTES_RECONCILIATION_CANONICAL_2026-08-16.md')), 'canonical reconciliation missing');
 
 const tx = read('src/store/slices/transactionsSlice.js');
 assert(!/Number\.isFinite\(walletRate\)[\s\S]{0,120}\? walletRate/.test(tx), 'foreign transaction command still silently falls back to wallet valuation');
@@ -42,7 +42,7 @@ assert(modules.includes('cfg.activeScope'), 'mixed personal/business mode still 
 
 const onboarding = read('src/screens/OnboardingScreen.js');
 assert(onboarding.includes('countryCode') && onboarding.includes('currencyCode') && onboarding.includes('baseCurrencyConfirmedAt'), 'first-run country/base-currency confirmation gate missing');
-// Reversed 2026-08-26 per docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md
+// Reversed 2026-08-26 per docs/design/06_MAALFLOW_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md
 // §7 prohibits rendering a rigid Personal/Business/Dual selector during
 // onboarding. The visual role and money-organisation questions may derive a
 // supported profile mode, and Settings retains the direct change path.
@@ -143,4 +143,4 @@ assert(tx.includes('walletPositionForCommand'), 'transaction commands still vali
 assert(trackers.includes('walletPositionForTrackerCommand'), 'tracker payment commands still validate balances from bounded Zustand only');
 assert(mgmt.includes('walletBalanceForManagementCommand'), 'wallet reconciliation still derives canonical balance from bounded Zustand only');
 
-console.log('MYFI R04 PHASE 6-9 CONTRACT: PASSED');
+console.log('MaalFlow R04 PHASE 6-9 CONTRACT: PASSED');

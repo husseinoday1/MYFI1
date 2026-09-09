@@ -123,4 +123,4 @@ if (ts) {
   assert.equal(negativeAdjustment.postings[0].amountMinor, -3000);
 }
 
-console.log('MYFI R04.1 A01 FINANCIAL CORE: PASSED');
+console.log('MaalFlow R04.1 A01 FINANCIAL CORE: PASSED');

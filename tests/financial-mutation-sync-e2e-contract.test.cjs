@@ -16,4 +16,4 @@ assert.match(source, /Invalid mutation was accepted/);
 assert.match(managed, /run-financial-mutation-sync-e2e\.cjs/);
 assert.match(qualityGate, /CLOUD_MUTATION_PROTOCOL_E2E/);
 
-console.log('MYFI mutation sync two-client staging harness contract passed.');
+console.log('MaalFlow mutation sync two-client staging harness contract passed.');

@@ -15,7 +15,7 @@ import AddTransModal from '../components/AddTransModal';
 import ActionMenu from '../components/ActionMenu';
 import { describeSmartSource } from '../lib/smartEntry';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
-import { exportMyfiPackage, pickMyfiPackage, saveMyfiPackageToDevice, shareMyfiPackage, unlockMyfiPackage } from '../lib/myfiFiles';
+import { exportMaalFlowPackage, pickMaalFlowPackage, saveMaalFlowPackageToDevice, shareMaalFlowPackage, unlockMaalFlowPackage } from '../lib/maalflowFiles';
 import { getColdArchiveNamespace, listColdArchiveYears, loadColdArchiveYear } from '../lib/localArchiveRepository';
 import { filterByActiveScope, getActiveScope, getTransactionDisplayAmount, transactionFeatureEnabled } from '../lib/modules';
 import { getTransactionTagMeta } from '../lib/transactionTags';
@@ -205,7 +205,7 @@ export default function ArchiveScreen() {
     if (fileBusy) return;
     setFileBusy(true);
     try {
-      const picked = await pickMyfiPackage({ kind: 'year_archive' });
+      const picked = await pickMaalFlowPackage({ kind: 'year_archive' });
       if (picked?.passwordRequired) {
         setLockedPackage(picked);
         setArchivePassword('');
@@ -260,7 +260,7 @@ export default function ArchiveScreen() {
           onPress: async () => {
             setFileBusy(true);
             try {
-              const result = await saveMyfiPackageToDevice({ ...exported, kind: 'year_archive' });
+              const result = await saveMaalFlowPackageToDevice({ ...exported, kind: 'year_archive' });
               if (result?.saved) confirmArchiveCommit(year, exported.checksum);
             } catch (error) {
               Alert.alert('', error?.message || (isAr ? 'تعذر حفظ الملف على الهاتف.' : 'Could not save the file to the phone.'));
@@ -274,7 +274,7 @@ export default function ArchiveScreen() {
           onPress: async () => {
             setFileBusy(true);
             try {
-              await shareMyfiPackage({ uri: exported.uri, kind: 'year_archive' });
+              await shareMaalFlowPackage({ uri: exported.uri, kind: 'year_archive' });
               confirmArchiveCommit(year, exported.checksum);
             } catch (error) {
               Alert.alert('', error?.message || (isAr ? 'تعذرت مشاركة الملف.' : 'Could not share the file.'));
@@ -296,7 +296,7 @@ export default function ArchiveScreen() {
     // Let the busy state paint before PBKDF2/compression work begins.
     await new Promise(resolve => setTimeout(resolve, 40));
     try {
-      const exported = await exportMyfiPackage({
+      const exported = await exportMaalFlowPackage({
         kind: 'year_archive',
         data,
         year,
@@ -353,7 +353,7 @@ export default function ArchiveScreen() {
     if (archivePasswordMode === 'import' && lockedPackage) {
       setFileBusy(true);
       try {
-        const unlocked = await unlockMyfiPackage(lockedPackage, archivePassword, 'year_archive');
+        const unlocked = await unlockMaalFlowPackage(lockedPackage, archivePassword, 'year_archive');
         setLoadedArchive(unlocked);
         setArchiveSection('timeline');
         setLockedPackage(null);

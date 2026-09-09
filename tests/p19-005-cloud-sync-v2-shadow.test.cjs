@@ -57,4 +57,4 @@ assert.match(sql, /grant execute on function public\.sync_financial_mutations_v2
 assert.doesNotMatch(sql, /delete from public\.financial_mutations_v1/i);
 assert.doesNotMatch(sql, /alter table public\.financial_mutations_v1/i);
 
-console.log('MYFI P19-005 CLOUD SYNC V2 SHADOW CONTRACT: PASSED');
+console.log('MaalFlow P19-005 CLOUD SYNC V2 SHADOW CONTRACT: PASSED');

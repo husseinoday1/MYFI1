@@ -98,4 +98,4 @@ console.log('[PASS] short internal reasons pass through unchanged');
 assert.equal(syncDiagnosticCode('x'.repeat(500)), 'sync_failed');
 console.log('[PASS] unrecognised long text collapses to a stable category');
 
-console.log('MYFI SYNC ERROR CLASSIFICATION CONTRACT: PASS');
+console.log('MaalFlow SYNC ERROR CLASSIFICATION CONTRACT: PASS');

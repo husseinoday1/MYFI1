@@ -1,4 +1,4 @@
--- MYFI P19 FINAL — preserve causal command order in V2 mutation batches.
+-- MaalFlow P19 FINAL — preserve causal command order in V2 mutation batches.
 --
 -- Root cause:
 -- The device drains ledger_outbox_v3 in sequence_id order, which preserves the

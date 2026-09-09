@@ -22,4 +22,4 @@
 
 ## Closure Decision
 
-R04.1 acceptance-recovery is closed. The R04.1 prohibition on starting Phase 6 is released after this documentation closure package passes its gates and is committed/pushed. Future multi-currency reporting work is governed by `MYFI_MULTI_CURRENCY_FINANCIAL_POLICY_ADDENDUM.md`.
+R04.1 acceptance-recovery is closed. The R04.1 prohibition on starting Phase 6 is released after this documentation closure package passes its gates and is committed/pushed. Future multi-currency reporting work is governed by `MAALFLOW_MULTI_CURRENCY_FINANCIAL_POLICY_ADDENDUM.md`.

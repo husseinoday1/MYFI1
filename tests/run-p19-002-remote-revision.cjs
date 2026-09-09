@@ -198,7 +198,7 @@ class FakeDb {
     /financial_mutation_revision_conflict/,
   );
 
-  console.log('MYFI P19-002 REMOTE REVISION RUNTIME: PASSED');
+  console.log('MaalFlow P19-002 REMOTE REVISION RUNTIME: PASSED');
 })().catch(error => {
   console.error(error);
   process.exit(1);

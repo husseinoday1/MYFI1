@@ -1,4 +1,4 @@
-// MYFI — the review screen that stands between the owner's queued financial
+// MaalFlow — the review screen that stands between the owner's queued financial
 // entries and a replacement of their local ledger.
 //
 // Not styling assertions. These are the rules from the approved design, each of

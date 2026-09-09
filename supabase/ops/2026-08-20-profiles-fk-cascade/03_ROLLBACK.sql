@@ -1,4 +1,4 @@
--- MYFI — rollback for 02_MIGRATION.sql
+-- MaalFlow — rollback for 02_MIGRATION.sql
 -- Date: 2026-08-20
 --
 -- *** READ THIS BEFORE USING IT ***

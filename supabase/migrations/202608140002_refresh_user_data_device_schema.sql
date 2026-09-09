@@ -1,4 +1,4 @@
--- Ensure device audit metadata exists on every legacy MYFI user_data table and
+-- Ensure device audit metadata exists on every legacy MaalFlow user_data table and
 -- force PostgREST to discard any schema cache created before the column existed.
 
 alter table public.user_data

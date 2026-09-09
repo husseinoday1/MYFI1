@@ -46,6 +46,6 @@ Proof:              tests/ui-contract.test.cjs (يتحقق من وجود
 ## مُرفَق مع نفس الالتزام
 
 تحديث توثيقي بحت في
-`docs/design/15_MYFI_VISUAL_ROLLOUT_IMPLEMENTATION_PLAN.md`: روابط فهرسة
+`docs/design/15_MAALFLOW_VISUAL_ROLLOUT_IMPLEMENTATION_PLAN.md`: روابط فهرسة
 لمرحلتين مستقبليتين (17-G صانع المتابعات، 17-C/17-E محرك الخطة وبصيرة MYFI)
 إلى مستنداتهما التصميمية. لا تأثير كودي.

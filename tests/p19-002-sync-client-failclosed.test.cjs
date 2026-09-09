@@ -28,4 +28,4 @@ assert(repository.includes("canonicalSyncValue"),
 assert(repository.includes("row.entityRevision < currentRevision"),
   'stale remote revision guard is missing');
 
-console.log('MYFI P19-002 SYNC CLIENT FAIL-CLOSED CONTRACT: PASSED');
+console.log('MaalFlow P19-002 SYNC CLIENT FAIL-CLOSED CONTRACT: PASSED');

@@ -149,7 +149,7 @@ const { stageFinancialBootstrapRecoveryImportV2 } = compiled.exports;
   assert.equal(interrupted.ok, false);
   assert.equal(interrupted.reason, 'network_interrupted');
   assert.equal(calls.fail, 1, 'an interrupted partial read must clear its private stage before retry');
-  console.log('MYFI P20 PHASE 12-C BOOTSTRAP RECOVERY PRIVATE STAGE: PASSED');
+  console.log('MaalFlow P20 PHASE 12-C BOOTSTRAP RECOVERY PRIVATE STAGE: PASSED');
 })().catch(error => {
   console.error(error);
   process.exit(1);

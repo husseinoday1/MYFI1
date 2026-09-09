@@ -80,4 +80,4 @@ assert(transferScopeSql.includes('add column if not exists from_scope'), 'Transf
 assert(transferScopeSql.includes('normalize_transfer_scopes()'), 'Transfer scope normalizer is missing');
 assert(transferScopeSql.includes('transactions_workspace_transfer_scopes_date_idx'), 'Transfer scope index is missing');
 
-console.log(`MYFI normalized schema contract: ${tables.length} tables, RLS, read support, and workspace integrity passed`);
+console.log(`MaalFlow normalized schema contract: ${tables.length} tables, RLS, read support, and workspace integrity passed`);

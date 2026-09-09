@@ -273,7 +273,7 @@ export default function HomeScreen({
         setSqlHomeError(false);
       })
       .catch((error) => {
-        console.warn('[MYFI:HOME_LEDGER_READ]', String(error?.message || error || 'home_ledger_read_failed'));
+        console.warn('[MAALFLOW:HOME_LEDGER_READ]', String(error?.message || error || 'home_ledger_read_failed'));
         if (cancelled) return;
         setSqlHome(null);
         setSqlHomeError(true);
@@ -465,12 +465,12 @@ export default function HomeScreen({
   const notificationBadgeCount = unreadNotificationCount + pendingSmartReviewCount;
 
   useEffect(() => {
-    AsyncStorage.getItem('MYFI_READ_NOTIFICATIONS_V1')
+    AsyncStorage.getItem('MAALFLOW_READ_NOTIFICATIONS_V1')
       .then(raw => {
         if (!raw) return;
         const safe = pruneNotificationKeys(sanitizeNotificationReadKeys(JSON.parse(raw)));
         setReadNotificationKeys(safe);
-        AsyncStorage.setItem('MYFI_READ_NOTIFICATIONS_V1', JSON.stringify(safe)).catch(() => {});
+        AsyncStorage.setItem('MAALFLOW_READ_NOTIFICATIONS_V1', JSON.stringify(safe)).catch(() => {});
       })
       .catch(() => {});
   }, []);
@@ -488,7 +488,7 @@ export default function HomeScreen({
     const next = Array.from(new Set([...readNotificationKeys, ...notificationKeys])).slice(-80);
     setReadNotificationKeys(next);
     setNotificationsOpen(true);
-    AsyncStorage.setItem('MYFI_READ_NOTIFICATIONS_V1', JSON.stringify(next)).catch(() => {});
+    AsyncStorage.setItem('MAALFLOW_READ_NOTIFICATIONS_V1', JSON.stringify(next)).catch(() => {});
   };
 
   const dismissNotifications = (keys = []) => {
@@ -1336,7 +1336,7 @@ export default function HomeScreen({
             ) : null}
           </TouchableOpacity>
           <View style={s.brandLockup}>
-            <Text style={[s.brandTitle, { color: th.primary }]}>MYFI</Text>
+            <Text style={[s.brandTitle, { color: th.primary }]}>MaalFlow</Text>
           </View>
           <TouchableOpacity
             onPress={() => setCenterMode('profile')}

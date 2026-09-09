@@ -25,4 +25,4 @@ assert.doesNotMatch(
 assert.match(e2e, /Conflicting reuse of a mutation ID was accepted/);
 assert.match(e2e, /mutation-id-conflict: ok/);
 
-console.log('MYFI P19-003 RPC ACK HARDENING CONTRACT: PASSED');
+console.log('MaalFlow P19-003 RPC ACK HARDENING CONTRACT: PASSED');

@@ -76,7 +76,7 @@ const {
     /ledger_exclusive_transaction_unavailable/,
   );
 
-  console.log('MYFI P19-015A1 SQLITE RUNTIME CORE: PASSED');
+  console.log('MaalFlow P19-015A1 SQLITE RUNTIME CORE: PASSED');
 })().catch(error => {
   console.error(error);
   process.exit(1);

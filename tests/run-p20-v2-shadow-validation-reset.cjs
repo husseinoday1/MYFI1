@@ -205,5 +205,5 @@ const failOneAttempt = async db => {
   assert.equal(cleanResult.preservedAppliedRows, 0);
   clean.native.close();
 
-  console.log('MYFI P20 V2 SHADOW VALIDATION RESET RUNTIME: PASSED');
+  console.log('MaalFlow P20 V2 SHADOW VALIDATION RESET RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

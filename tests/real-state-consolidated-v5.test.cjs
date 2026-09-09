@@ -42,7 +42,7 @@ const accountStart = settings.indexOf('function AccountPage(');
 const accountEnd = settings.indexOf('\nfunction DevicesPage(', accountStart);
 const account = settings.slice(accountStart, accountEnd);
 assert(account.includes('s.profileHero'), 'Unified account hero missing');
-assert(account.includes('T.connectAccount'), 'Optional MYFI account connection missing');
+assert(account.includes('T.connectAccount'), 'Optional MaalFlow account connection missing');
 assert(!account.includes('text={T.yourInfo}'), 'Name must not be repeated in a separate Your information block');
 assert(account.includes('title={T.email}'), 'Connected email must remain in account/security');
 assert(account.includes('T.syncDevices'), 'Sync and devices must remain part of the same account page');
@@ -74,4 +74,4 @@ for (const rel of ['App.js', 'src/screens/SettingsScreen.js', 'src/screens/Setti
   read(rel).split(/\r?\n/).forEach((line, i) => assert(!/[ \t]+$/.test(line), `${rel}:${i + 1} trailing whitespace`));
 }
 
-console.log('MYFI REAL-STATE CONSOLIDATED UX V5: PASSED');
+console.log('MaalFlow REAL-STATE CONSOLIDATED UX V5: PASSED');

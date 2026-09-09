@@ -1,4 +1,4 @@
-// MYFI — SQLite proof for adopting a different cloud ledger identity.
+// MaalFlow — SQLite proof for adopting a different cloud ledger identity.
 //
 // Three real accounts sat permanently blocked behind
 // financial_v2_ledger_id_conflict on 2026-09-05. The existing promotion cannot
@@ -254,5 +254,5 @@ const call = (db, over = {}) => promotion.promoteCloudIdentityAdoptionV1({
       'no re-entry queue may survive a rolled-back adoption');
   }
 
-  console.log('MYFI V2 IDENTITY ADOPTION PROMOTION SQLITE RUNTIME: PASSED');
+  console.log('MaalFlow V2 IDENTITY ADOPTION PROMOTION SQLITE RUNTIME: PASSED');
 })();

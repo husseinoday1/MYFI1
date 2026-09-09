@@ -217,5 +217,5 @@ const txRow = db => db.native.prepare('SELECT revision,deleted_at,title FROM led
     db.native.close();
   }
 
-  console.log('MYFI P14 TOMBSTONE RESURRECTION: PASSED');
+  console.log('MaalFlow P14 TOMBSTONE RESURRECTION: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

@@ -1,4 +1,4 @@
--- MYFI P19-012 — verified cloud recovery source for a truly empty local ledger.
+-- MaalFlow P19-012 — verified cloud recovery source for a truly empty local ledger.
 -- Read-only recovery discovery. It never writes financial data and never activates V2.
 
 create or replace function public.get_financial_cloud_recovery_source_v2()

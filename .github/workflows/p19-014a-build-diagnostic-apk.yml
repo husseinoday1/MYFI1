@@ -68,10 +68,10 @@ jobs:
           EXPECTED="FAC61745DC0903786FB9EDE62A962B399F7348F0BB6F899B8332667591033B9C"
           ACTUAL="$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android 2>/dev/null | sed -n 's/.*SHA256: //p' | tr -d ':[:space:]')"
           if [ "$ACTUAL" != "$EXPECTED" ]; then
-            echo "[FAIL] Signing certificate does not match installed MYFI app"
+            echo "[FAIL] Signing certificate does not match installed MaalFlow app"
             exit 1
           fi
-          echo "[PASS] Signing certificate matches installed MYFI app"
+          echo "[PASS] Signing certificate matches installed MaalFlow app"
 
       - name: Make Gradle wrapper executable
         working-directory: android

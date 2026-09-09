@@ -16,4 +16,4 @@ assert.match(failurePath, /String\(get\(\)\.lastSyncError \|\| ''\) === 'financi
 assert.match(failurePath, /online: revisionConflict \|\| preserveRevisionConflict/);
 assert.match(failurePath, /lastSyncError: preserveRevisionConflict \? 'financial_v2_revision_conflict' : syncReason/);
 
-console.log('MYFI P20 V2 CONFLICT STATUS CONTRACT: PASSED');
+console.log('MaalFlow P20 V2 CONFLICT STATUS CONTRACT: PASSED');

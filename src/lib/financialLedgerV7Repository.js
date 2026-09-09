@@ -1001,7 +1001,7 @@ export const adoptUnbootstrappedCloudLedgerIdentityV8 = async ({
 const restoreIntentMetaKey = namespace => `restore_intent:${String(namespace || 'guest')}`;
 
 // P20-G01-D2 — activation evidence is bound to (namespace, ledger_id, restore_epoch)
-// per MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM "Activation evidence". The legacy
+// per MAALFLOW_P19_SYNC_V2_ACTIVATION_ADDENDUM "Activation evidence". The legacy
 // namespace-only key is still read so ledgers activated before this change stay
 // active without a migration, but only when its payload matches the current
 // ledger identity and epoch.
@@ -2694,7 +2694,7 @@ export const readFinancialSyncProtocolV8 = async ({
     activationEvidence,
     // Literal question: does evidence for THIS ledger and epoch exist and check out.
     activationEvidencePresent: evidenceMatchesIdentity,
-    // Invariant from MYFI_P19_SYNC_V2_ACTIVATION_ADDENDUM: there must never be a
+    // Invariant from MAALFLOW_P19_SYNC_V2_ACTIVATION_ADDENDUM: there must never be a
     // durable state where V2 is active without the evidence that justified it.
     // It is therefore true when activated_at is absent — that is the invariant
     // holding, not proof of evidence. Use activationEvidencePresent or

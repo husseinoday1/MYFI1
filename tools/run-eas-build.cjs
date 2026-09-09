@@ -26,7 +26,7 @@ for (let index = 0; index < rawArgs.length; index += 1) {
     continue;
   }
   if (arg === '--platform' || arg.startsWith('--platform=') || arg.startsWith('--profile=')) {
-    console.error('Platform and profile are controlled by MYFI build scripts.');
+    console.error('Platform and profile are controlled by MaalFlow build scripts.');
     process.exit(2);
   }
   passthrough.push(arg);
@@ -60,7 +60,7 @@ const easArgs = [
 const childEnv = {
   ...process.env,
   EAS_NO_UPDATE_NOTIFIER: '1',
-  MYFI_EAS_ARTIFACT: allowedProfiles[profile],
+  MAALFLOW_EAS_ARTIFACT: allowedProfiles[profile],
   ...(process.platform === 'win32' && !process.env.SHELL ? { SHELL: 'powershell.exe' } : {}),
 };
 

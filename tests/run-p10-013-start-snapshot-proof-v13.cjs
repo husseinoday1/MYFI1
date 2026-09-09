@@ -147,5 +147,5 @@ const baseProof = {
     console.log('[PASS] missing token and private source namespaces fail closed');
   } finally { db.close(); }
 
-  console.log('MYFI P10-013 B2 START SNAPSHOT + PROOF V13: PASS');
+  console.log('MaalFlow P10-013 B2 START SNAPSHOT + PROOF V13: PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; });

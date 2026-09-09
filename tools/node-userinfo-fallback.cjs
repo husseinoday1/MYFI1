@@ -11,7 +11,7 @@ os.userInfo = (...args) => {
   } catch (error) {
     if (error?.code !== 'ERR_SYSTEM_ERROR' && error?.syscall !== 'uv_os_get_passwd') throw error;
     return {
-      username: process.env.USERNAME || 'myfi-builder',
+      username: process.env.USERNAME || 'maalflow-builder',
       uid: -1,
       gid: -1,
       shell: null,

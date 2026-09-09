@@ -5,7 +5,7 @@ import { Touchable, IconContainer, rtl, textAlign, rowDirection } from './AppPri
 import { SPACE, weight } from '../lib/tokens';
 
 // More/Settings/Follow-ups' icon+title+description+chevron row
-// (05_MYFI_COMPONENT_ARCHITECTURE.md). Purely presentational.
+// (05_MAALFLOW_COMPONENT_ARCHITECTURE.md). Purely presentational.
 export function SectionListRow({
   th,
   lang = 'ar',

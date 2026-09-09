@@ -45,4 +45,4 @@ assert(importBody.indexOf('backup_restore_requires_protocol_v2') < importBody.in
 assert(importBody.includes('restore_interlock_active'),
   'restore interlock audit state is missing');
 
-console.log('MYFI P19-007 DESTRUCTIVE RESTORE INTERLOCK: PASSED');
+console.log('MaalFlow P19-007 DESTRUCTIVE RESTORE INTERLOCK: PASSED');

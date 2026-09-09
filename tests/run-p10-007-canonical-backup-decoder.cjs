@@ -12,7 +12,7 @@ let source = fs.readFileSync(filename, 'utf8')
     /import \{[\s\S]*?\} from '\.\/financialBackupV11';/,
     [
       "const CANONICAL_BACKUP_V11_DATA_VERSION = 11;",
-      "const CANONICAL_BACKUP_V11_FORMAT = 'MYFI_CANONICAL_LEDGER_BACKUP';",
+      "const CANONICAL_BACKUP_V11_FORMAT = 'MAALFLOW_CANONICAL_LEDGER_BACKUP';",
       'const canonicalBackupV11ManifestCounts = data => globalThis.__COUNTS__(data);',
     ].join('\n'),
   )
@@ -50,9 +50,9 @@ globalThis.__VALIDATE__ = value => value?.structure === 'valid'
   : { ok: false, validatorVersion: 1, errors: [{ code: 'posting_amount_not_integer_minor', amount: -999999 }] };
 
 const backup = () => ({
-  kind: 'myfi_canonical_financial_backup',
+  kind: 'maalflow_canonical_financial_backup',
   manifest: {
-    format: 'MYFI_CANONICAL_LEDGER_BACKUP', dataVersion: 11,
+    format: 'MAALFLOW_CANONICAL_LEDGER_BACKUP', dataVersion: 11,
     semanticHashVersion: 2, semanticHashAlgorithm: 'SHA-256', semanticHash: 'a'.repeat(64),
     createdAt: '2026-08-21T00:00:00.000Z', ledgerId: 'ledger-v11', counts: { ...expectedCounts },
   },
@@ -95,4 +95,4 @@ const moduleText = fs.readFileSync(filename, 'utf8');
 for (const forbidden of ['prepareWalletData(', 'normalizeWallets(', 'normalizeCfg(', 'repairFrozenFx(']) {
   assert.ok(!moduleText.includes(forbidden), `decoder must not repair with ${forbidden}`);
 }
-console.log('MYFI P10-007 CANONICAL BACKUP DECODER CONTRACT: PASS');
+console.log('MaalFlow P10-007 CANONICAL BACKUP DECODER CONTRACT: PASS');

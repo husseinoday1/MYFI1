@@ -14,7 +14,7 @@ import ChoiceSheet from '../components/ChoiceSheet';
 // the broad multi-select priorities page with three short personalization
 // questions. Only the goals question remains intentionally multi-select:
 // goals are complementary, while the other questions are mutually exclusive.
-// These describe how the user wants MYFI configured; they are not
+// These describe how the user wants MaalFlow configured; they are not
 // identity labels and do not invent family sharing or bank connectivity.
 const PERSONALIZATION_QUESTIONS = [
   { id: 'context', title: 'contextTitle', body: 'contextBody', fallback: 'employee', options: [
@@ -44,7 +44,7 @@ const profileTypeForPersonalization = answers => {
   const choice = resolvedPersonalization(answers);
   // "Freelancer" and "Personal and work" are the only selections that
   // represent two real financial scopes. Household deliberately remains a
-  // personal workspace: MYFI does not imply unsupported shared accounts.
+  // personal workspace: MaalFlow does not imply unsupported shared accounts.
   return choice.context === 'freelancer' || choice.moneySetup === 'personalWork'
     ? 'personal_business'
     : 'personal';
@@ -70,10 +70,10 @@ const copy = lang => {
   return {
     back: ar ? 'رجوع' : 'Back',
     next: ar ? 'متابعة' : 'Continue',
-    start: ar ? 'ابدأ استخدام MYFI' : 'Start using MYFI',
+    start: ar ? 'ابدأ استخدام MaalFlow' : 'Start using MaalFlow',
     begin: ar ? 'ابدأ' : 'Start',
     // Step 1 — Welcome (REF-02)
-    welcomeTitle: ar ? 'مرحباً بك في MYFI' : 'Welcome to MYFI',
+    welcomeTitle: ar ? 'مرحباً بك في MaalFlow' : 'Welcome to MaalFlow',
     welcomeBody: ar
       ? 'نساعدك على فهم أموالك، تنظيمها، واتخاذ قرارات أفضل. سنضبط البداية خلال أقل من دقيقة.'
       : 'We help you understand your money, organize it, and make better decisions. We will set up the basics in under a minute.',
@@ -84,8 +84,8 @@ const copy = lang => {
     // Step 2 — Priorities (REF-03)
     priorityTitle: ar ? 'ما الذي يهمك أولاً؟' : 'What matters to you first?',
     priorityBody: ar
-      ? 'اختر ما تريد أن يركز عليه MYFI عند البداية. يمكنك اختيار أكثر من خيار.'
-      : 'Choose what you want MYFI to focus on at the start. You can select more than one.',
+      ? 'اختر ما تريد أن يركز عليه MaalFlow عند البداية. يمكنك اختيار أكثر من خيار.'
+      : 'Choose what you want MaalFlow to focus on at the start. You can select more than one.',
     priorityHint: ar ? 'يمكنك تعديل هذه الأولويات لاحقاً من داخل التطبيق.' : 'You can adjust these priorities later from inside the app.',
     priority_expenses: ar ? 'تتبع المصروفات' : 'Track expenses',
     priority_planning: ar ? 'التخطيط الشهري والميزانية' : 'Monthly planning and budgeting',
@@ -103,7 +103,7 @@ const copy = lang => {
     context_freelancerSub: ar ? 'دخل متغير ومصاريف عمل' : 'Variable income and work costs',
     context_household: ar ? 'إدارة المنزل' : 'Household',
     context_householdSub: ar ? 'ميزانية ومصروفات والتزامات منزلية' : 'Household budget, spending, and commitments',
-    focusTitle: ar ? 'ما أول نتيجة تريدها من MYFI؟' : 'What is your first goal with MYFI?',
+    focusTitle: ar ? 'ما أول نتيجة تريدها من MaalFlow؟' : 'What is your first goal with MaalFlow?',
     focusBody: ar ? 'اختر هدفاً واحداً أو أكثر؛ يمكنك اختيار الخيارات الأربعة كلها.' : 'Choose one or more goals. You can select all four.',
     focus_spending: ar ? 'ضبط المصروف' : 'Control spending',
     focus_spendingSub: ar ? 'تسجيل وفهم أين يذهب المال' : 'Track and understand where money goes',
@@ -157,7 +157,7 @@ const copy = lang => {
       : 'The base currency is the reporting reference and becomes fixed after financial history starts; every transaction keeps its own currency, amount, and historical rate.',
     // Step 5 — Privacy (REF-03C)
     privacyTitle: ar ? 'خصوصيتك أولاً' : 'Your privacy first',
-    privacyBody: ar ? 'MYFI يضع خصوصية بياناتك ضمن الأولويات.' : 'MYFI puts your data privacy first.',
+    privacyBody: ar ? 'MaalFlow يضع خصوصية بياناتك ضمن الأولويات.' : 'MaalFlow puts your data privacy first.',
     privacyLocal: ar ? 'بياناتك تبدأ محلياً على جهازك' : 'Your data starts locally on your device',
     privacyLocalSub: ar ? 'وتبقى تحت سيطرتك' : 'and stays under your control',
     privacySync: ar ? 'المزامنة اختيارية' : 'Syncing is optional',
@@ -168,8 +168,8 @@ const copy = lang => {
     // Step 6 — Complete (REF-03E)
     completeTitle: ar ? 'كل شيء جاهز' : 'Everything is ready',
     completeBody: ar
-      ? 'تم إعداد MYFI بنجاح. يمكنك البدء الآن وإكمال بقية التفاصيل لاحقاً.'
-      : 'MYFI is set up successfully. You can start now and complete the rest of the details later.',
+      ? 'تم إعداد MaalFlow بنجاح. يمكنك البدء الآن وإكمال بقية التفاصيل لاحقاً.'
+      : 'MaalFlow is set up successfully. You can start now and complete the rest of the details later.',
     summaryPriorities: ar ? 'الأولويات' : 'Priorities',
     summaryCountry: ar ? 'الدولة' : 'Country',
     summaryCurrency: ar ? 'العملة' : 'Currency',
@@ -340,7 +340,7 @@ export default function OnboardingScreen({ cfg, onDone }) {
         <View style={[s.topActions, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
           {step === WELCOME_STEP ? <LanguagePicker th={th} selected={lang} onSelect={setLang} /> : null}
           <View style={[s.brandWrap, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
-            <Text style={[s.brand, { color: th.text }]}>MYFI</Text>
+            <Text style={[s.brand, { color: th.text }]}>MaalFlow</Text>
             <View style={[s.brandMark, { backgroundColor: th.primary }]}>
               <Ionicons name="wallet" size={14} color={th.onPrimary} />
             </View>

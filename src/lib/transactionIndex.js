@@ -1,4 +1,4 @@
-// MYFI_TRANSACTION_INDEX_V5_3
+// MAALFLOW_TRANSACTION_INDEX_V5_3
 // Lightweight in-memory index for large ledgers. The source transaction array
 // stays authoritative; this cache avoids repeated full-history sorting/date
 // parsing and exposes cheap aggregate selectors for Home/History/Reports.

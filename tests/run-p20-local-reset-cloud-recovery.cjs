@@ -147,5 +147,5 @@ const seed = ({ pending = false } = {}) => {
   assert.equal(blocked.reason, 'local_reset_cloud_sync_pending');
   assert.equal(count(pending, 'ledger_financial_transactions_v7', ' WHERE namespace=?', NS), 1, 'pending data must remain untouched');
   assert.equal(count(pending, 'ledger_outbox_v3', ' WHERE ledger_id=?', LEDGER), 1, 'pending outbox must remain untouched');
-  console.log('MYFI P20 LOCAL CLOUD DELETE RECOVERY RUNTIME: PASSED');
+  console.log('MaalFlow P20 LOCAL CLOUD DELETE RECOVERY RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

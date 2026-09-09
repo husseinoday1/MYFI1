@@ -1,4 +1,4 @@
-// MYFI — the wiring that makes the adoption path reachable at all.
+// MaalFlow — the wiring that makes the adoption path reachable at all.
 //
 // The library can be perfect and still never run. Three real accounts sat
 // blocked on 2026-09-05 because prepareV2ConflictRecovery gates eligibility on

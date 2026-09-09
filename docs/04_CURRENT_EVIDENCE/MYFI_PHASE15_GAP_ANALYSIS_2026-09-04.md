@@ -129,7 +129,7 @@ explicitly delegated to an external ADB runner that does not exist yet.
 The §98 rule itself is violated structurally today (see Correction).
 
 ### §99 Performance SLOs — EXPECTED-EMPTY, not a gap
-`docs/MYFI_PERFORMANCE_SLO.md` exists and contains design rules only, no measured
+`docs/MAALFLOW_PERFORMANCE_SLO.md` exists and contains design rules only, no measured
 values. §99 says the final values land there "قبل optimization النهائي", so a
 pre-baseline document is the expected state at this point, not missing work.
 One factual defect in that doc is worth fixing: it states the device harness

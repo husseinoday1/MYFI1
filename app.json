@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "MYFI",
-    "slug": "terra-finance",
-    "scheme": "myfi",
+    "name": "MaalFlow",
+    "slug": "maalflow",
+    "scheme": "maalflow",
     "version": "1.0.0",
     "platforms": [
       "android",
@@ -11,9 +11,9 @@
     ],
     "orientation": "default",
     "userInterfaceStyle": "automatic",
-    "icon": "./assets/myfi-app-icon-v2.png",
+    "icon": "./assets/maalflow-app-icon-v2.png",
     "splash": {
-      "image": "./assets/myfi-splash-logo.png",
+      "image": "./assets/maalflow-splash-logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#0D1110"
     },
@@ -21,10 +21,10 @@
       "allowBackup": false,
       "versionCode": 2,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/myfi-app-icon-v2.png",
+        "foregroundImage": "./assets/maalflow-app-icon-v2.png",
         "backgroundColor": "#111713"
       },
-      "package": "com.myfi.app",
+      "package": "com.maalflow.app",
       "permissions": [
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
@@ -33,7 +33,7 @@
       ]
     },
     "ios": {
-      "bundleIdentifier": "com.myfi.app",
+      "bundleIdentifier": "com.maalflow.app",
       "supportsTablet": false
     },
     "plugins": [
@@ -42,20 +42,20 @@
       [
         "expo-local-authentication",
         {
-          "faceIDPermission": "يستخدم MYFI بصمتك أو رمز جهازك لقفل التطبيق وحماية بياناتك المالية."
+          "faceIDPermission": "يستخدم MaalFlow بصمتك أو رمز جهازك لقفل التطبيق وحماية بياناتك المالية."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "يحتاج MYFI الوصول للصور حتى تختار فاتورة وتحوّلها إلى عملية مالية.",
-          "cameraPermission": "يحتاج MYFI استخدام الكاميرا لتصوير الفواتير."
+          "photosPermission": "يحتاج MaalFlow الوصول للصور حتى تختار فاتورة وتحوّلها إلى عملية مالية.",
+          "cameraPermission": "يحتاج MaalFlow استخدام الكاميرا لتصوير الفواتير."
         }
       ],
       [
         "expo-audio",
         {
-          "microphonePermission": "يحتاج MYFI استخدام المايكروفون لتسجيل العملية صوتياً.",
+          "microphonePermission": "يحتاج MaalFlow استخدام المايكروفون لتسجيل العملية صوتياً.",
           "enableBackgroundRecording": false
         }
       ],

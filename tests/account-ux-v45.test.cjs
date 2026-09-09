@@ -22,23 +22,23 @@ assert(settings.includes("syncDevices: ar ? 'المزامنة والأجهزة' 
 
 const rootSettings = region('function RootSettings(', '\nfunction AccountPage(');
 assert(rootSettings.includes('s.accountCard'), 'Root settings must expose one account card');
-assert(!rootSettings.includes('title={T.myfiAccountTitle}'), 'Root settings must not show MYFI account as a second account row');
-assert(rootSettings.includes('user ? (accountEmail || T.connectedToMyfi) : T.savedOnDevice'), 'Account card must change state without changing identity');
+assert(!rootSettings.includes('title={T.maalflowAccountTitle}'), 'Root settings must not show MaalFlow account as a second account row');
+assert(rootSettings.includes('user ? (accountEmail || T.connectedToMaalFlow) : T.savedOnDevice'), 'Account card must change state without changing identity');
 
 const accountPage = region('function AccountPage(', '\nfunction DevicesPage(');
 assert(!accountPage.includes('text={T.yourInfo}'), 'Account page must not repeat the identity in a separate Your information section');
 assert(accountPage.includes('T.accountSecurity'), 'Connected account must expose security in the same page');
 assert(accountPage.includes('T.syncDevices'), 'Connected account must expose sync/devices in the same page');
 assert(accountPage.includes('T.connectAccount'), 'Unconnected account must expose a connect action');
-assert(!accountPage.includes('text={T.myfiAccountTitle}'), 'Account page must not render a second MYFI Account section');
+assert(!accountPage.includes('text={T.maalflowAccountTitle}'), 'Account page must not render a second MaalFlow Account section');
 assert(!accountPage.includes('s.cloudAccountCard'), 'Account page must not visually split identity into a cloud-account card');
-assert(accountPage.includes('accountEmail || T.connectedToMyfi'), 'Connected account must show the account email within the same identity hero');
+assert(accountPage.includes('accountEmail || T.connectedToMaalFlow'), 'Connected account must show the account email within the same identity hero');
 assert.equal((accountPage.match(/T\.savedOnDevice/g) || []).length, 1, 'Local status should appear once in the hero, not as duplicate text and pill');
 
 
 // Home account center follows the same one-identity rule.
 assert.equal(homeCenter.includes('localIdentity'), false, 'Home account center must not show a Local identity label');
-assert.equal(homeCenter.includes('connectedIdentity'), false, 'Home account center must not show MYFI account as a second identity type');
+assert.equal(homeCenter.includes('connectedIdentity'), false, 'Home account center must not show MaalFlow account as a second identity type');
 assert.equal(homeCenter.includes('profileHandle'), false, 'Home account center must not invent a username/handle');
 assert.equal(homeCenter.includes('getOrCreateDeviceId'), false, 'Device-local technical IDs must stay out of account UX');
 assert(homeCenter.includes("connectedAccount && user?.email ? user.email : L.local"), 'Home account center must keep one identity and switch only the account state');
@@ -69,4 +69,4 @@ settings.split(/\r?\n/).forEach((line, i) => {
   assert(!/[ \t]+$/.test(line), `SettingsScreen.js:${i + 1} trailing whitespace`);
 });
 
-console.log('MYFI ACCOUNT UX FINAL COMPATIBILITY: PASSED');
+console.log('MaalFlow ACCOUNT UX FINAL COMPATIBILITY: PASSED');

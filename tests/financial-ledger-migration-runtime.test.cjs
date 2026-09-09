@@ -96,7 +96,7 @@ class AsyncDatabase {
   assert.equal(database.db.prepare('PRAGMA user_version').get().user_version, 2);
 
   database.close();
-  console.log('MYFI schema migration runtime: apply/replay/checksum/failure/recovery passed.');
+  console.log('MaalFlow schema migration runtime: apply/replay/checksum/failure/recovery passed.');
 })().catch(error => {
   console.error(error);
   process.exit(1);

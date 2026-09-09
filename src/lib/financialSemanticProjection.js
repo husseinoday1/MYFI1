@@ -4,7 +4,7 @@
 // financial truth": backup export, the restore expected-hash, staged restore
 // verification, migration parity, diagnostics and tests. The research is explicit
 // that building a second, subtly different canonicaliser for restore is how this goes
-// wrong — and MYFI has already paid for that once.
+// wrong — and MaalFlow has already paid for that once.
 //
 // On 2026-08-20 cutover was blocked for a day because the source projection hashed the
 // raw entity payload while the write path persisted a canonical one that strips
@@ -13,7 +13,7 @@
 // rule — it imports canonicalFinancialEntityPayload from the repository that persists
 // it. There is one rule, in one place.
 //
-// Package integrity (myfiFiles.js, SHA-256 over the bytes) answers "did the file
+// Package integrity (maalflowFiles.js, SHA-256 over the bytes) answers "did the file
 // change". This answers "is this the same financial truth". They are different
 // questions and neither substitutes for the other. FNV-1a stays where it is for fast
 // internal parity checks; it is not the authoritative financial proof.

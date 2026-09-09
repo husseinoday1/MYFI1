@@ -148,7 +148,7 @@ for (const required of [
   'clearP10CloneLedgerDbOverride(clone)',
   'SQLite.deleteDatabaseAsync(cloneName, SQLite.defaultDatabaseDirectory)',
   "CLONE_MARKER_KEY = 'p10_014a_clone_database_marker'",
-  '__MYFI_P10_014A_CLONE_NONCE__',
+  '__MAALFLOW_P10_014A_CLONE_NONCE__',
   "sourceConnectionNotPristine".replace('sourceConnectionNotPristine','p10_clone_probe_source_connection_not_pristine'),
   '[P10_014A_CLONE_PROBE]',
   "setStatus({ label: 'FAIL', code })",
@@ -160,8 +160,8 @@ for (const required of [
   'KILL_WINDOW_PATTERN',
   'Linking.getInitialURL()',
   'harness.runPhase10RestoreKillWindowHarness({ killWindow })',
-  "__MYFI_P10_014A_KILL_WINDOW__",
-  "__MYFI_P10_014A_CLONE_DB_NAME__",
+  "__MAALFLOW_P10_014A_KILL_WINDOW__",
+  "__MAALFLOW_P10_014A_CLONE_DB_NAME__",
   "'P10-014A-002-R6.2'",
   "killWindow === 'cleanup_only'",
   "mode: 'orphan_cleanup_only'",
@@ -191,13 +191,13 @@ new Function('module', 'exports', compiledCloneArtifacts)(cloneArtifactsModule, 
 const cloneArtifacts = cloneArtifactsModule.exports;
 
 assert.equal(cloneArtifacts.isOwnedCloneDatabaseName('p10-014a-r5-clone-1724450000000-ab12cd34.db'), true);
-assert.equal(cloneArtifacts.isOwnedCloneDatabaseName('myfi-ledger-v2.db'), false);
+assert.equal(cloneArtifacts.isOwnedCloneDatabaseName('maalflow-ledger-v2.db'), false);
 assert.equal(cloneArtifacts.isOwnedCloneDatabaseName('../p10-014a-r5-clone-1724450000000-ab12cd34.db'), false);
 
 const runCloneArtifactRuntime = async () => {
   const ownedBase = 'p10-014a-r5-clone-1724450000000-ab12cd34.db';
   const files = new Set([
-    'myfi-ledger-v2.db',
+    'maalflow-ledger-v2.db',
     'unrelated.db',
     ownedBase,
     `${ownedBase}-wal`,
@@ -216,11 +216,11 @@ const runCloneArtifactRuntime = async () => {
   };
   const sweepResult = await cloneArtifacts.sweepOwnedCloneArtifacts({
     fileSystem,
-    directoryUri: 'file:///data/user/0/com.myfi.app/databases',
-    sourceDatabaseName: 'myfi-ledger-v2.db',
+    directoryUri: 'file:///data/user/0/com.maalflow.app/databases',
+    sourceDatabaseName: 'maalflow-ledger-v2.db',
   });
   assert.deepEqual(deleted.sort(), [ownedBase, `${ownedBase}-journal`, `${ownedBase}-shm`, `${ownedBase}-wal`].sort());
-  assert.equal(files.has('myfi-ledger-v2.db'), true, 'Source DB must survive clone cleanup');
+  assert.equal(files.has('maalflow-ledger-v2.db'), true, 'Source DB must survive clone cleanup');
   assert.equal(files.has('unrelated.db'), true, 'Unrelated DB must survive clone cleanup');
   assert.deepEqual(sweepResult, { artifactCount: 4, cleanupVerified: true });
 
@@ -230,8 +230,8 @@ const runCloneArtifactRuntime = async () => {
         readDirectoryAsync: async () => [ownedBase],
         deleteAsync: async () => {},
       },
-      directoryUri: 'file:///data/user/0/com.myfi.app/databases',
-      sourceDatabaseName: 'myfi-ledger-v2.db',
+      directoryUri: 'file:///data/user/0/com.maalflow.app/databases',
+      sourceDatabaseName: 'maalflow-ledger-v2.db',
     }),
     /p10_clone_probe_orphan_sweep_failed/,
   );
@@ -241,7 +241,7 @@ const runCloneArtifactRuntime = async () => {
         readDirectoryAsync: async () => [ownedBase],
         deleteAsync: async () => {},
       },
-      directoryUri: 'file:///data/user/0/com.myfi.app/databases',
+      directoryUri: 'file:///data/user/0/com.maalflow.app/databases',
       sourceDatabaseName: ownedBase,
     }),
     /p10_clone_probe_orphan_sweep_scope_invalid/,
@@ -292,7 +292,7 @@ for (const forbidden of [
 for (const required of [
   'P10-014A Original Package Clone Probe APK',
   "pkg.main='src/dev/p10_014aCloneProbeEntry.js'",
-  "applicationId 'com.myfi.app'",
+  "applicationId 'com.maalflow.app'",
   'EXPO_PUBLIC_P10_014A_CLONE_PROBE=1',
   'EXPO_PUBLIC_FRESH_TEST=0',
   'OriginalDatabaseMode=PREVERIFIED_FILE_URI_THEN_QUERY_ONLY_LOGICAL_IMMUTABILITY_SOURCE',
@@ -304,8 +304,8 @@ for (const required of [
   assert(workflow.includes(required), `R5 workflow missing: ${required}`);
 }
 assert.equal(
-  workflow.includes('gradle.replace(needle,"applicationId \'com.myfi.app.p10a\'")')
-    || workflow.includes("gradle.replace(needle,\"applicationId 'com.myfi.app.p10a'\")"),
+  workflow.includes('gradle.replace(needle,"applicationId \'com.maalflow.app.p10a\'")')
+    || workflow.includes("gradle.replace(needle,\"applicationId 'com.maalflow.app.p10a'\")"),
   false,
   'R5 workflow must never replace the original applicationId with the isolated p10a package',
 );
@@ -450,7 +450,7 @@ assert(
 );
 
 runCloneArtifactRuntime()
-  .then(() => console.log('MYFI P10-014A R5.3 WAL-AWARE LOGICAL IMMUTABILITY CLONE PROBE CONTRACT: PASS'))
+  .then(() => console.log('MaalFlow P10-014A R5.3 WAL-AWARE LOGICAL IMMUTABILITY CLONE PROBE CONTRACT: PASS'))
   .catch(error => {
     console.error(error);
     process.exitCode = 1;

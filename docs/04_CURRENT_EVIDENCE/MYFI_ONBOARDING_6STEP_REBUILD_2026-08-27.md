@@ -4,7 +4,7 @@ Triggered by the user asking directly why onboarding still looked unchanged.
 It genuinely was — this was a real gap, not a misunderstanding: the running
 `OnboardingScreen.js` was a 3-slide marketing-preview flow (value showcase →
 insight showcase → quick country/currency setup), while
-`docs/design/06_MYFI_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md` §7 **LOCKS**
+`docs/design/06_MAALFLOW_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md` §7 **LOCKS**
 onboarding to a different, specific 6-step sequence:
 
 > 1. Welcome → 2. What matters to you first? → 3. Customize your experience →

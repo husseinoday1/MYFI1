@@ -7,7 +7,7 @@ import { bytesToHex } from '@noble/hashes/utils';
 import { CANONICAL_BACKUP_V11_MANIFEST_COUNT_KEYS } from './financialBackupV11';
 import { SEMANTIC_HASH_V3_VERSION } from './financialSemanticProjection';
 
-export const CANONICAL_RESTORE_PROOF_V13_DOMAIN = 'MYFI:P10-013:STRATEGY-B:RESTORE-PROOF:V1';
+export const CANONICAL_RESTORE_PROOF_V13_DOMAIN = 'MAALFLOW:P10-013:STRATEGY-B:RESTORE-PROOF:V1';
 export const CANONICAL_RESTORE_PROOF_V13_VERSION = 1;
 
 const text = value => String(value ?? '').trim();

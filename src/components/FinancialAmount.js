@@ -11,7 +11,7 @@ const SIZE_MAP = {
   hero: TYPE.hero,
 };
 
-// Canonical financial-amount presentation (03_MYFI_DESIGN_SYSTEM_CANONICAL.md §11):
+// Canonical financial-amount presentation (03_MAALFLOW_DESIGN_SYSTEM_CANONICAL.md §11):
 // signed amount, color paired with the sign (never color alone), currency code
 // adjacent to the figure, thousands separators. Purely presentational — takes an
 // already-computed numeric magnitude and a kind, does no financial calculation,

@@ -20,7 +20,7 @@ const srcTree = [
   read('src/lib/supabase.js'),
 ].join('\n');
 
-assert(identity.includes("PROFILE_AVATAR_BUCKET = 'myfi-avatars'"), 'Profile avatars need one dedicated bucket');
+assert(identity.includes("PROFILE_AVATAR_BUCKET = 'maalflow-avatars'"), 'Profile avatars need one dedicated bucket');
 assert(identity.includes('fetchProfileIdentity'), 'A connected account must fetch its cloud profile');
 assert(identity.includes('uploadProfileAvatar') && identity.includes('removeProfileAvatar'), 'Avatar must support cloud upload/remove');
 assert(
@@ -44,8 +44,8 @@ assert(deleteModal.includes('حذف نهائي') && deleteModal.includes('Delete
 assert(migration.includes('add column if not exists username text'), 'Migration must ensure username exists');
 assert(migration.includes('add column if not exists phone text'), 'Migration must ensure phone exists');
 assert(migration.includes('add column if not exists avatar_path text'), 'Migration must persist avatar path');
-assert(migration.includes("'myfi-avatars'"), 'Migration must create/configure avatar bucket');
-assert(migration.includes('myfi_avatar_select_own') && migration.includes('myfi_avatar_delete_own'), 'Avatar RLS policies are required');
+assert(migration.includes("'maalflow-avatars'"), 'Migration must create/configure avatar bucket');
+assert(migration.includes('maalflow_avatar_select_own') && migration.includes('maalflow_avatar_delete_own'), 'Avatar RLS policies are required');
 assert(migration.includes('(storage.foldername(name))[1] = (select auth.uid())::text'), 'Avatar policies must scope files to the signed-in user');
 
 assert(edge.includes('SUPABASE_SERVICE_ROLE_KEY'), 'Delete endpoint requires server-side admin privileges');
@@ -53,4 +53,4 @@ assert(edge.includes('auth.getUser()'), 'Delete endpoint must verify the caller'
 assert(edge.includes('auth.admin.deleteUser(user.id)'), 'Delete endpoint must delete the authenticated account');
 assert.equal(srcTree.includes('SUPABASE_SERVICE_ROLE_KEY'), false, 'Service-role secret must never exist in mobile source');
 
-console.log('MYFI cloud profile and account security contract passed.');
+console.log('MaalFlow cloud profile and account security contract passed.');

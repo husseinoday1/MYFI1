@@ -92,10 +92,10 @@ const NS = 'user:outbox-restart';
 const WALLET_ID = 'wallet-restart';
 
 (async () => {
-  const file = process.env.MYFI_P14_OUTBOX_DB_FILE;
-  const boundary = String(process.env.MYFI_P14_OUTBOX_BOUNDARY || '');
-  const resume = process.env.MYFI_P14_OUTBOX_RESUME === '1';
-  assert.ok(file, 'MYFI_P14_OUTBOX_DB_FILE is required');
+  const file = process.env.MAALFLOW_P14_OUTBOX_DB_FILE;
+  const boundary = String(process.env.MAALFLOW_P14_OUTBOX_BOUNDARY || '');
+  const resume = process.env.MAALFLOW_P14_OUTBOX_RESUME === '1';
+  assert.ok(file, 'MAALFLOW_P14_OUTBOX_DB_FILE is required');
 
   const db = new Db(file);
   globalThis.__TEST_DB__ = db;

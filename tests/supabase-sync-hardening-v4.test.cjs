@@ -36,4 +36,4 @@ assert.ok(!cloudTest.includes('resolution=merge-duplicates'), 'cloud integration
 assert.ok(cloudTest.includes('optimistic-concurrency: ok'));
 assert.ok(cloudTest.includes('cloud-restore-via-rpc: ok'));
 
-console.log('MYFI SUPABASE SYNC HARDENING V4: PASSED');
+console.log('MaalFlow SUPABASE SYNC HARDENING V4: PASSED');

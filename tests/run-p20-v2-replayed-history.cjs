@@ -244,5 +244,5 @@ const walletRow = db => db.native.prepare('SELECT revision,payload_json FROM led
     db.native.close();
   }
 
-  console.log('MYFI P20 V2 REPLAYED HISTORY RUNTIME: PASSED');
+  console.log('MaalFlow P20 V2 REPLAYED HISTORY RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });

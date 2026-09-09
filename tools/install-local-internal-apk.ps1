@@ -1,5 +1,5 @@
 ﻿param(
-  [string]$ProjectPath = "C:\Users\husse\OneDrive\Документы\MYFI"
+  [string]$ProjectPath = "C:\Users\husse\OneDrive\Документы\MaalFlow"
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +8,7 @@ function Fail([string]$Message) {
   exit 1
 }
 
-$Apk = Join-Path $ProjectPath "dist-local\MYFI-P19-013-internal.apk"
+$Apk = Join-Path $ProjectPath "dist-local\MaalFlow-P19-013-internal.apk"
 if (-not (Test-Path $Apk)) { Fail "APK not found. Run npm run build:apk:local first." }
 
 $candidates = @(

@@ -1,4 +1,4 @@
--- MYFI normalized core schema.
+-- MaalFlow normalized core schema.
 -- The legacy public.user_data JSON snapshot remains untouched during the migration period.
 
 create extension if not exists pgcrypto;

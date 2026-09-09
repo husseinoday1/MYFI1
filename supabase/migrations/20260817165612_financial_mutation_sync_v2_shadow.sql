@@ -1,4 +1,4 @@
--- MYFI P19-005 — Cloud Sync Protocol V2 SHADOW
+-- MaalFlow P19-005 — Cloud Sync Protocol V2 SHADOW
 -- V1 remains active. V2 is isolated by immutable ledger_id + restore_epoch.
 -- Linked transaction/entity mutations share command_id and are accepted all-or-nothing.
 

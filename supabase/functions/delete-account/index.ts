@@ -38,11 +38,11 @@ Deno.serve(async (request) => {
     .maybeSingle();
   const avatarPath = String(profile?.avatar_path || "");
   if (avatarPath) {
-    const { error: avatarError } = await admin.storage.from("myfi-avatars").remove([avatarPath]);
+    const { error: avatarError } = await admin.storage.from("maalflow-avatars").remove([avatarPath]);
     if (avatarError) return json({ error: "avatar_delete_failed" }, 500);
   }
 
-  // Database rows tied to auth.users use ON DELETE CASCADE in MYFI's schema.
+  // Database rows tied to auth.users use ON DELETE CASCADE in MaalFlow's schema.
   const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
   if (deleteError) return json({ error: "account_delete_failed" }, 500);
 

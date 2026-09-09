@@ -99,7 +99,7 @@ assert(transactionAccess.includes("from './dateCore';"), 'transactionAccess must
   };
   for (const file of files) if (!state.get(file)) visit(file);
 
-  console.log('MYFI RUNTIME HOTFIX V4.2: PASSED');
+  console.log('MaalFlow RUNTIME HOTFIX V4.2: PASSED');
 })().catch(error => {
   console.error(error);
   process.exit(1);

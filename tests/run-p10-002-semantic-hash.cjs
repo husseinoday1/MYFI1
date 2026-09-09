@@ -457,4 +457,4 @@ for (const invented of [
 }
 console.log('[PASS] transaction amounts are read under the names the payload really uses');
 
-console.log('MYFI P10-002 SEMANTIC HASH CONTRACT: PASS');
+console.log('MaalFlow P10-002 SEMANTIC HASH CONTRACT: PASS');

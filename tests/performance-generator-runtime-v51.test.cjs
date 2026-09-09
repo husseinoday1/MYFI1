@@ -85,4 +85,4 @@ for (const tier of PERFORMANCE_TEST_TIERS) {
   const sampleTwo = JSON.stringify(twoTransactions.slice(180, 195).map(({ ts, ...tx }) => tx));
   if (sampleOne !== sampleTwo) throw new Error(`tier ${tier.id}: generator is not deterministic`);
 }
-console.log('MYFI PERFORMANCE GENERATOR RUNTIME V5.1: PASSED');
+console.log('MaalFlow PERFORMANCE GENERATOR RUNTIME V5.1: PASSED');

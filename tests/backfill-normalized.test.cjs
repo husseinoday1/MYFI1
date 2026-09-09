@@ -66,4 +66,4 @@ assert.equal(compareReports(report, target).passed, true);
 target.counts.transactions += 1;
 assert.equal(compareReports(report, target).passed, false);
 
-console.log('MYFI normalized backfill helpers: all assertions passed');
+console.log('MaalFlow normalized backfill helpers: all assertions passed');

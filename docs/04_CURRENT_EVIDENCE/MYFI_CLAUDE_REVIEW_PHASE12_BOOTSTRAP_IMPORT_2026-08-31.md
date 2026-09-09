@@ -7,7 +7,7 @@
 
 - ✅ **`ledger_bootstrap_import_state_v8` مربوط بـFK فعلي**: `FOREIGN KEY(namespace, ledger_id) REFERENCES ledger_sync_identity_v8(...) ON DELETE RESTRICT`. مؤكَّد حرفيًا — لا يمكن إنشاء صف باستيراد قبل وجود هوية V2 مطابقة أصلًا.
 - ✅ **لا صفوف cold archive بـBootstrap V2**: بحثت بـ`financialBootstrapV2.js`، صفر تطابق لـ`cold_archive`. مؤكَّد.
-- ✅ **الوثائق الأربعة المرجعية بـ§13 موجودة فعليًا** (`MYFI_SYNC_PROTOCOL.md`, `MYFI_DATA_OWNERSHIP.md`, تدقيق Phase 12 السابق، ملحق تفعيل P19) — لا مرجع وهمي.
+- ✅ **الوثائق الأربعة المرجعية بـ§13 موجودة فعليًا** (`MAALFLOW_SYNC_PROTOCOL.md`, `MAALFLOW_DATA_OWNERSHIP.md`, تدقيق Phase 12 السابق، ملحق تفعيل P19) — لا مرجع وهمي.
 
 ## إجابات الأسئلة الستة
 

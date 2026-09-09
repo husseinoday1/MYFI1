@@ -47,7 +47,7 @@ const dataSlice = read('src/store/slices/dataSlice.js');
 assert(dataSlice.includes('clearVaultSnapshot(targetNamespace)'), 'Reset must clear encrypted vault and backups for current and guest namespaces');
 assert(dataSlice.includes('clearVaultSnapshot(syncBaseNamespace(targetNamespace))'), 'Reset must clear stale sync-base snapshots');
 assert(dataSlice.includes('GUEST_NAMESPACE'), 'Signed-in reset must also clear stale guest workspace data');
-assert(dataSlice.includes('MYFI_INTENTIONAL_RESET_V1'), 'Intentional-reset tombstone missing');
+assert(dataSlice.includes('MAALFLOW_INTENTIONAL_RESET_V1'), 'Intentional-reset tombstone missing');
 assert(dataSlice.includes('stripPerformanceCfg'), 'Reset must remove performance/demo flags from the clean workspace');
 assert(dataSlice.includes('resetAll verification failed'), 'Post-reset verification missing');
 assert(dataSlice.includes('financialDataCount(snapshot?.data || snapshot)'), 'Reset must re-read the vault and verify no financial data survived');
@@ -86,4 +86,4 @@ assert.strictEqual(life.isSafelyArchivableTracker({ kind: 'saving', source: { st
 assert.strictEqual(life.isSafelyArchivableTracker({ kind: 'monthly', source: { repeatMonthly: false, lastPaidMonth: '2026-07' } }), true);
 assert.strictEqual(life.isSafelyArchivableTracker({ kind: 'monthly', source: { repeatMonthly: true, lastPaidMonth: '2026-07' } }), false);
 
-console.log('MYFI lifecycle/reset/default-wallet/history-search checks passed.');
+console.log('MaalFlow lifecycle/reset/default-wallet/history-search checks passed.');

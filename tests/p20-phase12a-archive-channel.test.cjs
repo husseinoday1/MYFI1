@@ -36,4 +36,4 @@ assert.doesNotMatch(migration, /update\s+public\.financial_ledgers_v2\s+set\s+re
 assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+public\.financial_bootstrap_rows_v2/i);
 assert.ok(gate.includes('p20-phase12a-archive-channel.test.cjs'), 'archive channel contract is not registered in quality gate');
 
-console.log('MYFI P20 PHASE 12-A ARCHIVE CHANNEL CONTRACT: PASSED');
+console.log('MaalFlow P20 PHASE 12-A ARCHIVE CHANNEL CONTRACT: PASSED');

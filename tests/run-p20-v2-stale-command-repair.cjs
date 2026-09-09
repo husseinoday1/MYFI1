@@ -200,5 +200,5 @@ const receipt = db => {
   assert.equal(outboxCount(many.db), 9);
   many.db.native.close();
 
-  console.log('MYFI P20 V2 STALE COMMAND REPAIR RUNTIME: PASSED');
+  console.log('MaalFlow P20 V2 STALE COMMAND REPAIR RUNTIME: PASSED');
 })().catch(error => { console.error(error); process.exit(1); });
