@@ -28,6 +28,13 @@ const recordAttempt = (result, tier, phase) => {
       ...(result?.health?.issues || []).map(issue => issue?.code),
       ...(result?.healthIssueCodes || []),
     ].filter(safeCode))],
+    // Duration-only rebuild-path trace (see `mark` below). Structural step
+    // names and elapsed milliseconds only, never rows or financial values.
+    steps: Array.isArray(result?.steps)
+      ? result.steps
+        .filter(step => safeCode(step?.name) && Number.isFinite(Number(step?.atMs)))
+        .map(step => ({ name: safeCode(step.name), atMs: Math.max(0, Math.round(Number(step.atMs))) }))
+      : [],
   };
   return { ...result, issueCodes: lastAttempt.issueCodes };
 };
@@ -124,10 +131,22 @@ export const ensurePerformanceTestLedgerV7 = async ({
   const requestedTier = String(workspace?.cfg?.performanceTestTier || '');
   let reuseFailureReason = null;
   let healthIssueCodes = [];
+  // Rebuild-path trace: this is separate from the caller's own
+  // `onDiagnosticStep` (reserved for the reuse-path hook wired to app-startup
+  // timing, which only records while a startup is actually in progress). The
+  // rebuild can run long after startup, from a manual tier press, so its
+  // trace is recorded here unconditionally and carried in `lastAttempt`.
+  const rebuildClockStart = Date.now();
+  const rebuildSteps = [];
+  const markRebuildStep = name => {
+    const safe = safeCode(name);
+    if (safe) rebuildSteps.push({ name: safe, atMs: Date.now() - rebuildClockStart });
+  };
   const report = (result, phase) => recordAttempt({
     ...result,
     ...(reuseFailureReason ? { reuseFailureReason } : {}),
     ...(healthIssueCodes.length ? { healthIssueCodes } : {}),
+    ...(rebuildSteps.length ? { steps: rebuildSteps } : {}),
   }, requestedTier, phase);
   if (!forceReplace) {
     const reused = await reusablePerformanceTestLedgerV7({ workspaceNamespace, workspace, onDiagnosticStep });
@@ -149,6 +168,7 @@ export const ensurePerformanceTestLedgerV7 = async ({
   // This namespace is already isolated by getLedgerNamespace(..., cfg). Clear
   // only that performance namespace before rebuilding the selected tier.
   await clearFinancialWorkspaceV7({ namespace });
+  markRebuildStep('namespace_cleared');
 
   // Operational cutover now owns one transaction-local stage from build through
   // parity, health proof, and promotion. Calling the standalone shadow proof
@@ -160,11 +180,13 @@ export const ensurePerformanceTestLedgerV7 = async ({
     forceReplace: true,
     resetPendingOutbox: true,
     batchSize,
+    onDiagnosticStep: markRebuildStep,
     // The lab namespace is disposable and never synchronizes. Keep database-
     // wide FK proof for real cutovers, but do not let an unrelated historical
     // row outside this stage prevent measurement of the isolated V7 path.
     foreignKeyScope: 'namespace',
   });
+  markRebuildStep('cutover_returned');
   if (cutover?.supported === false) return report(failure(cutover, 'financial_v7_cutover_unavailable'), 'operational_cutover');
   if (!cutover?.ok || !cutover?.cutover) return report(failure(cutover, 'financial_v7_cutover_failed'), 'operational_cutover');
 
@@ -173,6 +195,7 @@ export const ensurePerformanceTestLedgerV7 = async ({
     walletIds: Array.isArray(workspace?.wallets) ? workspace.wallets.map(item => item.id) : [],
     expectedActiveCount: Array.isArray(workspace?.trans) ? workspace.trans.length : null,
   });
+  markRebuildStep('post_cutover_health');
   if (!health?.ok) return report(failure({ ...cutover, health }, 'financial_v7_cutover_health_failed'), 'post_cutover_health');
 
   return report({

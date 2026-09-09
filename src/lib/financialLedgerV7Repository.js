@@ -6006,7 +6006,7 @@ const promoteFinancialWorkspaceStageInTransactionV7 = async (txn, {
 // path clears it before commit.
 export const runFinancialWorkspaceStageSessionV7 = async ({
   stageNamespace, commands = [], entities = [], workspacePayload = {}, database = null,
-  batchSize = FINANCIAL_STAGE_WRITE_BATCH_SIZE, task,
+  batchSize = FINANCIAL_STAGE_WRITE_BATCH_SIZE, task, onDiagnosticStep = null,
 } = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
@@ -6014,10 +6014,14 @@ export const runFinancialWorkspaceStageSessionV7 = async ({
   const stage = String(stageNamespace || '').trim();
   if (!stage.includes('::shadow-stage::')) throw new Error('financial_v7_shadow_stage_namespace_invalid');
   if (typeof task !== 'function') throw new Error('financial_v7_stage_session_task_required');
+  // Duration-only instrumentation for the performance lab's rebuild trace.
+  // Structural step names only; never rows, counts, or financial values.
+  const diagnosticStep = name => { try { onDiagnosticStep?.(String(name)); } catch {} };
   return enqueueWrite(() => runLedgerExclusiveTransaction(db, async (txn) => {
     await stageFinancialWorkspaceInTransactionV7(txn, {
       namespace: stage, commands, entities, workspacePayload, batchSize,
     });
+    diagnosticStep('stage_write_complete');
     let promotionAttempted = false;
     let stageConsumed = false;
     try {

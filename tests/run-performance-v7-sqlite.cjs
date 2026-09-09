@@ -324,6 +324,21 @@ async function run() {
       0,
       'successful operational cutover must consume its verified stage',
     );
+    // The rebuild trace must reach the Diagnostics-safe attempt record with
+    // every stage in order, so a real device reading can show where time
+    // actually goes instead of one undifferentiated total.
+    const rebuildSteps = (readPerformanceLedgerAttemptV7().steps || []).map(step => step.name);
+    for (const expected of [
+      'namespace_cleared', 'source_normalized', 'source_commands_built', 'source_projection_ready',
+      'unmirrored_check', 'stage_write_complete', 'verify_readback_start', 'verify_readback_complete',
+      'verify_checksum_complete', 'invariants_proved', 'promoted', 'cutover_returned', 'post_cutover_health',
+    ]) {
+      assert.ok(rebuildSteps.includes(expected), `rebuild trace missing step ${expected}: ${JSON.stringify(rebuildSteps)}`);
+    }
+    const rebuildAtMs = (readPerformanceLedgerAttemptV7().steps || []).map(step => step.atMs);
+    for (let index = 1; index < rebuildAtMs.length; index += 1) {
+      assert.ok(rebuildAtMs[index] >= rebuildAtMs[index - 1], `rebuild trace steps must be non-decreasing: ${JSON.stringify(rebuildAtMs)}`);
+    }
     const state = await getFinancialWorkspaceStateV7({ namespace: 'guest::performance-test' });
     assert.equal(state.source_mode, 'sqlite');
     if (verifyRebuild) {

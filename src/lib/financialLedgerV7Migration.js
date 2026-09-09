@@ -336,7 +336,11 @@ const compareMetric = (differences, field, source, target) => {
 
 export const buildFinancialShadowProjectionV7 = ({
   namespace = 'guest', workspace = {}, coldArchives = [], now = new Date().toISOString(),
+  onDiagnosticStep = null,
 } = {}) => {
+  // Duration-only instrumentation for the performance lab's rebuild trace.
+  // Structural step names only; never rows, counts, or financial values.
+  const diagnosticStep = name => { try { onDiagnosticStep?.(String(name)); } catch {} };
   const baseCurrency = normalizeCurrencyCode(workspace?.cfg?.currency, 'IQD');
   const wallets = collectWallets(workspace, coldArchives, baseCurrency);
   const defaultWalletId = getDefaultWalletId(wallets, baseCurrency, workspace?.cfg?.defaultWalletId);
@@ -359,6 +363,7 @@ export const buildFinancialShadowProjectionV7 = ({
   if (unresolvedFx.length) {
     throw new Error(`financial_v7_shadow_unresolved_fx:${unresolvedFx.slice(0, 20).map(item => item.id).join(',')}`);
   }
+  diagnosticStep('source_normalized');
 
   const coldMovement = new Map(wallets.map(wallet => [wallet.id, 0]));
   for (const transaction of dedupedArchived) {
@@ -412,6 +417,7 @@ export const buildFinancialShadowProjectionV7 = ({
   const commands = allTransactions.map(transaction => buildFinancialLedgerCommand({
     namespace, transaction, wallets, baseCurrency, now,
   }));
+  diagnosticStep('source_commands_built');
   const entities = entityRowsFor({
     namespace, workspace, wallets: normalizeWallets(workspace?.wallets, baseCurrency), now, archives: coldArchives,
   });
@@ -421,6 +427,7 @@ export const buildFinancialShadowProjectionV7 = ({
     workspace, activeTransactions, archivedTransactions: dedupedArchived,
     wallets, commands, entities, baseCurrency,
   });
+  diagnosticStep('source_projection_ready');
   return {
     namespace, baseCurrency, wallets, commands, entities, document, checksum, metrics,
     workspacePayload: entities.find(item => item.entityType === 'workspace')?.payload || {},
@@ -434,8 +441,9 @@ const FINANCIAL_STAGE_PARITY_FIELDS_V7 = [
 
 const prepareFinancialStageProjectionV7 = async ({
   namespace, stageNamespace, workspace, coldArchives, database, forceReplace,
-  checkUnresolvedFx = true,
+  checkUnresolvedFx = true, onDiagnosticStep = null,
 }) => {
+  const diagnosticStep = name => { try { onDiagnosticStep?.(String(name)); } catch {} };
   const sourceUnresolvedFx = [
     ...(Array.isArray(workspace?.trans) ? workspace.trans : []),
     ...archiveRows(coldArchives),
@@ -448,9 +456,12 @@ const prepareFinancialStageProjectionV7 = async ({
       differences: sourceUnresolvedFx.slice(0, 20).map(item => ({ field: 'fx', id: item.id })),
     };
   }
-  const projection = buildFinancialShadowProjectionV7({ namespace: stageNamespace, workspace, coldArchives });
+  const projection = buildFinancialShadowProjectionV7({
+    namespace: stageNamespace, workspace, coldArchives, onDiagnosticStep,
+  });
   const expectedIds = new Set(projection.commands.map(command => command.header.id));
   const existing = await readFinancialProjectionV7({ namespace, database });
+  diagnosticStep('unmirrored_check');
   const unmirrored = forceReplace ? [] : (existing?.transactions || []).filter(item => (
     !item.deletedAt && !item.payload?.hiddenFromHistory && !expectedIds.has(item.id)
   ));
@@ -464,8 +475,11 @@ const prepareFinancialStageProjectionV7 = async ({
   return { supported: true, ok: true, projection };
 };
 
-const verifyFinancialStageProjectionV7 = async ({ projection, readProjection }) => {
+const verifyFinancialStageProjectionV7 = async ({ projection, readProjection, onDiagnosticStep = null }) => {
+  const diagnosticStep = name => { try { onDiagnosticStep?.(String(name)); } catch {} };
+  diagnosticStep('verify_readback_start');
   const staged = await readProjection();
+  diagnosticStep('verify_readback_complete');
   const targetDocument = rawProjectionDocument(staged);
   const targetChecksum = financialProjectionChecksum(targetDocument);
   const targetMetrics = metricsFromTarget({
@@ -478,6 +492,7 @@ const verifyFinancialStageProjectionV7 = async ({ projection, readProjection }) 
   for (const field of FINANCIAL_STAGE_PARITY_FIELDS_V7) {
     compareMetric(differences, field, projection.metrics[field], targetMetrics[field]);
   }
+  diagnosticStep('verify_checksum_complete');
   return { targetChecksum, targetMetrics, differences };
 };
 
@@ -552,7 +567,9 @@ export const runFinancialShadowMigrationV7 = async ({
 export const runFinancialOperationalCutoverV7 = async ({
   namespace = 'guest', workspace = {}, coldArchives = [], database = null,
   forceReplace = false, resetPendingOutbox = false, foreignKeyScope = 'database', batchSize,
+  onDiagnosticStep = null,
 } = {}) => {
+  const diagnosticStep = name => { try { onDiagnosticStep?.(String(name)); } catch {} };
   if (!database && !financialLedgerV7Supported()) {
     return { supported: false, ok: false, reason: 'sqlite_unavailable', cutover: false };
   }
@@ -577,6 +594,7 @@ export const runFinancialOperationalCutoverV7 = async ({
     // Preserve the former operational contract: forceReplace bypassed the
     // standalone readiness pass, including its unresolved-FX source gate.
     checkUnresolvedFx: !forceReplace,
+    onDiagnosticStep,
   });
   if (!prepared.ok) {
     return { ...prepared, cutover: false, reason: prepared.reason || 'migration_not_ready' };
@@ -589,9 +607,10 @@ export const runFinancialOperationalCutoverV7 = async ({
     workspacePayload: projection.workspacePayload,
     database,
     batchSize,
+    onDiagnosticStep,
     task: async ({ readProjection, proveInvariants, promote }) => {
       const { targetChecksum, targetMetrics, differences } = await verifyFinancialStageProjectionV7({
-        projection, readProjection,
+        projection, readProjection, onDiagnosticStep,
       });
       if (differences.length) {
         return {
@@ -602,6 +621,7 @@ export const runFinancialOperationalCutoverV7 = async ({
       }
 
       const health = await proveInvariants({ foreignKeyScope });
+      diagnosticStep('invariants_proved');
       if (!health?.ok) {
         return {
           supported: true, ok: false, cutover: false, reason: 'financial_v7_health_blocking',
@@ -626,6 +646,7 @@ export const runFinancialOperationalCutoverV7 = async ({
         },
         resetPendingOutbox: !!resetPendingOutbox,
       });
+      diagnosticStep('promoted');
       return {
         ...promoted,
         cutover: promoted?.ok === true,
