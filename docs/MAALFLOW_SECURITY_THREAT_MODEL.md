@@ -210,3 +210,45 @@ a policy violation as well as a privacy one, which is why that row stays open.
 - SecureStore holds secrets, not the financial ledger.
 - Diagnostics and logging contain no notes, raw financial history, or secrets.
 - Production signing is not yet established; debug signing is not Release Ready.
+
+---
+
+## 7. Provider tier decision (2026-09-10)
+
+Both OCR/voice providers (A4/A5, F-04) offer a free or discounted tier whose price is
+the same thing in both cases: the request content — receipt images, voice recordings —
+becomes training data for that provider. Confirmed for both:
+
+- **Gemini:** an API key on a project with no billing account linked runs on the free
+  tier by default, and Google states free-tier prompts/outputs may be used to improve
+  its products. A key on a project with billing enabled runs on the paid tier, where
+  content is excluded from training.
+- **OpenAI:** the GPT-5 family has no standing free tier; the only free path is an
+  explicit opt-in "share your traffic for training" program. Paid, metered usage is
+  the default once billing is enabled and that program is never opted into.
+
+**Decision: free tier during closed testing (the 12–15 pilot testers), switched to
+paid before public release.** Owner-made, and made knowingly: the 12–15 pilot testers
+are real people the owner knows personally, and their real receipt photos and voice
+recordings will be usable as Google training data for the duration of the pilot. This
+was chosen anyway, on the reasoning that the pilot's own purpose is catching real
+problems with real usage before the wider public is exposed to anything, and the
+tester pool is small and known rather than anonymous strangers.
+
+**This is NOT optional to remember — it is a hard gate before Play submission.**
+Unlike most findings in this document, there is no code-level way to enforce it: the
+tier is a billing-account property of the API key itself, invisible to this codebase
+and to the app. A key that silently stayed on the free tier past the pilot would keep
+sending live users' financial photos and voice to a provider's training pipeline with
+nobody noticing, because both tiers behave identically from the API's perspective.
+
+**Before Play submission (Stage 8 of `MAALFLOW_LAUNCH_RUNBOOK_AR.md`), explicitly:**
+1. Open the Gemini project's billing page and confirm a payment method is linked.
+2. Regenerate `GEMINI_API_KEY` under that now-billed project (or confirm the existing
+   key already belongs to it) and update the Supabase secret.
+3. Confirm `OPENAI_API_KEY` was never enrolled in OpenAI's data-sharing token program.
+4. Record the date this was done and by whom, right in this section, below.
+
+**Verification log:**
+- 2026-09-10 — decision made; free tier in use for pilot testing. Not yet switched.
+- _(add an entry here the day the paid switch is made, before Play submission)_
