@@ -417,9 +417,43 @@ const authenticatedFetch = withSupabase({ auth: "user" }, async (request) => {
   const base64 = arrayBufferToBase64(bytes);
   const mimeType = file.type || "image/jpeg";
 
+  // Try OpenAI as a fallback whenever it is configured, not only when Gemini's key is
+  // absent. Model names and preview models rotate every few months on both providers;
+  // when the primary attempt fails (invalid/retired model name, quota, outage) a
+  // configured second key should mean the request still succeeds, not that it errors
+  // out because "the other provider" was never actually reachable.
+  const tryOpenAiVision = async (): Promise<Response> => {
+    const model = Deno.env.get("OPENAI_VISION_MODEL") || "gpt-5-mini";
+    const upstream = await callOpenAiVision({
+      key: openAiApiKey as string,
+      model,
+      prompt,
+      base64,
+      mimeType,
+    });
+    if (!upstream.ok) return upstreamError(upstream);
+
+    const raw = extractResponseText(await upstream.json());
+    const parsed = extractJsonObject(raw);
+    if (!parsed) return json({ error: "The image could not be converted into structured financial data." }, 422);
+    const analysis = normalizeAnalysis(parsed);
+    return json({
+      text: analysisText(analysis),
+      provider: "openai",
+      model,
+      mimeType,
+      analysis,
+    });
+  };
+
   if (geminiApiKey) {
+    // Primary: the cheapest current Gemini tier. Fallback: the current stable Flash
+    // line. Both names are env-overridable so a future rename is a config change, not
+    // a redeploy -- see GEMINI_VISION_MODEL. (gemini-3-flash-preview, this fallback's
+    // previous value, is a preview-era name outside Google's current stable lineup and
+    // would fail here exactly like an unconfigured provider.)
     const requestedModel = Deno.env.get("GEMINI_VISION_MODEL") || "gemini-3.1-flash-lite";
-    const geminiModels = [...new Set([requestedModel, "gemini-3-flash-preview"])];
+    const geminiModels = [...new Set([requestedModel, "gemini-3.8-flash"])];
     let lastUpstream: Response | null = null;
 
     for (const geminiModel of geminiModels) {
@@ -458,30 +492,11 @@ const authenticatedFetch = withSupabase({ auth: "user" }, async (request) => {
       lastUpstream = upstream;
     }
 
+    if (openAiApiKey) return tryOpenAiVision();
     return upstreamError(lastUpstream as Response);
   }
 
-  const model = Deno.env.get("OPENAI_VISION_MODEL") || "gpt-4.1-mini";
-  const upstream = await callOpenAiVision({
-    key: openAiApiKey as string,
-    model,
-    prompt,
-    base64,
-    mimeType,
-  });
-  if (!upstream.ok) return upstreamError(upstream);
-
-  const raw = extractResponseText(await upstream.json());
-  const parsed = extractJsonObject(raw);
-  if (!parsed) return json({ error: "The image could not be converted into structured financial data." }, 422);
-  const analysis = normalizeAnalysis(parsed);
-  return json({
-    text: analysisText(analysis),
-    provider: "openai",
-    model,
-    mimeType,
-    analysis,
-  });
+  return tryOpenAiVision();
 });
 
 export default {

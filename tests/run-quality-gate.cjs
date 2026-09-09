@@ -99,6 +99,7 @@ const staticContracts = [
   'smart-capture-privacy-gate.test.cjs',
   'screen-privacy-contract.test.cjs',
   'local-encryption-honesty.test.cjs',
+  'smart-capture-provider-models.test.cjs',
   'sync-error-classification.test.cjs',
   'automatic-sync-interaction-hold.test.cjs',
   'backup-format-vulnerabilities.test.cjs',

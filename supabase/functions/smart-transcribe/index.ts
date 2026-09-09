@@ -401,13 +401,112 @@ const authenticatedFetch = withSupabase({ auth: "user" }, async (request) => {
   const currency = String(formData.get("currency") || "");
   const lang = String(formData.get("lang") || "");
 
+  // Wraps the two-step OpenAI path (transcribe, then analyze the transcript) so it can
+  // be called either as the sole provider or as a fallback when Gemini is configured
+  // but fails outright. Kept as a closure over the request's already-parsed formData
+  // fields rather than re-reading the request, since a Request body can only be
+  // consumed once.
+  const tryOpenAiVoice = async (): Promise<Response> => {
+    const transcribeModel = Deno.env.get("OPENAI_TRANSCRIBE_MODEL") || "gpt-4o-mini-transcribe";
+    const upstreamForm = new FormData();
+    upstreamForm.append("file", file, file.name || "voice.m4a");
+    upstreamForm.append("model", transcribeModel);
+    upstreamForm.append("response_format", "json");
+    upstreamForm.append("prompt", Deno.env.get("OPENAI_TRANSCRIBE_PROMPT") || transcriptionPrompt);
+
+    const transcriptionResponse = await fetchWithRetry("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${openAiApiKey}` },
+      body: upstreamForm,
+    });
+
+    if (!transcriptionResponse.ok) return upstreamError(transcriptionResponse);
+
+    const transcriptionPayload = await transcriptionResponse.json();
+    const transcript = String(transcriptionPayload?.text || "").trim();
+    if (!transcript) return json({ error: "No speech was detected in the recording." }, 422);
+
+    // Model names rotate every few months on both providers; env-overridable so a
+    // future rename is a config change, not a redeploy. gpt-4.1-mini, this default's
+    // previous value, is being phased out of OpenAI's own product surface in favor of
+    // the gpt-5 family.
+    const analyzerModel = Deno.env.get("OPENAI_VOICE_ANALYSIS_MODEL")
+      || Deno.env.get("OPENAI_VISION_MODEL")
+      || "gpt-5-mini";
+
+    const analysisResponse = await analyzeOpenAiTranscript({
+      key: openAiApiKey as string,
+      model: analyzerModel,
+      transcript,
+      today,
+      currency,
+      lang,
+    });
+
+    if (!analysisResponse.ok) return upstreamError(analysisResponse);
+
+    const raw = extractResponseText(await analysisResponse.json());
+    const parsed = extractJsonObject(raw);
+    if (!parsed) {
+      return json({
+        text: transcript,
+        transcript,
+        provider: "openai",
+        model: transcribeModel,
+        mimeType: file.type || "audio/m4a",
+        analysis: normalizeAnalysis({
+          sourceType: "other",
+          transactionLikely: true,
+          multipleTransactions: false,
+          flow: "unknown",
+          direction: "unknown",
+          amount: null,
+          currency: null,
+          dateISO: null,
+          dateRole: "unknown",
+          title: null,
+          merchant: null,
+          counterparty: null,
+          category: null,
+          walletHint: null,
+          accountHint: null,
+          fromWalletHint: null,
+          toWalletHint: null,
+          amountEvidence: null,
+          amountConfidence: 0,
+          dateConfidence: 0,
+          overallConfidence: 0.25,
+          referenceNumbers: [],
+          candidates: [],
+          warnings: ["structured_voice_analysis_failed"],
+          rawText: "",
+          transcript,
+        }),
+      });
+    }
+
+    const analysis = normalizeAnalysis({ ...parsed, transcript });
+    return json({
+      text: transcript,
+      transcript,
+      provider: "openai",
+      model: `${transcribeModel} + ${analyzerModel}`,
+      mimeType: file.type || "audio/m4a",
+      analysis,
+    });
+  };
+
   if (geminiApiKey) {
     const bytes = await file.arrayBuffer();
     const geminiMimeType = ["audio/m4a", "audio/x-m4a"].includes(file.type)
       ? "audio/mp4"
       : (file.type || "audio/mp4");
+    // Primary: the cheapest current Gemini tier. Fallback: the current stable Flash
+    // line -- see GEMINI_TRANSCRIBE_MODEL. gemini-3-flash-preview, this fallback's
+    // previous value, is a preview-era name outside Google's current stable lineup
+    // and would fail here exactly like an unconfigured provider.
     const requestedModel = Deno.env.get("GEMINI_TRANSCRIBE_MODEL") || "gemini-3.1-flash-lite";
-    const geminiModels = [...new Set([requestedModel, "gemini-3-flash-preview"])];
+    const geminiModels = [...new Set([requestedModel, "gemini-3.8-flash"])];
     let lastUpstream: Response | null = null;
 
     for (const geminiModel of geminiModels) {
@@ -450,92 +549,11 @@ const authenticatedFetch = withSupabase({ auth: "user" }, async (request) => {
       lastUpstream = upstream;
     }
 
+    if (openAiApiKey) return tryOpenAiVoice();
     return upstreamError(lastUpstream as Response);
   }
 
-  const transcribeModel = Deno.env.get("OPENAI_TRANSCRIBE_MODEL") || "gpt-4o-mini-transcribe";
-  const upstreamForm = new FormData();
-  upstreamForm.append("file", file, file.name || "voice.m4a");
-  upstreamForm.append("model", transcribeModel);
-  upstreamForm.append("response_format", "json");
-  upstreamForm.append("prompt", Deno.env.get("OPENAI_TRANSCRIBE_PROMPT") || transcriptionPrompt);
-
-  const transcriptionResponse = await fetchWithRetry("https://api.openai.com/v1/audio/transcriptions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${openAiApiKey}` },
-    body: upstreamForm,
-  });
-
-  if (!transcriptionResponse.ok) return upstreamError(transcriptionResponse);
-
-  const transcriptionPayload = await transcriptionResponse.json();
-  const transcript = String(transcriptionPayload?.text || "").trim();
-  if (!transcript) return json({ error: "No speech was detected in the recording." }, 422);
-
-  const analyzerModel = Deno.env.get("OPENAI_VOICE_ANALYSIS_MODEL")
-    || Deno.env.get("OPENAI_VISION_MODEL")
-    || "gpt-4.1-mini";
-
-  const analysisResponse = await analyzeOpenAiTranscript({
-    key: openAiApiKey as string,
-    model: analyzerModel,
-    transcript,
-    today,
-    currency,
-    lang,
-  });
-
-  if (!analysisResponse.ok) return upstreamError(analysisResponse);
-
-  const raw = extractResponseText(await analysisResponse.json());
-  const parsed = extractJsonObject(raw);
-  if (!parsed) {
-    return json({
-      text: transcript,
-      transcript,
-      provider: "openai",
-      model: transcribeModel,
-      mimeType: file.type || "audio/m4a",
-      analysis: normalizeAnalysis({
-        sourceType: "other",
-        transactionLikely: true,
-        multipleTransactions: false,
-        flow: "unknown",
-        direction: "unknown",
-        amount: null,
-        currency: null,
-        dateISO: null,
-        dateRole: "unknown",
-        title: null,
-        merchant: null,
-        counterparty: null,
-        category: null,
-        walletHint: null,
-        accountHint: null,
-        fromWalletHint: null,
-        toWalletHint: null,
-        amountEvidence: null,
-        amountConfidence: 0,
-        dateConfidence: 0,
-        overallConfidence: 0.25,
-        referenceNumbers: [],
-        candidates: [],
-        warnings: ["structured_voice_analysis_failed"],
-        rawText: "",
-        transcript,
-      }),
-    });
-  }
-
-  const analysis = normalizeAnalysis({ ...parsed, transcript });
-  return json({
-    text: transcript,
-    transcript,
-    provider: "openai",
-    model: `${transcribeModel} + ${analyzerModel}`,
-    mimeType: file.type || "audio/m4a",
-    analysis,
-  });
+  return tryOpenAiVoice();
 });
 
 export default {
