@@ -1074,8 +1074,8 @@ export default function SettingsScreen({ tabs = [], resetSignal = 0, openRequest
     const isLarge = Number(tier.transactions) >= 10000;
     const active = cfg.demoMode && cfg.performanceTestTier === tier.id;
     const body = isAr
-      ? `سيتم فتح مساحة اختبار منفصلة تحتوي ${Number(tier.transactions).toLocaleString('en-US')} حركة موزعة على ${tier.months} شهراً (${Math.round(tier.months / 12)} سنوات تقريباً). بياناتك الحقيقية تبقى محفوظة ومشفرة ولا تختلط ببيانات الاختبار ولا تتم مزامنة بيانات الاختبار.${isLarge ? '\n\nهذا المستوى ثقيل وقد يحتاج عدة ثوانٍ على الهاتف، لكنه سيبقى فعالاً حتى تختار العودة إلى بياناتك.' : ''}`
-      : `An isolated test workspace with ${Number(tier.transactions).toLocaleString('en-US')} transactions across ${tier.months} months (about ${Math.round(tier.months / 12)} years) will be loaded. Your real data stays encrypted and separate, and test data is never synced.${isLarge ? '\n\nThis is a heavy tier and may take several seconds on a phone, but it remains active until you return to your real data.' : ''}`;
+      ? `سيتم فتح مساحة اختبار منفصلة تحتوي ${Number(tier.transactions).toLocaleString('en-US')} حركة موزعة على ${tier.months} شهراً (${Math.round(tier.months / 12)} سنوات تقريباً). بياناتك الحقيقية تبقى محفوظة كما هي ولا تختلط ببيانات الاختبار ولا تتم مزامنة بيانات الاختبار.${isLarge ? '\n\nهذا المستوى ثقيل وقد يحتاج عدة ثوانٍ على الهاتف، لكنه سيبقى فعالاً حتى تختار العودة إلى بياناتك.' : ''}`
+      : `An isolated test workspace with ${Number(tier.transactions).toLocaleString('en-US')} transactions across ${tier.months} months (about ${Math.round(tier.months / 12)} years) will be loaded. Your real data stays saved and untouched, and test data is never synced.${isLarge ? '\n\nThis is a heavy tier and may take several seconds on a phone, but it remains active until you return to your real data.' : ''}`;
     Alert.alert(
       isAr ? `بيانات اختبار · ${Number(tier.transactions).toLocaleString('en-US')} حركة` : `Test data · ${Number(tier.transactions).toLocaleString('en-US')} transactions`,
       body,

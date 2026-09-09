@@ -97,6 +97,7 @@ const staticContracts = [
   'dev-diagnostic-payload-privacy.test.cjs',
   'smart-capture-privacy-gate.test.cjs',
   'screen-privacy-contract.test.cjs',
+  'local-encryption-honesty.test.cjs',
   'sync-error-classification.test.cjs',
   'automatic-sync-interaction-hold.test.cjs',
   'backup-format-vulnerabilities.test.cjs',

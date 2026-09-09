@@ -150,11 +150,12 @@ manifest and its payload can both be rewritten. Encryption is what makes A2 tamp
 
 ## 5. Decisions this model hands forward
 
-**§109 — Local database encryption.** The evidence supports **Option A** (sandbox +
-`allowBackup=false` + device encryption) *provided* F-01 and F-03 are honoured in the
-product copy. Option B (SQLCipher) stays deferred until compatibility, performance,
-migration, recovery and Expo/native evidence exist. لا نضيف SQLCipher لأنه يبدو أكثر
-احترافاً.
+**§109 — Local database encryption.** **Decided: Option A**, recorded with its conditions,
+revisit triggers and Option B cost in `MAALFLOW_LOCAL_ENCRYPTION_DECISION.md`. The condition
+that the product never claims local encryption is enforced by
+`tests/local-encryption-honesty.test.cjs`, which on its first run caught a live overclaim:
+the dataset-tier dialog told the user "بياناتك الحقيقية تبقى محفوظة ومشفرة" / "Your real data
+stays encrypted". Both were corrected.
 
 **§110 — SecureStore.** Scope is confirmed narrow and correct: master key and device id
 only, never the ledger. The test matrix (first install, reboot, logout, account deletion,
