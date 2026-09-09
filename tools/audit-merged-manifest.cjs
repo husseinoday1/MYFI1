@@ -7,7 +7,7 @@
 // final manifest without touching a file we read. This audits what actually shipped.
 //
 // Usage:
-//   aapt dump xmltree app-release.apk --file AndroidManifest.xml > tree.txt
+//   aapt dump xmltree app-release.apk AndroidManifest.xml > tree.txt
 //   node tools/audit-merged-manifest.cjs tree.txt
 //
 // Exits non-zero with a readable diff on any violation.

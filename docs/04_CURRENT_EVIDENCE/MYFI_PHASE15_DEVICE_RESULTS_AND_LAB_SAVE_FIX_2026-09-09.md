@@ -147,12 +147,18 @@ No mutation survived.
 
 ## Remaining work
 
-1. Planning & Audit reviews this diff, tests, and mutations.
-2. After approval: commit, push, confirm both CI run IDs, install that exact
-   normal-release APK, and re-measure the five transaction/commitment saves at
+1. The isolated lab-save fix was reviewed, committed as `029d407`, and pushed.
+   Its first release build reached the artifact-manifest audit but failed before
+   upload because `aapt dump xmltree` was incorrectly given `--file`.
+2. The release-gate correction passes `AndroidManifest.xml` as the required
+   positional asset instead. A structural test now requires that invocation and
+   rejects `--file`; the deliberate restoration of `--file` failed the test,
+   then was restored. The full local quality gate passed afterward.
+3. After the corrected CI Test Gate and APK build are green, install that exact
+   normal-release APK and re-measure the five transaction/commitment saves at
    50K.
-3. Independently design and review metadata-first, bounded V7 startup. It must
+4. Independently design and review metadata-first, bounded V7 startup. It must
    preserve health/rebuild correctness and must never accept a same-count stale
    snapshot.
-4. §96/§98/§100 and Phase 15 remain open until the post-fix 50K evidence and
+5. §96/§98/§100 and Phase 15 remain open until the post-fix 50K evidence and
    the still-missing memory/100K-policy evidence are resolved.

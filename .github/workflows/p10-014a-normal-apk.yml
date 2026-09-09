@@ -145,7 +145,7 @@ jobs:
           # The audit reads the manifest out of the built artifact, not app.json or the
           # committed android/ sources. §105 exists because those can disagree with what
           # actually ships, and during the MaalFlow rename they did.
-          "$AAPT" dump xmltree "$APK" --file AndroidManifest.xml > merged-manifest.txt
+          "$AAPT" dump xmltree "$APK" AndroidManifest.xml > merged-manifest.txt
           node tools/audit-merged-manifest.cjs merged-manifest.txt | tee merged-manifest-audit.txt
 
       - name: Upload normal MaalFlow APK

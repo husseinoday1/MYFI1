@@ -50,6 +50,16 @@ const apkWorkflow = fs.readFileSync(path.join(root, '.github/workflows/p10-014a-
 assert.match(apkWorkflow, /dump xmltree/, 'Release build must extract the merged manifest from the APK');
 assert.match(
   apkWorkflow,
+  /dump xmltree "\$APK" AndroidManifest\.xml/,
+  '§105 must pass AndroidManifest.xml as the aapt asset argument',
+);
+assert.doesNotMatch(
+  apkWorkflow,
+  /dump xmltree[^\n]*--file/,
+  'aapt dump xmltree does not support --file; it would skip the artifact audit',
+);
+assert.match(
+  apkWorkflow,
   /node tools\/audit-merged-manifest\.cjs/,
   '§105 merged-manifest audit must run in the release build',
 );
