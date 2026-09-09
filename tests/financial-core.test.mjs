@@ -19,7 +19,7 @@ import {
   normalizeLedgerTransaction,
   profileModuleDefaults,
 } from '../src/lib/modules.js';
-import { buildMyfiPackage, inspectMyfiPackage } from '../src/lib/myfiFiles.js';
+import { buildMaalFlowPackage, inspectMaalFlowPackage } from '../src/lib/maalflowFiles.js';
 import { canonicalBackupV11ManifestCounts } from '../src/lib/financialBackupV11.js';
 import { semanticHashCanonicalV2 } from '../src/lib/financialSemanticProjection.js';
 import { secureAuthStorage } from '../src/lib/secureVault.js';
@@ -550,7 +550,7 @@ const integrity = auditFinancialData({
 });
 assert.equal(integrity.ok, true, 'fully linked financial data must pass integrity checks');
 
-const demo = JSON.parse(fs.readFileSync('sample-data/MYFI-demo-5-months.json', 'utf8'));
+const demo = JSON.parse(fs.readFileSync('sample-data/MaalFlow-demo-5-months.json', 'utf8'));
 const demoIntegrity = auditFinancialData(demo);
 assert.equal(demo.trans.length, 60, 'demo data must keep exactly 60 transactions');
 assert.equal(demoIntegrity.ok, true, `demo financial relationships must be healthy: ${JSON.stringify(demoIntegrity.issues)}`);
@@ -588,7 +588,7 @@ const voiceDraft = analyzeSmartEntry({
 assert.equal(voiceDraft.amount, 3500, 'Arabic voice digits must parse correctly');
 assert.equal(voiceDraft.walletId, 'cash');
 
-// MYFI_SMART_MULTIMODAL_V2_TESTS
+// MAALFLOW_SMART_MULTIMODAL_V2_TESTS
 [
   ['ألف ونص', 1500],
   ['مليون ونص', 1500000],
@@ -725,10 +725,10 @@ assert.equal(independentLocaleCfg.country, 'US', 'country must be stored indepen
 assert.equal(independentLocaleCfg.currency, 'IQD', 'currency must not be overwritten by country');
 
 const runLinkedStoreAssertions = async () => {
-  await secureAuthStorage.setItem('myfi-auth-test', '{"access_token":"private"}');
-  assert.equal(await secureAuthStorage.getItem('myfi-auth-test'), '{"access_token":"private"}');
-  await secureAuthStorage.removeItem('myfi-auth-test');
-  assert.equal(await secureAuthStorage.getItem('myfi-auth-test'), null);
+  await secureAuthStorage.setItem('maalflow-auth-test', '{"access_token":"private"}');
+  assert.equal(await secureAuthStorage.getItem('maalflow-auth-test'), '{"access_token":"private"}');
+  await secureAuthStorage.removeItem('maalflow-auth-test');
+  assert.equal(await secureAuthStorage.getItem('maalflow-auth-test'), null);
 
   const initialCfg = useStore.getState().cfg;
   const expectedStoreActions = [
@@ -1408,8 +1408,8 @@ const runLinkedStoreAssertions = async () => {
   const beforeArchiveBalance = getWalletBalances(archiveWallets, useStore.getState().trans, 'IQD', 'archive-cash')[0].balance;
   const archiveData = useStore.getState().buildYearArchive(2024);
   assert.equal(archiveData.trans.length, 2);
-  const archivePackage = await buildMyfiPackage({ kind: 'year_archive', data: archiveData, year: 2024 });
-  const inspectedArchive = await inspectMyfiPackage(archivePackage.base64);
+  const archivePackage = await buildMaalFlowPackage({ kind: 'year_archive', data: archiveData, year: 2024 });
+  const inspectedArchive = await inspectMaalFlowPackage(archivePackage.base64);
   assert.equal(inspectedArchive.payload.kind, 'year_archive');
   assert.equal(inspectedArchive.payload.data.trans.length, 2);
   assert.ok(inspectedArchive.csv.includes('old-income'));
@@ -1430,13 +1430,13 @@ const runLinkedStoreAssertions = async () => {
   assert.equal(afterArchiveBalance, beforeArchiveBalance, 'an aborted annual archive must preserve wallet balance');
   assert.deepEqual(state.cfg.archiveSummaries, []);
 
-  const fullPackage = await buildMyfiPackage({
+  const fullPackage = await buildMaalFlowPackage({
     kind: 'full_backup',
     data: JSON.parse(await useStore.getState().exportBackup()),
   });
-  const inspectedBackup = await inspectMyfiPackage(fullPackage.base64);
+  const inspectedBackup = await inspectMaalFlowPackage(fullPackage.base64);
   assert.equal(inspectedBackup.payload.kind, 'full_backup');
-  assert.equal(inspectedBackup.payload.format, 'MYFI');
+  assert.equal(inspectedBackup.payload.format, 'MAALFLOW');
   const canonicalData = {
     semanticHashVersion: 2,
     ledgerId: 'ledger-package-v11',
@@ -1444,9 +1444,9 @@ const runLinkedStoreAssertions = async () => {
     accounts: [], exchangeRates: [], transactions: [], postings: [], links: [], entities: [], archives: [],
   };
   const canonicalBackup = {
-    kind: 'myfi_canonical_financial_backup',
+    kind: 'maalflow_canonical_financial_backup',
     manifest: {
-      format: 'MYFI_CANONICAL_LEDGER_BACKUP',
+      format: 'MAALFLOW_CANONICAL_LEDGER_BACKUP',
       dataVersion: 11,
       semanticHashVersion: 2,
       semanticHashAlgorithm: 'SHA-256',
@@ -1457,23 +1457,23 @@ const runLinkedStoreAssertions = async () => {
     },
     data: canonicalData,
   };
-  const canonicalPackage = await buildMyfiPackage({ kind: 'full_backup', data: canonicalBackup });
-  const inspectedCanonical = await inspectMyfiPackage(canonicalPackage.base64);
-  assert.equal(inspectedCanonical.payload.data.kind, 'myfi_canonical_financial_backup');
+  const canonicalPackage = await buildMaalFlowPackage({ kind: 'full_backup', data: canonicalBackup });
+  const inspectedCanonical = await inspectMaalFlowPackage(canonicalPackage.base64);
+  assert.equal(inspectedCanonical.payload.data.kind, 'maalflow_canonical_financial_backup');
   assert.equal(inspectedCanonical.payload.data.manifest.dataVersion, 11);
-  const encryptedPackage = await buildMyfiPackage({
+  const encryptedPackage = await buildMaalFlowPackage({
     kind: 'full_backup',
     data: JSON.parse(await useStore.getState().exportBackup()),
     password: 'correct-horse-42',
   });
-  const lockedBackup = await inspectMyfiPackage(encryptedPackage.base64);
+  const lockedBackup = await inspectMaalFlowPackage(encryptedPackage.base64);
   assert.equal(lockedBackup.passwordRequired, true);
   assert.equal(lockedBackup.payload, null);
   await assert.rejects(
-    () => inspectMyfiPackage(encryptedPackage.base64, { password: 'wrong-password' }),
+    () => inspectMaalFlowPackage(encryptedPackage.base64, { password: 'wrong-password' }),
     /password/i,
   );
-  const unlockedBackup = await inspectMyfiPackage(encryptedPackage.base64, { password: 'correct-horse-42' });
+  const unlockedBackup = await inspectMaalFlowPackage(encryptedPackage.base64, { password: 'correct-horse-42' });
   assert.equal(unlockedBackup.payload.kind, 'full_backup');
   assert.equal(unlockedBackup.encrypted, true);
 
@@ -1501,14 +1501,14 @@ const runLinkedStoreAssertions = async () => {
 };
 
 runLinkedStoreAssertions()
-  .then(() => console.log('MYFI financial core: all assertions passed'))
+  .then(() => console.log('MaalFlow financial core: all assertions passed'))
   .catch((error) => {
     console.error(error);
     process.exitCode = 1;
   });
 
 
-// MYFI_SMART_BANK_VOICE_V21_TESTS
+// MAALFLOW_SMART_BANK_VOICE_V21_TESTS
 const iqBankPurchase = analyzeSmartEntry({
   text: 'Transaction details\nTransaction type POS - Purchase\nTransaction date 05/08/2026\nAmount -13,200.000 IQD\nTransaction reference FT2621706165',
   cats: smartCats,
@@ -1620,7 +1620,7 @@ assert.equal(aiFalseButVoiceClear.draft.amount, 500);
 
 
 
-// MYFI_SMART_SEPARATOR_V22_TESTS
+// MAALFLOW_SMART_SEPARATOR_V22_TESTS
 assert.equal(analyzeSmartEntry({
   text: 'TOTAL: 75,000 IQD',
   cats: smartCats,
@@ -1665,7 +1665,7 @@ assert.equal(analyzeSmartEntry({
 
 
 
-// MYFI_SMART_SPOKEN_ARBITRATION_V23_TESTS
+// MAALFLOW_SMART_SPOKEN_ARBITRATION_V23_TESTS
 assert.equal(analyzeSmartEntry({
   text: 'Debited 75,000 IQD at SUPERMARKET',
   cats: smartCats,
