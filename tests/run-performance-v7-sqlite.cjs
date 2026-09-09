@@ -74,10 +74,18 @@ async function run() {
   const { ensurePerformanceTestLedgerV7, readPerformanceLedgerAttemptV7 } = require('../src/dev/performanceTestLedgerV7');
   const {
     discardFinancialWorkspaceStageV7,
+    FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_MIGRATION,
+    FINANCIAL_LEDGER_V13_POSTING_TRANSACTION_INDEX_MIGRATION,
+    FINANCIAL_LEDGER_V7_SCHEMA_SQL,
     getFinancialWorkspaceStateV7,
     proveFinancialLedgerInvariantsV7,
     stageFinancialWorkspaceV7,
   } = require('../src/lib/financialLedgerV7Repository');
+  const {
+    LEDGER_SCHEMA_MIGRATION_JOURNAL_SQL,
+    migrationChecksum,
+    runLedgerSchemaMigrations,
+  } = require('../src/lib/financialLedgerSchemaMigrations');
   const {
     buildFinancialShadowProjectionV7,
     runFinancialOperationalCutoverV7,
@@ -87,6 +95,44 @@ async function run() {
   const { storeColdArchiveYears, exportColdArchives, clearColdArchives } = require('../src/lib/localArchiveRepository');
   const verifyRebuild = process.env.MYFI_TEST_VERIFY_REBUILD !== '0';
   const fixture = buildPerformanceTestWorkspace({}, '200');
+
+  // Reproduce a device that completed V12 before this release. Its recorded
+  // checksum must remain valid, then V13 alone may add the new index. This
+  // catches the exact unsafe mistake of rewriting a historical migration's
+  // toVersion/signature when adding a later migration.
+  const legacyNative = new DatabaseSync(':memory:');
+  const legacyDatabase = {
+    execAsync: async sql => legacyNative.exec(sql),
+    runAsync: async (sql, ...values) => legacyNative.prepare(sql).run(...bind(values)),
+    getFirstAsync: async (sql, ...values) => legacyNative.prepare(sql).get(...bind(values)) || null,
+    getAllAsync: async (sql, ...values) => legacyNative.prepare(sql).all(...bind(values)),
+    withExclusiveTransactionAsync: async task => {
+      legacyNative.exec('BEGIN IMMEDIATE');
+      try { await task(legacyDatabase); legacyNative.exec('COMMIT'); }
+      catch (error) { legacyNative.exec('ROLLBACK'); throw error; }
+    },
+  };
+  legacyNative.exec(FINANCIAL_LEDGER_V7_SCHEMA_SQL);
+  legacyNative.exec(LEDGER_SCHEMA_MIGRATION_JOURNAL_SQL);
+  legacyNative.exec('PRAGMA user_version=12;');
+  const historicalV12 = { ...FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_MIGRATION, toVersion: 12 };
+  legacyNative.prepare(`INSERT INTO schema_migrations
+    (migration_id,from_version,to_version,checksum,started_at,completed_at,status,app_version,attempt_count,last_error)
+    VALUES (?,?,?,?,?,'2026-09-08T00:00:00.000Z','completed','test',1,NULL)`).run(
+    historicalV12.migrationId, historicalV12.fromVersion, historicalV12.toVersion,
+    migrationChecksum(historicalV12), '2026-09-08T00:00:00.000Z',
+  );
+  const legacyUpgrade = await runLedgerSchemaMigrations({
+    database: legacyDatabase,
+    migrations: [FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_MIGRATION, FINANCIAL_LEDGER_V13_POSTING_TRANSACTION_INDEX_MIGRATION],
+    appVersion: 'test',
+  });
+  assert.equal(legacyUpgrade.currentVersion, 13, 'a completed V12 device must upgrade through the appended V13 migration');
+  assert.equal(
+    legacyNative.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_ledger_v7_posting_transaction'").get().name,
+    'idx_ledger_v7_posting_transaction',
+    'the V13 index must be added without rewriting V12 migration history',
+  );
   // This is a correctness comparison, not a Node performance measurement:
   // batch size 1 reproduces the former one-row statements, while 500 exercises
   // the production batching path against the exact same source projection.

@@ -558,10 +558,13 @@ CREATE INDEX IF NOT EXISTS idx_ledger_archive_recovery_rows_v12_session
   ON ledger_archive_recovery_rows_v12(namespace,session_id,ordinal);
 `;
 
-const FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_MIGRATION = {
+export const FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_MIGRATION = {
   migrationId: '0012_archive_recovery_stage_rows',
   fromVersion: 11,
-  toVersion: FINANCIAL_SQLITE_SCHEMA_VERSION,
+  // Keep every committed migration immutable. V13 must be appended below;
+  // changing this historical to-version changes its journal checksum and
+  // correctly makes an existing device fail closed.
+  toVersion: 12,
   signature: [
     FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_SQL,
     'store immutable verified archive row receipts with private staged rows',
@@ -586,7 +589,7 @@ CREATE INDEX IF NOT EXISTS idx_ledger_v7_posting_transaction
   ON ledger_postings_v7(namespace, transaction_id);
 `;
 
-const FINANCIAL_LEDGER_V13_POSTING_TRANSACTION_INDEX_MIGRATION = {
+export const FINANCIAL_LEDGER_V13_POSTING_TRANSACTION_INDEX_MIGRATION = {
   migrationId: '0013_posting_transaction_index',
   fromVersion: 12,
   toVersion: FINANCIAL_SQLITE_SCHEMA_VERSION,
