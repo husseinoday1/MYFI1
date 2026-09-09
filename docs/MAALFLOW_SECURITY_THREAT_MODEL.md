@@ -90,8 +90,9 @@ an attacker with filesystem access. See F-01.
 ### T2 — Malicious backup access (adb / cloud device backup)
 **Control:** `allowBackup=false` in `app.json`, which keeps the ledger out of Android
 auto-backup and `adb backup`.
-**Residual:** verification against the **merged release manifest** is still owed (§105).
-Source config is not proof.
+**Residual:** closed. §105 now audits the built APK in CI (`tools/audit-merged-manifest.cjs`)
+rather than trusting config — and that principle immediately paid for itself: the committed
+`android/` project was still shipping the previous applicationId and launcher label (F-07).
 
 ### T3 — Cloud account compromise
 **Reachable:** everything that account has synced.
@@ -138,11 +139,12 @@ manifest and its payload can both be rewritten. Encryption is what makes A2 tamp
 | ID | Finding | Severity |
 |---|---|---|
 | **F-01** | Credentials are encrypted at rest; the financial ledger is not. The lower-value asset has the stronger protection. Deliberate, but must never be described as "encrypted local database". | High |
-| **F-02** | No `FLAG_SECURE` / screen-capture protection anywhere. Balances and transactions appear in the recent-apps snapshot and are freely screenshottable. | Medium |
+| **F-02** | Was: no `FLAG_SECURE` anywhere, so balances sat in the recent-apps snapshot visible without unlocking the app. **Closed in code** via `src/lib/screenPrivacy.js`, protected by default with an opt-out in Settings. Takes effect only in a native build; unverified on a device. | Closed, unverified |
 | **F-03** | Backup encryption is opt-in. The default path produces a plaintext ledger copy outside the sandbox. | High |
 | **F-04** | OCR/voice: our functions persist nothing, but receipt images and **raw audio** leave the device to OpenAI and Google Gemini. Originally blocking because no smart-capture-specific consent existed — `cfg.accountConsentAccepted` covers account and sync terms, a different thing at a different moment, so a user could photograph a receipt without ever being told where it went. **Client side closed** by the §112 gate below. The Play data-safety declaration remains outstanding and is the owner's to file. | Partly closed |
-| **F-05** | `allowBackup=false` is verified in source only, not in the merged release manifest. | Medium |
+| **F-05** | Was: `allowBackup=false` verified in source only. **Closed** — `tools/audit-merged-manifest.cjs` now audits the built APK in CI for package identity, allowBackup, pinned orientation, unexpected permissions and unreviewed exported components. | Closed, pending first run |
 | **F-06** | Production signing is unproven; a debug-signed build is not Release Ready. | Blocking |
+| **F-07** | The committed `android/` project overrode `app.json` and still shipped the previous brand: `applicationId`, Kotlin package, deep-link scheme and `app_name` (the launcher label). Found only because §105 insists on auditing the artifact rather than the config. **Fixed**, and the drift is now contracted. | Was High |
 
 ---
 

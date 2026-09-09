@@ -1,4 +1,4 @@
-package com.myfi.app
+package com.maalflow.app
 
 import android.app.Application
 import android.content.res.Configuration

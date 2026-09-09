@@ -13,6 +13,7 @@ import { STORAGE, detectSystemLang, getSymbol } from './src/lib/constants';
 import { clearVaultSnapshot } from './src/lib/secureVault';
 import { supabase } from './src/lib/supabase';
 import { authenticate } from './src/lib/biometric';
+import { applyScreenPrivacy } from './src/lib/screenPrivacy';
 import { checkDecisionAlerts } from './src/lib/notifications';
 import { buildNotificationItems, filterDismissedNotifications, NOTIFICATION_DISMISSED_STORAGE_KEY, notificationReadKey, pruneNotificationKeys, sanitizeNotificationReadKeys } from './src/lib/notificationCenter';
 import { applyGlobalFont, fontAssets } from './src/lib/fonts';
@@ -249,6 +250,17 @@ function AppRoot() {
     });
     return () => appStateSub.remove();
   }, [cfg.langMode]);
+
+  // F-02. Re-applied on every foreground, not just at mount: FLAG_SECURE is what blanks
+  // the recent-apps snapshot, and the snapshot is taken as the app leaves the foreground.
+  useEffect(() => {
+    const apply = () => { applyScreenPrivacy(useStore.getState().cfg).catch(() => {}); };
+    apply();
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') apply();
+    });
+    return () => sub.remove();
+  }, [cfg.allowScreenshots]);
 
   useEffect(() => {
     const orientationMode = ['system', 'auto', 'portrait'].includes(cfg.orientationMode)

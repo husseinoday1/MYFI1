@@ -136,6 +136,18 @@ jobs:
           } | tee MaalFlow-normal-apk-evidence.txt
           sha256sum "$APK" > app-release.apk.sha256
 
+      - name: "§105 merged release manifest audit"
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          # The audit reads the manifest out of the built artifact, not app.json or the
+          # committed android/ sources. §105 exists because those can disagree with what
+          # actually ships, and during the MaalFlow rename they did.
+          "$AAPT" dump xmltree "$APK" --file AndroidManifest.xml > merged-manifest.txt
+          node tools/audit-merged-manifest.cjs merged-manifest.txt | tee merged-manifest-audit.txt
+
       - name: Upload normal MaalFlow APK
         uses: actions/upload-artifact@v4
         with:
@@ -144,5 +156,7 @@ jobs:
             android/app/build/outputs/apk/release/app-release.apk
             app-release.apk.sha256
             MaalFlow-normal-apk-evidence.txt
+            merged-manifest.txt
+            merged-manifest-audit.txt
           if-no-files-found: error
           retention-days: 7

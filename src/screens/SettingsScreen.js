@@ -2236,6 +2236,7 @@ function SecurityPage({ th, isAr, T, cfg, setCfg, onToggleBio }) {
       <MenuGroup th={th}>
         <SwitchRow th={th} isAr={isAr} icon="eye-off-outline" title={isAr ? 'إخفاء الأرصدة في الرئيسية' : 'Hide Home balances'} subtitle={isAr ? 'تبقى الأرقام مخفية حتى تضغط إظهار.' : 'Balances stay hidden until you tap Show.'} value={!!cfg.homeBalancesHidden} onValueChange={value => setCfg({ homeBalancesHidden: value })} />
         <SwitchRow th={th} isAr={isAr} icon="notifications-off-outline" title={isAr ? 'إخفاء تفاصيل الإشعارات' : 'Hide notification details'} subtitle={isAr ? 'يظهر تنبيه عام على شاشة القفل من دون مبالغ أو أسماء.' : 'Lock-screen alerts omit amounts and names.'} value={cfg.hideNotificationDetails !== false} onValueChange={value => setCfg({ hideNotificationDetails: value })} />
+        <SwitchRow th={th} isAr={isAr} icon="scan-outline" title={isAr ? 'منع لقطات الشاشة' : 'Block screenshots'} subtitle={isAr ? 'يخفي أرصدتك أيضاً من شاشة التطبيقات الأخيرة. إيقافه يسمح بلقطات الشاشة والتسجيل.' : 'Also hides balances from the recent-apps preview. Turning it off allows screenshots and recording.'} value={cfg.allowScreenshots !== true} onValueChange={value => setCfg({ allowScreenshots: !value })} />
         <SwitchRow th={th} isAr={isAr} icon="finger-print-outline" title={T.appLock} subtitle={T.appLockSub} value={!!cfg.bioLock} onValueChange={onToggleBio} last={!cfg.bioLock} />
         {cfg.bioLock ? (
           <View style={[s.lockOptions, { borderTopColor: th.border }]}>

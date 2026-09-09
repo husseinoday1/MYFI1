@@ -96,6 +96,7 @@ const staticContracts = [
   'p14-sync-resume-contract.test.cjs',
   'dev-diagnostic-payload-privacy.test.cjs',
   'smart-capture-privacy-gate.test.cjs',
+  'screen-privacy-contract.test.cjs',
   'sync-error-classification.test.cjs',
   'automatic-sync-interaction-hold.test.cjs',
   'backup-format-vulnerabilities.test.cjs',
