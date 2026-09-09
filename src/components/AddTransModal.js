@@ -25,6 +25,7 @@ import DateField from './DateField';
 import SmartImageViewerModal from './SmartImageViewerModal';
 import { analyzeSmartEntry, buildSmartSourceMeta, describeSmartSource } from '../lib/smartEntry';
 import { resolveSmartCaptureDraft, smartCaptureReasonMessage } from '../lib/smartCapture';
+import { requestSmartCaptureConsent } from '../lib/smartCaptureConsent';
 import { suggestCategoryFromHistory } from '../lib/localIntelligence';
 import { CATEGORY_FLOWS, categorySupportsFlow, getCategoriesForFlow, getDefaultCategoryId } from '../lib/categories';
 import { rowDirFor, textAlignFor } from '../lib/layout';
@@ -166,7 +167,7 @@ export default function AddTransModal({
   draftData = null, focusedEntry = false,
 }) {
   useAutomaticSyncInteractionHold(visible, 'transaction_editor');
-  const { addTrans, addTransfer, editTrans, deleteTrans, undoLastTransactionDelete, payDebt, saveGoal, payCommitment, debts, goals, commitments, wallets, cats, cfg, trans } = useStore();
+  const { addTrans, addTransfer, setCfg, editTrans, deleteTrans, undoLastTransactionDelete, payDebt, saveGoal, payCommitment, debts, goals, commitments, wallets, cats, cfg, trans } = useStore();
   const th  = TH[cfg.theme] || TH.dark;
   const L   = STR[cfg.lang]  || STR.ar;
   const sym = getSymbol(cfg.currency); // base/reporting currency symbol
@@ -581,6 +582,11 @@ export default function AddTransModal({
   };
 
   const pickReceiptImage = async (source = 'library') => {
+    // §112. The privacy disclosure comes before the OS permission prompt. Asking for the
+    // camera first would let the user grant access without ever being told the photo
+    // leaves the device.
+    const consented = await requestSmartCaptureConsent({ cfg, setCfg, kind: 'image', lang: cfg.lang });
+    if (!consented) return;
     const permission = source === 'camera'
       ? await ImagePicker.requestCameraPermissionsAsync()
       : await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -687,6 +693,11 @@ export default function AddTransModal({
       }
 
       setVoiceError('');
+      // §112. Disclosure before the microphone prompt, for the same reason as the
+      // receipt path: the recording itself is uploaded, not just a transcript.
+      const consented = await requestSmartCaptureConsent({ cfg, setCfg, kind: 'voice', lang: cfg.lang });
+      if (!mountedRef.current || operationId !== recordingOperationRef.current) return;
+      if (!consented) return;
       const permission = await AudioModule.requestRecordingPermissionsAsync();
       if (!mountedRef.current || operationId !== recordingOperationRef.current) return;
       if (!permission.granted) {

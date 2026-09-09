@@ -95,6 +95,7 @@ const staticContracts = [
   'p13-legacy-mirror-retirement.test.cjs',
   'p14-sync-resume-contract.test.cjs',
   'dev-diagnostic-payload-privacy.test.cjs',
+  'smart-capture-privacy-gate.test.cjs',
   'sync-error-classification.test.cjs',
   'automatic-sync-interaction-hold.test.cjs',
   'backup-format-vulnerabilities.test.cjs',

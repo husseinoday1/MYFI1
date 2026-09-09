@@ -261,7 +261,7 @@ export const DEF_CFG = {
   orientationMode: 'system',
   monthNameStyle: 'system',
   numberInputFormat: 'system',
-  displayName: '', username: '', phone: '', avatarUri: '', avatarPath: '', accountConsentAccepted: false,
+  displayName: '', username: '', phone: '', avatarUri: '', avatarPath: '', accountConsentAccepted: false, smartCaptureImageConsent: 0, smartCaptureVoiceConsent: 0,
   country: 'IQ', name: '', avatar: '🌿',
   profileType: 'personal',
   activeScope: 'personal',

@@ -23,6 +23,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../store/useStore';
+import { hasSmartCaptureConsent, revokeSmartCaptureConsent, smartCaptureDisclosure } from '../lib/smartCaptureConsent';
 import { TH } from '../lib/theme';
 import { STR } from '../lib/strings';
 import { COUNTRIES, CURRENCIES } from '../lib/constants';
@@ -1985,6 +1986,45 @@ function DiagnosticRow({ th, isAr, label, value, last = false }) {
 }
 
 function AboutPage({ th, isAr, T, onOpenDiagnostics }) {
+  // §112. Consent that cannot be withdrawn is not consent, so smart capture gets its own
+  // always-visible controls. Deliberately not inside the Legal group below: that group
+  // only renders when the privacy/terms URLs are configured, and these must be reachable
+  // whether or not those links exist.
+  const { cfg, setCfg } = useStore();
+  const lang = isAr ? 'ar' : 'en';
+  const captureRow = kind => {
+    const granted = hasSmartCaptureConsent(cfg, kind);
+    const isVoice = kind === 'voice';
+    return {
+      granted,
+      title: isVoice
+        ? (isAr ? 'التسجيل الصوتي' : 'Voice capture')
+        : (isAr ? 'تصوير الفواتير' : 'Receipt scanning'),
+      subtitle: granted
+        ? (isAr ? 'مسموح — اضغط للسحب' : 'Allowed — tap to withdraw')
+        : (isAr ? 'غير مسموح — لا يغادر شيء هاتفك' : 'Not allowed — nothing leaves your phone'),
+      onPress: () => {
+        const text = smartCaptureDisclosure(kind, lang);
+        if (!granted) { Alert.alert(text.title, text.body); return; }
+        Alert.alert(
+          isAr ? 'سحب الموافقة' : 'Withdraw consent',
+          isAr
+            ? 'لن يُرسل شيء بعد الآن، وسنسألك من جديد إذا استخدمت الميزة لاحقاً.'
+            : 'Nothing further will be sent, and you will be asked again if you use the feature later.',
+          [
+            { text: isAr ? 'إلغاء' : 'Cancel', style: 'cancel' },
+            {
+              text: isAr ? 'اسحب' : 'Withdraw',
+              style: 'destructive',
+              onPress: () => { revokeSmartCaptureConsent({ setCfg, kind }).catch(() => {}); },
+            },
+          ],
+        );
+      },
+    };
+  };
+  const imageRow = captureRow('image');
+  const voiceRow = captureRow('voice');
   const version = process.env.EXPO_PUBLIC_MAALFLOW_VERSION || '1.0.0';
   const privacyUrl = process.env.EXPO_PUBLIC_MAALFLOW_PRIVACY_URL || '';
   const termsUrl = process.env.EXPO_PUBLIC_MAALFLOW_TERMS_URL || '';
@@ -2019,6 +2059,11 @@ function AboutPage({ th, isAr, T, onOpenDiagnostics }) {
         <MenuRow th={th} isAr={isAr} icon="phone-portrait-outline" title={T.localFirstPrinciple} subtitle={T.localFirstPrincipleSub} />
         <MenuRow th={th} isAr={isAr} icon="cloud-outline" title={T.cloudPrinciple} subtitle={T.cloudPrincipleSub} />
         <MenuRow th={th} isAr={isAr} icon="language-outline" title={T.bilingualPrinciple} subtitle={T.bilingualPrincipleSub} last />
+      </MenuGroup>
+      <SectionLabel th={th} isAr={isAr} text={isAr ? 'الالتقاط الذكي والخصوصية' : 'Smart capture & privacy'} />
+      <MenuGroup th={th}>
+        <MenuRow th={th} isAr={isAr} icon="camera-outline" title={imageRow.title} subtitle={imageRow.subtitle} onPress={imageRow.onPress} />
+        <MenuRow th={th} isAr={isAr} icon="mic-outline" title={voiceRow.title} subtitle={voiceRow.subtitle} onPress={voiceRow.onPress} last />
       </MenuGroup>
       {(privacyUrl || termsUrl) ? <><SectionLabel th={th} isAr={isAr} text={T.legal} /><MenuGroup th={th}>{privacyUrl ? <MenuRow th={th} isAr={isAr} icon="document-lock-outline" title={T.privacy} subtitle={isAr ? 'كيف يتعامل MaalFlow مع بياناتك وخصوصيتك.' : 'How MaalFlow handles your data and privacy.'} onPress={() => openExternal(privacyUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last={!termsUrl} /> : null}{termsUrl ? <MenuRow th={th} isAr={isAr} icon="document-text-outline" title={T.termsOfUse} subtitle={isAr ? 'شروط استخدام التطبيق والخدمات المرتبطة.' : 'Terms for using the app and connected services.'} onPress={() => openExternal(termsUrl, T.supportUnavailableTitle, T.supportUnavailableBody)} last /> : null}</MenuGroup></> : null}
       <Text style={[s.aboutFooter, { color: th.faint }]}>{isAr ? 'MaalFlow · إدارة مالية أوضح بدون تعقيد غير ضروري' : 'MaalFlow · Clearer money management without unnecessary complexity'}</Text>

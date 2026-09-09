@@ -140,7 +140,7 @@ manifest and its payload can both be rewritten. Encryption is what makes A2 tamp
 | **F-01** | Credentials are encrypted at rest; the financial ledger is not. The lower-value asset has the stronger protection. Deliberate, but must never be described as "encrypted local database". | High |
 | **F-02** | No `FLAG_SECURE` / screen-capture protection anywhere. Balances and transactions appear in the recent-apps snapshot and are freely screenshottable. | Medium |
 | **F-03** | Backup encryption is opt-in. The default path produces a plaintext ledger copy outside the sandbox. | High |
-| **F-04** | OCR/voice: our functions persist nothing, but receipt images and **raw audio** leave the device to OpenAI and Google Gemini, and **no consent or disclosure specific to smart capture exists**. The only consent in the app (`cfg.accountConsentAccepted`) covers account and sync terms — a different thing, presented at a different moment. A user can photograph a receipt without ever being told it is sent to a third party. | Blocking |
+| **F-04** | OCR/voice: our functions persist nothing, but receipt images and **raw audio** leave the device to OpenAI and Google Gemini. Originally blocking because no smart-capture-specific consent existed — `cfg.accountConsentAccepted` covers account and sync terms, a different thing at a different moment, so a user could photograph a receipt without ever being told where it went. **Client side closed** by the §112 gate below. The Play data-safety declaration remains outstanding and is the owner's to file. | Partly closed |
 | **F-05** | `allowBackup=false` is verified in source only, not in the merged release manifest. | Medium |
 | **F-06** | Production signing is unproven; a debug-signed build is not Release Ready. | Blocking |
 
@@ -162,19 +162,28 @@ reinstall, biometric toggle, key loss) is still owed.
 background delay, and permits device-credential fallback. The unanswered part is the
 recent-app snapshot — F-02.
 
-**§112 — OCR / voice privacy gate.** F-04 is the gate's subject, and it is **blocking for
-release, not merely open**. Requirements:
+**§112 — OCR / voice privacy gate.** Implemented in `src/lib/smartCaptureConsent.js`,
+enforced at both capture entry points in `src/components/AddTransModal.js`, and contracted
+by `tests/smart-capture-privacy-gate.test.cjs`.
 
-1. A disclosure shown before the *first* capture of each kind, naming that the image or
-   audio is sent to a third-party provider for processing.
-2. Consent stored separately from `cfg.accountConsentAccepted` — sync consent is not
-   capture consent.
-3. A Play Store data-safety declaration that matches: photos and audio are transmitted
-   off-device.
-4. A working path to use the app fully without ever enabling smart capture.
+| Requirement | Status |
+|---|---|
+| Disclosure before the *first* capture of each kind, naming the provider | Done — and it runs **before** the OS permission prompt, so nobody grants camera or microphone access before learning where the data goes |
+| Consent stored separately from `cfg.accountConsentAccepted` | Done — `smartCaptureImageConsent` and `smartCaptureVoiceConsent`, independent of each other and of sync consent |
+| Withdrawable | Done — Settings › Smart capture & privacy, always visible (not inside the Legal group, which only renders when the privacy/terms URLs are configured) |
+| App fully usable without smart capture | Already true; the disclosure states it, and declining returns cleanly to manual entry |
+| Play data-safety declaration | **Outstanding — owner's action.** Photos and audio are transmitted off-device and must be declared |
 
-Google Play's data-safety form requires this disclosure to be accurate; shipping the
-current behaviour undeclared is a policy violation as well as a privacy one.
+Consent is stored as the disclosure *version*, not a boolean: changing the providers or
+the scope of what leaves the device means bumping `SMART_CAPTURE_CONSENT_VERSION`, which
+re-asks everyone rather than inheriting consent given to a different statement.
+
+A decline is not persisted as a permanent opt-out — the next attempt asks again. That is
+deliberate: a user who taps the camera by accident and backs out has not opted out of the
+feature forever.
+
+Google Play's data-safety form must match this behaviour. Shipping it undeclared would be
+a policy violation as well as a privacy one, which is why that row stays open.
 
 ---
 
