@@ -458,8 +458,7 @@ export const hasCurrencySensitiveFinancialData = (snapshot = {}) => {
       .some(wallet => Number(wallet?.openingBalance || 0) !== 0);
 };
 
-export const snapshotFromState = (state = {}, overrides = {}) => {
-  const clean = dedupeWorkspaceData(state);
+const snapshotFromCanonicalStateValue = (clean = {}, overrides = {}) => {
   return {
     v: 7,
     data: {
@@ -474,12 +473,29 @@ export const snapshotFromState = (state = {}, overrides = {}) => {
     cats: clean.cats || DEF_CATS,
     cfg: clean.cfg || DEF_CFG,
     notif: clean.notif || DEF_NOTIF,
-    updatedAt: overrides.updatedAt || clean.localUpdatedAt || state.localUpdatedAt || new Date().toISOString(),
-    lastSyncedAt: overrides.lastSyncedAt ?? clean.lastSyncedAt ?? state.lastSyncedAt ?? null,
-    cloudRevision: Number(overrides.cloudRevision ?? clean.cloudRevision ?? state.cloudRevision ?? 0),
-    dirty: overrides.dirty ?? clean.dirty ?? state.dirty ?? false,
+    updatedAt: overrides.updatedAt || clean.localUpdatedAt || new Date().toISOString(),
+    lastSyncedAt: overrides.lastSyncedAt ?? clean.lastSyncedAt ?? null,
+    cloudRevision: Number(overrides.cloudRevision ?? clean.cloudRevision ?? 0),
+    dirty: overrides.dirty ?? clean.dirty ?? false,
   };
 };
+
+export const snapshotFromState = (state = {}, overrides = {}) => (
+  snapshotFromCanonicalStateValue(dedupeWorkspaceData(state), overrides)
+);
+
+// The performance lab is generated or hydrated through the canonical V7
+// projection before it reaches saveLocal. Re-running dedupeWorkspaceData over
+// 25K-50K rows on every lab-only UI mutation made the supposedly deferred
+// overlay write spend seconds synchronously before it was even scheduled.
+// Keep the isolation check inside the helper as well as at its only call site:
+// if a future caller passes a real/legacy state, it falls back to the ordinary
+// normalized snapshot instead of silently bypassing a financial-data guard.
+export const snapshotFromPerformanceState = (state = {}, overrides = {}) => (
+  state?.cfg?.demoMode === true && state?.cfg?.performanceTestMode === true
+    ? snapshotFromCanonicalStateValue(state, overrides)
+    : snapshotFromState(state, overrides)
+);
 
 export const stateFromSnapshot = (snapshot = {}, fallbackCfg = DEF_CFG) => {
   const data = snapshot.data || snapshot;

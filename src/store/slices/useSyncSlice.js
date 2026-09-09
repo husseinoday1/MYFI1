@@ -1,5 +1,5 @@
-// MYFI_PERFORMANCE_DATA_RUNTIME_V5_1_2
-// MYFI_PERFORMANCE_DATA_PERSISTENCE_V5_1_1
+// MAALFLOW_PERFORMANCE_DATA_RUNTIME_V5_1_2
+// MAALFLOW_PERFORMANCE_DATA_PERSISTENCE_V5_1_1
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SQLiteStorage from 'expo-sqlite/kv-store';
@@ -95,6 +95,7 @@ import {
   dedupeWorkspaceData,
   financialDataCount,
   hasCurrencySensitiveFinancialData,
+  snapshotFromPerformanceState,
   snapshotFromState,
   stateFromSnapshot,
   uid,
@@ -181,9 +182,9 @@ const armTransientCloudRetry = (get, syncUserId, error) => {
 const FRESH_TEST_MODE = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
 const FRESH_TEST_NAMESPACE = 'fresh-test-new-user';
 
-const RESET_MARKER_PREFIX = 'MYFI_INTENTIONAL_RESET_V1';
-const ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY = 'MYFI_ACTIVE_LOCAL_LEDGER_NAMESPACE_V1';
-const ACTIVE_LOCAL_LEDGER_CONTEXT_KEY = 'MYFI_ACTIVE_LOCAL_LEDGER_CONTEXT_V1';
+const RESET_MARKER_PREFIX = 'MAALFLOW_INTENTIONAL_RESET_V1';
+const ACTIVE_LOCAL_LEDGER_NAMESPACE_KEY = 'MAALFLOW_ACTIVE_LOCAL_LEDGER_NAMESPACE_V1';
+const ACTIVE_LOCAL_LEDGER_CONTEXT_KEY = 'MAALFLOW_ACTIVE_LOCAL_LEDGER_CONTEXT_V1';
 const ACTIVE_LOCAL_LEDGER_CONTEXT_VERSION = 2;
 const R04_OPERATIONAL_CUTOVER_ENABLED = true;
 
@@ -610,7 +611,7 @@ const findLegacySnapshot = async () => {
   }
 
   const keys = typeof AsyncStorage.getAllKeys === 'function' ? await AsyncStorage.getAllKeys() : [];
-  const candidateKeys = keys.filter(key => /MYFI|TERRA|FINANCE|MONEY|BUDGET|DATA|BACKUP|STORE/i.test(String(key || '')));
+  const candidateKeys = keys.filter(key => /MaalFlow|TERRA|FINANCE|MONEY|BUDGET|DATA|BACKUP|STORE/i.test(String(key || '')));
   if (!candidateKeys.length) return null;
   const rows = await AsyncStorage.multiGet(candidateKeys);
   for (const [key, raw] of rows) {
@@ -1566,7 +1567,7 @@ export const createSyncSlice = (set, get) => ({
       if (reported) return;
       reported = true;
       marks.totalMs = Date.now() - clock;
-      console.log('[MYFI:MAINTENANCE_TIMING]', JSON.stringify(marks));
+      console.log('[MAALFLOW:MAINTENANCE_TIMING]', JSON.stringify(marks));
     };
 
     try {
@@ -2635,7 +2636,14 @@ export const createSyncSlice = (set, get) => ({
       // Performance fixtures are isolated, deterministic test data. Their UI
       // mutations should be immediate; coalesce the expensive full fixture
       // persistence instead of deduping and rewriting 5k-100k rows per tap.
-      const demoSnapshot = snapshotFromState({ ...current, localUpdatedAt: updatedAt, dirty: nextDirty }, { updatedAt, dirty: nextDirty });
+      // The performance workspace is generated or hydrated through canonical
+      // V7 state. Preserve those array references for the delta/overlay writer;
+      // the general snapshotFromState path would normalize all 25K-50K rows
+      // synchronously before the deferred write can begin.
+      const demoSnapshot = snapshotFromPerformanceState(
+        { ...current, localUpdatedAt: updatedAt, dirty: nextDirty },
+        { updatedAt, dirty: nextDirty },
+      );
       schedulePerformanceSnapshotWrite(demoSnapshot, {
         namespace: current.workspaceNamespace || GUEST_NAMESPACE,
         tier: String(current.cfg?.performanceTestTier || ''),

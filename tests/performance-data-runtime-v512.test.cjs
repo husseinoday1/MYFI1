@@ -47,6 +47,13 @@ must(storage.includes('transactionCount'), 'performance storage does not validat
 must(sync.includes('readPerformanceSnapshot(namespace, {'), 'loadLocal does not use chunked performance restore');
 must(sync.includes('newerThan: resetMarker?.resetAt || null'), 'chunked restore does not distinguish a current lab from a stale pre-reset snapshot');
 must(sync.includes('schedulePerformanceSnapshotWrite(demoSnapshot'), 'saveLocal does not use coalesced chunked performance persistence');
+const demoSaveStart = sync.indexOf('if (current.cfg.demoMode) {');
+const demoSaveEnd = sync.indexOf('const next = { ...current', demoSaveStart);
+const demoSaveBranch = sync.slice(demoSaveStart, demoSaveEnd);
+must(demoSaveStart >= 0 && demoSaveEnd > demoSaveStart, 'performance save branch is not structurally isolated');
+must(demoSaveBranch.includes('snapshotFromPerformanceState('), 'performance save still normalizes the full fixture before scheduling its overlay');
+must(!demoSaveBranch.includes('snapshotFromState('), 'performance save regressed to the full normalization path');
+must((sync.match(/snapshotFromPerformanceState\(/g) || []).length === 1, 'performance snapshot fast path escaped the isolated performance save branch');
 must(storage.includes('WRITE_BATCH_SIZE = 1'), 'large fixture writes are not yielded after each bounded chunk');
 must(storage.includes('writePerformanceOverlay'), 'single additions still rewrite the full performance fixture');
 must(storage.includes('addedTransactions'), 'performance overlay does not preserve newly added rows');
@@ -117,4 +124,4 @@ must(allRows.length === 200, 'smallest tier does not contain exactly 200 transac
 must(monthSpan >= 13, `smallest tier only spans ${monthSpan} months`);
 must(!allRows.some(item => String(item.id).startsWith('base_')), 'built-in base rows leaked into performance history');
 
-console.log('MYFI PERFORMANCE DATA RUNTIME V5.1.2: PASSED');
+console.log('MaalFlow PERFORMANCE DATA RUNTIME V5.1.2: PASSED');
