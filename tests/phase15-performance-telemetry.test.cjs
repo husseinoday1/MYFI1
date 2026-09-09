@@ -262,12 +262,35 @@ console.log('PASS: phase15-performance-telemetry');
 
 const diagnostics = read('src/screens/DiagnosticsScreen.js');
 
-for (const entry of ['readPerformanceTelemetryV1', 'evaluateSloV1', 'resetPerformanceTelemetryV1']) {
+for (const entry of ['readPerformanceTelemetryV1', 'evaluateSloV1']) {
   assert(
     diagnostics.includes(`${entry}(`),
     `${entry} must actually be CALLED from Diagnostics, not just defined`,
   );
 }
+
+// CHANGED 2026-09-09. This used to require Diagnostics to call
+// resetPerformanceTelemetryV1 directly. It no longer does, deliberately: calling
+// the three instrument resets from the screen is exactly what left one of them
+// (and the persisted cold-start ring) uncleared, which invalidated the 200-tier
+// device run. Clearing is now one aggregate call.
+//
+// The guarantee this assertion protects -- the reset is reachable and this
+// instrument is included -- is unchanged and now checked in two places instead
+// of one: the button reaches the aggregate, and the aggregate reaches this
+// reset. tests/phase15-instrument-reachability.test.cjs derives that second half
+// from the source rather than listing it, so a future instrument cannot be
+// forgotten.
+const instruments = read('src/lib/performanceInstruments.js');
+assert(
+  diagnostics.includes('resetAllPerformanceInstrumentsV1()'),
+  'the reset button must reach the aggregate reset',
+);
+assert(
+  /attempt\(\s*'[A-Za-z0-9_]+'\s*,\s*resetPerformanceTelemetryV1\s*\)/.test(instruments),
+  'the aggregate must actually invoke this reset -- the import line alone is not '
+  + 'wiring, and a mutation proved that on 2026-09-09',
+);
 
 // Imported, not shadowed by a local of the same name.
 assert(
@@ -292,7 +315,9 @@ assert(
 );
 
 // The reset must be attached to a pressable, not merely called somewhere.
-const resetIndex = diagnostics.indexOf('resetPerformanceTelemetryV1()');
+// Anchored on the aggregate for the same reason as above: the screen no longer
+// calls this instrument's reset directly, and must not.
+const resetIndex = diagnostics.indexOf('resetAllPerformanceInstrumentsV1()');
 assert(resetIndex > 0, 'reset must be called');
 const aroundReset = diagnostics.slice(Math.max(0, resetIndex - 700), resetIndex);
 assert(

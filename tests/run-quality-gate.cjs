@@ -55,6 +55,7 @@ const staticContracts = [
   'phase15-history-read-path-telemetry.test.cjs',
   'phase15-performance-telemetry.test.cjs',
   'phase15-add-operation-step-timing.test.cjs',
+  'phase15-instrument-reachability.test.cjs',
   'history-sql-year-filter.test.cjs',
   'phase15-sync-honesty-v2stuck.test.cjs',
   'goal-release-delete-notice.test.cjs',

@@ -31,9 +31,9 @@ import {
 } from '../lib/performanceTelemetry';
 import {
   readAddOperationTimings,
-  resetAddOperationTimings,
   summariseAddOperationTimings,
 } from '../lib/addOperationTiming';
+import { resetAllPerformanceInstrumentsV1 } from '../lib/performanceInstruments';
 import IdentityAdoptionReview from '../components/IdentityAdoptionReview';
 import { conflictRecoveryGatesV1 } from '../dev/p12ConflictRecoveryGates';
 import {
@@ -549,12 +549,19 @@ export default function DiagnosticsScreen() {
               icon="refresh-outline"
               label={isAr ? 'تصفير عيّنات الأداء' : 'Reset performance samples'}
               onPress={async () => {
-                resetPerformanceTelemetryV1();
-                resetAddOperationTimings();
+                // One call that clears every instrument, memory and disk. Calling
+                // the individual resets here is what left the persisted
+                // cold-start ring and the History counters behind and
+                // invalidated the 200-tier run.
+                const outcome = await resetAllPerformanceInstrumentsV1();
                 await refresh();
-                Alert.alert('', isAr
-                  ? 'صُفِّرت العيّنات. قِس شريحة واحدة الآن ثم اقرأ الأرقام قبل الانتقال للتالية.'
-                  : 'Samples cleared. Measure one tier, read the numbers, then move to the next.');
+                Alert.alert('', outcome.ok
+                  ? (isAr
+                    ? 'صُفِّرت كل العيّنات. قِس شريحة واحدة الآن ثم اقرأ الأرقام قبل الانتقال للتالية.'
+                    : 'All samples cleared. Measure one tier, read the numbers, then move to the next.')
+                  : (isAr
+                    ? `لم يُصفَّر كل شيء: ${outcome.failed.join(', ')}. لا تعتمد على أرقام هذه الشريحة.`
+                    : `Not everything cleared: ${outcome.failed.join(', ')}. Do not trust this tier's numbers.`));
               }}
             />
           </Section>

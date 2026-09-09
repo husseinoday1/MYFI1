@@ -135,12 +135,16 @@ export const createTransactionSlice = (set, get) => ({
           },
         }] : [];
         v7Commit = tx.flowType === FLOW_TYPES.EXPENSE && !recurringEntityChanges.length
-          ? await commitExpenseToFinancialLedgerV7({ ...commitArgs, wallet: selectedWallet })
+          // Pass the local recorder, not the caller's optional listener. The
+          // recorder owns the device evidence; the listener is only an extra
+          // observer forwarded by the local recorder. Passing the raw optional listener
+          // made ordinary expenses record none of the V7 commit steps.
+          ? await commitExpenseToFinancialLedgerV7({ ...commitArgs, wallet: selectedWallet, onDiagnosticStep: step })
           : await commitFinancialTransactionV7({
               ...commitArgs,
               wallets: [selectedWallet].filter(Boolean),
               entityChanges: recurringEntityChanges,
-              onDiagnosticStep,
+              onDiagnosticStep: step,
             });
         step('ledger_commit');
         if (v7Commit.supported && !v7Commit.ok) return false;

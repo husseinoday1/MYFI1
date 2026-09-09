@@ -4376,6 +4376,8 @@ export const commitFinancialLedgerV7Command = async (
   });
 };
 
+// Forwards every option, onDiagnosticStep included -- kept as a spread rather
+// than a named list so a new option cannot be silently dropped here.
 export const commitExpenseLedgerV7Command = (command, options = {}) => commitFinancialLedgerV7Command(command, options);
 
 export const commitFinancialTransactionV7 = async ({
@@ -4771,10 +4773,11 @@ export const archiveFinancialTransactionsV7 = async ({
 
 export const commitExpenseToFinancialLedgerV7 = async ({
   namespace = 'guest', transaction, wallet, baseCurrency = 'IQD', database = null,
+  onDiagnosticStep = null,
 } = {}) => {
   if (!database && !financialLedgerV7Supported()) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
   const command = buildExpenseLedgerCommand({ namespace, transaction, wallet, baseCurrency });
-  return commitFinancialLedgerV7Command(command, { database });
+  return commitFinancialLedgerV7Command(command, { database, onDiagnosticStep });
 };
 
 export const commitEntityChangesV7 = async ({ namespace = 'guest', changes = [], database = null, now = new Date().toISOString() } = {}) => {

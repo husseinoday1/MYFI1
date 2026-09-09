@@ -104,13 +104,22 @@ for (const [label, source] of [['repository', repository], ['store', store]]) {
 // --- the hook is threaded, or the SQL steps never arrive ---------------------
 
 assert(
-  /onDiagnosticStep,\n\s*\}\);/.test(store) || store.includes('onDiagnosticStep,'),
-  'addTrans must pass its hook into the ledger commit, or layer B stays invisible',
+  /commitExpenseToFinancialLedgerV7\([^)]*onDiagnosticStep:\s*step/.test(store),
+  'the ordinary expense path must pass its local recorder into the ledger commit, not the optional listener',
 );
 assert(
-  repository.includes('return commitFinancialLedgerV7Command(command, { database, onDiagnosticStep });'),
-  'commitFinancialTransactionV7 must forward the hook to the command',
+  /commitFinancialTransactionV7\(\{[\s\S]*?onDiagnosticStep:\s*step,/.test(store),
+  'the non-expense path must pass its local recorder into the ledger commit too',
 );
+for (const wrapper of ['commitFinancialTransactionV7', 'commitExpenseToFinancialLedgerV7']) {
+  const start = repository.indexOf(`export const ${wrapper} = async ({`);
+  const body = repository.slice(start, repository.indexOf('\n};', start));
+  assert(start > 0, `${wrapper} must exist`);
+  assert(
+    body.includes('return commitFinancialLedgerV7Command(command, { database, onDiagnosticStep });'),
+    `${wrapper} must forward the local recorder hook to the command`,
+  );
+}
 
 // --- executable proof: a throwing listener cannot break the commit -----------
 
@@ -226,21 +235,26 @@ assert(
 // numbers are collected and never seen, or never isolated between tiers.
 assert(diagnostics.includes('summariseAddOperationTimings()'), 'the summary must reach the evidence snapshot');
 assert(diagnostics.includes('readAddOperationTimings()'), 'the full per-run table must reach the evidence snapshot');
+// CHANGED 2026-09-09. This used to require Diagnostics to call
+// resetAddOperationTimings directly, and to check the two reset calls sat close
+// together so one press cleared both. That proximity check was a proxy for
+// "nothing is missed", and it was too weak: it passed while the History
+// instrument and the persisted cold-start ring were never cleared at all, which
+// invalidated the 200-tier device run.
+//
+// One aggregate call replaces the proxy. The requirement is the same and
+// stronger: every instrument reset that exists must be registered, derived from
+// the source in tests/phase15-instrument-reachability.test.cjs.
+const instrumentsModule = read('src/lib/performanceInstruments.js');
 assert(
-  diagnostics.includes('resetAddOperationTimings()'),
-  'the reset button must clear add timings too, or tiers cannot be isolated',
+  diagnostics.includes('resetAllPerformanceInstrumentsV1()'),
+  'the reset button must reach the aggregate reset',
 );
-{
-  // The reset of both instruments must be the same press, not two buttons the
-  // owner has to remember to use together.
-  const resetIndex = diagnostics.indexOf('resetPerformanceTelemetryV1()');
-  const addResetIndex = diagnostics.indexOf('resetAddOperationTimings()');
-  assert(resetIndex > 0 && addResetIndex > 0);
-  assert(
-    Math.abs(addResetIndex - resetIndex) < 200,
-    'both instruments must be cleared by the same press',
-  );
-}
+assert(
+  /attempt\(\s*'[A-Za-z0-9_]+'\s*,\s*resetAddOperationTimings\s*\)/.test(instrumentsModule),
+  'the aggregate must actually invoke this reset, or tiers cannot be isolated -- '
+  + 'matching the import line alone let a mutation through on 2026-09-09',
+);
 
 // The full per-run table must be carried, not only the summary: the spec
 // requires reporting the step table, never one blended number.
