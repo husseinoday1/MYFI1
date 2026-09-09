@@ -77,8 +77,10 @@ async function run() {
     FINANCIAL_LEDGER_V12_ARCHIVE_RECOVERY_STAGE_MIGRATION,
     FINANCIAL_LEDGER_V13_POSTING_TRANSACTION_INDEX_MIGRATION,
     FINANCIAL_LEDGER_V7_SCHEMA_SQL,
+    commitFinancialTransactionV7,
     getFinancialWorkspaceStateV7,
     proveFinancialLedgerInvariantsV7,
+    readFinancialWorkspaceV7,
     stageFinancialWorkspaceV7,
   } = require('../src/lib/financialLedgerV7Repository');
   const {
@@ -423,6 +425,45 @@ async function run() {
   assert.equal(isolated.cutover, true);
   assert.equal(readPerformanceLedgerAttemptV7().phase, 'complete');
   assert.equal((await getFinancialWorkspaceStateV7({ namespace: 'guest::performance-test' })).source_mode, 'sqlite');
+
+  // The UI cache may be smaller than the active V7 ledger, but reuse health
+  // must keep proving the full active count.  A normal lab add updates that
+  // count in the same SQLite transaction; otherwise a crash between the
+  // financial commit and a deferred snapshot could incorrectly request a
+  // rebuild from the bounded cache.
+  const boundedCache = await readFinancialWorkspaceV7({
+    namespace: 'guest::performance-test', includeArchived: false, transactionLimit: 1,
+  });
+  assert.equal(boundedCache.trans.length, 1, 'test requires a genuinely bounded UI cache');
+  const boundedLabState = {
+    ...workspace,
+    trans: boundedCache.trans,
+    cfg: { ...(boundedCache.workspace.cfg || {}), ...workspace.cfg },
+    notif: boundedCache.workspace.notif,
+  };
+  const boundedReuseBeforeAdd = await ensurePerformanceTestLedgerV7({
+    workspaceNamespace: 'guest', workspace: boundedLabState, reuseOnly: true,
+  });
+  assert.equal(boundedReuseBeforeAdd.ok, true, JSON.stringify(boundedReuseBeforeAdd));
+  const addedFixtureRow = {
+    ...workspace.trans[0],
+    id: `${workspace.trans[0].id}_bounded_cache_add`,
+    idempotencyKey: `performance-bounded-cache-add:${workspace.trans[0].id}`,
+    ts: Number(workspace.trans[0].ts || Date.now()) + 1,
+  };
+  const addResult = await commitFinancialTransactionV7({
+    namespace: 'guest::performance-test', transaction: addedFixtureRow,
+    wallets: workspace.wallets, baseCurrency: workspace.cfg.currency,
+  });
+  assert.equal(addResult.ok, true, JSON.stringify(addResult));
+  const stateAfterAdd = await getFinancialWorkspaceStateV7({ namespace: 'guest::performance-test' });
+  const stateCountAfterAdd = JSON.parse(stateAfterAdd.payload_json).cfg.performanceTestActiveTransactions;
+  assert.equal(stateCountAfterAdd, Number(workspace.cfg.performanceTestActiveTransactions) + 1,
+    'the active-count receipt must commit with the lab transaction');
+  const boundedReuseAfterAdd = await ensurePerformanceTestLedgerV7({
+    workspaceNamespace: 'guest', workspace: boundedLabState, reuseOnly: true,
+  });
+  assert.equal(boundedReuseAfterAdd.ok, true, JSON.stringify(boundedReuseAfterAdd));
 
   // A real FK break inside the namespace being proved must still stop the
   // operation. This is the mutation boundary the lab scope is allowed to use.

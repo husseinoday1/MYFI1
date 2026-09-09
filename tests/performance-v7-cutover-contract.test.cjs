@@ -62,7 +62,12 @@ must(demoBranch.includes("markStartupStage('performance:ledgerEnsure')"), 'perfo
 must(demoBranch.includes("markStartupStage('performance:v7Read')"), 'performance startup does not time V7 reading');
 must(demoBranch.includes("markStartupStage('performance:stateFromFinancialV7')"), 'performance startup does not time V7 state hydration');
 must(demoBranch.indexOf('reuseOnly: true') < demoBranch.indexOf('exportColdArchives('), 'performance startup hydrates cold archives before its non-mutating V7 reuse proof');
-must(demoBranch.includes('transactionLimit: null'), 'performance startup must retain the complete V7 read after same-count edits');
+must(demoBranch.includes('transactionLimit: 2000'), 'performance startup must retain the same bounded V7 UI cache as production');
+must(!demoBranch.includes('transactionLimit: null'), 'performance startup must not hydrate every V7 row into Zustand');
+must(data.includes('performance_v7_cache_read_failed'), 'enterDemoMode does not fail closed when its bounded V7 cache cannot be read');
+must(data.includes('transactionLimit: 2000'), 'enterDemoMode does not replace the full staging fixture with a bounded V7 cache');
+must(helper.includes('performanceTestActiveTransactions'), 'performance reuse health has no source-of-truth active-count receipt');
+must(ledger.includes('refreshPerformanceActiveCountInTransactionV13'), 'lab mutations do not update the V7 active-count receipt atomically');
 
 must(ledger.includes('isPerformanceTestNamespaceV13'), 'performance namespace transport guard is missing');
 must(ledger.includes('if (isPerformanceTestNamespaceV13(namespace)) return null;'), 'V3 outbox writes are not blocked for performance data');

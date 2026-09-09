@@ -29,6 +29,7 @@ import {
   clearLocalFinancialDataForCloudRecoveryV8,
   getFinancialWorkspaceStateV7,
   inspectLocalFinancialResetSafetyV8,
+  readFinancialWorkspaceV7,
 } from '../../lib/financialLedgerV7Repository';
 import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
 import { createCanonicalBackupV11 } from '../../lib/financialBackupV11';
@@ -174,8 +175,43 @@ export const createDataSlice = (set, get) => ({
       const details = (performanceLedger.issueCodes || []).join(', ');
       throw new Error(`${performanceLedger.reason || 'performance_v7_cutover_failed'}${details ? `: ${details}` : ''}`);
     }
+    // Match a real post-cutover workspace: SQLite retains the complete lab,
+    // while Zustand receives only its bounded newest-first query cache.  The
+    // original full fixture was used for the verified cutover above; keeping
+    // it mounted in every screen afterwards makes a lab-only add re-render
+    // tens of thousands of rows that production never keeps in memory.
+    let cachedDemoState = demoState;
+    if (performanceLedger.supported) {
+      const cachedWorkspace = await readFinancialWorkspaceV7({
+        namespace: getLedgerNamespace(current.workspaceNamespace || GUEST_NAMESPACE, demoState.cfg),
+        includeArchived: false,
+        transactionLimit: 2000,
+      });
+      if (!cachedWorkspace) throw new Error('performance_v7_cache_read_failed');
+      cachedDemoState = {
+        ...demoState,
+        trans: cachedWorkspace.trans,
+        // V7 stores the syncable workspace configuration.  The lab flags are
+        // deliberately local-only, so retain them from demoState rather than
+        // allowing the cache read to make the isolated namespace look real.
+        cfg: {
+          ...demoState.cfg,
+          ...(cachedWorkspace.workspace?.cfg || {}),
+          // These flags intentionally never come from a syncable workspace
+          // payload. Reassert them after the V7 source cfg, while preserving
+          // its atomically updated performanceTestActiveTransactions receipt.
+          demoMode: true,
+          performanceTestMode: true,
+          performanceTestTier: demoState.cfg.performanceTestTier,
+          performanceTestTransactions: demoState.cfg.performanceTestTransactions,
+          performanceTestMonths: demoState.cfg.performanceTestMonths,
+          performanceTestModeKind: demoState.cfg.performanceTestModeKind,
+        },
+        notif: cachedWorkspace.workspace?.notif || demoState.notif,
+      };
+    }
     set({
-      ...demoState,
+      ...cachedDemoState,
       ledgerReady: activeLedgerSupported(),
       ledgerError: null,
       financialLedgerV7Ready: performanceLedger.supported === true,

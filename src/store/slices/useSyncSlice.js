@@ -2406,7 +2406,10 @@ export const createSyncSlice = (set, get) => ({
             const v7Workspace = await readFinancialWorkspaceV7({
               namespace: getLedgerNamespace(namespace, loadedDemo.cfg),
               includeArchived: false,
-              transactionLimit: null,
+              // The performance lab proves the V7 ledger at scale; it must not
+              // retain every proved row in Zustand afterwards.  Production
+              // cutover uses this same 2K UI-cache boundary.
+              transactionLimit: 2000,
             });
             markStartupStage('performance:v7Read');
             if (!v7Workspace) throw new Error('performance_v7_read_failed');

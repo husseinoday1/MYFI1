@@ -48,6 +48,24 @@ const stateTier = state => {
   return String(payload?.cfg?.performanceTestTier || '');
 };
 
+// A bounded lab cache must never become the authority for the total active
+// count.  During normal reuse the V7 workspace state carries the count updated
+// in the same SQLite transaction as every lab financial mutation.  The source
+// workspace fallback is only for the first cutover proof, before that state
+// exists.  `typeof` matters: Number(null) is 0 in JavaScript.
+const expectedActiveCount = ({ workspace = {}, workspaceState = null } = {}) => {
+  const statePayload = parseJson(workspaceState?.payload_json, null);
+  const sourceValue = statePayload?.cfg?.performanceTestActiveTransactions;
+  if (typeof sourceValue === 'number' && Number.isSafeInteger(sourceValue) && sourceValue >= 0) {
+    return sourceValue;
+  }
+  const cacheValue = workspace?.cfg?.performanceTestActiveTransactions;
+  if (typeof cacheValue === 'number' && Number.isSafeInteger(cacheValue) && cacheValue >= 0) {
+    return cacheValue;
+  }
+  return Array.isArray(workspace?.trans) ? workspace.trans.length : null;
+};
+
 const failure = (result, fallbackReason) => ({
   ...(result || {}),
   supported: result?.supported !== false,
@@ -77,7 +95,7 @@ const reusablePerformanceTestLedgerV7 = async ({
   const health = await getLedgerDataHealth({
     namespace,
     walletIds: Array.isArray(workspace?.wallets) ? workspace.wallets.map(item => item.id) : [],
-    expectedActiveCount: Array.isArray(workspace?.trans) ? workspace.trans.length : null,
+    expectedActiveCount: expectedActiveCount({ workspace, workspaceState: currentState }),
     onDiagnosticStep,
   });
   if (!health?.ok) {
@@ -193,7 +211,7 @@ export const ensurePerformanceTestLedgerV7 = async ({
   const health = await getLedgerDataHealth({
     namespace,
     walletIds: Array.isArray(workspace?.wallets) ? workspace.wallets.map(item => item.id) : [],
-    expectedActiveCount: Array.isArray(workspace?.trans) ? workspace.trans.length : null,
+    expectedActiveCount: expectedActiveCount({ workspace }),
   });
   markRebuildStep('post_cutover_health');
   if (!health?.ok) return report(failure({ ...cutover, health }, 'financial_v7_cutover_health_failed'), 'post_cutover_health');

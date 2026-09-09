@@ -4027,6 +4027,56 @@ const advanceActiveFinancialGenerationInTransactionV13 = async (database, namesp
   return advanceLiveGenerationForMutationInTransactionV13({ database, namespace });
 };
 
+// The performance lab intentionally keeps only a bounded UI cache, but its
+// V7 health proof must still know the exact active-row count after a lab add,
+// edit, void, or archive.  Store that count with the mutation itself: writing
+// it later in AsyncStorage would allow a crash to leave a newer ledger paired
+// with an older expected count and invite an unsafe rebuild from a partial UI
+// cache.  This is private lab metadata only; real namespaces never enter it.
+const refreshPerformanceActiveCountInTransactionV13 = async (database, namespace) => {
+  if (!isPerformanceTestNamespaceV13(namespace)) return null;
+  const state = await database.getFirstAsync(
+    `SELECT payload_json FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1`, namespace,
+  );
+  const workspace = await database.getFirstAsync(
+    `SELECT payload_json,revision FROM ledger_entities_v7
+      WHERE namespace=? AND entity_type='workspace' AND id='workspace' AND deleted_at IS NULL LIMIT 1`,
+    namespace,
+  );
+  const statePayload = parseJson(state?.payload_json, null);
+  const workspacePayload = parseJson(workspace?.payload_json, null);
+  if (statePayload?.cfg?.demoMode !== true || statePayload?.cfg?.performanceTestMode !== true
+      || !workspacePayload || typeof workspacePayload !== 'object') {
+    throw new Error('performance_workspace_count_metadata_invalid');
+  }
+  const countRow = await database.getFirstAsync(
+    `SELECT COUNT(*) AS n FROM ledger_financial_transactions_v7
+      WHERE namespace=? AND deleted_at IS NULL AND archived_at IS NULL
+        AND COALESCE(json_extract(payload_json,'$.hiddenFromHistory'),0)<>1`, namespace,
+  );
+  const activeCount = Number(countRow?.n);
+  if (!Number.isSafeInteger(activeCount) || activeCount < 0) {
+    throw new Error('performance_workspace_count_unreadable');
+  }
+  const now = new Date().toISOString();
+  const withCount = payload => ({
+    ...payload,
+    cfg: { ...payload.cfg, performanceTestActiveTransactions: activeCount },
+  });
+  const nextState = withCount(statePayload);
+  const nextWorkspace = withCount(workspacePayload);
+  await database.runAsync(
+    `UPDATE ledger_workspace_state_v7 SET payload_json=?,updated_at=? WHERE namespace=?`,
+    safeJson(nextState), now, namespace,
+  );
+  await database.runAsync(
+    `UPDATE ledger_entities_v7 SET payload_json=?,revision=?,updated_at=?
+      WHERE namespace=? AND entity_type='workspace' AND id='workspace' AND deleted_at IS NULL`,
+    safeJson(nextWorkspace), Math.max(1, Number(workspace.revision || 0) + 1), now, namespace,
+  );
+  return activeCount;
+};
+
 const createShadowCommandIdV2 = async db => {
   const row = await db.getFirstAsync(`SELECT 'cmd2-' || lower(hex(randomblob(16))) AS id`);
   const value = String(row?.id || '').trim();
@@ -4360,6 +4410,7 @@ export const commitFinancialLedgerV7Command = async (
         await insertFinancialTransactionOutbox(txn, command);
       }
       step('outbox');
+      await refreshPerformanceActiveCountInTransactionV13(txn, header.namespace);
       await advanceActiveFinancialGenerationInTransactionV13(txn, header.namespace);
       step('generation');
       const persisted = await readFinancialTransaction(txn, header.namespace, header.id);
@@ -4494,6 +4545,7 @@ export const replaceFinancialTransactionV7 = async ({
         await upsertEntity(txn, prepared);
       }
       await insertFinancialTransactionOutbox(txn, command);
+      await refreshPerformanceActiveCountInTransactionV13(txn, namespace);
       await advanceActiveFinancialGenerationInTransactionV13(txn, namespace);
       const persisted = await readFinancialTransaction(txn, namespace, transaction.id);
       result = { supported: true, ok: true, idempotent: false, transactionId: persisted.id, committedAt: header.updatedAt, persisted };
@@ -4618,6 +4670,7 @@ export const voidFinancialTransactionsV7 = async ({
         await upsertEntity(txn, entity);
         await insertEntityOutbox(txn, entity, { commandId: shadowCommandId });
       }
+      await refreshPerformanceActiveCountInTransactionV13(txn, namespace);
       if (changed > 0 || (Array.isArray(entityChanges) && entityChanges.some(item => item?.id && item?.entityType))) {
         await advanceActiveFinancialGenerationInTransactionV13(txn, namespace);
       }
@@ -4755,6 +4808,7 @@ export const archiveFinancialTransactionsV7 = async ({
         await upsertEntity(txn, entity);
         await insertEntityOutbox(txn, entity, { commandId: shadowCommandId });
       }
+      await refreshPerformanceActiveCountInTransactionV13(txn, namespace);
       if (changed > 0 || (Array.isArray(entityChanges) && entityChanges.some(item => item?.id && item?.entityType))) {
         await advanceActiveFinancialGenerationInTransactionV13(txn, namespace);
       }
