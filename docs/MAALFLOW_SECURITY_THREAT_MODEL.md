@@ -104,8 +104,20 @@ app mitigates a compromised Supabase credential, and it should not claim to.
 ### T4 — Cross-account access
 **Control:** RLS scoping plus the identity-adoption review flow, which blocks pending
 local mutations from being silently promoted into a different cloud ledger.
-**Residual:** RLS policy coverage has not been re-verified since the rename changed
-policy names; re-run against the new Supabase project when it exists.
+**Re-verified 2026-09-10** against the live `maalflow-production` project
+(`toimsipwiratbxfsozsk`) after the account migration: all 26 migrations applied,
+`supabase db advisors --type security` shows every `_v2`/`_v3` RPC still carrying its
+`security definer` + row-scoping guard, and no missing-RLS finding was raised for any
+table. Two functions are anon-callable per the linter (`maalflow_create_profile_for_auth_user`,
+a trigger with `returns trigger` that Postgres structurally refuses to run outside trigger
+context, so this is inert rather than exploitable; and `rls_auto_enable`, a Supabase
+platform function tied to the "Enable automatic RLS" project setting, not ours to patch).
+**Residual:** `public.profiles` and `public.workspace_members` each carry a duplicate
+permissive policy pair (an old-era policy alongside its `maalflow_*` successor) — a
+performance advisory, not a coverage gap, since both policies enforce the same
+own-row scoping. Revoking `EXECUTE` from `public`/`anon` on the two trigger functions
+above is available as cheap defense-in-depth but is optional hardening, not a fix to
+an active exploit path; not applied here as it was outside this task's scope.
 
 ### T5 — Accidental export
 **Reachable:** a full plaintext ledger, in the user's chosen folder or share target.
