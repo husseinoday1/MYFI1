@@ -1,2 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# SQL migrations are applied to Postgres verbatim inside CREATE FUNCTION ... $$ ... $$
+# bodies -- Postgres stores that text byte for byte. A CRLF checkout on Windows
+# (core.autocrlf) silently embeds \r\n into stored function source, which can break
+# any later migration that does exact text matching against pg_get_functiondef().
+# One such break was found and fixed in 20260819040505_financial_v2_causal_command_order.sql.
+# Force LF unconditionally so this class of bug cannot recur on any platform.
+*.sql text eol=lf

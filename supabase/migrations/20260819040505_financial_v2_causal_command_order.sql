@@ -36,6 +36,16 @@ begin
     raise exception 'financial_v2_sync_function_missing' using errcode = '55000';
   end if;
 
+  -- Postgres stores a plpgsql body verbatim, byte for byte, from whatever was sent
+  -- between the $$ delimiters. A checkout with CRLF line endings (git core.autocrlf
+  -- on Windows applied to the migration that created this function) therefore
+  -- embeds \r\n in the stored source, while v_old/v_new below use bare \n. Normalize
+  -- CRLF to LF before matching so the anchor is found regardless of which line
+  -- endings were present when the function was originally created; this only
+  -- changes whitespace, never plpgsql semantics, and the exactly-one-match guard
+  -- below still fails closed if the anchor is not uniquely present.
+  v_def := replace(v_def, chr(13) || chr(10), chr(10));
+
   v_occurrences :=
     (length(v_def) - length(replace(v_def, v_old, '')))
     / greatest(1, length(v_old));
