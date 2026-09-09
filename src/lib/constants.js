@@ -13,6 +13,10 @@ export const STORAGE = {
   ONBOARD:   'MYFI_ONBOARD_V1',
   FAB_POS:   'MYFI_FAB_POS_V1',
   DEMO_REAL: 'MYFI_DEMO_REAL_V1',
+  // Phase 15 §97. Cold start yields exactly one sample per launch, so its
+  // p50/p95 is meaningless without carrying a bounded ring across launches.
+  // Durations only -- no financial data, no identifiers.
+  PERF_COLD_START: 'MYFI_PERF_COLD_START_V1',
   DEMO_DATA: 'MYFI_DEMO_DATA_V1',
   DEMO_ACTIVE: 'MYFI_DEMO_ACTIVE_V1',
 };

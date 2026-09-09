@@ -18,10 +18,14 @@ const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
 
 // --- Run the telemetry module for real ---------------------------------------
 
-let source = read('src/lib/historyReadPathTelemetry.js');
-source = source.replace(/^export const /gm, 'const ');
+// The shared §97 module is inlined rather than stubbed: this test asserts real
+// p50/p95 values, and a stubbed percentile would be asserting the stub.
+const sharedSource = read('src/lib/performanceTelemetry.js').replace(/^export const /gm, 'const ');
+const historySource = read('src/lib/historyReadPathTelemetry.js')
+  .replace(/import \{[\s\S]*?\} from '\.\/performanceTelemetry';/, '');
+let source = `${sharedSource}\n${historySource}`.replace(/^export const /gm, 'const ');
 source += '\nmodule.exports = { recordHistoryLedgerQueryOutcome, recordHistoryLedgerQueryDuration, readHistoryReadPathTelemetry, resetHistoryReadPathTelemetry };\n';
-const sandbox = { module: { exports: {} }, exports: {}, Date, Number, Boolean, String, Math, console };
+const sandbox = { module: { exports: {} }, exports: {}, Date, Number, Boolean, String, Math, Object, Array, console };
 vm.createContext(sandbox);
 vm.runInContext(source, sandbox, { filename: 'historyReadPathTelemetry.js' });
 const {

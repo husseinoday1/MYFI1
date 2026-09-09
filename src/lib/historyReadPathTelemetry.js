@@ -27,6 +27,12 @@
 // Counters are module-level on purpose: writing them into the Zustand store on
 // every query would re-render the very screen being measured.
 
+import {
+  PERFORMANCE_OPERATIONS,
+  percentile,
+  recordOperationDurationV1,
+} from './performanceTelemetry';
+
 const EMPTY = () => ({
   accepted: 0,
   rejectedCoverage: 0,
@@ -122,16 +128,14 @@ export const recordHistoryLedgerQueryDuration = (durationMs) => {
   // Bounded: a long session must not grow this without limit. Oldest go first,
   // so the percentiles describe recent behaviour rather than app start.
   counters.durationsMs = [...counters.durationsMs.slice(-(MAX_DURATIONS - 1)), value];
+  // Same sample, one shared operation key, so §97 and this module can never
+  // disagree about History read latency.
+  recordOperationDurationV1(PERFORMANCE_OPERATIONS.HISTORY_FIRST_PAGE, value);
 };
 
-// Nearest-rank percentile. Deliberately not interpolated: with a bounded
-// sample, an exact observed value is easier to reason about than a synthetic
-// one, and p95 of 20 samples should name a query that really happened.
-const percentile = (sorted, fraction) => {
-  if (!sorted.length) return null;
-  const rank = Math.max(1, Math.ceil(fraction * sorted.length));
-  return sorted[Math.min(rank, sorted.length) - 1];
-};
+// percentile now lives in performanceTelemetry.js and is imported above.
+// Two implementations would eventually disagree about what p95 means, and
+// this module and the §97 module report the same operation.
 
 export const readHistoryReadPathTelemetry = () => {
   const resolved = counters.accepted + counters.rejectedCoverage

@@ -24,6 +24,16 @@ import { SPACE, weight } from '../lib/tokens';
 import { collectP12ConflictRecoveryDiagnostics } from '../dev/p12ConflictRecoveryDiagnostics';
 import { collectHistoryReadPathDiagnostics } from '../dev/historyReadPathDiagnostics';
 import { readPerformanceLedgerAttemptV7 } from '../dev/performanceTestLedgerV7';
+import {
+  evaluateSloV1,
+  readPerformanceTelemetryV1,
+  resetPerformanceTelemetryV1,
+} from '../lib/performanceTelemetry';
+import {
+  readAddOperationTimings,
+  resetAddOperationTimings,
+  summariseAddOperationTimings,
+} from '../lib/addOperationTiming';
 import IdentityAdoptionReview from '../components/IdentityAdoptionReview';
 import { conflictRecoveryGatesV1 } from '../dev/p12ConflictRecoveryGates';
 import {
@@ -96,6 +106,16 @@ export default function DiagnosticsScreen() {
       ledger,
       historyReadPath,
       performanceLabAttempt: readPerformanceLedgerAttemptV7(),
+      // §97. Read here rather than in a component body: this is the same
+      // refresh the owner already presses, and reading on render would re-run
+      // on every state change of the screen being measured.
+      performance: readPerformanceTelemetryV1(),
+      performanceSlo: evaluateSloV1(),
+      // Step-level add timings. The full per-run table is carried, not just the
+      // summary: the investigation needs the shape across runs, and a single
+      // blended number is exactly what the spec forbids reporting.
+      addOperationSummary: summariseAddOperationTimings(),
+      addOperationRuns: readAddOperationTimings(),
     });
     setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -489,6 +509,74 @@ export default function DiagnosticsScreen() {
           <Section th={th} lang={lang} isAr={isAr} icon="shield-outline" title="restoreSafety">
             <Text style={{ color: th.text, fontSize: 11, fontFamily: 'monospace', textAlign: textAlign(lang) }} selectable>
               {j(restoreSafety)}
+            </Text>
+          </Section>
+
+          <SectionTitle th={th} lang={lang}>{isAr ? 'قياس الأداء (§97)' : 'Performance (§97)'}</SectionTitle>
+          <Section th={th} lang={lang} isAr={isAr} icon="speedometer-outline" title={isAr ? 'p50/p95 لأربع عمليات' : 'p50/p95 for four operations'}>
+            {Object.entries(snapshot?.performanceSlo?.results || {}).map(([operation, row]) => (
+              <View key={operation} style={{ marginBottom: 8 }}>
+                <Row th={th} lang={lang} label={operation} value={row.measured
+                  ? `p50 ${row.p50Ms}ms / p95 ${row.p95Ms}ms (n=${row.sampleCount})`
+                  : (isAr ? 'لم يُقَس بعد' : 'not measured yet')} />
+                <Row
+                  th={th}
+                  lang={lang}
+                  label={isAr ? '  العتبة' : '  target'}
+                  value={`p50 ${row.targetP50Ms}ms / p95 ${row.targetP95Ms}ms · ${row.evidence}`}
+                />
+                {row.measured && (row.breachedP50 || row.breachedP95) ? (
+                  <Text style={{ color: th.warn, fontSize: 11, ...weight('800'), textAlign: textAlign(lang) }}>
+                    {isAr
+                      ? `تجاوز العتبة${row.breachedP50 ? ' p50' : ''}${row.breachedP95 ? ' p95' : ''}`
+                      : `over target${row.breachedP50 ? ' p50' : ''}${row.breachedP95 ? ' p95' : ''}`}
+                  </Text>
+                ) : null}
+              </View>
+            ))}
+            <Text style={{ color: th.sub, fontSize: 11, textAlign: textAlign(lang) }}>
+              {isAr
+                ? 'ثلاث من العتبات الأربع مؤقتة (provisional) وتنتظر قياساً على جهاز حقيقي. تجاوز العتبة يُعرَض فقط ولا يمنع شيئاً — سياسة التعامل معه قرار لم يُحسم بعد.'
+                : 'Three of the four targets are provisional and await a real device run. A breach is reported only; what it should trigger is an open decision.'}
+            </Text>
+            {/* The reset this project shipped without last time. resetHistoryReadPathTelemetry
+                went out with zero callers, which is why the owner had to fully restart the app
+                between every dataset tier on 2026-09-08 to get isolated numbers. */}
+            <AppButton
+              th={th}
+              lang={lang}
+              tone="secondary"
+              icon="refresh-outline"
+              label={isAr ? 'تصفير عيّنات الأداء' : 'Reset performance samples'}
+              onPress={async () => {
+                resetPerformanceTelemetryV1();
+                resetAddOperationTimings();
+                await refresh();
+                Alert.alert('', isAr
+                  ? 'صُفِّرت العيّنات. قِس شريحة واحدة الآن ثم اقرأ الأرقام قبل الانتقال للتالية.'
+                  : 'Samples cleared. Measure one tier, read the numbers, then move to the next.');
+              }}
+            />
+          </Section>
+
+          <Section th={th} lang={lang} isAr={isAr} icon="list-outline" title={isAr ? 'خطوات الإضافة (قياس)' : 'Add steps (measurement)'}>
+            {Object.keys(snapshot?.addOperationSummary || {}).length === 0 ? (
+              <Text style={{ color: th.faint, fontSize: 12, textAlign: textAlign(lang) }}>
+                {isAr ? 'لم تُسجَّل إضافات بعد. أضف معاملة أو التزاماً ثم حدّث.' : 'No adds recorded yet. Add a transaction or a commitment, then refresh.'}
+              </Text>
+            ) : null}
+            {Object.entries(snapshot?.addOperationSummary || {}).map(([operation, data]) => (
+              <View key={operation} style={{ marginBottom: 10 }}>
+                <Row th={th} lang={lang} label={operation} value={`${data.runCount} runs · median ${data.medianTotalMs}ms · max ${data.maxTotalMs}ms`} />
+                {Object.entries(data.steps).map(([name, step]) => (
+                  <Row key={name} th={th} lang={lang} label={`  ${name}`} value={`median ${step.medianMs}ms · max ${step.maxMs}ms (n=${step.runs})`} />
+                ))}
+              </View>
+            ))}
+            <Text style={{ color: th.sub, fontSize: 11, textAlign: textAlign(lang) }}>
+              {isAr
+                ? 'قياس فقط — لم يُصلَح أي بطء. الجدول الكامل لكل تشغيلة موجود في نسخة الدليل.'
+                : 'Measurement only -- no slowdown has been fixed. The full per-run table is in the copied evidence.'}
             </Text>
           </Section>
 

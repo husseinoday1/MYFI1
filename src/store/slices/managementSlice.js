@@ -1,4 +1,5 @@
 import { today, normalizeDate } from '../../utils/calc';
+import { beginAddOperationTiming } from '../../lib/addOperationTiming';
 import { getDefaultWalletId, normalizeWallets } from '../../lib/wallets';
 import { commitmentCycleMonth, deferredCommitmentDueISO, monthKey, normalizeCommitments } from '../../lib/commitments';
 import { FLOW_TYPES, getEntryScope, normalizeScope } from '../../lib/modules';
@@ -60,6 +61,10 @@ export const createManagementSlice = (set, get) => ({
   },
 
   addCommitment: async (item) => {
+    // Measurement only, same contract as addTrans: duration-only, structural
+    // names, wrapped so a listener cannot break the add.
+    const timing = beginAddOperationTiming('commitment');
+    const step = name => { try { timing.step(name); } catch {} };
     const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
     const linkedTarget = item.linkedType === 'goal'
       ? get().goals.find(target => target.id === item.linkedId)
@@ -94,14 +99,19 @@ export const createManagementSlice = (set, get) => ({
         namespace: getLedgerNamespace(get().workspaceNamespace, get().cfg),
         changes: [{ entityType: 'commitment', id: next.id, payload: next }],
       });
+      step('entity_commit');
       if (committed.supported && !committed.ok) return false;
     } catch (error) {
       set({ ledgerError: String(error?.message || 'financial_v7_commitment_create_failed') });
       return false;
     }
     set(s => ({ commitments: [next, ...normalizeCommitments(s.commitments, defaultWalletId)] }));
+    step('store_set');
     await get().saveLocal();
+    step('save_local');
     get().scheduleCloudSync?.('management_change');
+    step('schedule_sync');
+    timing.finish();
     return true;
   },
 

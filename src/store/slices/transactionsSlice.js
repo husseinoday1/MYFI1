@@ -14,6 +14,8 @@ import {
 } from '../domain';
 import { debtLifecycle, goalLifecycle, releasedGoalDeleteNotice, reopenCompletionCommitments } from '../../lib/trackerLifecycle';
 import { buildCurrencyFields, buildEntityCurrencyFields, buildTransferCurrencyFields } from '../../lib/financialCoreV2';
+import { PERFORMANCE_OPERATIONS, recordOperationDurationV1 } from '../../lib/performanceTelemetry';
+import { beginAddOperationTiming } from '../../lib/addOperationTiming';
 import { getLedgerNamespace } from '../../lib/activeLedgerRepository';
 import { commandWalletPosition } from '../../lib/financialCommandBalances';
 import {
@@ -35,7 +37,17 @@ const walletPositionForCommand = (get, walletId, excludeTransaction = null) => c
 });
 
 export const createTransactionSlice = (set, get) => ({
-  addTrans: async (t) => {
+  addTrans: async (t, { onDiagnosticStep = null } = {}) => {
+    // Clock starts at the top of the action: the user has confirmed and is now
+    // waiting. Anything after this point is time they experience.
+    const addStartedAt = Date.now();
+    // Step-level measurement for the 25K-50K slowdown investigation. Optional,
+    // duration-only, structural names only, and wrapped so a broken listener
+    // cannot break an add. Both layers are instrumented because the answer is
+    // probably not in one of them, and measuring only SQL would produce a
+    // confident wrong conclusion.
+    const timing = beginAddOperationTiming('transaction');
+    const step = name => { try { timing.step(name); onDiagnosticStep?.(String(name)); } catch {} };
     const id = uid();
     const defaultWalletId = getDefaultWalletId(get().wallets, get().cfg.currency, get().cfg.defaultWalletId);
     const cat = get().cats.find(item => item.id === t.cat) || get().cats.find(item => item.id === 'other') || {};
@@ -88,6 +100,7 @@ export const createTransactionSlice = (set, get) => ({
     };
     if (Number(currencyFields.walletAmount || 0) < 0) {
       const position = await walletPositionForCommand(get, tx.walletId);
+      step('wallet_position');
       const available = Number(position?.availableBalance);
       tx.balanceWarning = !Number.isFinite(available)
         || Math.abs(Number(currencyFields.walletAmount || 0)) > available + 0.0001;
@@ -127,7 +140,9 @@ export const createTransactionSlice = (set, get) => ({
               ...commitArgs,
               wallets: [selectedWallet].filter(Boolean),
               entityChanges: recurringEntityChanges,
+              onDiagnosticStep,
             });
+        step('ledger_commit');
         if (v7Commit.supported && !v7Commit.ok) return false;
         if (v7Commit.ok) {
           tx.id = v7Commit.transactionId;
@@ -143,8 +158,26 @@ export const createTransactionSlice = (set, get) => ({
       trans: [tx, ...s.trans],
       ...(v7Commit?.ok ? { financialLedgerV7Ready: true, ledgerError: null } : {}),
     }));
+    step('store_set');
+    // §97 boundary decision, recorded here because the choice IS the
+    // measurement: "save" is timed to the moment the row is in the store and
+    // the UI can render it -- not to the SQLite COMMIT, and not to saveLocal
+    // finishing.
+    //
+    // COMMIT alone would flatter the number. What the owner waits for when he
+    // says adding feels slow at 25K-50K is the row appearing, which is this
+    // point. saveLocal is real cost but runs after the UI can already paint, so
+    // folding it in here would charge the visible save for work nobody is
+    // watching; it is measured per-step by the separate add-operation
+    // investigation (step `save_local`) rather than as a fifth operation key.
+    //
+    // Only addTrans is instrumented. addTransfer is a different shape with
+    // different work, and blending both into one key would produce a p50 that
+    // describes neither.
+    recordOperationDurationV1(PERFORMANCE_OPERATIONS.TRANSACTION_SAVE, Date.now() - addStartedAt);
     try {
       await get().saveLocal();
+      step('save_local');
     } catch (error) {
       if (!v7Commit?.ok) throw error;
       // SQLite already committed the financial truth. A compatibility Vault
@@ -152,6 +185,8 @@ export const createTransactionSlice = (set, get) => ({
       set({ dirty: true, ledgerError: 'compatibility_snapshot_retry_required' });
     }
     get().scheduleCloudSync?.('transaction_change');
+    step('schedule_sync');
+    timing.finish();
     return true;
 
   },

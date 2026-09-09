@@ -30,6 +30,7 @@ import { deriveDisplayName } from '../lib/accountIdentity';
 import { getMonthTransactionsByKey, getRecentTransactions, getTransactionIndex } from '../lib/transactionIndex';
 import { averageGoalProgress, summarizeCommitmentCurrencies, summarizeGoalCurrencies } from '../lib/entityCurrencySummary';
 import { getLedgerNamespace, queryLedgerSummary, queryLedgerTransactions, queryLedgerWalletPositions } from '../lib/activeLedgerRepository';
+import { PERFORMANCE_OPERATIONS, recordOperationDurationV1 } from '../lib/performanceTelemetry';
 import { getLedgerDb, runLedgerReadTransaction } from '../lib/ledgerDatabase';
 import { getFinancialWorkspaceStateV7 } from '../lib/financialLedgerV7Repository';
 import { releasedGoalDeleteNotice, releasedGoalDeleteRefusalCopy } from '../lib/trackerLifecycle';
@@ -259,9 +260,15 @@ export default function HomeScreen({
         return { summary, recent: recentPage?.rows || [], positions: positions?.rows || [] };
       });
     };
+    // §97: Home's own data being ready. Started here rather than at mount so it
+    // measures the query work, not React scheduling. A cancelled run records
+    // nothing -- a screen the user navigated away from is not a Home open, and
+    // counting it would report a duration nobody waited for.
+    const homeOpenStartedAt = Date.now();
     void run()
       .then((result) => {
         if (cancelled) return;
+        recordOperationDurationV1(PERFORMANCE_OPERATIONS.HOME_OPEN, Date.now() - homeOpenStartedAt);
         setSqlHome(result);
         setSqlHomeError(false);
       })

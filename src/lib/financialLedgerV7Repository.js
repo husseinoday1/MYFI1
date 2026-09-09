@@ -4258,18 +4258,34 @@ const readFinancialTransaction = async (db, namespace, transactionId) => {
   };
 };
 
-export const commitFinancialLedgerV7Command = async (command, { database = null, writeOutbox = true } = {}) => {
+export const commitFinancialLedgerV7Command = async (
+  command,
+  { database = null, writeOutbox = true, onDiagnosticStep = null } = {},
+) => {
+  // Duration-only instrumentation, same shape as getLedgerDataHealth's hook:
+  // structural step names only, never counts, ids, amounts or rows. Optional,
+  // so the production path is unchanged when nothing is listening, and wrapped
+  // so a broken listener can never break a financial commit.
+  const step = name => { try { onDiagnosticStep?.(String(name)); } catch {} };
   const db = database || await getLedgerDb();
   if (!db) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
+  step('db_handle');
   await ensureFinancialLedgerV7(db);
+  step('schema_ensure');
 
   return enqueueWrite(async () => {
+    // Separate from txn_begin on purpose: waiting for another write to finish
+    // and waiting for the database lock are different problems with different
+    // fixes, and one combined number cannot tell them apart.
+    step('write_queue');
     let result = null;
     await runLedgerExclusiveTransaction(db, async (txn) => {
+      step('txn_begin');
       const existing = await txn.getFirstAsync(
         `SELECT id FROM ledger_financial_transactions_v7 WHERE namespace=? AND idempotency_key=? LIMIT 1`,
         command.header.namespace, command.header.idempotencyKey,
       );
+      step('idempotency_lookup');
       if (existing?.id) {
         const persisted = await readFinancialTransaction(txn, command.header.namespace, String(existing.id));
         result = { supported: true, ok: true, idempotent: true, transactionId: String(existing.id), persisted };
@@ -4295,6 +4311,8 @@ export const commitFinancialLedgerV7Command = async (command, { database = null,
         );
       }
 
+      step('currencies_accounts_rates');
+
       const header = command.header;
       await txn.runAsync(
         `INSERT INTO ledger_financial_transactions_v7
@@ -4307,6 +4325,8 @@ export const commitFinancialLedgerV7Command = async (command, { database = null,
         header.archiveYear, header.archivedAt, header.deletedAt, safeJson(command.originalTransaction),
         header.createdAt, header.updatedAt,
       );
+
+      step('insert_transaction');
 
       for (const item of command.postings || [command.posting].filter(Boolean)) {
         await txn.runAsync(
@@ -4326,22 +4346,32 @@ export const commitFinancialLedgerV7Command = async (command, { database = null,
           link.relation, link.appliedAmountMinor, link.currencyCode, link.createdAt,
         );
       }
+      step('insert_postings_links');
+
       for (const entity of command.entities || []) {
         const prepared = await prepareLocalEntity(txn, entity);
         Object.assign(entity, prepared);
         await upsertEntity(txn, prepared);
       }
 
+      step('entity_changes');
+
       if (writeOutbox) {
         await insertFinancialTransactionOutbox(txn, command);
       }
+      step('outbox');
       await advanceActiveFinancialGenerationInTransactionV13(txn, header.namespace);
+      step('generation');
       const persisted = await readFinancialTransaction(txn, header.namespace, header.id);
+      step('read_back');
       result = {
         supported: true, ok: true, idempotent: false, transactionId: String(persisted.id),
         committedAt: header.updatedAt, persisted,
       };
     });
+    // After the transaction closes: this is the COMMIT itself, which at scale
+    // can dominate everything inside it.
+    step('txn_commit');
     return result || { supported: true, ok: false, reason: 'sqlite_transaction_no_result' };
   });
 };
@@ -4350,10 +4380,11 @@ export const commitExpenseLedgerV7Command = (command, options = {}) => commitFin
 
 export const commitFinancialTransactionV7 = async ({
   namespace = 'guest', transaction, wallets = [], baseCurrency = 'IQD', entityChanges = [], database = null,
+  onDiagnosticStep = null,
 } = {}) => {
   if (!database && !financialLedgerV7Supported()) return { supported: false, ok: false, reason: 'sqlite_unavailable' };
   const command = buildFinancialLedgerCommand({ namespace, transaction, wallets, baseCurrency, entityChanges });
-  return commitFinancialLedgerV7Command(command, { database });
+  return commitFinancialLedgerV7Command(command, { database, onDiagnosticStep });
 };
 
 export const replaceFinancialTransactionV7 = async ({

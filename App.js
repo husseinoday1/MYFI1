@@ -54,6 +54,12 @@ import {
   subscribeFinancialMaintenance,
 } from './src/lib/financialMaintenanceBarrier';
 import { beginStartupStageTiming, recordStartupTiming } from './src/lib/startupTiming';
+import {
+  PERFORMANCE_OPERATIONS,
+  exportOperationDurationsV1,
+  hydrateOperationDurationsV1,
+  recordOperationDurationV1,
+} from './src/lib/performanceTelemetry';
 
 const FORCE_ONBOARDING = process.env.EXPO_PUBLIC_FORCE_ONBOARDING === '1';
 const FRESH_TEST_MODE = process.env.EXPO_PUBLIC_FRESH_TEST === '1';
@@ -427,7 +433,21 @@ function AppRoot() {
       // Kept in memory as well as logged, so the numbers can be read from the
       // Settings diagnostic panel instead of requiring adb from a workstation. The
       // person who needs to produce them is holding a phone.
-      recordStartupTiming(startupMarks, 'completed');
+      const startupTiming = recordStartupTiming(startupMarks, 'completed');
+      // §97 cold-start sample. One launch produces one measurement, so the
+      // ring is carried across launches -- otherwise p50/p95 would describe a
+      // single number forever. Off any render path, once per launch, and the
+      // stored value is a list of durations with nothing else in it.
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE.PERF_COLD_START);
+        const parsed = raw ? JSON.parse(raw) : [];
+        hydrateOperationDurationsV1(PERFORMANCE_OPERATIONS.COLD_START, Array.isArray(parsed) ? parsed : []);
+        recordOperationDurationV1(PERFORMANCE_OPERATIONS.COLD_START, startupTiming?.totalMs);
+        await AsyncStorage.setItem(
+          STORAGE.PERF_COLD_START,
+          JSON.stringify(exportOperationDurationsV1(PERFORMANCE_OPERATIONS.COLD_START)),
+        );
+      } catch {}
       console.log('[MYFI:STARTUP_TIMING]', JSON.stringify(startupMarks));
     })().catch(error => {
       // A launch that failed part-way is the one we most want numbers from, so the
