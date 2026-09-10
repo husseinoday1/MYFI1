@@ -193,6 +193,7 @@ for (const name of [
   'performance_write_started',
   'performance_write_completed',
   'performance_write_failed',
+  'performance_write_superseded',
 ]) {
   assert(
     performanceStorage.includes(`'${name}'`),
@@ -292,6 +293,68 @@ assert(
   timingModule.includes('runs.slice(-(MAX_RUNS - 1))'),
   'the oldest runs must be evicted, keeping the most recent',
 );
+assert(
+  timingModule.includes("hasMark('performance_schedule')")
+    && timingModule.includes('DEFERRED_WRITE_TERMINALS')
+    && timingModule.includes("hasMark('performance_next_frame')"),
+  'a lab run must wait for its deferred write terminal signal and next frame before closing',
+);
+
+// Executable lifecycle proof: `finish()` remains immediate for normal saves,
+// but a performance-lab save cannot close while its deferred signals are still
+// pending. This caught the original microtask-vs-macrotask blind spot.
+const timingSandbox = { Date, Math, Set, String };
+vm.createContext(timingSandbox);
+vm.runInContext(
+  `${timingModule.replace(/^export const /gm, 'const ')}
+  globalThis.result = (() => {
+    resetAddOperationTimings();
+    const ordinary = beginAddOperationTiming('ordinary');
+    ordinary.step('schedule_sync');
+    ordinary.finish();
+    const ordinaryClosed = readAddOperationTimings().length === 1;
+
+    resetAddOperationTimings();
+    const lab = beginAddOperationTiming('lab');
+    lab.step('performance_schedule');
+    lab.finish();
+    const closedEarly = readAddOperationTimings().length !== 0;
+    lab.step('performance_next_frame');
+    const closedBeforeWriteTerminal = readAddOperationTimings().length !== 0;
+    lab.step('performance_write_completed');
+    const labMarks = Object.keys(readAddOperationTimings()[0]?.marks || {}).sort().join(',');
+
+    resetAddOperationTimings();
+    const stale = beginAddOperationTiming('stale');
+    stale.step('performance_schedule');
+    stale.finish();
+    resetAddOperationTimings();
+    stale.step('performance_next_frame');
+    stale.step('performance_write_completed');
+    const staleWasDiscarded = readAddOperationTimings().length === 0;
+
+    resetAddOperationTimings();
+    const superseded = beginAddOperationTiming('superseded');
+    superseded.step('performance_schedule');
+    superseded.finish();
+    superseded.step('performance_next_frame');
+    superseded.step('performance_write_superseded');
+    const supersededClosed = readAddOperationTimings().length === 1;
+    return { ordinaryClosed, closedEarly, closedBeforeWriteTerminal, labMarks, staleWasDiscarded, supersededClosed };
+  })();`,
+  timingSandbox,
+  { filename: 'add-operation-timing.js' },
+);
+assert.equal(timingSandbox.result.ordinaryClosed, true, 'ordinary saves must retain synchronous timing closure');
+assert.equal(timingSandbox.result.closedEarly, false, 'a lab run must not close before deferred signals');
+assert.equal(timingSandbox.result.closedBeforeWriteTerminal, false, 'a lab run must wait for the write terminal signal');
+assert.equal(
+  timingSandbox.result.labMarks,
+  'performance_next_frame,performance_schedule,performance_write_completed',
+  'the completed lab run must retain both delayed marks',
+);
+assert.equal(timingSandbox.result.staleWasDiscarded, true, 'reset must discard a deferred run from an older sample set');
+assert.equal(timingSandbox.result.supersededClosed, true, 'a superseded timer must close its old timing run safely');
 
 // Per-step gaps, not cumulative marks: a cumulative number says when a step
 // ended, and the question is how long it took.

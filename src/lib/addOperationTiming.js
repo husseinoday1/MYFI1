@@ -22,8 +22,14 @@
 // Bounded: a long session must not grow this. The most recent runs are the
 // interesting ones, so the oldest are evicted.
 const MAX_RUNS = 20;
+const DEFERRED_WRITE_TERMINALS = new Set([
+  'performance_write_completed',
+  'performance_write_failed',
+  'performance_write_superseded',
+]);
 
 let runs = [];
+let runGeneration = 0;
 
 const nowMs = () => Date.now();
 
@@ -35,19 +41,19 @@ const nowMs = () => Date.now();
  */
 export const beginAddOperationTiming = (operation = 'unknown') => {
   const startedAt = nowMs();
+  const generation = runGeneration;
   const marks = [];
   let finished = false;
+  let finishRequested = false;
 
-  const step = name => {
-    if (finished) return;
-    // Structural names only. Coerced at the boundary so a caller cannot pass an
-    // object whose toString leaks something.
-    marks.push({ name: String(name), at: nowMs() - startedAt });
-  };
+  const hasMark = name => marks.some(mark => mark.name === name);
 
-  const finish = () => {
+  const recordFinishedRun = () => {
     if (finished) return;
     finished = true;
+    // A deferred lab write can finish after Diagnostics has been reset. It is
+    // evidence for the old sample set and must never repopulate the new one.
+    if (generation !== runGeneration) return;
     // The gaps are the answer, not the marks. A cumulative number says when a
     // step ended; the question is how long it took, and working that out by
     // hand from a JSON blob is exactly the step that does not happen.
@@ -68,6 +74,33 @@ export const beginAddOperationTiming = (operation = 'unknown') => {
         marks: marks.reduce((all, mark) => ({ ...all, [mark.name]: mark.at }), {}),
       },
     ];
+  };
+
+  const maybeFinish = () => {
+    if (!finishRequested || finished) return;
+    // Only the isolated performance-lab save schedules deferred work. A real
+    // save continues to finish synchronously exactly as before. For that lab
+    // run, closing early would silently discard the very marks that explain
+    // the delay, so require both its terminal write signal and the next frame.
+    if (hasMark('performance_schedule')) {
+      const writeFinished = marks.some(mark => DEFERRED_WRITE_TERMINALS.has(mark.name));
+      if (!writeFinished || !hasMark('performance_next_frame')) return;
+    }
+    recordFinishedRun();
+  };
+
+  const step = name => {
+    if (finished) return;
+    // Structural names only. Coerced at the boundary so a caller cannot pass an
+    // object whose toString leaks something.
+    marks.push({ name: String(name), at: nowMs() - startedAt });
+    maybeFinish();
+  };
+
+  const finish = () => {
+    if (finished) return;
+    finishRequested = true;
+    maybeFinish();
   };
 
   return { step, finish };
@@ -126,4 +159,7 @@ export const summariseAddOperationTimings = () => {
   return summary;
 };
 
-export const resetAddOperationTimings = () => { runs = []; };
+export const resetAddOperationTimings = () => {
+  runGeneration += 1;
+  runs = [];
+};

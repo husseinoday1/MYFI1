@@ -181,8 +181,15 @@ const persistScheduledSnapshot = async (snapshot, options) => {
 
 export const schedulePerformanceSnapshotWrite = (snapshot, options = {}) => {
   const generation = scheduledGeneration;
+  const superseded = scheduledWrite;
+  if (scheduledTimer) {
+    clearTimeout(scheduledTimer);
+    // A newer save replaces this pending write. Its timing run must still be
+    // allowed to close instead of waiting forever for a timer that was safely
+    // cancelled before it started.
+    if (superseded) markDeferredWriteStep(superseded.options, 'performance_write_superseded');
+  }
   scheduledWrite = { snapshot, options, generation };
-  if (scheduledTimer) clearTimeout(scheduledTimer);
   scheduledTimer = setTimeout(async () => {
     scheduledTimer = null;
     const pending = scheduledWrite;
