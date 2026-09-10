@@ -23,6 +23,13 @@ const markPerformanceSnapshotStage = name => {
   if (typeof markStartupStage === 'function') markStartupStage(`performance:${name}`);
 };
 
+// The optional recorder receives fixed structural names only. It must never
+// affect the deferred persistence path, even if an instrumentation listener
+// itself fails.
+const markDeferredWriteStep = (options, name) => {
+  try { options?.onDiagnosticStep?.(String(name)); } catch {}
+};
+
 const yieldToUi = () => (
   typeof setTimeout === 'function'
     ? new Promise(resolve => setTimeout(resolve, 0))
@@ -158,8 +165,18 @@ const writePerformanceOverlay = async snapshot => {
 };
 
 const persistScheduledSnapshot = async (snapshot, options) => {
-  if (await writePerformanceOverlay(snapshot)) return;
-  await writePerformanceSnapshot(snapshot, options);
+  markDeferredWriteStep(options, 'performance_write_started');
+  try {
+    if (await writePerformanceOverlay(snapshot)) {
+      markDeferredWriteStep(options, 'performance_write_completed');
+      return;
+    }
+    await writePerformanceSnapshot(snapshot, options);
+    markDeferredWriteStep(options, 'performance_write_completed');
+  } catch (error) {
+    markDeferredWriteStep(options, 'performance_write_failed');
+    throw error;
+  }
 };
 
 export const schedulePerformanceSnapshotWrite = (snapshot, options = {}) => {
@@ -171,6 +188,7 @@ export const schedulePerformanceSnapshotWrite = (snapshot, options = {}) => {
     const pending = scheduledWrite;
     scheduledWrite = null;
     if (!pending || pending.generation !== scheduledGeneration) return;
+    markDeferredWriteStep(pending.options, 'performance_timer_fired');
     scheduledInFlight = persistScheduledSnapshot(pending.snapshot, pending.options);
     try {
       await scheduledInFlight;

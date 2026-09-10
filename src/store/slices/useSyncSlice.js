@@ -2660,6 +2660,7 @@ export const createSyncSlice = (set, get) => ({
       schedulePerformanceSnapshotWrite(demoSnapshot, {
         namespace: current.workspaceNamespace || GUEST_NAMESPACE,
         tier: String(current.cfg?.performanceTestTier || ''),
+        onDiagnosticStep,
       });
       try { onDiagnosticStep?.('performance_schedule'); } catch {}
       set({
@@ -2667,6 +2668,13 @@ export const createSyncSlice = (set, get) => ({
         dirty: nextDirty,
       });
       try { onDiagnosticStep?.('performance_store_set'); } catch {}
+      if (typeof onDiagnosticStep === 'function') {
+        const reportFrame = () => {
+          try { onDiagnosticStep('performance_next_frame'); } catch {}
+        };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(reportFrame);
+        else if (typeof setTimeout === 'function') setTimeout(reportFrame, 0);
+      }
       return;
     }
     const next = { ...current, localUpdatedAt: updatedAt, dirty: nextDirty };

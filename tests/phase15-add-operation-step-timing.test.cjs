@@ -21,6 +21,7 @@ const repository = read('src/lib/financialLedgerV7Repository.js');
 const store = read('src/store/slices/transactionsSlice.js');
 const sync = read('src/store/slices/useSyncSlice.js');
 const management = read('src/store/slices/managementSlice.js');
+const performanceStorage = read('src/dev/performanceTestStorage.js');
 
 // --- the hook follows the missing_postings precedent -------------------------
 
@@ -177,6 +178,46 @@ assert(
     && demoSaveBranch.indexOf("onDiagnosticStep?.('performance_schedule')")
       < demoSaveBranch.indexOf("onDiagnosticStep?.('performance_store_set')"),
   'performance save diagnostic marks must retain execution order',
+);
+assert(
+  /schedulePerformanceSnapshotWrite\(demoSnapshot,\s*\{[\s\S]*?onDiagnosticStep,/.test(demoSaveBranch),
+  'the lab scheduler must receive the same recorder that measures the save path',
+);
+assert(
+  demoSaveBranch.includes("onDiagnosticStep('performance_next_frame')")
+    && demoSaveBranch.includes('requestAnimationFrame(reportFrame)'),
+  'the lab save must expose whether the next UI frame is delayed after the store update',
+);
+for (const name of [
+  'performance_timer_fired',
+  'performance_write_started',
+  'performance_write_completed',
+  'performance_write_failed',
+]) {
+  assert(
+    performanceStorage.includes(`'${name}'`),
+    `deferred performance persistence must expose ${name}`,
+  );
+}
+assert(
+  performanceStorage.includes('try { options?.onDiagnosticStep?.(String(name)); } catch {}'),
+  'a diagnostic listener failure must not affect deferred persistence',
+);
+assert(
+  performanceStorage.indexOf("'performance_timer_fired'")
+    < performanceStorage.indexOf('scheduledInFlight = persistScheduledSnapshot'),
+  'the timer mark must happen before the deferred write starts',
+);
+const deferredWriter = performanceStorage.slice(
+  performanceStorage.indexOf('const persistScheduledSnapshot'),
+  performanceStorage.indexOf('export const schedulePerformanceSnapshotWrite'),
+);
+assert(
+  deferredWriter.indexOf("'performance_write_started'")
+    < deferredWriter.indexOf('await writePerformanceOverlay')
+    && deferredWriter.lastIndexOf("'performance_write_completed'")
+      > deferredWriter.indexOf('await writePerformanceSnapshot'),
+  'the deferred writer must report start before persistence and completion after it',
 );
 for (const [label, source] of [['transaction', store], ['commitment', management]]) {
   assert(
