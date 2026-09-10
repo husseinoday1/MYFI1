@@ -130,6 +130,7 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'number_input_contract', 'number-input-contract.test.mjs'],
   ['STORE_RUNTIME_WEB', 'financial_core_web_compat', 'run-financial-core.cjs'],
   ['REPOSITORY_RUNTIME_MOCK', 'financial_ledger_v7_atomic_operations_and_shadow_projection', 'run-financial-ledger-v7.cjs'],
+  ['REPOSITORY_RUNTIME_MOCK', 'financial_ledger_v7_local_preferences_persistence', 'financial-ledger-v7-local-preferences.test.cjs'],
   ['SQLITE_SCHEMA_RUNTIME', 'financial_ledger_v7_ddl_and_constraints', 'financial-ledger-v7-schema.test.cjs'],
   ['SCHEMA_MIGRATION_RUNTIME', 'financial_schema_migration_recovery', 'financial-ledger-migration-runtime.test.cjs'],
   ['UNIT_RUNTIME', 'forecasting', 'run-forecasting-fix.cjs'],

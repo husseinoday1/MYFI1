@@ -5207,6 +5207,21 @@ export const setFinancialWorkspaceStateV7 = async ({ namespace = 'guest', source
 // Local-only settings live beside the financial workspace but are never placed
 // in its outbox. This keeps them durable across app restarts without turning a
 // language/theme/privacy choice into a cloud mutation.
+//
+// A namespace's ledger_workspace_state_v7 row is normally created by the first
+// full (non-localOnly) V7 workspace commit -- typically triggered by a currency
+// change or a financial mutation. A brand-new namespace that has done neither
+// yet (e.g. its very first UI-only preference, such as turning on biometric
+// app lock, before any financial activity) has no row for this UPDATE to find.
+// The prior UPDATE-only version silently no-op'd here (`if (!state) return
+// false`), which saveLocal() turned into a thrown 'financial_v7_local_
+// preferences_persist_failed' -- but only *after* the in-memory Zustand cfg had
+// already been optimistically updated by coreSet(), so the setting appeared to
+// work for the rest of that session and was then silently lost on the next
+// cold start, when config is reloaded from this same row. Insert a row with
+// the same fresh-namespace defaults used elsewhere in this file (source_mode
+// 'shadow', FINANCIAL_LEDGER_SCHEMA_VERSION) when none exists yet, instead of
+// requiring one to already be there.
 export const persistFinancialLocalPreferencesV7 = async ({ namespace = 'guest', cfg = {}, notif = {}, database = null } = {}) => {
   const db = database || await getLedgerDb();
   if (!db) return false;
@@ -5217,7 +5232,18 @@ export const persistFinancialLocalPreferencesV7 = async ({ namespace = 'guest', 
       `SELECT payload_json FROM ledger_workspace_state_v7 WHERE namespace=? LIMIT 1`,
       namespace,
     );
-    if (!state) return false;
+    if (!state) {
+      await db.runAsync(
+        `INSERT INTO ledger_workspace_state_v7
+         (namespace,source_mode,schema_version,payload_json,updated_at)
+         VALUES (?,?,?,?,?)
+         ON CONFLICT(namespace) DO UPDATE SET
+           payload_json=excluded.payload_json,updated_at=excluded.updated_at`,
+        namespace, 'shadow', FINANCIAL_LEDGER_SCHEMA_VERSION,
+        safeJson({ localPreferences: { cfg, notif } }), now,
+      );
+      return true;
+    }
     const payload = parseJson(state.payload_json, {}) || {};
     await db.runAsync(
       `UPDATE ledger_workspace_state_v7 SET payload_json=?,updated_at=? WHERE namespace=?`,
