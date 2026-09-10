@@ -19,6 +19,8 @@ const read = rel => fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/
 
 const repository = read('src/lib/financialLedgerV7Repository.js');
 const store = read('src/store/slices/transactionsSlice.js');
+const sync = read('src/store/slices/useSyncSlice.js');
+const management = read('src/store/slices/managementSlice.js');
 
 // --- the hook follows the missing_postings precedent -------------------------
 
@@ -30,6 +32,10 @@ assert(
 assert(
   /onDiagnosticStep = null/.test(store),
   'the store hook must default to null',
+);
+assert(
+  /onDiagnosticStep = null/.test(sync),
+  'the local-save diagnostic hook must default to null',
 );
 
 // Wrapped: a listener that throws must not be able to break a financial commit.
@@ -150,6 +156,35 @@ assert.equal(sandbox.result.survived, true, 'a throwing listener must not escape
 // rather than on contents.
 assert.equal(sandbox.result.seen.join(','), 'store_set', 'a working listener must still receive its step');
 
+// --- a slow isolated save is decomposed before it is optimised --------------
+
+// The latest 50K device evidence narrowed the remaining slow add to
+// `save_local`, but that label covers three distinct operations.  These marks
+// carry fixed structural names only and exist only on the isolated demo path;
+// they do not alter persistence scheduling or production saves.
+const demoSaveStart = sync.indexOf('if (current.cfg.demoMode) {');
+const demoSaveEnd = sync.indexOf('const next = { ...current', demoSaveStart);
+const demoSaveBranch = sync.slice(demoSaveStart, demoSaveEnd);
+for (const name of ['performance_snapshot', 'performance_schedule', 'performance_store_set']) {
+  assert(
+    demoSaveBranch.includes(`onDiagnosticStep?.('${name}')`),
+    `performance save must report ${name} so the device can distinguish the remaining cost`,
+  );
+}
+assert(
+  demoSaveBranch.indexOf("onDiagnosticStep?.('performance_snapshot')")
+    < demoSaveBranch.indexOf("onDiagnosticStep?.('performance_schedule')")
+    && demoSaveBranch.indexOf("onDiagnosticStep?.('performance_schedule')")
+      < demoSaveBranch.indexOf("onDiagnosticStep?.('performance_store_set')"),
+  'performance save diagnostic marks must retain execution order',
+);
+for (const [label, source] of [['transaction', store], ['commitment', management]]) {
+  assert(
+    source.includes('saveLocal({ onDiagnosticStep: step })'),
+    `${label} must forward its device recorder into saveLocal`,
+  );
+}
+
 // --- this task must not have become a fix ------------------------------------
 
 // The instrumentation is additive. If it altered a write, an ordering, or a
@@ -192,7 +227,6 @@ console.log('PASS: phase15-add-operation-step-timing');
 // this project, so it is asserted rather than remembered.
 
 const timingModule = read('src/lib/addOperationTiming.js');
-const management = read('src/store/slices/managementSlice.js');
 const diagnostics = read('src/screens/DiagnosticsScreen.js');
 
 // Both add paths must own a recorder, not wait for a caller to supply one.

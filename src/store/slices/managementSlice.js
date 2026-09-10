@@ -107,7 +107,7 @@ export const createManagementSlice = (set, get) => ({
     }
     set(s => ({ commitments: [next, ...normalizeCommitments(s.commitments, defaultWalletId)] }));
     step('store_set');
-    await get().saveLocal();
+    await get().saveLocal({ onDiagnosticStep: step });
     step('save_local');
     get().scheduleCloudSync?.('management_change');
     step('schedule_sync');

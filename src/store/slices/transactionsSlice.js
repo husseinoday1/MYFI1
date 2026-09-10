@@ -180,7 +180,7 @@ export const createTransactionSlice = (set, get) => ({
     // describes neither.
     recordOperationDurationV1(PERFORMANCE_OPERATIONS.TRANSACTION_SAVE, Date.now() - addStartedAt);
     try {
-      await get().saveLocal();
+      await get().saveLocal({ onDiagnosticStep: step });
       step('save_local');
     } catch (error) {
       if (!v7Commit?.ok) throw error;

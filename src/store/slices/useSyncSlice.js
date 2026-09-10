@@ -2640,7 +2640,7 @@ export const createSyncSlice = (set, get) => ({
     }
   },
 
-  saveLocal: async ({ dirty = true, force = false, localOnly = false } = {}) => {
+  saveLocal: async ({ dirty = true, force = false, localOnly = false, onDiagnosticStep = null } = {}) => {
     const current = get();
     const updatedAt = new Date().toISOString();
     const nextDirty = dirty ? true : current.dirty;
@@ -2656,14 +2656,17 @@ export const createSyncSlice = (set, get) => ({
         { ...current, localUpdatedAt: updatedAt, dirty: nextDirty },
         { updatedAt, dirty: nextDirty },
       );
+      try { onDiagnosticStep?.('performance_snapshot'); } catch {}
       schedulePerformanceSnapshotWrite(demoSnapshot, {
         namespace: current.workspaceNamespace || GUEST_NAMESPACE,
         tier: String(current.cfg?.performanceTestTier || ''),
       });
+      try { onDiagnosticStep?.('performance_schedule'); } catch {}
       set({
         localUpdatedAt: updatedAt,
         dirty: nextDirty,
       });
+      try { onDiagnosticStep?.('performance_store_set'); } catch {}
       return;
     }
     const next = { ...current, localUpdatedAt: updatedAt, dirty: nextDirty };
