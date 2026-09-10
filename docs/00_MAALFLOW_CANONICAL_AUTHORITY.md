@@ -18,7 +18,7 @@ this canonical base, **this canonical base wins**.
 
 ## A0 — Actual repository state: implementation reality only
 Repository:
-`https://github.com/husseinoday1/MYFI1`
+`https://github.com/husseinoday1/MaalFlow`
 
 Before every new code-change session:
 - verify local branch;

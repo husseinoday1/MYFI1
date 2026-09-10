@@ -1,7 +1,7 @@
 # MaalFlow — Engineering Handoff
 
 Prepared: 2026-08-19 (last updated 2026-08-19, MaalFlow Planning & Audit session)
-Repository: `https://github.com/husseinoday1/MYFI1`
+Repository: `https://github.com/husseinoday1/MaalFlow`
 
 ## 0. What this document is — and is not
 
