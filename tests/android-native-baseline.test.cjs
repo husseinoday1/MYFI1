@@ -14,8 +14,36 @@ assert.match(manifest, /android:allowBackup="false"/, 'Native source manifest mu
 assert.doesNotMatch(manifest, /android:screenOrientation="portrait"/, 'Native manifest must not override system/default orientation');
 assert.equal(app.expo.orientation, 'default');
 assert.match(orientation, /unlockAsync\(\)/, 'System orientation mode must respect device settings');
-assert.match(gradle, /release\s*\{[\s\S]*signingConfig signingConfigs\.debug/, 'Current release-signing blocker changed without a dedicated signing gate');
-assert.match(gate, /P01-SIGN-001[\s\S]*blocked/, 'Debug release signing must remain explicitly blocked in the release gate');
+// §106. A real production signing path now exists (android/keystore.properties,
+// git-ignored, created locally by the app owner -- this repo never holds the real
+// keystore or its passwords). These assertions guard the two ways that could quietly
+// break: falling through to debug signing even when a real keystore.properties exists
+// (shipping an unsigned-for-Play build believing it's the real thing), or the reverse
+// -- a fresh checkout / today's CI run, which has no keystore.properties, failing to
+// build at all instead of safely producing its existing debug-signed test APK.
+assert.match(
+  gradle,
+  /def releaseSigningReady = keystorePropertiesFile\.exists\(\)/,
+  'release signing readiness must be derived from whether the local keystore.properties file exists',
+);
+assert.match(
+  gradle,
+  /signingConfig releaseSigningReady \? signingConfigs\.release : signingConfigs\.debug/,
+  'release build type must sign with the real keystore when configured, and fall back to debug otherwise',
+);
+const gitignore = fs.readFileSync(path.join(root, '.gitignore'), 'utf8');
+assert.match(gitignore, /^android\/keystore\.properties$/m, 'the local keystore.properties file (real passwords) must be git-ignored');
+assert.ok(
+  fs.existsSync(path.join(root, 'android/keystore.properties.example')),
+  'a committed, secret-free template for keystore.properties is missing',
+);
+assert.doesNotMatch(
+  fs.readFileSync(path.join(root, 'android/keystore.properties.example'), 'utf8'),
+  /^(storePassword|keyPassword)=(?!CHANGE_ME).+$/m,
+  'the committed example file must not carry a real password',
+);
+assert.match(gate, /P01-SIGN-001[\s\S]*in_progress/, 'P01-SIGN-001 must reflect the conditional signing path, not the old debug-only blocker');
+assert.match(gate, /P01-SIGN-001[\s\S]{0,600}لا ادعاء Release Ready/, 'the row must keep explicitly denying Release Ready until a real signed build is verified');
 
 // The committed android/ project overrides app.json, so the two must not drift. During
 // the MaalFlow rename they did: app.json said com.maalflow.app while build.gradle, the
@@ -68,4 +96,4 @@ assert.ok(
   '§105 audit script is missing',
 );
 
-console.log('MaalFlow Android native baseline hardening/static audit passed; production signing remains explicitly blocked.');
+console.log('MaalFlow Android native baseline hardening/static audit passed; conditional production signing path verified, no Release Ready claim made.');

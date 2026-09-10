@@ -4,6 +4,20 @@ apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
+// §106 production signing. Real credentials live only in android/keystore.properties,
+// a git-ignored file the app owner creates locally (see keystore.properties.example) --
+// this build script never sees, generates, or stores a real password. Absent that file
+// (any fresh checkout, and every CI run today), releaseSigningReady stays false and the
+// release build type below falls back to debug signing exactly as before: this is
+// additive, and changes nothing about the existing CI workflow that intentionally
+// produces a debug-signed, update-compatible test APK.
+def keystorePropertiesFile = file("${rootDir}/keystore.properties")
+def keystoreProperties = new Properties()
+def releaseSigningReady = keystorePropertiesFile.exists()
+if (releaseSigningReady) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 /**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.
@@ -104,15 +118,27 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (releaseSigningReady) {
+            release {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // §106. Signs with the real production keystore when android/keystore.properties
+            // is present locally; falls back to the debug keystore otherwise, unchanged from
+            // before this block existed. See docs/01_CORE_AUTHORITY/MAALFLOW_RELEASE_GATE_STATUS_AR.md
+            // P01-SIGN-001 -- this makes a real signing path possible, it does not by itself
+            // constitute a verified release build; that still requires an actual signed build
+            // and a Play upload to close the gate.
+            signingConfig releaseSigningReady ? signingConfigs.release : signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

@@ -23,6 +23,7 @@ web-build/
 *.keystore
 *.p8
 *.p12
+android/keystore.properties
 *.key
 *.pem
 *.cer
