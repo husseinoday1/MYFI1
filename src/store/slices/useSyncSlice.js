@@ -42,6 +42,7 @@ import { accountIdentityPatch, ensureProfileIdentity } from '../../lib/accountId
 import { accountIdFromWorkspaceNamespace, resolveWorkspaceTransition, workspaceNamespaceForSession } from '../../lib/accountWorkspace';
 import { readPerformanceSnapshot, schedulePerformanceSnapshotWrite } from '../../dev/performanceTestStorage';
 import { ensurePerformanceTestLedgerV7 } from '../../dev/performanceTestLedgerV7';
+import { buildPerformanceTestWorkspaceAsync } from '../../dev/performanceTestData';
 import { markStartupStage } from '../../lib/startupTiming';
 import { exportColdArchives, getColdArchiveNamespace, replaceColdArchives } from '../../lib/localArchiveRepository';
 import { runFinancialOperationalCutoverV7, runFinancialShadowMigrationV7 } from '../../lib/financialLedgerV7Migration';
@@ -2387,18 +2388,26 @@ export const createSyncSlice = (set, get) => ({
         });
         markStartupStage('performance:ledgerReuseProof');
         if (performanceLedger?.rebuildRequired) {
-          const coldArchives = await exportColdArchives(
-            getColdArchiveNamespace(namespace, loadedDemo.cfg),
+          // `loadedDemo.trans` is deliberately only the 2K UI cache. It is
+          // never a rebuild source: rebuilding from it would silently omit
+          // active fixture rows. Performance fixtures are deterministic and
+          // disposable, so regenerate the selected complete fixture before a
+          // failed V7 reuse proof may authorize replacement.
+          const rebuiltSource = await buildPerformanceTestWorkspaceAsync(
+            loadedDemo.cfg,
+            loadedDemo.cfg?.performanceTestTier,
           );
-          markStartupStage('performance:coldArchiveExport');
+          const { __performanceArchives: regeneratedArchives = [], ...regeneratedDemo } = rebuiltSource;
+          markStartupStage('performance:fixtureRegenerated');
           performanceLedger = await ensurePerformanceTestLedgerV7({
             workspaceNamespace: namespace,
-            workspace: loadedDemo,
-            coldArchives,
+            workspace: regeneratedDemo,
+            coldArchives: regeneratedArchives,
+            forceReplace: true,
           });
           markStartupStage('performance:ledgerEnsure');
         }
-        if (performanceLedger?.alreadyCutover && performanceLedger?.ok) {
+        if (performanceLedger?.ok && performanceLedger?.cutover) {
           try {
             // The SQLite ledger may be newer than the deferred performance
             // snapshot after a same-count edit. Hydrate Zustand from the V7
