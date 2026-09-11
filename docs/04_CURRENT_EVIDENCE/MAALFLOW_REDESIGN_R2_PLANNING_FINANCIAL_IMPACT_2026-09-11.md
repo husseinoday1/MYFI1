@@ -158,6 +158,56 @@ Proof (must fail if wrong):
   - cloud allowlist includes monthlyPlan and nothing else new
 ```
 
+## Pre-push /code-review fixes (same day, on `1574ca4`)
+
+High-effort review of the pure-logic commit found three issues; all addressed
+before push:
+
+1. **Goal decision could be overwritten after its allocation existed**
+   (`recordPeriodReview`). Once a decision has produced a real ledger
+   allocation, the module cannot reverse it — so switching the decision away,
+   to a different goal, or to a different amount would either double-count the
+   remainder (carry the same money already moved into the goal) or orphan the
+   allocation. **Fixed**: such a decision is now locked (`allocation_locked`)
+   unless the new call is the exact same decision (idempotent re-confirm). A
+   new `clearPeriodReview(plan, scope, periodKey, { voidedAllocationTransactionId })`
+   lets a caller unlock it, but only by naming the exact allocation id it
+   already voided in the ledger — a mismatch or omission fails closed
+   (`allocation_not_voided`). Verified with a repeated-decision test and 2
+   mutation tests (removing each guard).
+2. **Period sums re-derived a transaction's period per row.**
+   `periodIncomeMinor`/`periodFlexibleSpentMinor` called `periodKeyForDate`
+   (which tries up to 3 candidate periods and rebuilds ranges each time) once
+   per transaction; `resolvePlannedIncome('lowestReliable')` repeated that
+   6×. Measured before the fix: ~900ms combined for the 8 full passes a
+   Home/planning render would trigger, on 50K transactions on desktop —
+   exactly the shape of per-row cost Phase 15 already traced to multi-second
+   JS-thread blocks on device. **Fixed**: the period's `[startISO, endISO]` is
+   resolved once, then each row is a plain ISO-string comparison. Reduced to
+   ~230ms for the same work; a perf-budget assertion (400ms) is in the gate
+   so a regression back to per-row derivation is caught, not just observed.
+3. **A start-day change crossing the day-15/16 label split could extend the
+   current period to ~60 days**, e.g. changing from day 16 to day 15 right
+   after the current period started. Investigated in depth: this is not a
+   fixable search bug. Any period scheme that (a) uses `YYYY-MM` keys (a hard
+   requirement — budget storage compatibility), (b) never reinterprets a date
+   already inside a started period, and (c) tiles with no gap, produces the
+   same result for this specific crossing; shortening the current period
+   instead only moves the identical excess days onto whichever period absorbs
+   the transition. **Fixed the right thing instead of the impossible thing**:
+   `scheduleStartDayChange` now returns `currentPeriodDays` and a
+   `warning: 'extended_current_period'` (threshold `LONG_TRANSITION_WARNING_DAYS
+   = 45` days) so a screen can tell the user before applying the change,
+   rather than a silent surprise turning up later in pace/report numbers.
+   Verified the exact reviewed scenario (day 16 → 15) reports the warning and
+   the correct 60-day figure, that tiling and non-retroactivity still hold
+   through it, and that the *other* direction of change (day 1 → 25, which
+   shortens rather than extends) correctly reports no warning. 2 mutation
+   tests confirm the warning is load-bearing, not decorative.
+
+`npm run test:gate`: 197 passed / 1 failed (pre-existing,
+`p20_v2_conflict_recovery_resume`, unrelated) / 11 skipped.
+
 ## Build order inside R2
 
 1. Pure `src/lib/planningPeriods.js` + `src/lib/monthlyPlan.js` with the proofs

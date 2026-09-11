@@ -129,11 +129,31 @@ export const isDateInPeriod = (dateISO, key, history) => {
   return range.startISO <= iso && iso <= range.endISO;
 };
 
+// A transition this long or longer is surfaced to the caller (see below) so a
+// screen can warn the user before applying it, rather than silently producing
+// an oversized period.
+export const LONG_TRANSITION_WARNING_DAYS = 45;
+
 // Schedule a start-day change as of `todayISO` without touching any period that
 // has started: the change takes effect at the first future period whose new
 // start is on or after the day the current period would otherwise end + 1.
 // The current period may therefore be followed by one transitional period, but
 // no date that already belongs to a started period moves.
+//
+// When the new day falls on the other side of the label split (day <= 15 vs.
+// > 15) from the old one, "the first valid new-day occurrence on or after the
+// old end" can itself be a full period later — e.g. moving from day 16 to day
+// 15 near a period boundary makes the *only* correctly-tiling, non-retroactive
+// candidate the occurrence a month after that. This is not a search bug: any
+// key-based period system that (a) never reinterprets a date already inside a
+// started period, (b) tiles with no gap, and (c) keeps `YYYY-MM` period keys
+// compatible with existing budget storage, produces the same result for this
+// input — shrinking the current period instead just moves the same excess days
+// onto whichever period absorbs the transition. So this function does not try
+// to eliminate a long transition; it reports one via `warning` /
+// `currentPeriodDays` so a screen can tell the user before applying the change,
+// instead of a silent surprise later. See docs/04_CURRENT_EVIDENCE/
+// MAALFLOW_REDESIGN_R2_PLANNING_FINANCIAL_IMPACT_2026-09-11.md §2.
 export function scheduleStartDayChange(history, newStartDay, todayISO) {
   const normalized = normalizeStartDayHistory(history);
   const day = normalizeStartDay(newStartDay);
@@ -144,13 +164,20 @@ export function scheduleStartDayChange(history, newStartDay, todayISO) {
   const kept = normalized.filter(entry => comparePeriodKeys(entry.effectivePeriod, currentKey) <= 0);
   if (startDayForPeriod(shiftPeriodKey(currentKey, 1), kept) === day
       && startDayForPeriod(currentKey, kept) === day) {
-    return { history: kept, effectivePeriod: null };
+    return { history: kept, effectivePeriod: null, currentPeriodDays: null, warning: null };
   }
   const oldNextStart = periodStartISO(shiftPeriodKey(currentKey, 1), kept);
   let candidate = shiftPeriodKey(currentKey, 1);
   while (startUnderDay(candidate, day) < oldNextStart) candidate = shiftPeriodKey(candidate, 1);
   const next = normalizeStartDayHistory([...kept, { effectivePeriod: candidate, startDay: day }]);
-  return { history: next, effectivePeriod: candidate };
+  const extendedRange = periodRange(currentKey, next);
+  const currentPeriodDays = (Date.parse(`${extendedRange.endISO}T00:00:00Z`) - Date.parse(`${extendedRange.startISO}T00:00:00Z`)) / 86400000 + 1;
+  return {
+    history: next,
+    effectivePeriod: candidate,
+    currentPeriodDays,
+    warning: currentPeriodDays >= LONG_TRANSITION_WARNING_DAYS ? 'extended_current_period' : null,
+  };
 }
 
 // Whole days left in a period after `todayISO` (today excluded), and elapsed

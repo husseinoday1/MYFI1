@@ -70,6 +70,8 @@ history = step.history;
 // Old Oct start is Oct 1; Oct under day 25 would start Sep 25 (inside the
 // started Sep period) -> the change must wait until November.
 assert.equal(step.effectivePeriod, '2026-11');
+assert.equal(step.currentPeriodDays, 30, 'the current (Sep, day-1) period is untouched by this direction of change');
+assert.equal(step.warning, null);
 assert.deepEqual(startedRanges(history, ['2026-07', '2026-08', '2026-09']), beforeFirst, 'first change leaves started periods intact');
 assert.deepEqual(P.periodRange('2026-10', history), { key: '2026-10', startISO: '2026-10-01', endISO: '2026-10-24', startDay: 1 }, 'one transitional period');
 assert.deepEqual(P.periodRange('2026-11', history).startISO, '2026-10-25');
@@ -90,6 +92,28 @@ assert(currentAfter.endISO >= currentBefore.endISO && currentAfter.endISO >= tod
 assert.equal(step.effectivePeriod, '2027-02');
 assert.deepEqual(P.periodRange('2027-02', history), { key: '2027-02', startISO: '2027-02-01', endISO: '2027-02-28', startDay: 1 });
 assert.equal(P.periodRange('2027-01', history).endISO, '2027-01-31', 'current period only gains future days');
+
+// Moving the start day backward across the day-15/16 label split can extend
+// the still-open current period rather than the one after it (see the doc
+// comment on scheduleStartDayChange for why no key-based, non-retroactive,
+// exactly-tiling scheme can avoid this for this specific direction of
+// crossing). The function must surface it, not let it pass silently.
+{
+  const crossing = [{ effectivePeriod: '2000-01', startDay: 16 }];
+  const beforeCrossing = P.periodRange('2026-11', crossing);
+  const result = P.scheduleStartDayChange(crossing, 15, '2026-11-01');
+  assert.equal(result.effectivePeriod, '2026-12');
+  assert.equal(result.currentPeriodDays, 60);
+  assert.equal(result.warning, 'extended_current_period');
+  assert(result.currentPeriodDays >= P.LONG_TRANSITION_WARNING_DAYS, 'the warning threshold actually matches what is reported');
+  const afterCrossing = P.periodRange('2026-11', result.history);
+  // The extension is real (the caller needs it to warn the user) but it is
+  // still non-retroactive and still tiles: same start, only the end moves.
+  assert.equal(afterCrossing.startISO, beforeCrossing.startISO, 'the already-started period keeps its own start');
+  assert.equal(afterCrossing.endISO, '2026-12-14');
+  const next = P.periodRange('2026-12', result.history);
+  assert.equal(next.startISO, '2026-12-15', 'periods still tile with no gap across the transition');
+}
 
 // A pending (not yet effective) change is replaced, not stacked; choosing the
 // day already in force cancels it.

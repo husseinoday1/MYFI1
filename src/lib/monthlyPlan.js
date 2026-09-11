@@ -7,7 +7,7 @@
 // All money is integer minor units of the plan's base currency (financial
 // contract clause 3). Rules: docs/04_CURRENT_EVIDENCE/
 // MAALFLOW_REDESIGN_R2_PLANNING_FINANCIAL_IMPACT_2026-09-11.md §3–§4.
-import { normalizeStartDayHistory, periodKeyForDate, shiftPeriodKey } from './planningPeriods';
+import { normalizeStartDayHistory, periodRange, shiftPeriodKey } from './planningPeriods';
 import { FLOW_TYPES, inferFlowType } from './modules';
 import { toMinorUnits } from './money';
 
@@ -67,31 +67,37 @@ const baseMinor = (tx, currency) => {
 
 const txDate = (tx) => String(tx?.dateISO || tx?.date || '').slice(0, 10);
 
-// Income received in a period: income flows only. Transfers, debt proceeds,
-// collections, opening balances and adjustments are system flows, not income.
-export function periodIncomeMinor(transactions, periodKey, history, currency) {
+// Sums transactions matching `flowTypes` whose date falls in `periodKey`.
+// The period's [startISO, endISO] is resolved once per call, then each
+// transaction is a plain ISO-string comparison — periodKeyForDate (which tries
+// up to 3 candidate periods and re-derives ranges each time) would otherwise
+// run per transaction. Measured: ~700ms for 50K rows before this change: the
+// per-row cost the Phase 15 root-cause work found is a JS-thread-block risk
+// this module must not reintroduce (see run-monthly-plan.cjs perf assertion).
+function sumFlowInPeriod(transactions, periodKey, history, currency, flowTypes) {
+  const { startISO, endISO } = periodRange(periodKey, history);
   let total = 0;
   for (const tx of Array.isArray(transactions) ? transactions : []) {
     if (tx?.deletedAt || tx?.voidedAt) continue;
-    if (inferFlowType(tx) !== FLOW_TYPES.INCOME) continue;
-    if (periodKeyForDate(txDate(tx), history) !== periodKey) continue;
+    if (!flowTypes.includes(inferFlowType(tx))) continue;
+    const date = txDate(tx);
+    if (date < startISO || date > endISO) continue;
     total += baseMinor(tx, currency);
   }
   return total;
 }
 
+// Income received in a period: income flows only. Transfers, debt proceeds,
+// collections, opening balances and adjustments are system flows, not income.
+export const periodIncomeMinor = (transactions, periodKey, history, currency) => (
+  sumFlowInPeriod(transactions, periodKey, history, currency, [FLOW_TYPES.INCOME])
+);
+
 // Discretionary spend in a period: expense flows only. Commitment payments are
 // already counted in "committed" and goal allocations in "goals".
-export function periodFlexibleSpentMinor(transactions, periodKey, history, currency) {
-  let total = 0;
-  for (const tx of Array.isArray(transactions) ? transactions : []) {
-    if (tx?.deletedAt || tx?.voidedAt) continue;
-    if (inferFlowType(tx) !== FLOW_TYPES.EXPENSE) continue;
-    if (periodKeyForDate(txDate(tx), history) !== periodKey) continue;
-    total += baseMinor(tx, currency);
-  }
-  return total;
-}
+export const periodFlexibleSpentMinor = (transactions, periodKey, history, currency) => (
+  sumFlowInPeriod(transactions, periodKey, history, currency, [FLOW_TYPES.EXPENSE])
+);
 
 export function resolvePlannedIncome(plan, transactions, currentKey) {
   const { incomeMode, fixedIncomeMinor, startDayHistory: history, currencyCode } = plan;
@@ -170,10 +176,18 @@ export class MonthlyPlanError extends Error {
   }
 }
 
-// Records the end-of-period decision (frame ٥). Idempotent per (scope, period):
-// recording again replaces the decision, never adds a second carry. A goal
-// allocation is created by the caller through the existing goal-saving path;
-// its transaction id is stored here so a repeated confirm can see it exists.
+// Records the end-of-period decision (frame ٥). Idempotent per (scope, period)
+// as long as the choice and amount are unchanged: recording again replaces the
+// decision in place, never adds a second carry.
+//
+// Once a decision has produced a real allocation (choice 'goal' with
+// allocationTransactionId set), it is locked: this module has no way to
+// reverse the ledger allocation it already caused, so silently switching the
+// decision away would either double-count the remainder (carry the same money
+// that was already moved into the goal) or orphan the allocation (switch to a
+// different goal while the old one keeps the money). The caller must void the
+// existing allocation transaction first, then call clearPeriodReview with the
+// id it voided, before recording a different decision for that period.
 export function recordPeriodReview(plan, {
   scope = 'personal',
   periodKey,
@@ -194,9 +208,10 @@ export function recordPeriodReview(plan, {
   if (choice === 'goal' && !goalId) throw new MonthlyPlanError('goal_required');
   const id = reviewId(scope, periodKey);
   const previous = plan.reviews?.[id] || null;
-  if (previous?.choice === 'goal' && previous.allocationTransactionId && choice === 'goal'
-      && previous.goalId === goalId && !allocationTransactionId) {
-    // A repeated confirm must not lose the link to the allocation already made.
+  if (previous?.choice === 'goal' && previous.allocationTransactionId) {
+    const sameDecision = choice === 'goal' && previous.goalId === goalId && previous.amountMinor === amount;
+    if (!sameDecision) throw new MonthlyPlanError('allocation_locked');
+    // A repeated confirm of the same decision must not lose the allocation link.
     allocationTransactionId = previous.allocationTransactionId;
   }
   const review = {
@@ -209,6 +224,23 @@ export function recordPeriodReview(plan, {
     decidedAt: decidedAt || previous?.decidedAt || null,
   };
   return { ...plan, reviews: { ...(plan.reviews || {}), [id]: review } };
+}
+
+// Removes a locked decision so a different one can be recorded. The caller
+// must pass the exact allocation transaction id it already voided in the
+// ledger; a mismatch (including "there is nothing to clear") fails closed
+// instead of silently unlocking a decision the caller has not actually reversed.
+export function clearPeriodReview(plan, scope, periodKey, { voidedAllocationTransactionId } = {}) {
+  const id = reviewId(scope, periodKey);
+  const previous = plan.reviews?.[id] || null;
+  if (!previous) throw new MonthlyPlanError('no_review_to_clear');
+  if (previous.choice === 'goal' && previous.allocationTransactionId) {
+    if (!voidedAllocationTransactionId || voidedAllocationTransactionId !== previous.allocationTransactionId) {
+      throw new MonthlyPlanError('allocation_not_voided');
+    }
+  }
+  const { [id]: _removed, ...rest } = plan.reviews || {};
+  return { ...plan, reviews: rest };
 }
 
 // Whether a goal allocation still needs to be created for this decision.

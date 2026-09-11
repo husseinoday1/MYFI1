@@ -127,6 +127,57 @@ assert.equal(reason(() => M.recordPeriodReview(fresh, { periodKey: '2026-08', ch
 assert.equal(reason(() => M.recordPeriodReview(fresh, { periodKey: '2026-08', choice: 'goal', remainderMinor: 100, currencyCode: 'IQD' })), 'goal_required');
 assert.equal(reason(() => M.recordPeriodReview(fresh, { periodKey: '2026-08', choice: 'auto', remainderMinor: 100, currencyCode: 'IQD' })), 'invalid_choice');
 
+// A decision that already produced an allocation is locked: switching away
+// from it, switching goals, or changing the amount are all refused rather
+// than silently double-counting the remainder or orphaning the allocation.
+assert.equal(reason(() => M.recordPeriodReview(goalReview, { periodKey: '2026-08', choice: 'carry', remainderMinor: 60000, currencyCode: 'IQD' })), 'allocation_locked');
+assert.equal(reason(() => M.recordPeriodReview(goalReview, { periodKey: '2026-08', choice: 'keep', remainderMinor: 60000, currencyCode: 'IQD' })), 'allocation_locked');
+assert.equal(reason(() => M.recordPeriodReview(goalReview, { periodKey: '2026-08', choice: 'goal', goalId: 'emergency', remainderMinor: 60000, currencyCode: 'IQD' })), 'allocation_locked', 'switching to a different goal is locked too');
+assert.equal(reason(() => M.recordPeriodReview(goalReview, { periodKey: '2026-08', choice: 'goal', goalId: 'trip', remainderMinor: 60000, amountMinor: 50000, currencyCode: 'IQD' })), 'allocation_locked', 'changing the amount is locked too');
+// The carry stays absent while locked (no double count via the back door).
+assert.equal(M.carryInForPeriod(goalReview, 'personal', '2026-09'), 0);
+
+// clearPeriodReview requires proof the allocation was actually voided.
+assert.equal(reason(() => M.clearPeriodReview(goalReview, 'personal', '2026-08', {})), 'allocation_not_voided');
+assert.equal(reason(() => M.clearPeriodReview(goalReview, 'personal', '2026-08', { voidedAllocationTransactionId: 'wrong-id' })), 'allocation_not_voided');
+assert.equal(reason(() => M.clearPeriodReview(fresh, 'personal', '2026-08', {})), 'no_review_to_clear');
+const cleared = M.clearPeriodReview(goalReview, 'personal', '2026-08', { voidedAllocationTransactionId: 'tx-alloc-1' });
+assert.equal(cleared.reviews['personal:2026-08'], undefined, 'the decision is gone once the allocation is confirmed voided');
+// After clearing, a different decision may be recorded normally.
+const recarried = M.recordPeriodReview(cleared, { periodKey: '2026-08', choice: 'carry', remainderMinor: 60000, currencyCode: 'IQD' });
+assert.equal(M.carryInForPeriod(recarried, 'personal', '2026-09'), 60000);
+// A carry decision (no allocation) is never locked and can be replaced freely,
+// matching the earlier "switching the decision replaces it" behavior.
+assert.doesNotThrow(() => M.recordPeriodReview(recarried, { periodKey: '2026-08', choice: 'keep', remainderMinor: 60000, currencyCode: 'IQD' }));
+
+// ---- performance: period sums must not re-derive a date's period per row ---
+// Phase 15 traced multi-second JS-thread blocks to exactly this shape of cost
+// (broad per-row recomputation); this is a hard budget, not a soft target.
+// This exercises 8 full passes over the ledger (income, spend, and 6 lookback
+// periods for lowestReliable) — a bound generous enough to allow that, but
+// tight enough to catch a regression back to per-row period re-derivation
+// (which measured ~900ms for the same 8 passes before this fix).
+const PERF_BUDGET_MS = 400;
+const bigLedger = [];
+for (let i = 0; i < 50000; i += 1) {
+  const day = i % 28;
+  const monthIndex = Math.floor(i / 28) % 12;
+  const year = 2020 + Math.floor(i / (28 * 12));
+  bigLedger.push({
+    id: `perf-${i}`,
+    amt: i % 3 === 0 ? 50000 : -1000,
+    flowType: i % 3 === 0 ? 'income' : 'expense',
+    dateISO: `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day + 1).padStart(2, '0')}`,
+  });
+}
+const perfHistory = [{ effectivePeriod: '2000-01', startDay: 25 }];
+const t0 = Date.now();
+M.periodIncomeMinor(bigLedger, '2026-09', perfHistory, 'IQD');
+M.periodFlexibleSpentMinor(bigLedger, '2026-09', perfHistory, 'IQD');
+M.resolvePlannedIncome({ ...fresh, incomeMode: 'lowestReliable', startDayHistory: perfHistory }, bigLedger, '2026-09');
+const elapsedMs = Date.now() - t0;
+assert(elapsedMs < PERF_BUDGET_MS, `period sums over 50K transactions took ${elapsedMs}ms, budget is ${PERF_BUDGET_MS}ms`);
+
 // Carry lookup follows period keys across a year boundary.
 const dec = M.recordPeriodReview(fresh, { periodKey: '2026-12', choice: 'carry', remainderMinor: 5, currencyCode: 'IQD' });
 assert.equal(M.carryInForPeriod(dec, 'personal', P.shiftPeriodKey('2026-12', 1)), 5);
