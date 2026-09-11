@@ -52,14 +52,35 @@ export function normalizeMonthlyPlan(raw, { baseCurrency = 'IQD', legacyIncomePl
       reviews: {},
     };
   }
+  const resolvedCurrency = String(source.currencyCode || baseCurrency);
+  // A review reaching this function may not have come from recordPeriodReview's
+  // own guards — a restored backup, or (once cross-device sync exists) a
+  // remote copy — so every field is re-validated here, not just spread
+  // through. Every field this rebuilds mirrors what recordPeriodReview itself
+  // writes, so a value that passed through there once keeps its exact shape.
   const reviews = {};
   for (const [id, review] of Object.entries(isObject(source.reviews) ? source.reviews : {})) {
     if (!isObject(review) || !REVIEW_CHOICES.includes(review.choice)) continue;
-    reviews[id] = { ...review, amountMinor: Math.max(0, toMinorInt(review.amountMinor)) };
+    const choice = review.choice;
+    const remainderMinor = Math.max(0, toMinorInt(review.remainderMinor));
+    const amountMinor = choice === 'keep' ? 0 : Math.min(remainderMinor, Math.max(0, toMinorInt(review.amountMinor)));
+    const goalId = choice === 'goal' ? (String(review.goalId || '').trim() || null) : null;
+    reviews[id] = {
+      choice,
+      amountMinor,
+      remainderMinor,
+      // A review is always denominated in the plan's own currency
+      // (recordPeriodReview refuses any other); a stored value that disagrees
+      // is corrupt, not a second currency to carry forward.
+      currencyCode: resolvedCurrency,
+      goalId,
+      allocationTransactionId: goalId ? (String(review.allocationTransactionId || '').trim() || null) : null,
+      decidedAt: review.decidedAt ? String(review.decidedAt) : null,
+    };
   }
   return {
     version: MONTHLY_PLAN_VERSION,
-    currencyCode: String(source.currencyCode || baseCurrency),
+    currencyCode: resolvedCurrency,
     startDayHistory: normalizeStartDayHistory(source.startDayHistory),
     incomeMode: INCOME_MODES.includes(source.incomeMode) ? source.incomeMode : 'fixed',
     fixedIncomeMinor: Math.max(0, toMinorInt(source.fixedIncomeMinor)),

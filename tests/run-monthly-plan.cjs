@@ -43,6 +43,38 @@ const kept = M.normalizeMonthlyPlan({ ...fresh, fixedIncomeMinor: 900000 }, { ba
 assert.equal(kept.fixedIncomeMinor, 900000, 'an existing plan is never re-seeded from the legacy plan');
 assert.equal(M.normalizeMonthlyPlan({ incomeMode: 'bogus', fixedIncomeMinor: -5 }).incomeMode, 'fixed');
 assert.equal(M.normalizeMonthlyPlan({ fixedIncomeMinor: -5 }).fixedIncomeMinor, 0);
+
+// A stored plan may not have come through recordPeriodReview's own guards (a
+// restored backup, or a corrupted/tampered one) — every review field is
+// re-validated on load, not just amountMinor.
+const sanitized = M.normalizeMonthlyPlan({
+  currencyCode: 'IQD',
+  reviews: {
+    'personal:2026-08': {
+      choice: 'carry', remainderMinor: -999999, amountMinor: 5000000000,
+      currencyCode: 'XXX', goalId: 'should-be-null-for-carry', allocationTransactionId: 'should-be-null-too',
+      decidedAt: '2026-08-25T00:00:00Z',
+    },
+    'personal:2026-09': {
+      choice: 'goal', remainderMinor: 100, amountMinor: 999999, goalId: '  trip  ',
+      allocationTransactionId: 'tx-1', decidedAt: null,
+    },
+    'personal:2026-10': { choice: 'keep', remainderMinor: 100, amountMinor: 999999 },
+  },
+}, { baseCurrency: 'IQD' });
+assert.deepEqual(sanitized.reviews['personal:2026-08'], {
+  choice: 'carry', amountMinor: 0, remainderMinor: 0, currencyCode: 'IQD', goalId: null, allocationTransactionId: null,
+  decidedAt: '2026-08-25T00:00:00Z',
+}, 'a negative remainder clamps to 0, the currency is forced to the plan\'s own, and a carry never carries a goalId/allocation');
+assert.equal(sanitized.reviews['personal:2026-09'].amountMinor, 100, 'a stored amount above its own remainder is clamped down to the remainder, not trusted as-is');
+assert.equal(sanitized.reviews['personal:2026-09'].goalId, 'trip', 'goalId is trimmed');
+assert.equal(sanitized.reviews['personal:2026-10'].amountMinor, 0, 'a keep decision never carries a stored amount, however large');
+// A choice other than 'goal' can never carry a goalId/allocation forward, even
+// if one was present in storage (e.g. a decision switched away from 'goal').
+for (const id of ['personal:2026-08', 'personal:2026-10']) {
+  assert.equal(sanitized.reviews[id].goalId, null);
+  assert.equal(sanitized.reviews[id].allocationTransactionId, null);
+}
 const usdFresh = M.normalizeMonthlyPlan(undefined, { baseCurrency: 'USD', legacyIncomePlan: { income: 12.5 } });
 assert.equal(usdFresh.fixedIncomeMinor, 1250, 'minor units follow the base currency');
 
