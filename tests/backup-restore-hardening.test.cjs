@@ -184,6 +184,26 @@ const safeCfg = pickFinancialBackupConfig(sourceCfg);
 ['displayName', 'username', 'phone', 'avatarUri', 'lang', 'theme', 'orientationMode', 'bioLock']
   .forEach(key => assert.equal(Object.prototype.hasOwnProperty.call(safeCfg, key), false, `Financial config leaked ${key}`));
 
+// The monthly plan (period start day, income mode/amount, end-of-period
+// reviews — 2026-09-11 planning redesign) round-trips like the budgets beside
+// it: present in the backup, replaces the current device's plan wholesale on
+// restore, and a pre-existing plan survives untouched when the backup has none.
+const cfgWithPlan = {
+  ...sourceCfg,
+  monthlyPlan: {
+    version: 1, currencyCode: 'IQD', startDayHistory: [{ effectivePeriod: '2026-11', startDay: 25 }],
+    incomeMode: 'fixed', fixedIncomeMinor: 1500000000,
+    reviews: { 'personal:2026-08': { choice: 'carry', amountMinor: 60000000, remainderMinor: 60000000, currencyCode: 'IQD', goalId: null, allocationTransactionId: null, decidedAt: '2026-08-25T00:00:00Z' } },
+  },
+};
+const planSafeCfg = pickFinancialBackupConfig(cfgWithPlan);
+assert.deepEqual(planSafeCfg.monthlyPlan, cfgWithPlan.monthlyPlan, 'the plan must reach the backup document');
+const currentDevicePlan = { version: 1, currencyCode: 'USD', startDayHistory: [], incomeMode: 'fixed', fixedIncomeMinor: 1, reviews: {} };
+const restoredWithPlan = mergeFinancialBackupConfig({ ...kept, monthlyPlan: currentDevicePlan }, cfgWithPlan);
+assert.deepEqual(restoredWithPlan.monthlyPlan, cfgWithPlan.monthlyPlan, 'restoring a backup with a plan replaces the device plan wholesale');
+const restoredWithoutPlan = mergeFinancialBackupConfig({ ...kept, monthlyPlan: currentDevicePlan }, sourceCfg);
+assert.deepEqual(restoredWithoutPlan.monthlyPlan, currentDevicePlan, 'a backup with no plan (pre-2026-09-11) leaves the current device plan untouched');
+
 // Core "other" category remains available after a partial category backup.
 const cats = sanitizeBackupCategories(
   [{ id: 'food', label: 'Food' }],

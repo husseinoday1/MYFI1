@@ -7,14 +7,19 @@
 // All money is integer minor units of the plan's base currency (financial
 // contract clause 3). Rules: docs/04_CURRENT_EVIDENCE/
 // MAALFLOW_REDESIGN_R2_PLANNING_FINANCIAL_IMPACT_2026-09-11.md §3–§4.
-import { normalizeStartDayHistory, periodRange, shiftPeriodKey } from './planningPeriods';
-import { FLOW_TYPES, inferFlowType } from './modules';
+//
+// This file is deliberately free of any dependency on modules.js (transaction
+// flow-type semantics) — normalizeMonthlyPlan is called from src/lib/constants.js
+// (normalizeCfg), and constants.js is imported by nearly everything, including
+// modules.js itself; importing modules.js from here would make that a require
+// cycle. Ledger-scanning functions that need FLOW_TYPES/inferFlowType live in
+// src/lib/monthlyPlanLedger.js instead, which has no such constraint.
+import { normalizeStartDayHistory, shiftPeriodKey } from './planningPeriods';
 import { toMinorUnits } from './money';
 
 export const MONTHLY_PLAN_VERSION = 1;
 export const INCOME_MODES = ['fixed', 'lowestReliable', 'lastPeriod'];
 export const REVIEW_CHOICES = ['goal', 'carry', 'keep'];
-export const RELIABLE_INCOME_LOOKBACK = 6;
 
 const isObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 const toMinorInt = (value) => {
@@ -23,6 +28,13 @@ const toMinorInt = (value) => {
 };
 
 export const reviewId = (scope, periodKey) => `${scope === 'business' ? 'business' : 'personal'}:${periodKey}`;
+
+export class MonthlyPlanError extends Error {
+  constructor(reason) {
+    super(reason);
+    this.reason = reason;
+  }
+}
 
 // Normalizes a stored plan. `legacyIncomePlan` (cfg.incomeAllocationPlan) only
 // seeds the fixed income once, when no plan exists yet; it is never written back.
@@ -53,71 +65,6 @@ export function normalizeMonthlyPlan(raw, { baseCurrency = 'IQD', legacyIncomePl
     fixedIncomeMinor: Math.max(0, toMinorInt(source.fixedIncomeMinor)),
     reviews,
   };
-}
-
-// Base-currency amount of a transaction in minor units. Uses the stored base
-// amount (the per-transaction FX snapshot already applied), never a live rate.
-// An amount that cannot be represented as a safe integer is corrupt data: fail
-// closed instead of counting it as zero.
-const baseMinor = (tx, currency) => {
-  const minor = toMinorUnits(Math.abs(Number(tx?.baseAmount ?? tx?.amt ?? 0)) || 0, currency);
-  if (minor === null) throw new MonthlyPlanError('amount_not_representable');
-  return minor;
-};
-
-const txDate = (tx) => String(tx?.dateISO || tx?.date || '').slice(0, 10);
-
-// Sums transactions matching `flowTypes` whose date falls in `periodKey`.
-// The period's [startISO, endISO] is resolved once per call, then each
-// transaction is a plain ISO-string comparison — periodKeyForDate (which tries
-// up to 3 candidate periods and re-derives ranges each time) would otherwise
-// run per transaction. Measured: ~700ms for 50K rows before this change: the
-// per-row cost the Phase 15 root-cause work found is a JS-thread-block risk
-// this module must not reintroduce (see run-monthly-plan.cjs perf assertion).
-function sumFlowInPeriod(transactions, periodKey, history, currency, flowTypes) {
-  const { startISO, endISO } = periodRange(periodKey, history);
-  let total = 0;
-  for (const tx of Array.isArray(transactions) ? transactions : []) {
-    if (tx?.deletedAt || tx?.voidedAt) continue;
-    if (!flowTypes.includes(inferFlowType(tx))) continue;
-    const date = txDate(tx);
-    if (date < startISO || date > endISO) continue;
-    total += baseMinor(tx, currency);
-  }
-  return total;
-}
-
-// Income received in a period: income flows only. Transfers, debt proceeds,
-// collections, opening balances and adjustments are system flows, not income.
-export const periodIncomeMinor = (transactions, periodKey, history, currency) => (
-  sumFlowInPeriod(transactions, periodKey, history, currency, [FLOW_TYPES.INCOME])
-);
-
-// Discretionary spend in a period: expense flows only. Commitment payments are
-// already counted in "committed" and goal allocations in "goals".
-export const periodFlexibleSpentMinor = (transactions, periodKey, history, currency) => (
-  sumFlowInPeriod(transactions, periodKey, history, currency, [FLOW_TYPES.EXPENSE])
-);
-
-export function resolvePlannedIncome(plan, transactions, currentKey) {
-  const { incomeMode, fixedIncomeMinor, startDayHistory: history, currencyCode } = plan;
-  if (incomeMode === 'lastPeriod') {
-    const sourcePeriod = shiftPeriodKey(currentKey, -1);
-    return { mode: incomeMode, amountMinor: periodIncomeMinor(transactions, sourcePeriod, history, currencyCode), sourcePeriod };
-  }
-  if (incomeMode === 'lowestReliable') {
-    let lowest = null;
-    for (let i = 1; i <= RELIABLE_INCOME_LOOKBACK; i += 1) {
-      const key = shiftPeriodKey(currentKey, -i);
-      const amount = periodIncomeMinor(transactions, key, history, currencyCode);
-      // A period with no income at all is missing data, not a reliable minimum.
-      if (amount > 0 && (lowest === null || amount < lowest.amountMinor)) lowest = { amountMinor: amount, sourcePeriod: key };
-    }
-    return lowest
-      ? { mode: incomeMode, ...lowest }
-      : { mode: incomeMode, amountMinor: 0, sourcePeriod: null, reason: 'no_income_history' };
-  }
-  return { mode: 'fixed', amountMinor: fixedIncomeMinor, sourcePeriod: null };
 }
 
 const sumLines = (items) => (Array.isArray(items) ? items : [])
@@ -168,13 +115,6 @@ export const carryInForPeriod = (plan, scope, periodKey) => {
   const review = plan?.reviews?.[reviewId(scope, shiftPeriodKey(periodKey, -1))];
   return review?.choice === 'carry' ? Math.max(0, toMinorInt(review.amountMinor)) : 0;
 };
-
-export class MonthlyPlanError extends Error {
-  constructor(reason) {
-    super(reason);
-    this.reason = reason;
-  }
-}
 
 // Records the end-of-period decision (frame ٥). Idempotent per (scope, period)
 // as long as the choice and amount are unchanged: recording again replaces the

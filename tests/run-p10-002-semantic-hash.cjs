@@ -281,6 +281,32 @@ assert.ok(v2Difference.differences.length > 0, 'V2 content-only drift must never
 assert.ok(semanticMetricsV2(v2Source).archiveRecords >= 3, 'V2 metrics must describe archive coverage');
 console.log('[PASS] V2 covers full live/archive records and financial config only');
 
+// --- monthlyPlan (2026-09-11 planning redesign) is financial config, exactly
+// like the budgets it sits next to in pickFinancialBackupConfig -----------
+const withPlan = JSON.parse(JSON.stringify(v2Source));
+const planCfg = JSON.parse(withPlan.workspace.payloadJson);
+planCfg.localPreferences.cfg.monthlyPlan = {
+  version: 1, currencyCode: 'IQD', startDayHistory: [], incomeMode: 'fixed', fixedIncomeMinor: 1500000000, reviews: {},
+};
+withPlan.workspace.payloadJson = JSON.stringify(planCfg);
+const differentPlan = JSON.parse(JSON.stringify(withPlan));
+const differentPlanCfg = JSON.parse(differentPlan.workspace.payloadJson);
+differentPlanCfg.localPreferences.cfg.monthlyPlan.fixedIncomeMinor = 1000000000;
+differentPlan.workspace.payloadJson = JSON.stringify(differentPlanCfg);
+assert.notEqual(semanticHashV2(v2Source), semanticHashV2(withPlan),
+  'the monthly plan must be covered by V2, same as the budgets beside it');
+assert.notEqual(semanticHashV2(withPlan), semanticHashV2(differentPlan),
+  'a changed plan amount must change V2 (this is the restore-proof path a plan carry/goal decision runs through)');
+assert.notEqual(semanticHashV3(withPlan), semanticHashV3(differentPlan),
+  'V3 must cover the monthly plan too');
+// A workspace with no monthlyPlan at all (every fixture above, and every
+// pre-2026-09-11 archived cfg) must keep hashing exactly as it always has —
+// this is the backward-compatibility half of "no migration required": two
+// independently-built ledgers that both omit the field must still match.
+assert.equal(semanticHashV2(ledger()), semanticHashV2(ledger()),
+  'a cfg with no monthlyPlan field must be stable across repeated computation');
+console.log('[PASS] the monthly plan is covered by the restore proof, and its absence is stable');
+
 // --- V3: deterministic order, independent from device/UI locale ------------
 const unicodeOrdered = ledger({
   accounts: [

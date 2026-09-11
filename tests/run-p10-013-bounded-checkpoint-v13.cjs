@@ -12,14 +12,15 @@ const compile = (filename, source) => {
 };
 const countKeys = Object.freeze(['transactions','postings','links','accounts','exchangeRates','entities','coldArchiveBundles','coldArchiveRecords']);
 const zeroCounts = Object.freeze(Object.fromEntries(countKeys.map(key => [key, 0])));
-const pickFinancialBackupConfig = (cfg = {}) => ({
-  currency: cfg.currency || 'IQD', profileType: cfg.profileType || 'personal', activeScope: cfg.activeScope || 'personal',
-  enabledModules: cfg.enabledModules && typeof cfg.enabledModules === 'object' ? { ...cfg.enabledModules } : {},
-  defaultWalletId: cfg.defaultWalletId || null,
-  categoryBudgets: cfg.categoryBudgets && typeof cfg.categoryBudgets === 'object' ? { ...cfg.categoryBudgets } : {},
-  categoryBudgetsByMonth: cfg.categoryBudgetsByMonth && typeof cfg.categoryBudgetsByMonth === 'object' ? { ...cfg.categoryBudgetsByMonth } : {},
-  archiveSummaries: Array.isArray(cfg.archiveSummaries) ? cfg.archiveSummaries.map(item => ({ ...item })) : [],
-});
+// The real function, not a hand-copy: a hand-copy is exactly what let the
+// 2026-08-20 cfg.avatarUri defect through (see run-p10-002-semantic-hash.cjs's
+// header comment) — this file used to reimplement pickFinancialBackupConfig
+// here and it had already drifted (missing the 2026-09-11 monthlyPlan field).
+const backupDataFilename = path.join(root, 'src/lib/backupData.js');
+const backupDataSource = fs.readFileSync(backupDataFilename, 'utf8')
+  .replace(/export const /g, 'const ')
+  + '\nmodule.exports = { pickFinancialBackupConfig };';
+const { pickFinancialBackupConfig } = compile(backupDataFilename, backupDataSource);
 
 class AsyncSqlite {
   constructor() { this.native = new DatabaseSync(':memory:'); this.native.exec('PRAGMA foreign_keys = ON'); }

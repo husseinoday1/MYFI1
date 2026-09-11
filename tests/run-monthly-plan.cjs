@@ -27,7 +27,10 @@ function load(relative) {
   return compiled.exports;
 }
 
-const M = load('src/lib/monthlyPlan.js');
+// monthlyPlan.js (pure model, no modules.js dependency — see its own header
+// comment) and monthlyPlanLedger.js (transaction scanning) are split so
+// src/lib/constants.js can import the model half without a require cycle.
+const M = { ...load('src/lib/monthlyPlan.js'), ...load('src/lib/monthlyPlanLedger.js') };
 // IQD has three fraction digits (ISO 4217): 1 dinar = 1000 minor units.
 const IQD = (major) => major * 1000;
 const P = load('src/lib/planningPeriods.js');

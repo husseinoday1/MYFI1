@@ -1,4 +1,8 @@
 import { normalizeMonthNameStyle } from './months';
+// monthlyPlan.js is deliberately free of any dependency on modules.js (see its
+// own header comment) so this import cannot become a require cycle — nearly
+// everything, including modules.js, imports this file.
+import { normalizeMonthlyPlan } from './monthlyPlan';
 
 export const STORAGE = {
   DATA:      'MAALFLOW_DATA_V1',
@@ -280,6 +284,9 @@ export const DEF_CFG = {
   categoryBudgets: {},
   categoryBudgetsByMonth: {},
   incomeAllocationPlan: DEF_INCOME_ALLOCATION_PLAN,
+  // Raw default; normalizeCfg below derives the real default (which needs the
+  // resolved currency and the legacy income plan) rather than a static value here.
+  monthlyPlan: null,
 };
 
 const normalizeModules = (modules = {}) =>
@@ -387,6 +394,9 @@ export const normalizeCfg = (cfg = {}) => {
         .filter(([, map]) => Object.keys(map).length > 0),
     ),
     incomeAllocationPlan: normalizeIncomeAllocationPlan(cfg.incomeAllocationPlan),
+    // Legacy income plan seeds the fixed income only when no monthly plan
+    // exists yet (src/lib/monthlyPlan.js); it is never written back to it.
+    monthlyPlan: normalizeMonthlyPlan(cfg.monthlyPlan, { baseCurrency: currency, legacyIncomePlan: cfg.incomeAllocationPlan }),
     // Monthly recurrence is a core entry capability. Existing profiles that
     // hid the old optional module are migrated back to the enabled state.
     enabledModules: { ...normalizeModules(cfg.enabledModules), recurring: true },

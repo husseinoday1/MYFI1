@@ -79,6 +79,12 @@ export const pickFinancialBackupConfig = (cfg = {}) => ({
   categoryBudgets: safeCloneObject(cfg.categoryBudgets),
   categoryBudgetsByMonth: safeCloneObject(cfg.categoryBudgetsByMonth),
   archiveSummaries: Array.isArray(cfg.archiveSummaries) ? cfg.archiveSummaries.map(item => ({ ...item })) : [],
+  // The plan (period start day, income mode/amount, end-of-period reviews) is
+  // money-relevant state, same tier as the budgets above — a restore missing
+  // it would show a different "available to spend" on an otherwise identical
+  // ledger. Raw clone, not normalizeMonthlyPlan(): cfg.monthlyPlan is already
+  // normalized by normalizeCfg before it ever reaches here (src/lib/constants.js).
+  monthlyPlan: safeCloneObject(cfg.monthlyPlan),
 });
 
 export const mergeFinancialBackupConfig = (currentCfg = {}, incoming = {}) => {
@@ -93,6 +99,10 @@ export const mergeFinancialBackupConfig = (currentCfg = {}, incoming = {}) => {
     ...(isObject(source.categoryBudgets) ? { categoryBudgets: { ...source.categoryBudgets } } : {}),
     ...(isObject(source.categoryBudgetsByMonth) ? { categoryBudgetsByMonth: { ...source.categoryBudgetsByMonth } } : {}),
     ...(Array.isArray(source.archiveSummaries) ? { archiveSummaries: source.archiveSummaries.map(item => ({ ...item })) } : {}),
+    // A backup lacking this field (pre-monthlyPlan backup, or a legacy archive)
+    // leaves the current plan untouched, exactly like the budget fields above;
+    // normalizeCfg re-derives a default afterward if there truly is none.
+    ...(isObject(source.monthlyPlan) ? { monthlyPlan: { ...source.monthlyPlan } } : {}),
     demoMode: false,
   };
 };

@@ -70,6 +70,22 @@ for (const value of ['home', 'followups', 'transactions', 'planning', 'history',
   assert.equal(normalizeCfg({ startTab: value }).startTab, nav.normalizeStartTab(value), `startTab ${value} agrees`);
 }
 
+// normalizeCfg wires the monthly plan (src/lib/monthlyPlan.js) without pulling
+// in modules.js at load time — see the header comment on monthlyPlan.js for
+// why that must stay a plain, non-circular import into this widely-imported file.
+const freshPlan = normalizeCfg({}).monthlyPlan;
+assert.equal(freshPlan.currencyCode, 'IQD', 'a fresh config defaults the plan to the resolved base currency');
+assert.deepEqual(freshPlan.reviews, {});
+const usdPlan = normalizeCfg({ currency: 'USD' }).monthlyPlan;
+assert.equal(usdPlan.currencyCode, 'USD');
+const seeded = normalizeCfg({ incomeAllocationPlan: { income: 1500000 } }).monthlyPlan;
+assert.equal(seeded.fixedIncomeMinor, 1500000000, 'a fresh config seeds fixed income from the legacy income plan once');
+const notReseeded = normalizeCfg({
+  incomeAllocationPlan: { income: 1500000 },
+  monthlyPlan: { fixedIncomeMinor: 900000000 },
+}).monthlyPlan;
+assert.equal(notReseeded.fixedIncomeMinor, 900000000, 'an existing plan is never overwritten by the legacy plan on every normalize');
+
 // Opening a root replaces the stack; a sub-screen pushes; re-opening the top
 // screen does not duplicate it.
 let stack = nav.initialStack();

@@ -89,14 +89,18 @@ device, loses the plan and sees a different "available to spend".
   ~6483), and the V7 read-back (`~4899`) does not return unknown types into
   state. A new type would need projection, read-back, reconcile, restore-engine
   and semantic-hash support at once. That is the highest-risk path.
-- **Plan as reviewed cloud workspace config (chosen).** One normalized object
-  `cfg.monthlyPlan` = `{ version, currencyCode, startDayHistory, incomeMode
-  ('fixed' | 'lowestReliable' | 'lastPeriod'), fixedIncomeMinor, reviews:
-  { [scope:period]: decision } }`. It travels on the existing, already-synced
-  `workspace` entity once `monthlyPlan` is added to `CLOUD_WORKSPACE_CFG_KEYS`
-  (the allowlist exists precisely for a reviewed financial reason plus a test),
-  and is added to `pickFinancialBackupConfig` / `mergeFinancialBackupConfig`.
-  Category budgets stay on their existing path, unchanged.
+- **Plan as reviewed workspace config, backup/restore only for now (chosen,
+  narrowed from an earlier draft of this section — see "Step 2" below for why).**
+  One normalized object `cfg.monthlyPlan` = `{ version, currencyCode,
+  startDayHistory, incomeMode ('fixed' | 'lowestReliable' | 'lastPeriod'),
+  fixedIncomeMinor, reviews: { [scope:period]: decision } }`, added to
+  `pickFinancialBackupConfig` / `mergeFinancialBackupConfig`. An earlier draft
+  of this section also planned to add it to `CLOUD_WORKSPACE_CFG_KEYS` for live
+  cross-device sync; tracing that allowlist's actual call sites first showed it
+  is a flat whole-field overwrite on every sync pull with no field-level
+  revision check — safe for `currency` (effectively immutable after
+  onboarding) but not proven safe for a frequently-edited object. Deferred;
+  see Step 2. Category budgets stay on their existing path, unchanged.
 - **Leave the legacy `incomeAllocationPlan` as is.** It is kept and read only as
   an upgrade seed: its `income` fills `fixedIncomeMinor` once when no
   `monthlyPlan` exists, and its percentages become the "compare with a rule"
@@ -207,6 +211,79 @@ before push:
 
 `npm run test:gate`: 197 passed / 1 failed (pre-existing,
 `p20_v2_conflict_recovery_resume`, unrelated) / 11 skipped.
+
+## Step 2: persistence wiring (`cfg.monthlyPlan`), on `a7edc95`
+
+Full rigor: this touches `pickFinancialBackupConfig`, which is also the input
+to `canonicalFinancialConfigV2`/`V3` — the P10/V13 restore engine's
+completeness-proof hash — not just the backup file. Traced every consumer
+before changing anything.
+
+**File split, to keep `constants.js` cycle-free.** `normalizeCfg` needed to
+call `normalizeMonthlyPlan`, but the original `monthlyPlan.js` imported
+`FLOW_TYPES`/`inferFlowType` from `modules.js`, which imports `DEF_MODULES`
+from `constants.js` — importing `monthlyPlan.js` into `constants.js` would
+have made that a require cycle through the single most widely-imported file in
+the app. Split into `src/lib/monthlyPlan.js` (pure model/normalization, no
+`modules.js` dependency — safe to import from `constants.js`) and
+`src/lib/monthlyPlanLedger.js` (the transaction-scanning functions that
+actually need flow-type semantics). Verified both directions of the load
+order work (loading `constants.js` first, and loading `modules.js` first)
+against the real compiled sources, not just reasoned about.
+
+**Wired:**
+- `DEF_CFG.monthlyPlan = null` (raw default) / `normalizeCfg` derives the real
+  default via `normalizeMonthlyPlan(cfg.monthlyPlan, { baseCurrency: currency,
+  legacyIncomePlan: cfg.incomeAllocationPlan })` — same seed-once-only rule as
+  the pure module.
+- `pickFinancialBackupConfig` / `mergeFinancialBackupConfig` (`backupData.js`):
+  `monthlyPlan` added exactly like `categoryBudgets`/`categoryBudgetsByMonth`
+  beside it — raw clone/replace, not re-normalized (it is already normalized
+  by the time it reaches here); restoring a backup with a plan replaces the
+  device's plan wholesale, a backup without one leaves the device's plan alone.
+
+**Scope narrowed from the original plan — not added to `CLOUD_WORKSPACE_CFG_KEYS`.**
+The original design in this document said the plan would travel on the
+`workspace` entity via the cloud-cfg allowlist. Tracing `mergeCloudWorkspaceCfg`'s
+actual call sites (`financialLedgerV7Repository.js`, `useSyncSlice.js`,
+`multiDeviceSync.js`, `financialRestorePromotionV11/V13.js`) before touching
+the allowlist showed it is a **flat, whole-field overwrite on every sync
+pull**, appropriate for `currency` (locked after onboarding, effectively
+never changes) but not proven safe for a frequently-edited object: a stale
+cloud snapshot pulled after a local edit could silently discard that edit,
+with no revision check at the field level. Category budgets — the closest
+precedent — are *not* in this allowlist either; they sync through dedicated
+V7 `budget` entities with real per-row revisions instead. Giving the monthly
+plan that same treatment is a larger, separate piece of work deserving its
+own investigation, not something to fold into this step under time pressure.
+**Consequence, stated plainly: the monthly plan currently round-trips through
+backup/restore (disaster recovery, and manual restore-on-a-new-device) but
+does NOT yet sync live between two already-logged-in devices.** This mirrors
+a gap already suspected (§6 above) for `categoryBudgets`/`categoryBudgetsByMonth`
+themselves — both are the same underlying open question and worth resolving
+together later, not two different fixes.
+
+**A pre-existing test-quality gap found and fixed while tracing this:**
+`tests/run-p10-013-bounded-checkpoint-v13.cjs` had its own hand-copied
+reimplementation of `pickFinancialBackupConfig`, already stale (missing this
+field) at the moment it was found — exactly the failure mode
+`run-p10-002-semantic-hash.cjs`'s own header comment warns about (the
+2026-08-20 `cfg.avatarUri` incident: "re-implementing it here would defeat the
+point of the test"). Replaced it with the real, compiled source. A mutation
+test (leaking `theme` into `pickFinancialBackupConfig`) confirms the checkpoint
+test now actually exercises the real function — it would not have caught that
+leak, or the missing field, before this fix.
+
+**Verification:** extended `run-p10-002-semantic-hash.cjs` (a `monthlyPlan`
+difference changes the V2 and V3 hash; two ledgers with no plan hash
+identically — the backward-compatibility half), `backup-restore-hardening.test.cjs`
+(plan reaches the backup document; restore replaces it wholesale; a
+plan-less backup leaves the device's plan untouched), and
+`run-redesign-foundation.cjs` (`normalizeCfg` derives the right currency-scoped
+default, seeds once from the legacy plan, never re-seeds over an existing
+plan). 3 mutation tests confirm each new assertion is load-bearing. Ran the
+full P10/V13 restore suite (9 files) plus `npm run test:gate` (197 passed / 1
+pre-existing unrelated failure / 11 skipped) after these changes.
 
 ## Build order inside R2
 
