@@ -214,6 +214,8 @@ const runtimeTests = [
   ['UNIT_RUNTIME', 'p10_014b_restore_workspace_conflict', 'run-p10-014b-restore-workspace-conflict.cjs'],
   ['UNIT_RUNTIME', 'home_hidden_amounts', 'run-home-hidden-amounts.cjs'],
   ['UNIT_RUNTIME', 'redesign_foundation', 'run-redesign-foundation.cjs'],
+  ['UNIT_RUNTIME', 'planning_periods', 'run-planning-periods.cjs'],
+  ['UNIT_RUNTIME', 'monthly_plan', 'run-monthly-plan.cjs'],
   ['UNIT_RUNTIME', 'ci_source_scope_guard', 'run-ci-source-scope-guard.cjs'],
   ['UNIT_RUNTIME', 'performance_data', 'performance-data-runtime-v512.test.cjs'],
   ['UNIT_RUNTIME', 'performance_generator', 'performance-generator-runtime-v51.test.cjs'],
