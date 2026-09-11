@@ -312,13 +312,20 @@ export const normalizeCfg = (cfg = {}) => {
   const hasLang = Object.prototype.hasOwnProperty.call(cfg, 'lang');
   const langMode = hasLangMode ? cfg.langMode : hasLang ? 'manual' : DEF_CFG.langMode;
   const manualLang = cfg.lang === 'ar' ? 'ar' : 'en';
+  // Mirrors normalizeStartTab in src/ui/shell/navigation.js — the 2026-09-11
+  // redesign roots are Home / Follow-ups / Transactions / Planning. Kept inline
+  // so config normalization does not depend on the UI layer;
+  // tests/run-redesign-foundation.cjs asserts the two agree.
   const legacyStartTabMap = {
-    history: 'mymoney',
-    reports: 'mymoney',
-    settings: 'more',
+    history: 'transactions',
+    reports: 'planning',
+    settings: 'home',
+    mymoney: 'planning',
+    trackers: 'followups',
+    more: 'home',
   };
   const requestedStartTab = legacyStartTabMap[cfg.startTab] || cfg.startTab;
-  const nextStartTab = ['home', 'mymoney', 'trackers', 'more'].includes(requestedStartTab)
+  const nextStartTab = ['home', 'followups', 'transactions', 'planning'].includes(requestedStartTab)
     ? requestedStartTab
     : DEF_START_TAB;
   const country = COUNTRIES.some(item => item.code === cfg.country) ? cfg.country : DEF_CFG.country;

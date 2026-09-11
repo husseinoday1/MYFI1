@@ -136,6 +136,9 @@ const copy = (lang) => {
 };
 
 export default function HomeScreen({
+  // Redesign shell top bar (src/ui/shell/HomeTopBar.js). When provided it
+  // replaces the legacy bell/brand/profile row until Home itself is rebuilt.
+  topBar = null,
   onAddExpense = noop,
   onAddIncome = noop,
   onTransfer = noop,
@@ -1312,7 +1315,7 @@ export default function HomeScreen({
   return (
     <View style={{ flex: 1, backgroundColor: th.bg }}>
       <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 8, paddingBottom: 112 }}>
-        <View style={[s.topBar, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+        {topBar || <View style={[s.topBar, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
           <TouchableOpacity
             onPress={openNotificationCenter}
             style={[s.notifyBtn, { backgroundColor: th.card, borderColor: th.border }]}
@@ -1349,7 +1352,7 @@ export default function HomeScreen({
               {user ? <View style={[s.profileStatus, { backgroundColor: th.inc, borderColor: th.card }]} /> : null}
             </View>
           </TouchableOpacity>
-        </View>
+        </View>}
 
         {isHomeSectionVisible('hero') ? (
         <View style={[s.hero, { backgroundColor: th.card, borderColor: th.border }]}>

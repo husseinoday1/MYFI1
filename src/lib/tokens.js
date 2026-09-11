@@ -1,6 +1,9 @@
 import { Platform } from 'react-native';
+import { DEFAULT_FONT_ID, fontFamilyFor } from '../ui/typography';
 
-export const FONT_FAMILY = 'MaalFlow-Cairo';
+// Legacy screens use `font(weight)` below; it now resolves to the approved
+// IBM Plex Sans Arabic face for that weight (see src/ui/typography.js).
+export const FONT_FAMILY = fontFamilyFor(DEFAULT_FONT_ID, 400);
 
 export const TYPE = {
   hero: 28,
@@ -98,9 +101,11 @@ export const SHADOW = {
   }),
 };
 
+// The family already carries the weight. Adding `fontWeight` on top would make
+// Android synthesize bold over a bold face and makes iOS fall back to the
+// system font for a custom single-face family.
 export const font = (value = '700') => ({
-  fontFamily: FONT_FAMILY,
-  fontWeight: String(value),
+  fontFamily: fontFamilyFor(DEFAULT_FONT_ID, value),
 });
 
 export const weight = font;

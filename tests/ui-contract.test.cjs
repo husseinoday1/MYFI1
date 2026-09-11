@@ -67,6 +67,7 @@ const passwordRecovery = fs.readFileSync(path.join(srcRoot, 'components', 'Passw
 const archive = fs.readFileSync(path.join(srcRoot, 'screens', 'ArchiveScreen.js'), 'utf8');
 const auth = fs.readFileSync(path.join(srcRoot, 'screens', 'AuthScreen.js'), 'utf8');
 const theme = fs.readFileSync(path.join(srcRoot, 'lib', 'theme.js'), 'utf8');
+const palette = fs.readFileSync(path.join(srcRoot, 'ui', 'palette.js'), 'utf8');
 const startupTiming = fs.readFileSync(path.join(srcRoot, 'lib', 'startupTiming.js'), 'utf8');
 const demoData = fs.readFileSync(path.join(srcRoot, 'store', 'demoData.js'), 'utf8');
 const monthsLib = fs.readFileSync(path.join(srcRoot, 'lib', 'months.js'), 'utf8');
@@ -229,8 +230,9 @@ assert(paymentHistory.includes('التسلسل الزمني') && paymentHistory.
 assert(homeCenter.includes('identityText') && homeCenter.includes('accountState'), 'Account center must use a compact identity card with explicit connection state');
 assert(legacySettings.includes('monthNameStyle') && legacySettings.includes('monthStyleLabel'), 'Advanced settings must preserve the global month display preference');
 assert(constants.includes("monthNameStyle: 'system'"), 'Month display preference must follow the phone by default');
-assert(constants.includes("history: 'mymoney'") && constants.includes("reports: 'mymoney'") && constants.includes("settings: 'more'"), 'Legacy start tabs must migrate into the four-root navigation');
-assert(constants.includes("['home', 'mymoney', 'trackers', 'more']"), 'Default start tab must accept only the four current root destinations');
+// 2026-09-11 redesign roots; the full mapping is runtime-tested in run-redesign-foundation.cjs.
+assert(constants.includes("history: 'transactions'") && constants.includes("reports: 'planning'") && constants.includes("mymoney: 'planning'") && constants.includes("trackers: 'followups'"), 'Legacy start tabs must migrate into the four-root navigation');
+assert(constants.includes("['home', 'followups', 'transactions', 'planning']"), 'Default start tab must accept only the four current root destinations');
 assert(home.includes('formatMonthLabel') && home.includes('cfg.monthNameStyle'), 'Home month labels must follow the global month display preference');
 assert(trackers.includes('const paidThisMonth ='), 'Commitment cards must derive whether the current month was paid');
 assert(trackers.includes("if (status === 'paidMonth') return T.paidMonth;") && !trackers.includes('style={[s.paidNotice,'), 'Commitment cards must show paid-this-month once through the status label without a duplicate notice');
@@ -263,9 +265,11 @@ assert.equal(trackers.includes('+ إدخال كامل'), false, 'Trackers screen
 assert.equal(trackers.includes('onQuickEntry'), false, 'Trackers must keep financial entry actions out of tracker creation');
 assert.equal(trackers.includes('trackerAddPanel'), false, 'Trackers must not show a second add panel under the header');
 assert.equal(trackers.includes('quickEntry'), false, 'Trackers must not receive money-entry mode props');
-assert(appRoot.includes("classicEntry && tab === 'home'"), 'Classic mode must keep the money-entry FAB on Home');
-assert(appRoot.includes("classicEntry && tab === 'trackers'"), 'Classic mode must show the matching FAB on Trackers');
-assert(appRoot.includes('onPress={() => openNewTracker()}'), 'Classic tracker FAB must open tracker creation, including commitments');
+// 2026-09-11 glossary: + exists on Home only and means "new transaction";
+// every other creation is a worded action inside its screen.
+assert(appRoot.includes('classicEntry && showsFab(navStack)'), 'Classic mode must keep the money-entry FAB on Home');
+assert.equal((appRoot.match(/<Fab\b/g) || []).length, 1, 'Exactly one FAB may be mounted by the shell');
+assert.equal(appRoot.includes('DraggableFab'), false, 'The retired per-tab tracker FAB must not return');
 assert.equal(/<AddTransModal[\s\S]*?onNewTracker=\{openNewTracker\}/.test(appRoot), false, 'Transaction modal must not open tracker creation from money entry');
 assert.equal(appRoot.includes("['home', 'trackers']"), false, 'Trackers must not share the general floating entry button');
 assert(newItemModal.includes('headerIconBtn'), 'Tracker creation modal must use the refreshed compact header');
@@ -497,12 +501,15 @@ assert(reports.includes('kind="income" color={th.inc}') && reports.includes('kin
 
 assert(legacySettings.includes("direction: item.key === 'income' ? 'income' : item.key === 'expense' ? 'expense' : null"), 'Advanced Home metric settings must use plus/minus direction marks');
 assert(legacySettings.includes("direction: 'expense', color: th.exp") && legacySettings.includes("direction: 'income', color: th.inc"), 'Category flow choices must use red minus/green plus semantics');
+// 2026-09-11: semantic colors come from the approved palette (src/ui/palette.js,
+// colors.html); exact values are runtime-asserted in run-redesign-foundation.cjs.
 assert(
-  theme.includes('export const INCOME_GREEN = BRAND_GREEN;')
-    && theme.includes('inc: INCOME_GREEN')
-    && theme.includes("exp: '#C74F5C'")
-    && theme.includes("exp: '#E06B76'"),
-  'Light and dark themes must preserve the semantic income green and their expense reds',
+  theme.includes('inc: p.income')
+    && theme.includes('exp: p.expense')
+    && palette.includes("income: '#2E7D32'")
+    && palette.includes("expense: '#B0342A'")
+    && palette.includes("expense: '#E8776B'"),
+  'Light and dark themes must take income and expense from the approved semantic palette',
 );
 assert(accountDelete.includes('secureTextEntry={!passwordVisible}') && accountDelete.includes("passwordVisible ? 'eye-off-outline' : 'eye-outline'"), 'Account deletion password must have a show/hide control');
 assert(archive.includes('secureTextEntry={!archivePasswordVisible}') && archive.includes("archivePasswordVisible ? 'eye-off-outline' : 'eye-outline'"), 'Archive password must have a show/hide control');

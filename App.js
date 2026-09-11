@@ -1,5 +1,5 @@
 ﻿// MAALFLOW_PERFORMANCE_DATA_RUNTIME_V5_1_2
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Appearance, BackHandler, I18nManager, Image, Linking, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -29,7 +29,6 @@ import ReportsScreen from './src/screens/ReportsScreen';
 import ArchiveScreen from './src/screens/ArchiveScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import MyMoneyScreen from './src/screens/MyMoneyScreen';
-import MoreScreen from './src/screens/MoreScreen';
 import CustomizeMaalFlowScreen from './src/screens/CustomizeMaalFlowScreen';
 import WalletsAccountsScreen from './src/screens/WalletsAccountsScreen';
 import PaymentHistoryScreen from './src/screens/PaymentHistoryScreen';
@@ -40,12 +39,28 @@ import CategoriesScreen from './src/screens/CategoriesScreen';
 import BenefitsScreen from './src/screens/BenefitsScreen';
 import AddTransModal from './src/components/AddTransModal';
 import NewItemModal from './src/components/NewItemModal';
-import DraggableFab from './src/components/DraggableFab';
 import NotificationCenterModal from './src/components/NotificationCenterModal';
 import PressableScale from './src/components/PressableScale';
 import AppAlertHost from './src/components/AppAlertHost';
 import PasswordRecoveryModal from './src/components/PasswordRecoveryModal';
 import DecisionModal from './src/components/DecisionModal';
+import { UIProvider } from './src/ui/UIContext';
+import { TabBar } from './src/ui/shell/TabBar';
+import { Fab } from './src/ui/shell/Fab';
+import { HomeTopBar } from './src/ui/shell/HomeTopBar';
+import { AppDrawer } from './src/ui/shell/AppDrawer';
+import {
+  ROOT_TABS,
+  currentRoot,
+  currentScreen,
+  goBack,
+  initialStack,
+  isRootTab,
+  normalizeStartTab,
+  openScreen,
+  showsFab,
+} from './src/ui/shell/navigation';
+import { deriveDisplayName } from './src/lib/accountIdentity';
 import { filterByActiveScope, getEntryScope, getModules, normalizeScope, shouldShowTrackersTab } from './src/lib/modules';
 import { handleAuthCallback } from './src/lib/authCallback';
 import { normalizeWallets } from './src/lib/wallets';
@@ -68,32 +83,14 @@ const INTERNAL_DEMO_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_INTERNAL_DEMO =
 const R01_DEVICE_GATE_ENABLED = __DEV__ && process.env.EXPO_PUBLIC_R01_DEVICE_GATE === '1';
 let r01DeviceGateStarted = false;
 
-// 4-tab primary navigation per docs/design/06_MAALFLOW_NAVIGATION_AND_INFORMATION_ARCHITECTURE.md
-// §1 (LOCKED): Home / My Money / Follow-ups / More. History, Reports, and
-// Settings moved off the primary bar into My Money/More gateways (see the
-// `screens` map below and HUB_TABS/back-affordance handling) — their own
-// screen components are unchanged.
-const BASE_TABS = [
-  { key: 'home', icon: 'home-outline', labelKey: 'home' },
-  { key: 'mymoney', icon: 'wallet-outline', labelAr: 'أموالي', labelEn: 'My Money' },
-  { key: 'trackers', icon: 'layers-outline', labelAr: 'المتابعات', labelEn: 'Follow-ups' },
-  { key: 'more', icon: 'ellipsis-horizontal-outline', labelAr: 'المزيد', labelEn: 'More' },
-];
-
-// Primary/hub tabs (bottom nav). Any other `tab` value is a secondary
-// destination reached via a My Money/More gateway and gets a "back to hub"
-// affordance instead of a bottom-nav highlight.
-const HUB_TABS = ['home', 'mymoney', 'trackers', 'more'];
-
-// Secondary destinations reached via a My Money/More gateway (not a primary
-// tab, so never subject to the visibleTabs filter/reset guard below).
-const SECONDARY_SCREEN_KEYS = [
-  'history', 'reports', 'settings', 'wallets', 'budget', 'paymentHistory',
-  'incomeAllocation',
-  'basira',
-  'categories', 'benefits', 'customize',
-  'followupsAll', 'followupsDebts', 'followupsOwed', 'followupsReceivable', 'followupsCommitments', 'followupsInstallments', 'followupsSubscriptions', 'followupsGoals',
-];
+// Navigation follows the approved redesign (MaalFlow-Design-Board/glossary.html,
+// 2026-09-11): four tab roots — Home · Follow-ups · Transactions · Planning —
+// with a stack of sub-screens on top (src/ui/shell/navigation.js). The old
+// Home / My Money / Follow-ups / More bar is retired; More's destinations moved
+// to the drawer opened from Home's account avatar. Screens not yet rebuilt are
+// mounted as interim tab content: Follow-ups -> FollowUpsHubScreen,
+// Transactions -> HistoryScreen, Planning -> MyMoneyScreen (its gateways are
+// the planning destinations until planning.html is built).
 
 const shellCopy = (lang) => (
   lang === 'ar'
@@ -166,8 +163,14 @@ function AppRoot() {
     resolveSyncConflict,
     exitDemoMode,
   } = useStore();
-  const [tab, setTab] = useState('home');
-  const [lastHubTab, setLastHubTab] = useState('home');
+  const [navStack, setNavStack] = useState(() => initialStack());
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const tab = currentScreen(navStack);
+  const activeRoot = currentRoot(navStack);
+  // Every existing call site keeps calling setTab(key): a root key replaces the
+  // stack, any other key is pushed as a sub-screen, legacy keys are aliased.
+  const setTab = useCallback((key) => setNavStack(stack => openScreen(stack, key)), []);
+  const handleBack = useCallback(() => setNavStack(stack => goBack(stack).stack), []);
   const [historyOpenRequest, setHistoryOpenRequest] = useState(null);
   const [settingsResetSignal, setSettingsResetSignal] = useState(0);
   const [settingsOpenRequest, setSettingsOpenRequest] = useState(null);
@@ -297,6 +300,7 @@ function AppRoot() {
   const th = TH[cfg.theme] || TH.dark;
   const L = STR[cfg.lang] || STR.ar;
   const sym = getSymbol(cfg.currency);
+  const accountName = deriveDisplayName({ user, cfg }) || (cfg.lang === 'ar' ? 'حساب محلي' : 'Local account');
   const modules = getModules(cfg);
   const isRtl = cfg.lang === 'ar';
   const transferAvailable = useMemo(() => {
@@ -325,15 +329,32 @@ function AppRoot() {
   const notifKeys = useMemo(() => notifItems.map(notificationReadKey), [notifItems]);
   const unreadNotifCount = notifKeys.filter(key => !readNotifKeys.includes(key)).length;
   const visibleTabs = useMemo(
-    () => BASE_TABS.filter(item => item.key !== 'trackers' || shouldShowTrackersTab(cfg)),
+    () => ROOT_TABS.filter(item => item.key !== 'followups' || shouldShowTrackersTab(cfg)),
     [cfg.enabledModules],
   );
-  const preferredTab = visibleTabs.some(item => item.key === cfg.startTab) ? cfg.startTab : 'home';
-  const isSecondaryScreen = !HUB_TABS.includes(tab);
+  const normalizedStartTab = normalizeStartTab(cfg.startTab);
+  const preferredTab = visibleTabs.some(item => item.key === normalizedStartTab) ? normalizedStartTab : 'home';
+  const isSecondaryScreen = !isRootTab(tab);
 
+  // System back (glossary): drawer closes first; a sub-screen returns to where
+  // it was opened from; a non-Home root returns to Home; Home leaves the app.
+  // Modals (RN <Modal>) receive the press before this handler.
   useEffect(() => {
-    if (HUB_TABS.includes(tab)) setLastHubTab(tab);
-  }, [tab]);
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Full-screen states own their back press (archive has its own handler;
+      // onboarding and the lock screen keep the OS default).
+      if (archiveOpen || showOnboard || locked) return false;
+      if (drawerOpen) {
+        setDrawerOpen(false);
+        return true;
+      }
+      const step = goBack(navStack);
+      if (step.exit) return false;
+      setNavStack(step.stack);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [drawerOpen, navStack, archiveOpen, showOnboard, locked]);
 
   // P19-015A2: startup barrier. Local SQLite mounting/migration completes before
   // any Supabase session transition is allowed to switch the active workspace.
@@ -701,7 +722,7 @@ function AppRoot() {
 
   useEffect(() => {
     if (fontsLoaded) applyGlobalFont();
-    if (fontError) console.warn('[MaalFlow] Cairo font failed to load; falling back to system font.', fontError);
+    if (fontError) console.warn('[MaalFlow] App fonts failed to load; falling back to system font.', fontError);
   }, [fontsLoaded, fontError]);
 
   useEffect(() => {
@@ -727,13 +748,13 @@ function AppRoot() {
   }, [ready, trans, debts, goals, wallets, commitments, cats, cfg, notif, sym]);
 
   useEffect(() => {
-    if (SECONDARY_SCREEN_KEYS.includes(tab)) return;
-    if (!visibleTabs.some(t => t.key === tab)) setTab('home');
-  }, [visibleTabs, tab]);
+    // A root hidden by customization cannot stay open underneath the user.
+    if (!visibleTabs.some(t => t.key === activeRoot)) setNavStack(initialStack());
+  }, [visibleTabs, activeRoot]);
 
   useEffect(() => {
     if (!ready) return;
-    setTab(prev => (prev === 'home' ? preferredTab : prev));
+    setNavStack(stack => (stack.length === 1 && stack[0] === 'home' ? initialStack(preferredTab) : stack));
   }, [ready, preferredTab]);
 
   useEffect(() => {
@@ -982,9 +1003,24 @@ function AppRoot() {
     }
   };
 
+  const homeTopBar = (
+    <HomeTopBar
+      accountName={accountName}
+      hasNewNotifications={unreadNotifCount > 0}
+      onOpenDrawer={() => setDrawerOpen(true)}
+      onOpenNotifications={openNotifications}
+      labels={{
+        drawer: cfg.lang === 'ar' ? 'فتح القائمة والحساب' : 'Open menu and account',
+        notifications: cfg.lang === 'ar' ? 'الإشعارات' : 'Notifications',
+        share: cfg.lang === 'ar' ? 'مشاركة' : 'Share',
+      }}
+    />
+  );
+
   const screens = {
     home: (
       <HomeScreen
+        topBar={homeTopBar}
         onAddExpense={() => openAddExp(true)}
         onAddIncome={openAddInc}
         onTransfer={openTransfer}
@@ -1002,14 +1038,13 @@ function AppRoot() {
     // was given one here — so the +/- buttons on their empty states were decorative.
     // A user with no transactions taps the one obvious call to action and nothing
     // happens. Same handlers HomeScreen already uses.
-    history: <HistoryScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} openRequest={historyOpenRequest} />,
-    // 'trackers' is the primary Follow-ups nav tab (BASE_TABS/HUB_TABS) and,
-    // like 'mymoney', now renders a thin hub — REF-05. The full/unfiltered
-    // TrackersLabScreen (needed for trackerFocus deep-links from
-    // notifications and quick-pay/save/commitment shortcuts) moved to the
-    // 'followupsAll' secondary key below; every setTab('trackers') call site
-    // that relied on that behavior was repointed to 'followupsAll'.
-    trackers: (
+    // Interim Transactions root until transactions.html is built.
+    transactions: <HistoryScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} openRequest={historyOpenRequest} />,
+    // Interim Follow-ups root (thin hub, REF-05) until followups.html is built.
+    // The full/unfiltered TrackersLabScreen (needed for trackerFocus deep-links
+    // from notifications and quick-pay/save/commitment shortcuts) lives at the
+    // 'followupsAll' sub-screen key below.
+    followups: (
       <FollowUpsHubScreen
         onOpenOwed={() => setTab('followupsOwed')}
         onOpenReceivable={() => setTab('followupsReceivable')}
@@ -1115,24 +1150,16 @@ function AppRoot() {
     ),
     paymentHistory: <PaymentHistoryScreen />,
     reports: <ReportsScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} onOpenIncomeAllocation={() => setTab('incomeAllocation')} onOpenHistory={openHistoryWithContext} onOpenBasira={() => setTab('basira')} />,
-    settings: <SettingsScreen tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} onExit={() => setTab(lastHubTab)} />,
-    mymoney: (
+    settings: <SettingsScreen tabs={visibleTabs} resetSignal={settingsResetSignal} openRequest={settingsOpenRequest} onExit={handleBack} />,
+    // Interim Planning root until planning.html is built: My Money's gateways
+    // (budget, reports, Basira, income allocation) are the planning destinations.
+    planning: (
       <MyMoneyScreen
-        onOpenHistory={() => setTab('history')}
+        onOpenHistory={() => setTab('transactions')}
         onOpenBudget={() => setTab('budget')}
         onOpenReports={() => setTab('reports')}
         onOpenBasira={() => setTab('basira')}
         onOpenIncomeAllocation={() => setTab('incomeAllocation')}
-      />
-    ),
-    more: (
-      <MoreScreen
-        onOpenSettingsPage={openSettingsPage}
-        onOpenCustomize={() => setTab('customize')}
-        onOpenArchive={() => setArchiveOpen(true)}
-        onOpenWallets={() => setTab('wallets')}
-        onOpenCategories={() => setTab('categories')}
-        onOpenBenefits={() => setTab('benefits')}
       />
     ),
     wallets: <WalletsAccountsScreen />,
@@ -1141,10 +1168,60 @@ function AppRoot() {
     benefits: <BenefitsScreen />,
     budget: <PlanBudgetScreen />,
     incomeAllocation: <IncomeAllocationScreen />,
-    basira: <BasiraScreen onOpenHistory={openHistoryWithContext} onOpenFollowUps={() => setTab('trackers')} />,
+    basira: <BasiraScreen onOpenHistory={openHistoryWithContext} onOpenFollowUps={() => setTab('followups')} />,
+  };
+
+  // Drawer (tools.html frame ١). Only destinations that exist today are listed;
+  // Follow-up types, Recently deleted and Subscription join when their screens
+  // are built — the glossary forbids items without a function behind them.
+  const openFromDrawer = (action) => () => {
+    setDrawerOpen(false);
+    action();
+  };
+  const drawerGroups = cfg.lang === 'ar'
+    ? [
+        { key: 'tools', label: 'أدواتي', items: [
+          { key: 'wallets', icon: 'wallet', label: 'المحافظ', onPress: openFromDrawer(() => setTab('wallets')) },
+          { key: 'categories', icon: 'category', label: 'الفئات', onPress: openFromDrawer(() => setTab('categories')) },
+          { key: 'archive', icon: 'archive', label: 'الأرشيف', onPress: openFromDrawer(() => setArchiveOpen(true)) },
+        ] },
+        { key: 'app', label: 'التطبيق', items: [
+          { key: 'settings', icon: 'settings', label: 'الإعدادات', onPress: openFromDrawer(() => openSettingsPage('root')) },
+          { key: 'customize', icon: 'layout-grid', label: 'تخصيص مالفلو', onPress: openFromDrawer(() => setTab('customize')) },
+          { key: 'data', icon: 'database', label: 'البيانات والنسخ', onPress: openFromDrawer(() => openSettingsPage('data')) },
+          { key: 'benefits', icon: 'gift', label: 'المزايا والدعوة', onPress: openFromDrawer(() => setTab('benefits')) },
+        ] },
+        { key: 'support', label: 'الدعم', items: [
+          { key: 'help', icon: 'help-circle', label: 'المساعدة', onPress: openFromDrawer(() => openSettingsPage('support')) },
+          { key: 'about', icon: 'info-circle', label: 'حول مالفلو', onPress: openFromDrawer(() => openSettingsPage('about')) },
+        ] },
+      ]
+    : [
+        { key: 'tools', label: 'My tools', items: [
+          { key: 'wallets', icon: 'wallet', label: 'Wallets', onPress: openFromDrawer(() => setTab('wallets')) },
+          { key: 'categories', icon: 'category', label: 'Categories', onPress: openFromDrawer(() => setTab('categories')) },
+          { key: 'archive', icon: 'archive', label: 'Archive', onPress: openFromDrawer(() => setArchiveOpen(true)) },
+        ] },
+        { key: 'app', label: 'App', items: [
+          { key: 'settings', icon: 'settings', label: 'Settings', onPress: openFromDrawer(() => openSettingsPage('root')) },
+          { key: 'customize', icon: 'layout-grid', label: 'Customize MaalFlow', onPress: openFromDrawer(() => setTab('customize')) },
+          { key: 'data', icon: 'database', label: 'Data & backup', onPress: openFromDrawer(() => openSettingsPage('data')) },
+          { key: 'benefits', icon: 'gift', label: 'Benefits & invites', onPress: openFromDrawer(() => setTab('benefits')) },
+        ] },
+        { key: 'support', label: 'Support', items: [
+          { key: 'help', icon: 'help-circle', label: 'Help', onPress: openFromDrawer(() => openSettingsPage('support')) },
+          { key: 'about', icon: 'info-circle', label: 'About MaalFlow', onPress: openFromDrawer(() => openSettingsPage('about')) },
+        ] },
+      ];
+  const drawerAccount = {
+    name: accountName,
+    status: user
+      ? (user.email || (cfg.lang === 'ar' ? 'مسجّل الدخول' : 'Signed in'))
+      : (cfg.lang === 'ar' ? 'غير مسجّل · بياناتك على هذا الجهاز' : 'Not signed in · your data is on this device'),
   };
 
   return (
+    <UIProvider theme={cfg.theme} lang={cfg.lang} fontId={cfg.fontId} fontScale={cfg.fontScale}>
     <SafeAreaView edges={['top', 'right', 'left']} style={[{ flex: 1, backgroundColor: th.bg }, dirStyle]}>
       <StatusBar style={statusStyle(th)} />
 
@@ -1195,11 +1272,16 @@ function AppRoot() {
             </Text>
           </View>
         ) : null}
+        {/* Interim back affordance for legacy sub-screens that draw no back
+            arrow of their own; rebuilt screens bring the sub-screen bar
+            (arrow + title) and this row disappears with them. Settings has
+            its own header and exit. */}
         {isSecondaryScreen && tab !== 'settings' ? (
           <Pressable
-            onPress={() => setTab(lastHubTab)}
+            onPress={handleBack}
             style={[s.backToHubBar, { flexDirection: isRtl ? 'row-reverse' : 'row', borderBottomColor: th.border }]}
             hitSlop={8}
+            accessibilityRole="button"
           >
             <Ionicons name={isRtl ? 'chevron-forward' : 'chevron-back'} size={20} color={th.text} />
             <Text style={{ color: th.text, fontSize: 13, fontWeight: '800' }}>
@@ -1210,72 +1292,24 @@ function AppRoot() {
         {screens[tab]}
       </View>
 
-      <View
-        style={[
-          s.navWrap,
-          {
-            backgroundColor: th.nav,
-            borderTopColor: th.border,
-            paddingBottom: Math.max(bottomInset, 8) + 4,
-          },
-        ]}
-      >
-        <View style={[s.navbar, { flexDirection: isRtl ? 'row-reverse' : 'row' }]}>
-          {visibleTabs.map((item) => {
-            const active = tab === item.key;
-            const label = item.labelKey ? L[item.labelKey] : (cfg.lang === 'ar' ? item.labelAr : item.labelEn);
-            return (
-              <PressableScale
-                key={item.key}
-                onPress={() => {
-                  if (item.key === 'settings') {
-                    // A bottom-tab entry is an explicit root navigation command.
-                    // Keep it separate from Home's requested subpage route.
-                    setSettingsOpenRequest({ page: 'root', nonce: Date.now() });
-                    setTab('settings');
-                    return;
-                  }
-                  setTab(item.key);
-                }}
-                style={s.tabBtn}
-                haptic="selection"
-                scale={0.95}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={label}
-              >
-                <View style={s.tabIconWrap}>
-                  <Ionicons
-                    name={active ? item.icon.replace('-outline', '') : item.icon}
-                    size={23}
-                    color={active ? th.primary : th.faint}
-                  />
-                </View>
-                <Text
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  style={[
-                    s.tabLabel,
-                    {
-                      color: active ? th.primary : th.faint,
-                      fontWeight: active ? '900' : '700',
-                    },
-                  ]}
-                >
-                  {label}
-                </Text>
-              </PressableScale>
-            );
-          })}
-        </View>
-      </View>
+      <TabBar tabs={visibleTabs} activeKey={activeRoot} onSelect={setTab} bottomInset={bottomInset} />
 
-      {classicEntry && tab === 'home' ? (
-        <DraggableFab th={th} onPress={handleFab} bottomInset={bottomInset} label="" color={th.primary} />
+      {/* + is Home-only. Until Home is rebuilt, the legacy quick-entry mode
+          still draws its own add buttons, so the FAB keeps its classic-mode gate. */}
+      {classicEntry && showsFab(navStack) ? (
+        <Fab
+          onPress={handleFab}
+          bottomInset={bottomInset}
+          accessibilityLabel={cfg.lang === 'ar' ? 'حركة جديدة' : 'New transaction'}
+        />
       ) : null}
-      {classicEntry && tab === 'trackers' ? (
-        <DraggableFab th={th} onPress={() => openNewTracker()} bottomInset={bottomInset} label="" color={th.primary} />
-      ) : null}
+      <AppDrawer
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        account={drawerAccount}
+        groups={drawerGroups}
+        onOpenAccount={openFromDrawer(() => openSettingsPage('account'))}
+      />
 
       <AddTransModal
         visible={showAdd}
@@ -1330,6 +1364,7 @@ function AppRoot() {
       />
       {maintenanceOverlay}
     </SafeAreaView>
+    </UIProvider>
   );
 }
 
@@ -1483,30 +1518,4 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   archiveTitle: { fontSize: 18, lineHeight: 23, fontWeight: '900' },
-  navWrap: {
-    paddingHorizontal: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  navbar: {
-    paddingHorizontal: 2,
-    paddingTop: 5,
-  },
-  tabBtn: {
-    flex: 1,
-    minHeight: 58,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 5,
-  },
-  tabIconWrap: {
-    width: 32,
-    height: 29,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-  tabLabel: {
-    fontSize: 12,
-    lineHeight: 14,
-  },
 });

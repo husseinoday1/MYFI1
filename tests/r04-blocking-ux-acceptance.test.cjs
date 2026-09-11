@@ -27,7 +27,8 @@ assert(
 assert(
   settings.includes("const requestedPage = String(openRequest?.page || '').trim();")
     && settings.includes('setPage(requestedPage);')
-    && app.includes("setSettingsOpenRequest({ page: 'root', nonce: Date.now() });"),
+    // 2026-09-11 redesign: Settings is a drawer destination, opened at its root.
+    && app.includes("openSettingsPage('root')"),
   'D-09: Settings must consume direct Account/Security request',
 );
 
