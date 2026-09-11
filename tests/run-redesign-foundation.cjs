@@ -103,6 +103,11 @@ assert.deepEqual(nav.goBack(stack), { stack: ['home'], exit: false });
 stack = nav.openScreen(['followups', 'paymentHistory'], 'transactions');
 assert.deepEqual(stack, ['transactions']);
 
+// A filtered drill-down from a report is a sub-screen: back returns to the report.
+stack = nav.openScreen(['planning', 'reports'], 'transactionsContext');
+assert.deepEqual(stack, ['planning', 'reports', 'transactionsContext']);
+assert.deepEqual(nav.goBack(stack).stack, ['planning', 'reports']);
+
 // A legacy root key opened as a destination lands on its new root.
 assert.deepEqual(nav.openScreen(['planning', 'reports'], 'trackers'), ['followups']);
 
@@ -121,12 +126,12 @@ assert.equal(type.fontFamilyFor('IBM Plex Sans Arabic', 'bold'), 'MF-IBMPlexSans
 assert.equal(type.fontFamilyFor('IBM Plex Sans Arabic', 450), 'MF-IBMPlexSansArabic-500', 'ties resolve heavier');
 // A font without bundled files falls back to the default instead of a missing family.
 assert.equal(type.fontFamilyFor('Tajawal', 600), 'MF-IBMPlexSansArabic-600');
-assert.equal(type.fontFamilyFor('Cairo', 700), 'MF-Cairo-400');
+assert.equal(type.fontFamilyFor('Cairo', 700), 'MF-IBMPlexSansArabic-700');
 assert.equal(type.isSelectableFont('Tajawal'), false);
-// Every registered family is one the lookup can return, and vice versa.
+// Only the default font's faces block startup; every registered family is one
+// the lookup can return.
 const registered = Object.keys(type.fontAssets).sort();
 assert.deepEqual(registered, [
-  'MF-Cairo-400',
   'MF-IBMPlexSansArabic-400',
   'MF-IBMPlexSansArabic-500',
   'MF-IBMPlexSansArabic-600',

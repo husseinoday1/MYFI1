@@ -25,7 +25,7 @@ storage) get a financial-impact review before any code, as the board requires.
 | Area | Change |
 |---|---|
 | Colors | `src/ui/palette.js` holds the board values verbatim (colors.html + mf.css `.screen.dark`). `src/lib/theme.js` keeps every legacy `th.*` key but resolves each from the palette, so un-rebuilt screens already show the approved colors. Brand `#0A5C4C` and income `#2E7D32` are now separate roles (they were one literal). |
-| Font | IBM Plex Sans Arabic 400/500/600/700 bundled (`assets/fonts`, OFL text included). `src/ui/typography.js` registers each weight as its own family and maps (font id, weight) → nearest bundled face. The six tools.html fonts are listed by their Google Fonts names; only Plex and Cairo are selectable until their files are added in the tools.html step. Global font-size multiplier is clamped 0.9–1.4. |
+| Font | IBM Plex Sans Arabic 400/500/600/700 bundled (`assets/fonts`, OFL text included). `src/ui/typography.js` registers each weight as its own family and maps (font id, weight) → nearest bundled face. The six tools.html fonts are listed by their Google Fonts names; only Plex is registered and selectable until the others are wired in the tools.html step (Cairo's file is already in assets). Global font-size multiplier is clamped 0.9–1.4. |
 | Text | `src/ui/Txt.js`: one primitive applying font face, weight, size multiplier and palette role colors; never truncates. |
 | Icons | `src/ui/Icon.js` draws Tabler outline icons with react-native-svg from a generated 125-icon subset (`tools/generate-ui-icons.cjs`, list in `tools/ui-icons.txt`). |
 | Context | `src/ui/UIContext.js` provides theme/lang/font/scale once at the root. |
@@ -37,12 +37,15 @@ storage) get a financial-impact review before any code, as the board requires.
 - Tab content: Follow-ups → `FollowUpsHubScreen`, Transactions → `HistoryScreen`,
   Planning → `MyMoneyScreen` (its gateways are the planning destinations).
   `MoreScreen` is no longer mounted; its destinations are in the drawer.
-- Home is still the legacy screen; only its top row is replaced by `HomeTopBar`
-  (new `topBar` prop).
+- Home is still the legacy screen; its top row is replaced by `HomeTopBar` and it
+  renders the drawer (new `drawer` prop). Both live inside Home on purpose: the
+  bell keeps Home's own notification center (smart-capture review count and
+  Review action) and the drawer header opens the account center, which holds
+  manual sync and the only vault-unreadable recovery UI (see review fixes).
 - The share icon is not drawn yet: the share center does not exist, and the
   glossary forbids icons without a decided function.
 - Drawer omits Follow-up types, Recently deleted and Subscription until those
-  screens exist, for the same reason. The drawer header opens Settings → Account
+  screens exist, for the same reason. The drawer header opens the account center
   until Account info (more-screens ١٧) is built.
 - The + button keeps its classic-entry-mode gate, because legacy Home in quick
   mode still draws its own add buttons. It is now Home-only; the per-tab tracker
@@ -64,6 +67,24 @@ storage) get a financial-impact review before any code, as the board requires.
   broad store subscriptions; a context read adds no listeners.
 - **Drawing drawer items for unbuilt screens and routing them to near
   equivalents**: would mislead; items arrive with their screens.
+
+## Pre-push /code-review fixes (same day)
+
+The first review of 38199c6 found four issues; all fixed before any push:
+
+1. Replacing Home's top row had cut the only path to the account center, whose
+   `vault_unreadable` block (Retry read / Start fresh) exists nowhere else. The
+   drawer header now opens that center. Verified on web, where storage is
+   unreadable and the recovery actions render.
+2. The bell had moved to App's notification center, dropping the pending
+   smart-capture review count and Review button. The bar now uses Home's own
+   center and badge (unread + pending reviews).
+3. Reports/Basira → filtered transactions used to replace the stack with the
+   Transactions root, so back skipped the report. It is now a
+   `transactionsContext` sub-screen with its own keyed HistoryScreen, so filters
+   never leak into the unfiltered root. Tested.
+4. Cairo was registered and loaded before the splash lifts although nothing
+   selects it; it is unregistered until the font picker exists.
 
 ## Observations recorded, not changed here
 

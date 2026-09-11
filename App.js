@@ -47,8 +47,6 @@ import DecisionModal from './src/components/DecisionModal';
 import { UIProvider } from './src/ui/UIContext';
 import { TabBar } from './src/ui/shell/TabBar';
 import { Fab } from './src/ui/shell/Fab';
-import { HomeTopBar } from './src/ui/shell/HomeTopBar';
-import { AppDrawer } from './src/ui/shell/AppDrawer';
 import {
   ROOT_TABS,
   currentRoot,
@@ -164,7 +162,6 @@ function AppRoot() {
     exitDemoMode,
   } = useStore();
   const [navStack, setNavStack] = useState(() => initialStack());
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const tab = currentScreen(navStack);
   const activeRoot = currentRoot(navStack);
   // Every existing call site keeps calling setTab(key): a root key replaces the
@@ -336,25 +333,20 @@ function AppRoot() {
   const preferredTab = visibleTabs.some(item => item.key === normalizedStartTab) ? normalizedStartTab : 'home';
   const isSecondaryScreen = !isRootTab(tab);
 
-  // System back (glossary): drawer closes first; a sub-screen returns to where
-  // it was opened from; a non-Home root returns to Home; Home leaves the app.
-  // Modals (RN <Modal>) receive the press before this handler.
+  // System back (glossary): a sub-screen returns to where it was opened from; a non-Home root returns to Home; Home leaves the app.
+  // Modals (RN <Modal>, including the drawer) receive the press before this handler.
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       // Full-screen states own their back press (archive has its own handler;
       // onboarding and the lock screen keep the OS default).
       if (archiveOpen || showOnboard || locked) return false;
-      if (drawerOpen) {
-        setDrawerOpen(false);
-        return true;
-      }
       const step = goBack(navStack);
       if (step.exit) return false;
       setNavStack(step.stack);
       return true;
     });
     return () => subscription.remove();
-  }, [drawerOpen, navStack, archiveOpen, showOnboard, locked]);
+  }, [navStack, archiveOpen, showOnboard, locked]);
 
   // P19-015A2: startup barrier. Local SQLite mounting/migration completes before
   // any Supabase session transition is allowed to switch the active workspace.
@@ -934,9 +926,12 @@ function AppRoot() {
     setTab('settings');
   };
 
+  // A drill-down (Reports/Basira -> filtered transactions) is a sub-screen of
+  // its opener, not a jump to the Transactions root: back must return to the
+  // report. The root keeps its own unfiltered instance.
   const openHistoryWithContext = (request = {}) => {
     setHistoryOpenRequest({ ...request, nonce: Date.now() });
-    setTab('history');
+    setTab('transactionsContext');
   };
 
   const handleFab = () => openAddExp(false);
@@ -1003,24 +998,57 @@ function AppRoot() {
     }
   };
 
-  const homeTopBar = (
-    <HomeTopBar
-      accountName={accountName}
-      hasNewNotifications={unreadNotifCount > 0}
-      onOpenDrawer={() => setDrawerOpen(true)}
-      onOpenNotifications={openNotifications}
-      labels={{
-        drawer: cfg.lang === 'ar' ? 'فتح القائمة والحساب' : 'Open menu and account',
-        notifications: cfg.lang === 'ar' ? 'الإشعارات' : 'Notifications',
-        share: cfg.lang === 'ar' ? 'مشاركة' : 'Share',
-      }}
-    />
-  );
+  // Drawer (tools.html frame ١), rendered by Home, which closes it before
+  // running an item. Only destinations that exist today are listed;
+  // Follow-up types, Recently deleted and Subscription join when their screens
+  // are built — the glossary forbids items without a function behind them.
+  const drawerGroups = cfg.lang === 'ar'
+    ? [
+        { key: 'tools', label: 'أدواتي', items: [
+          { key: 'wallets', icon: 'wallet', label: 'المحافظ', onPress: () => setTab('wallets') },
+          { key: 'categories', icon: 'category', label: 'الفئات', onPress: () => setTab('categories') },
+          { key: 'archive', icon: 'archive', label: 'الأرشيف', onPress: () => setArchiveOpen(true) },
+        ] },
+        { key: 'app', label: 'التطبيق', items: [
+          { key: 'settings', icon: 'settings', label: 'الإعدادات', onPress: () => openSettingsPage('root') },
+          { key: 'customize', icon: 'layout-grid', label: 'تخصيص مالفلو', onPress: () => setTab('customize') },
+          { key: 'data', icon: 'database', label: 'البيانات والنسخ', onPress: () => openSettingsPage('data') },
+          { key: 'benefits', icon: 'gift', label: 'المزايا والدعوة', onPress: () => setTab('benefits') },
+        ] },
+        { key: 'support', label: 'الدعم', items: [
+          { key: 'help', icon: 'help-circle', label: 'المساعدة', onPress: () => openSettingsPage('support') },
+          { key: 'about', icon: 'info-circle', label: 'حول مالفلو', onPress: () => openSettingsPage('about') },
+        ] },
+      ]
+    : [
+        { key: 'tools', label: 'My tools', items: [
+          { key: 'wallets', icon: 'wallet', label: 'Wallets', onPress: () => setTab('wallets') },
+          { key: 'categories', icon: 'category', label: 'Categories', onPress: () => setTab('categories') },
+          { key: 'archive', icon: 'archive', label: 'Archive', onPress: () => setArchiveOpen(true) },
+        ] },
+        { key: 'app', label: 'App', items: [
+          { key: 'settings', icon: 'settings', label: 'Settings', onPress: () => openSettingsPage('root') },
+          { key: 'customize', icon: 'layout-grid', label: 'Customize MaalFlow', onPress: () => setTab('customize') },
+          { key: 'data', icon: 'database', label: 'Data & backup', onPress: () => openSettingsPage('data') },
+          { key: 'benefits', icon: 'gift', label: 'Benefits & invites', onPress: () => setTab('benefits') },
+        ] },
+        { key: 'support', label: 'Support', items: [
+          { key: 'help', icon: 'help-circle', label: 'Help', onPress: () => openSettingsPage('support') },
+          { key: 'about', icon: 'info-circle', label: 'About MaalFlow', onPress: () => openSettingsPage('about') },
+        ] },
+      ];
+  const drawerAccount = {
+    name: accountName,
+    status: user
+      ? (user.email || (cfg.lang === 'ar' ? 'مسجّل الدخول' : 'Signed in'))
+      : (cfg.lang === 'ar' ? 'غير مسجّل · بياناتك على هذا الجهاز' : 'Not signed in · your data is on this device'),
+  };
+  const homeDrawer = { groups: drawerGroups, account: drawerAccount };
 
   const screens = {
     home: (
       <HomeScreen
-        topBar={homeTopBar}
+        drawer={homeDrawer}
         onAddExpense={() => openAddExp(true)}
         onAddIncome={openAddInc}
         onTransfer={openTransfer}
@@ -1039,7 +1067,10 @@ function AppRoot() {
     // A user with no transactions taps the one obvious call to action and nothing
     // happens. Same handlers HomeScreen already uses.
     // Interim Transactions root until transactions.html is built.
-    transactions: <HistoryScreen onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} openRequest={historyOpenRequest} />,
+    // Distinct keys: both render at the same position, and without them React
+    // would carry a drill-down's filters into the unfiltered root.
+    transactions: <HistoryScreen key="transactions" onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} />,
+    transactionsContext: <HistoryScreen key="transactionsContext" onAddExpense={() => openAddExp(true)} onAddIncome={openAddInc} openRequest={historyOpenRequest} />,
     // Interim Follow-ups root (thin hub, REF-05) until followups.html is built.
     // The full/unfiltered TrackersLabScreen (needed for trackerFocus deep-links
     // from notifications and quick-pay/save/commitment shortcuts) lives at the
@@ -1171,55 +1202,6 @@ function AppRoot() {
     basira: <BasiraScreen onOpenHistory={openHistoryWithContext} onOpenFollowUps={() => setTab('followups')} />,
   };
 
-  // Drawer (tools.html frame ١). Only destinations that exist today are listed;
-  // Follow-up types, Recently deleted and Subscription join when their screens
-  // are built — the glossary forbids items without a function behind them.
-  const openFromDrawer = (action) => () => {
-    setDrawerOpen(false);
-    action();
-  };
-  const drawerGroups = cfg.lang === 'ar'
-    ? [
-        { key: 'tools', label: 'أدواتي', items: [
-          { key: 'wallets', icon: 'wallet', label: 'المحافظ', onPress: openFromDrawer(() => setTab('wallets')) },
-          { key: 'categories', icon: 'category', label: 'الفئات', onPress: openFromDrawer(() => setTab('categories')) },
-          { key: 'archive', icon: 'archive', label: 'الأرشيف', onPress: openFromDrawer(() => setArchiveOpen(true)) },
-        ] },
-        { key: 'app', label: 'التطبيق', items: [
-          { key: 'settings', icon: 'settings', label: 'الإعدادات', onPress: openFromDrawer(() => openSettingsPage('root')) },
-          { key: 'customize', icon: 'layout-grid', label: 'تخصيص مالفلو', onPress: openFromDrawer(() => setTab('customize')) },
-          { key: 'data', icon: 'database', label: 'البيانات والنسخ', onPress: openFromDrawer(() => openSettingsPage('data')) },
-          { key: 'benefits', icon: 'gift', label: 'المزايا والدعوة', onPress: openFromDrawer(() => setTab('benefits')) },
-        ] },
-        { key: 'support', label: 'الدعم', items: [
-          { key: 'help', icon: 'help-circle', label: 'المساعدة', onPress: openFromDrawer(() => openSettingsPage('support')) },
-          { key: 'about', icon: 'info-circle', label: 'حول مالفلو', onPress: openFromDrawer(() => openSettingsPage('about')) },
-        ] },
-      ]
-    : [
-        { key: 'tools', label: 'My tools', items: [
-          { key: 'wallets', icon: 'wallet', label: 'Wallets', onPress: openFromDrawer(() => setTab('wallets')) },
-          { key: 'categories', icon: 'category', label: 'Categories', onPress: openFromDrawer(() => setTab('categories')) },
-          { key: 'archive', icon: 'archive', label: 'Archive', onPress: openFromDrawer(() => setArchiveOpen(true)) },
-        ] },
-        { key: 'app', label: 'App', items: [
-          { key: 'settings', icon: 'settings', label: 'Settings', onPress: openFromDrawer(() => openSettingsPage('root')) },
-          { key: 'customize', icon: 'layout-grid', label: 'Customize MaalFlow', onPress: openFromDrawer(() => setTab('customize')) },
-          { key: 'data', icon: 'database', label: 'Data & backup', onPress: openFromDrawer(() => openSettingsPage('data')) },
-          { key: 'benefits', icon: 'gift', label: 'Benefits & invites', onPress: openFromDrawer(() => setTab('benefits')) },
-        ] },
-        { key: 'support', label: 'Support', items: [
-          { key: 'help', icon: 'help-circle', label: 'Help', onPress: openFromDrawer(() => openSettingsPage('support')) },
-          { key: 'about', icon: 'info-circle', label: 'About MaalFlow', onPress: openFromDrawer(() => openSettingsPage('about')) },
-        ] },
-      ];
-  const drawerAccount = {
-    name: accountName,
-    status: user
-      ? (user.email || (cfg.lang === 'ar' ? 'مسجّل الدخول' : 'Signed in'))
-      : (cfg.lang === 'ar' ? 'غير مسجّل · بياناتك على هذا الجهاز' : 'Not signed in · your data is on this device'),
-  };
-
   return (
     <UIProvider theme={cfg.theme} lang={cfg.lang} fontId={cfg.fontId} fontScale={cfg.fontScale}>
     <SafeAreaView edges={['top', 'right', 'left']} style={[{ flex: 1, backgroundColor: th.bg }, dirStyle]}>
@@ -1303,13 +1285,6 @@ function AppRoot() {
           accessibilityLabel={cfg.lang === 'ar' ? 'حركة جديدة' : 'New transaction'}
         />
       ) : null}
-      <AppDrawer
-        visible={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        account={drawerAccount}
-        groups={drawerGroups}
-        onOpenAccount={openFromDrawer(() => openSettingsPage('account'))}
-      />
 
       <AddTransModal
         visible={showAdd}

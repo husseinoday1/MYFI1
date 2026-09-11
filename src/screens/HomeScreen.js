@@ -19,6 +19,8 @@ import { describeSmartSource } from '../lib/smartEntry';
 import NotificationCenterModal from '../components/NotificationCenterModal';
 import HomeCenterModal from '../components/HomeCenterModal';
 import { buildNotificationItems, filterDismissedNotifications, NOTIFICATION_DISMISSED_STORAGE_KEY, notificationReadKey, pruneNotificationKeys, sanitizeNotificationReadKeys } from '../lib/notificationCenter';
+import { HomeTopBar } from '../ui/shell/HomeTopBar';
+import { AppDrawer } from '../ui/shell/AppDrawer';
 import { isRTL, rowDirFor, textAlignFor } from '../lib/layout';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
 import { getTransactionTagMeta } from '../lib/transactionTags';
@@ -136,9 +138,12 @@ const copy = (lang) => {
 };
 
 export default function HomeScreen({
-  // Redesign shell top bar (src/ui/shell/HomeTopBar.js). When provided it
-  // replaces the legacy bell/brand/profile row until Home itself is rebuilt.
-  topBar = null,
+  // Redesign drawer ({ groups, account }) from the shell. When provided, the
+  // legacy bell/brand/profile row is replaced by HomeTopBar and the avatar opens
+  // the drawer. The bar is rendered here, not in App.js, so it keeps Home's own
+  // notification center (smart-capture review count + Review action) and the
+  // drawer header keeps reaching the account center (sync, vault recovery).
+  drawer = null,
   onAddExpense = noop,
   onAddIncome = noop,
   onTransfer = noop,
@@ -192,6 +197,7 @@ export default function HomeScreen({
   const [recurringDraft, setRecurringDraft] = useState(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [centerMode, setCenterMode] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [readNotificationKeys, setReadNotificationKeys] = useState([]);
   const [dismissedNotificationKeys, setDismissedNotificationKeys] = useState([]);
   const snapshot = useMemo(
@@ -1315,7 +1321,19 @@ export default function HomeScreen({
   return (
     <View style={{ flex: 1, backgroundColor: th.bg }}>
       <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 8, paddingBottom: 112 }}>
-        {topBar || <View style={[s.topBar, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
+        {drawer ? (
+          <HomeTopBar
+            accountName={accountName}
+            hasNewNotifications={notificationBadgeCount > 0}
+            onOpenDrawer={() => setDrawerOpen(true)}
+            onOpenNotifications={openNotificationCenter}
+            labels={{
+              drawer: isAr ? 'فتح القائمة والحساب' : 'Open menu and account',
+              notifications: isAr ? 'الإشعارات' : 'Notifications',
+              share: isAr ? 'مشاركة' : 'Share',
+            }}
+          />
+        ) : <View style={[s.topBar, { flexDirection: isAr ? 'row-reverse' : 'row' }]}>
           <TouchableOpacity
             onPress={openNotificationCenter}
             style={[s.notifyBtn, { backgroundColor: th.card, borderColor: th.border }]}
@@ -1470,6 +1488,23 @@ export default function HomeScreen({
         onEditTransaction={setEditing}
         onOpenTransactionDetails={setDetails}
       />
+      {drawer ? (
+        <AppDrawer
+          visible={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          account={drawer.account}
+          groups={drawer.groups.map(group => ({
+            ...group,
+            items: group.items.map(item => ({
+              ...item,
+              onPress: () => { setDrawerOpen(false); item.onPress(); },
+            })),
+          }))}
+          // Account info (more-screens ١٧) is the account center until it is
+          // rebuilt: it carries sync and the vault-unreadable recovery actions.
+          onOpenAccount={() => { setDrawerOpen(false); setCenterMode('profile'); }}
+        />
+      ) : null}
     </View>
   );
 }

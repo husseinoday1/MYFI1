@@ -30,14 +30,10 @@ export const FONT_OPTIONS = [
     },
   },
   { id: 'Readex Pro', labelAr: 'المرن', labelEn: 'Flexible', faces: null },
-  {
-    id: 'Cairo',
-    labelAr: 'الكلاسيكي',
-    labelEn: 'Classic',
-    // Cairo ships as one variable file, registered as a single face; every
-    // requested weight resolves to it.
-    faces: { 400: require('../../assets/fonts/Cairo.ttf') },
-  },
+  // Cairo's file is in assets/fonts, but it is not registered until the font
+  // picker (tools.html) can select it: useFonts blocks the splash until every
+  // registered face loads, and ~600 KB nobody uses by default is cold-start cost.
+  { id: 'Cairo', labelAr: 'الكلاسيكي', labelEn: 'Classic', faces: null },
   { id: 'Noto Sans Arabic', labelAr: 'الشامل', labelEn: 'Universal', faces: null },
   { id: 'Tajawal', labelAr: 'الأنيق', labelEn: 'Elegant', faces: null },
   { id: 'Almarai', labelAr: 'الجريء', labelEn: 'Bold', faces: null },
