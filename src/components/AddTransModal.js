@@ -34,6 +34,7 @@ import { formatNumberInput, parseNumberInput, preserveNumberInputDraft } from '.
 import { buildEntryFxSuggestion, buildTransferFxSuggestion } from '../lib/fxSuggestions';
 import { buildGeneratedEntryTitle, isGeneratedEntryTitle } from '../lib/transactionSemantics';
 import { releasedGoalDeleteNotice, releasedGoalDeleteRefusalCopy } from '../lib/trackerLifecycle';
+import { useShallow } from 'zustand/react/shallow';
 
 const displayFxValue = value => {
   const n = parseNumberInput(value, { fractionDigits: 8 });
@@ -167,7 +168,27 @@ export default function AddTransModal({
   draftData = null, focusedEntry = false,
 }) {
   useAutomaticSyncInteractionHold(visible, 'transaction_editor');
-  const { addTrans, addTransfer, setCfg, editTrans, deleteTrans, undoLastTransactionDelete, payDebt, saveGoal, payCommitment, debts, goals, commitments, wallets, cats, cfg, trans } = useStore();
+  const {
+    addTrans, addTransfer, setCfg, editTrans, deleteTrans, undoLastTransactionDelete,
+    payDebt, saveGoal, payCommitment, debts, goals, commitments, wallets, cats, cfg, trans,
+  } = useStore(useShallow(state => ({
+    addTrans: state.addTrans,
+    addTransfer: state.addTransfer,
+    setCfg: state.setCfg,
+    editTrans: state.editTrans,
+    deleteTrans: state.deleteTrans,
+    undoLastTransactionDelete: state.undoLastTransactionDelete,
+    payDebt: state.payDebt,
+    saveGoal: state.saveGoal,
+    payCommitment: state.payCommitment,
+    debts: state.debts,
+    goals: state.goals,
+    commitments: state.commitments,
+    wallets: state.wallets,
+    cats: state.cats,
+    cfg: state.cfg,
+    trans: state.trans,
+  })));
   const th  = TH[cfg.theme] || TH.dark;
   const L   = STR[cfg.lang]  || STR.ar;
   const sym = getSymbol(cfg.currency); // base/reporting currency symbol

@@ -22,6 +22,11 @@ const store = read('src/store/slices/transactionsSlice.js');
 const sync = read('src/store/slices/useSyncSlice.js');
 const management = read('src/store/slices/managementSlice.js');
 const performanceStorage = read('src/dev/performanceTestStorage.js');
+const homeScreen = read('src/screens/HomeScreen.js');
+const basiraScreen = read('src/screens/BasiraScreen.js');
+const reportsScreen = read('src/screens/ReportsScreen.js');
+const trackersScreen = read('src/screens/TrackersLabScreen.js');
+const addTransModal = read('src/components/AddTransModal.js');
 
 // --- the hook follows the missing_postings precedent -------------------------
 
@@ -225,6 +230,25 @@ for (const [label, source] of [['transaction', store], ['commitment', management
     source.includes('saveLocal({ onDiagnosticStep: step })'),
     `${label} must forward its device recorder into saveLocal`,
   );
+}
+
+// These screens are mounted around the add flow. A whole-store subscription
+// makes every local save notify every one of them, even when its own inputs did
+// not change. `useShallow` keeps the same selected references without changing
+// which financial collections or actions each screen consumes.
+for (const [label, source] of [
+  ['HomeScreen', homeScreen],
+  ['BasiraScreen', basiraScreen],
+  ['ReportsScreen', reportsScreen],
+  ['TrackersLabScreen', trackersScreen],
+  ['AddTransModal', addTransModal],
+]) {
+  assert(source.includes("from 'zustand/react/shallow'"), `${label} must use Zustand's shallow selector helper`);
+  assert(
+    /useStore\(useShallow\(state => \(\{/.test(source),
+    `${label} must subscribe to an explicit store slice, not the whole store`,
+  );
+  assert(!/useStore\(\)\s*[;)]/.test(source), `${label} must not retain a whole-store subscription`);
 }
 
 // --- this task must not have become a fix ------------------------------------

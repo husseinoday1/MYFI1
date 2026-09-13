@@ -17,6 +17,7 @@ import { parseNumberInput, preserveNumberInputDraft } from '../lib/numberInput';
 import { MultiSelectBar, SelectionCheckbox, useMultiSelect } from '../components/MultiSelect';
 import { isSafelyArchivableTracker, isTrackerPastGracePeriod, latestMovementDate, releasedGoalDeleteNotice, releasedGoalDeleteRefusalCopy } from '../lib/trackerLifecycle';
 import { remainingInstallments } from '../store/domain';
+import { useShallow } from 'zustand/react/shallow';
 
 const money = (value) => Math.round(Math.abs(Number(value) || 0)).toLocaleString();
 const monthStartISO = (value = today()) => `${String(value).slice(0, 7)}-01`;
@@ -201,7 +202,33 @@ export default function TrackersLabScreen({
     editGoal, deleteGoal, editGoalSaving, deleteGoalSaving, releaseGoalSavings, undoGoalRelease,
     deferCommitment, clearCommitmentDeferral, editCommitment, deleteCommitment,
     archiveTracker, archiveTrackersMany, restoreTracker, deleteTrackersMany, deleteTrackerPaymentsMany,
-  } = useStore();
+  } = useStore(useShallow(state => ({
+    trans: state.trans,
+    debts: state.debts,
+    goals: state.goals,
+    commitments: state.commitments,
+    wallets: state.wallets,
+    cfg: state.cfg,
+    editDebt: state.editDebt,
+    deleteDebt: state.deleteDebt,
+    editDebtPayment: state.editDebtPayment,
+    deleteDebtPayment: state.deleteDebtPayment,
+    editGoal: state.editGoal,
+    deleteGoal: state.deleteGoal,
+    editGoalSaving: state.editGoalSaving,
+    deleteGoalSaving: state.deleteGoalSaving,
+    releaseGoalSavings: state.releaseGoalSavings,
+    undoGoalRelease: state.undoGoalRelease,
+    deferCommitment: state.deferCommitment,
+    clearCommitmentDeferral: state.clearCommitmentDeferral,
+    editCommitment: state.editCommitment,
+    deleteCommitment: state.deleteCommitment,
+    archiveTracker: state.archiveTracker,
+    archiveTrackersMany: state.archiveTrackersMany,
+    restoreTracker: state.restoreTracker,
+    deleteTrackersMany: state.deleteTrackersMany,
+    deleteTrackerPaymentsMany: state.deleteTrackerPaymentsMany,
+  })));
   const th = TH[cfg.theme] || TH.dark;
   const commitmentColor = cfg.theme === 'dark' ? '#76A9DB' : '#356FAF';
   const commitmentBg = cfg.theme === 'dark' ? 'rgba(118,169,219,0.18)' : 'rgba(53,111,175,0.12)';

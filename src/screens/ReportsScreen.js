@@ -19,6 +19,7 @@ import { formatMonthLabel, monthNames } from '../lib/months';
 import { getTransactionIndex } from '../lib/transactionIndex';
 import { getLedgerNamespace, queryLedgerCategorySpend, queryLedgerSummary } from '../lib/activeLedgerRepository';
 import { currencyGroupsAreBaseOnly, mergeCurrencyAmounts, summarizeCommitmentCurrencies, summarizeDebtCurrencies, summarizeGoalCurrencies } from '../lib/entityCurrencySummary';
+import { useShallow } from 'zustand/react/shallow';
 
 // Step 7 (2026-08-26): reconnected to the app's existing, already-governed
 // category palette (CAT_COLORS, src/lib/constants.js) instead of maintaining
@@ -159,7 +160,20 @@ const copy = (lang) => {
 };
 
 export default function ReportsScreen({ onAddExpense = () => {}, onAddIncome = () => {}, onOpenIncomeAllocation = () => {}, onOpenHistory = () => {}, onOpenBasira = () => {} }) {
-  const { trans, debts, goals, wallets, commitments, cats, cfg, financialLedgerV7Cutover, workspaceNamespace } = useStore();
+  const {
+    trans, debts, goals, wallets, commitments, cats, cfg,
+    financialLedgerV7Cutover, workspaceNamespace,
+  } = useStore(useShallow(state => ({
+    trans: state.trans,
+    debts: state.debts,
+    goals: state.goals,
+    wallets: state.wallets,
+    commitments: state.commitments,
+    cats: state.cats,
+    cfg: state.cfg,
+    financialLedgerV7Cutover: state.financialLedgerV7Cutover,
+    workspaceNamespace: state.workspaceNamespace,
+  })));
   const th = TH[cfg.theme] || TH.dark;
   const C = copy(cfg.lang);
   const ar = isRTL(cfg.lang);

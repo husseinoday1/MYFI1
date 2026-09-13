@@ -34,6 +34,7 @@ import { PERFORMANCE_OPERATIONS, recordOperationDurationV1 } from '../lib/perfor
 import { getLedgerDb, runLedgerReadTransaction } from '../lib/ledgerDatabase';
 import { getFinancialWorkspaceStateV7 } from '../lib/financialLedgerV7Repository';
 import { releasedGoalDeleteNotice, releasedGoalDeleteRefusalCopy } from '../lib/trackerLifecycle';
+import { useShallow } from 'zustand/react/shallow';
 const noop = () => {};
 
 const copy = (lang) => {
@@ -148,7 +149,28 @@ export default function HomeScreen({
   onOpenSettingsPage = noop,
   onNotificationAction = noop,
 }) {
-  const { trans, debts, goals, wallets, commitments, cats, cfg, notif, user, setCfg, editTrans, deleteTrans, deleteTransMany, deferCommitment, financialLedgerV7Cutover, workspaceNamespace } = useStore();
+  const {
+    trans, debts, goals, wallets, commitments, cats, cfg, notif, user,
+    setCfg, editTrans, deleteTrans, deleteTransMany, deferCommitment,
+    financialLedgerV7Cutover, workspaceNamespace,
+  } = useStore(useShallow(state => ({
+    trans: state.trans,
+    debts: state.debts,
+    goals: state.goals,
+    wallets: state.wallets,
+    commitments: state.commitments,
+    cats: state.cats,
+    cfg: state.cfg,
+    notif: state.notif,
+    user: state.user,
+    setCfg: state.setCfg,
+    editTrans: state.editTrans,
+    deleteTrans: state.deleteTrans,
+    deleteTransMany: state.deleteTransMany,
+    deferCommitment: state.deferCommitment,
+    financialLedgerV7Cutover: state.financialLedgerV7Cutover,
+    workspaceNamespace: state.workspaceNamespace,
+  })));
   const th  = TH[cfg.theme] || TH.dark;
   const L   = STR[cfg.lang]  || STR.ar;
   const C   = copy(cfg.lang);

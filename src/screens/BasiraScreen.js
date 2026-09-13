@@ -11,6 +11,7 @@ import { calcStats, monthlyForecast } from '../utils/calc';
 import { formatMonthLabel } from '../lib/months';
 import { AppButton, ScreenScroll, SectionTitle, SurfaceCard, Touchable, rowDirection, textAlign } from '../components/AppPrimitives';
 import { RADIUS, SPACE, weight } from '../lib/tokens';
+import { useShallow } from 'zustand/react/shallow';
 
 const isoMonth = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 const monthBounds = (key) => {
@@ -39,7 +40,11 @@ const makePeriod = (type, value, from, to) => ({
 
 export default function BasiraScreen({ onOpenHistory, onOpenFollowUps }) {
   const { th, lang, isAr, cfg } = useTheme();
-  const { trans, cats, commitments } = useStore();
+  const { trans, cats, commitments } = useStore(useShallow(state => ({
+    trans: state.trans,
+    cats: state.cats,
+    commitments: state.commitments,
+  })));
   const now = new Date();
   const currentMonth = isoMonth(now);
   const currentDateISO = now.toISOString().slice(0, 10);
